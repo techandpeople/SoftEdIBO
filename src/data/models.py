@@ -28,7 +28,7 @@ class InteractionEvent:
     event_id: int | None = None
     session_id: str = ""
     participant_id: str = ""
-    robot_type: str = ""  # "turtle", "thymio", "tree"
+    type: str = ""  # "turtle", "thymio", "tree"
     action: str = ""  # "inflate", "deflate", "touch", "share", etc.
     target: str = ""  # chamber ID, branch ID, etc.
     timestamp: datetime = field(default_factory=datetime.now)

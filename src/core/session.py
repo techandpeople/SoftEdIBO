@@ -3,9 +3,12 @@
 import logging
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.core.participant import Participant
+
+if TYPE_CHECKING:
+    from src.activities.base_activity import BaseActivity
 
 logger = logging.getLogger(__name__)
 
@@ -21,13 +24,23 @@ class SessionState(Enum):
 class Session:
     """Represents a study session with participants and a specific activity."""
 
-    def __init__(self, session_id: str, activity_name: str):
+    def __init__(self, session_id: str, activity: "BaseActivity"):
         self.session_id = session_id
-        self.activity_name = activity_name
+        self._activity = activity
         self._state = SessionState.CREATED
         self._participants: list[Participant] = []
         self._start_time: datetime | None = None
         self._end_time: datetime | None = None
+
+    @property
+    def activity(self) -> "BaseActivity":
+        """The activity being run in this session."""
+        return self._activity
+
+    @property
+    def activity_name(self) -> str:
+        """Name of the activity (derived from the activity object)."""
+        return self._activity.name
 
     @property
     def state(self) -> SessionState:

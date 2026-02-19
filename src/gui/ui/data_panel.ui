@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>DataPanel</class>
+ <widget class="QWidget" name="DataPanel">
+  <property name="geometry">
+   <rect><x>0</x><y>0</y><width>600</width><height>500</height></rect>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <widget class="QGroupBox" name="sessions_group">
+     <property name="title"><string>Past Sessions</string></property>
+     <layout class="QVBoxLayout" name="sessions_layout">
+      <item>
+       <widget class="QTableWidget" name="sessions_table">
+        <property name="columnCount"><number>4</number></property>
+        <column><property name="text"><string>Session ID</string></property></column>
+        <column><property name="text"><string>Activity</string></property></column>
+        <column><property name="text"><string>Start</string></property></column>
+        <column><property name="text"><string>End</string></property></column>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="events_group">
+     <property name="title"><string>Events</string></property>
+     <layout class="QVBoxLayout" name="events_layout">
+      <item>
+       <widget class="QTableWidget" name="events_table">
+        <property name="columnCount"><number>6</number></property>
+        <column><property name="text"><string>Time</string></property></column>
+        <column><property name="text"><string>Participant</string></property></column>
+        <column><property name="text"><string>Robot</string></property></column>
+        <column><property name="text"><string>Action</string></property></column>
+        <column><property name="text"><string>Target</string></property></column>
+        <column><property name="text"><string>Metadata</string></property></column>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="export_layout">
+     <item>
+      <widget class="QPushButton" name="export_btn">
+       <property name="text"><string>Export Session to CSV</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="export_all_btn">
+       <property name="text"><string>Export All Sessions to CSV</string></property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

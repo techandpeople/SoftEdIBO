@@ -5,31 +5,36 @@ touches and interacts with the air chambers simultaneously.
 """
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.activities.base_activity import BaseActivity
-from src.core.session import Session
 from src.robots.base_robot import BaseRobot
+from src.robots.turtle.turtle_robot import TurtleRobot
+
+if TYPE_CHECKING:
+    from src.core.session import Session
 
 logger = logging.getLogger(__name__)
 
 
 class GroupTouchActivity(BaseActivity):
-    """Activity where the group interacts with a robot through touch."""
+    """Activity where the whole group interacts with a Turtle robot through touch."""
+
+    robot_type = TurtleRobot
 
     def __init__(self):
         super().__init__(
             name="Group Touch",
             description="All participants interact with the robot's air chambers together.",
         )
-        self._session: Session | None = None
-        self._robots: list[BaseRobot] = []
+        self._session: "Session | None" = None
+        self._robots: list[TurtleRobot] = []
         self._is_running = False
 
-    def setup(self, session: Session, robots: list[BaseRobot]) -> None:
-        """Prepare the group touch activity."""
+    def _setup(self, session: "Session", robots: list[BaseRobot]) -> None:
+        """Configure the activity with the given session and Turtle robots."""
         self._session = session
-        self._robots = robots
+        self._robots = robots  # type: ignore[assignment]  # validated by BaseActivity.setup()
         logger.info("Group Touch activity set up with %d robots", len(robots))
 
     def start(self) -> None:

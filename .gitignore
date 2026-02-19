@@ -1,3 +1,4 @@
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
@@ -11,12 +12,27 @@ build/
 venv/
 .venv/
 env/
+ENV/
+
+# pyenv
+.python-version
+
+# Tests & coverage
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+*.coveragerc
+
+# Generated UI Python files (from pyside6-uic — source of truth is src/gui/ui/*.ui)
+src/gui/ui_*.py
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
+*.iml
 
 # Data files
 data/*.db
@@ -25,6 +41,8 @@ data/*.sqlite
 # OS
 .DS_Store
 Thumbs.db
+desktop.ini
 
-# Environment
+# Environment variables
 .env
+.env.*

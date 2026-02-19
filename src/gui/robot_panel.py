@@ -1,55 +1,39 @@
-"""Robot status and control panel."""
+"""Robot connection management panel."""
 
-from PyQt6.QtWidgets import (
-    QGroupBox,
-    QLabel,
-    QPushButton,
-    QVBoxLayout,
-    QWidget,
-)
+from PySide6.QtWidgets import QWidget
+
+from src.gui.ui_robot_panel import Ui_RobotPanel
+from src.robots.base_robot import BaseRobot, RobotStatus
+from src.robots.thymio.thymio_robot import ThymioRobot
+from src.robots.tree.tree_robot import TreeRobot
+from src.robots.turtle.turtle_robot import TurtleRobot
 
 
-class RobotPanel(QWidget):
-    """Panel for monitoring and controlling connected robots."""
+class RobotPanel(QWidget, Ui_RobotPanel):
+    """Panel for monitoring and managing robot connections.
+
+    Call :meth:`refresh` after the robot registry changes to update
+    all list views.
+    """
 
     def __init__(self):
         super().__init__()
-        layout = QVBoxLayout(self)
+        self.setupUi(self)
 
-        # Turtle section
-        turtle_group = QGroupBox("Turtle")
-        turtle_layout = QVBoxLayout(turtle_group)
-        self._turtle_status = QLabel("Status: Disconnected")
-        turtle_layout.addWidget(self._turtle_status)
-        self._turtle_connect_btn = QPushButton("Connect")
-        turtle_layout.addWidget(self._turtle_connect_btn)
-        layout.addWidget(turtle_group)
+    def refresh(self, robots: list[BaseRobot]) -> None:
+        """Repopulate all robot lists from the given robot collection."""
+        turtles  = [r for r in robots if isinstance(r, TurtleRobot)]
+        thymios  = [r for r in robots if isinstance(r, ThymioRobot)]
+        trees    = [r for r in robots if isinstance(r, TreeRobot)]
 
-        # Thymio section
-        thymio_group = QGroupBox("Thymios")
-        thymio_layout = QVBoxLayout(thymio_group)
-        self._thymio_status = QLabel("Status: Disconnected")
-        thymio_layout.addWidget(self._thymio_status)
-        self._thymio_connect_btn = QPushButton("Connect")
-        thymio_layout.addWidget(self._thymio_connect_btn)
-        layout.addWidget(thymio_group)
+        self._fill_list(self.turtle_list,  turtles)
+        self._fill_list(self.thymio_list,  thymios)
+        self._fill_list(self.tree_list,    trees)
 
-        # Tree section
-        tree_group = QGroupBox("Tree")
-        tree_layout = QVBoxLayout(tree_group)
-        self._tree_status = QLabel("Status: Disconnected")
-        tree_layout.addWidget(self._tree_status)
-        self._tree_connect_btn = QPushButton("Connect")
-        tree_layout.addWidget(self._tree_connect_btn)
-        layout.addWidget(tree_group)
-
-        # Gateway section
-        gateway_group = QGroupBox("ESP-NOW Gateway")
-        gateway_layout = QVBoxLayout(gateway_group)
-        self._gateway_status = QLabel("Status: Disconnected")
-        gateway_layout.addWidget(self._gateway_status)
-        self._gateway_connect_btn = QPushButton("Connect Gateway")
-        gateway_layout.addWidget(self._gateway_connect_btn)
-        layout.addWidget(gateway_group)
-
-        layout.addStretch()
+    @staticmethod
+    def _fill_list(list_widget, robots: list[BaseRobot]) -> None:
+        list_widget.clear()
+        for robot in robots:
+            status = robot.status.value
+            icon = "●" if robot.status == RobotStatus.CONNECTED else "○"
+            list_widget.addItem(f"{icon}  {robot.name}  [{status}]")

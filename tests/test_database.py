@@ -57,7 +57,7 @@ def test_log_and_get_events(db):
     event = InteractionEvent(
         session_id="test-002",
         participant_id="p-002",
-        robot_type="turtle",
+        type="turtle",
         action="inflate",
         target="chamber_3",
         timestamp=datetime.now(),
@@ -67,4 +67,4 @@ def test_log_and_get_events(db):
     events = db.get_session_events("test-002")
     assert len(events) == 1
     assert events[0].action == "inflate"
-    assert events[0].robot_type == "turtle"
+    assert events[0].type == "turtle"

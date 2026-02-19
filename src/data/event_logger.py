@@ -19,7 +19,7 @@ class EventLogger:
     def log(
         self,
         participant_id: str,
-        robot_type: str,
+        type: str,
         action: str,
         target: str = "",
         metadata: str = "",
@@ -28,7 +28,7 @@ class EventLogger:
         event = InteractionEvent(
             session_id=self._session_id,
             participant_id=participant_id,
-            robot_type=robot_type,
+            type=type,
             action=action,
             target=target,
             timestamp=datetime.now(),
@@ -37,5 +37,5 @@ class EventLogger:
         self._db.log_event(event)
         logger.debug(
             "Event: %s %s %s on %s",
-            participant_id, action, robot_type, target,
+            participant_id, action, type, target,
         )

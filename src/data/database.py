@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS events (
     event_id INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id TEXT NOT NULL,
     participant_id TEXT NOT NULL,
-    robot_type TEXT NOT NULL,
+    type TEXT NOT NULL,
     action TEXT NOT NULL,
     target TEXT DEFAULT '',
     timestamp TEXT NOT NULL,
@@ -102,12 +102,12 @@ class Database:
     def log_event(self, event: InteractionEvent) -> None:
         """Log an interaction event."""
         self._conn.execute(
-            "INSERT INTO events (session_id, participant_id, robot_type, action, target, timestamp, metadata) "
+            "INSERT INTO events (session_id, participant_id, type, action, target, timestamp, metadata) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (
                 event.session_id,
                 event.participant_id,
-                event.robot_type,
+                event.type,
                 event.action,
                 event.target,
                 event.timestamp.isoformat(),
@@ -119,7 +119,7 @@ class Database:
     def get_session_events(self, session_id: str) -> list[InteractionEvent]:
         """Get all events for a session."""
         cursor = self._conn.execute(
-            "SELECT event_id, session_id, participant_id, robot_type, action, target, timestamp, metadata "
+            "SELECT event_id, session_id, participant_id, type, action, target, timestamp, metadata "
             "FROM events WHERE session_id = ? ORDER BY timestamp",
             (session_id,),
         )
@@ -128,7 +128,7 @@ class Database:
                 event_id=row[0],
                 session_id=row[1],
                 participant_id=row[2],
-                robot_type=row[3],
+                type=row[3],
                 action=row[4],
                 target=row[5],
                 timestamp=datetime.fromisoformat(row[6]),
@@ -140,7 +140,7 @@ class Database:
     def get_all_sessions(self) -> list[SessionRecord]:
         """Get all session records."""
         cursor = self._conn.execute(
-            "SELECT session_id, activity_name, start_time, end_time, notes FROM sessions ORDER BY start_time DESC"
+            "SELECT session_id, activity_name, start_time, end_time, notes FROM sessions ORDER BY start_time ASC"
         )
         return [
             SessionRecord(
