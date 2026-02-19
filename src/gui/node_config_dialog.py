@@ -3,31 +3,28 @@
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
-    QFormLayout,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
-    QScrollArea,
-    QVBoxLayout,
     QWidget,
 )
 
 from src.config.settings import Settings
+from src.gui.ui_node_config_dialog import Ui_NodeConfigDialog
 from src.hardware.espnow_gateway import ESPNowGateway
 
-_MAX_SKINS = 3
+_MAX_CHAMBERS = 3
 _YAML_KEY = {"turtle": "turtles", "tree": "trees", "thymio": "thymios"}
 
 
-class NodeConfigDialog(QDialog):
-    """Dialog for configuring a single ESP32 node and its skins.
+class NodeConfigDialog(QDialog, Ui_NodeConfigDialog):
+    """Dialog for configuring a single ESP32 node and its air chambers.
 
-    Each skin row has three slot checkboxes (0–2).  Checking a slot in one
-    skin automatically unchecks it in every other skin (cross-skin) and
-    unchecks the other slots in the same row (one slot per skin).
+    Each chamber row has three slot checkboxes (0–2).  Checking a slot in one
+    chamber automatically unchecks it in every other chamber (cross-chamber)
+    and unchecks the other slots in the same row (one slot per chamber).
 
     Args:
         robot_type: One of ``"turtle"``, ``"tree"``, or ``"thymio"``.
@@ -55,10 +52,40 @@ class NodeConfigDialog(QDialog):
         self._settings = settings
         self._gateway = gateway
         self._skin_entries: list[dict] = []
-        self._add_skin_btn: QPushButton | None = None
 
+        self.setupUi(self)
+
+        is_new = node_index < 0
+        type_label = {
+            "turtle": "Turtle Node", "tree": "Tree Node", "thymio": "Thymio Node",
+        }.get(robot_type, "Node")
+        self.setWindowTitle(("Add " if is_new else "Configure ") + type_label)
+
+        # Delete button only shown when editing an existing node
+        self.delete_btn.setVisible(not is_new)
+
+        # Test button enabled only when gateway is connected
+        self.test_btn.setEnabled(gateway.is_connected)
+
+        # Populate from config
         node_cfg = self._load_node_cfg()
-        self._build_ui(node_cfg)
+        self.mac_edit.setText(node_cfg.get("mac", ""))
+        for skin_cfg in node_cfg.get("skins", []):
+            self._add_skin_row(skin_cfg)
+        self._on_slot_changed()
+
+        # Add-chamber button — inserted before the stretch at end of chambers_vbox
+        self._add_chamber_btn = QPushButton("+ Add Air Chamber")
+        self._add_chamber_btn.clicked.connect(lambda: self._add_skin_row(None))
+        self.chambers_vbox.addWidget(self._add_chamber_btn)
+        self.chambers_vbox.addStretch()
+        self._update_add_chamber_btn()
+
+        # Connect buttons
+        self.delete_btn.clicked.connect(self._on_delete)
+        self.test_btn.clicked.connect(self._on_test_actuators)
+        self.save_btn.clicked.connect(self._on_save)
+        self.cancel_btn.clicked.connect(self.reject)
 
     # ------------------------------------------------------------------
     # Load / collect helpers
@@ -86,7 +113,7 @@ class NodeConfigDialog(QDialog):
                 skins.append({"skin_id": skin_id, "slots": slots})
         return skins
 
-    def _active_skin_count(self) -> int:
+    def _active_chamber_count(self) -> int:
         return sum(1 for se in self._skin_entries if not se["deleted"])
 
     # ------------------------------------------------------------------
@@ -94,7 +121,7 @@ class NodeConfigDialog(QDialog):
     # ------------------------------------------------------------------
 
     def _on_slot_changed(self) -> None:
-        """Disable in every other skin any slot that is already checked here."""
+        """Disable in every other chamber any slot that is already checked here."""
         active: list[tuple[int, set[int]]] = [
             (i, {s for s, cb in enumerate(se["slot_checks"]) if cb.isChecked()})
             for i, se in enumerate(self._skin_entries)
@@ -111,79 +138,11 @@ class NodeConfigDialog(QDialog):
                 cb.setEnabled(slot_idx not in others_used)
 
     # ------------------------------------------------------------------
-    # UI construction
+    # Dynamic chamber rows
     # ------------------------------------------------------------------
 
-    def _build_ui(self, node_cfg: dict) -> None:
-        is_new = self._node_index < 0
-        type_label = {
-            "turtle": "Turtle Node", "tree": "Tree Node", "thymio": "Thymio Node",
-        }.get(self._robot_type, "Node")
-        self.setWindowTitle(("Add " if is_new else "Configure ") + type_label)
-        self.setMinimumSize(520, 360)
-
-        main_layout = QVBoxLayout(self)
-
-        # ── MAC ───────────────────────────────────────────────────────
-        mac_form = QFormLayout()
-        self._mac_edit = QLineEdit(node_cfg.get("mac", ""))
-        self._mac_edit.setPlaceholderText("AA:BB:CC:DD:EE:FF")
-        mac_form.addRow("Node MAC:", self._mac_edit)
-        main_layout.addLayout(mac_form)
-
-        # ── Skins ─────────────────────────────────────────────────────
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll_content = QWidget()
-        self._skins_vbox = QVBoxLayout(scroll_content)
-        self._skins_vbox.setSpacing(4)
-        scroll.setWidget(scroll_content)
-
-        for skin_cfg in node_cfg.get("skins", []):
-            self._add_skin_row(skin_cfg)
-        self._on_slot_changed()
-
-        self._add_skin_btn = QPushButton("+ Add Skin")
-        self._add_skin_btn.clicked.connect(lambda: self._add_skin_row(None))
-        self._skins_vbox.addWidget(self._add_skin_btn)
-        self._skins_vbox.addStretch()
-        self._update_add_skin_btn()
-
-        skins_group = QGroupBox(f"Skins (max {_MAX_SKINS})")
-        skins_group_layout = QVBoxLayout(skins_group)
-        skins_group_layout.addWidget(scroll)
-        main_layout.addWidget(skins_group)
-
-        # ── Button row ────────────────────────────────────────────────
-        btn_row = QHBoxLayout()
-
-        if not is_new:
-            delete_btn = QPushButton("Delete Node")
-            delete_btn.setStyleSheet("color: #cc2222;")
-            delete_btn.clicked.connect(self._on_delete)
-            btn_row.addWidget(delete_btn)
-
-        test_btn = QPushButton("Test Actuators")
-        test_btn.setEnabled(self._gateway.is_connected)
-        test_btn.setToolTip("Open test dialog (requires gateway connection)")
-        test_btn.clicked.connect(self._on_test_actuators)
-        btn_row.addWidget(test_btn)
-
-        btn_row.addStretch()
-
-        save_btn = QPushButton("Save")
-        save_btn.setDefault(True)
-        save_btn.clicked.connect(self._on_save)
-        btn_row.addWidget(save_btn)
-
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.clicked.connect(self.reject)
-        btn_row.addWidget(cancel_btn)
-
-        main_layout.addLayout(btn_row)
-
     def _add_skin_row(self, skin_cfg: dict | None) -> None:
-        if self._active_skin_count() >= _MAX_SKINS:
+        if self._active_chamber_count() >= _MAX_CHAMBERS:
             return
 
         skin_id = skin_cfg.get("skin_id", "") if skin_cfg else ""
@@ -194,9 +153,9 @@ class NodeConfigDialog(QDialog):
         hbox.setContentsMargins(0, 0, 0, 0)
 
         id_edit = QLineEdit(skin_id)
-        id_edit.setPlaceholderText("skin_id")
+        id_edit.setPlaceholderText("chamber_id")
         id_edit.setMinimumWidth(120)
-        hbox.addWidget(QLabel("Skin ID:"))
+        hbox.addWidget(QLabel("Chamber ID:"))
         hbox.addWidget(id_edit)
 
         slot_checks: list[QCheckBox] = []
@@ -206,7 +165,7 @@ class NodeConfigDialog(QDialog):
             hbox.addWidget(cb)
             slot_checks.append(cb)
 
-        # Connect each checkbox: uncheck siblings in this row, then enforce cross-skin
+        # Connect each checkbox: uncheck siblings in this row, then enforce cross-chamber
         for this_slot, cb in enumerate(slot_checks):
             def _make_handler(s: int, checks: list[QCheckBox]):
                 def _handler(checked: bool) -> None:
@@ -222,7 +181,7 @@ class NodeConfigDialog(QDialog):
 
         del_btn = QPushButton("✕")
         del_btn.setFixedWidth(28)
-        del_btn.setToolTip("Remove this skin")
+        del_btn.setToolTip("Remove this air chamber")
         hbox.addWidget(del_btn)
 
         entry: dict = {
@@ -236,24 +195,24 @@ class NodeConfigDialog(QDialog):
         def _delete_skin() -> None:
             entry["deleted"] = True
             row_widget.hide()
-            self._update_add_skin_btn()
+            self._update_add_chamber_btn()
             self._on_slot_changed()
 
         del_btn.clicked.connect(_delete_skin)
-        self._skins_vbox.insertWidget(self._skins_vbox.count() - 2, row_widget)
-        self._update_add_skin_btn()
+        # Insert before the "+ Add Air Chamber" button and the stretch
+        self.chambers_vbox.insertWidget(self.chambers_vbox.count() - 2, row_widget)
+        self._update_add_chamber_btn()
         self._on_slot_changed()
 
-    def _update_add_skin_btn(self) -> None:
-        if self._add_skin_btn is not None:
-            self._add_skin_btn.setEnabled(self._active_skin_count() < _MAX_SKINS)
+    def _update_add_chamber_btn(self) -> None:
+        self._add_chamber_btn.setEnabled(self._active_chamber_count() < _MAX_CHAMBERS)
 
     # ------------------------------------------------------------------
     # Actions
     # ------------------------------------------------------------------
 
     def _on_test_actuators(self) -> None:
-        mac = self._mac_edit.text().strip()
+        mac = self.mac_edit.text().strip()
         if not mac:
             QMessageBox.warning(self, "Test Actuators", "Enter a MAC address first.")
             return
@@ -269,7 +228,7 @@ class NodeConfigDialog(QDialog):
         dlg.exec()
 
     def _on_save(self) -> None:
-        mac = self._mac_edit.text().strip()
+        mac = self.mac_edit.text().strip()
         node_entry = {"mac": mac, "skins": self._collect_skins()}
 
         data = self._settings.data

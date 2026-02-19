@@ -44,6 +44,11 @@ CREATE TABLE IF NOT EXISTS events (
     FOREIGN KEY (session_id) REFERENCES sessions(session_id),
     FOREIGN KEY (participant_id) REFERENCES participants(participant_id)
 );
+
+CREATE TABLE IF NOT EXISTS counters (
+    name TEXT PRIMARY KEY,
+    value INTEGER NOT NULL DEFAULT 0
+);
 """
 
 
@@ -59,8 +64,26 @@ class Database:
         """Open the database connection and create tables."""
         self._conn = sqlite3.connect(str(self._db_path))
         self._conn.executescript(SCHEMA)
+        self._init_counters()
         self._conn.commit()
         logger.info("Database connected: %s", self._db_path)
+
+    def _init_counters(self) -> None:
+        """Seed counters from existing data on first run."""
+        for name, table, col in [
+            ("participant", "participants", "participant_id"),
+            ("session", "sessions", "session_id"),
+        ]:
+            exists = self._conn.execute(
+                "SELECT 1 FROM counters WHERE name = ?", (name,)
+            ).fetchone()
+            if not exists:
+                n = self._conn.execute(
+                    f"SELECT COALESCE(MAX(CAST(SUBSTR({col}, 2) AS INTEGER)), 0) FROM {table}"
+                ).fetchone()[0]
+                self._conn.execute(
+                    "INSERT INTO counters (name, value) VALUES (?, ?)", (name, n)
+                )
 
     def close(self) -> None:
         """Close the database connection."""
@@ -81,6 +104,10 @@ class Database:
                 session.notes,
             ),
         )
+        num = int(session.session_id[1:])
+        self._conn.execute(
+            "UPDATE counters SET value = MAX(value, ?) WHERE name = 'session'", (num,)
+        )
         self._conn.commit()
 
     def save_participant(self, participant: ParticipantRecord) -> None:
@@ -88,6 +115,10 @@ class Database:
         self._conn.execute(
             "INSERT OR REPLACE INTO participants (participant_id, alias, age) VALUES (?, ?, ?)",
             (participant.participant_id, participant.alias, participant.age),
+        )
+        num = int(participant.participant_id[1:])
+        self._conn.execute(
+            "UPDATE counters SET value = MAX(value, ?) WHERE name = 'participant'", (num,)
         )
         self._conn.commit()
 
@@ -136,6 +167,37 @@ class Database:
             )
             for row in cursor.fetchall()
         ]
+
+    def get_all_participants(self) -> list[ParticipantRecord]:
+        """Get all participant records ordered by ID."""
+        cursor = self._conn.execute(
+            "SELECT participant_id, alias, age FROM participants ORDER BY participant_id"
+        )
+        return [
+            ParticipantRecord(participant_id=row[0], alias=row[1], age=row[2])
+            for row in cursor.fetchall()
+        ]
+
+    def next_participant_id(self) -> str:
+        """Return the next auto-generated participant ID (P001, P002, …)."""
+        n = self._conn.execute(
+            "SELECT value FROM counters WHERE name = 'participant'"
+        ).fetchone()[0]
+        return f"P{n + 1:03d}"
+
+    def next_session_id(self) -> str:
+        """Return the next auto-generated session ID (S001, S002, …)."""
+        n = self._conn.execute(
+            "SELECT value FROM counters WHERE name = 'session'"
+        ).fetchone()[0]
+        return f"S{n + 1:03d}"
+
+    def delete_participant(self, participant_id: str) -> None:
+        """Delete a participant record."""
+        self._conn.execute(
+            "DELETE FROM participants WHERE participant_id = ?", (participant_id,)
+        )
+        self._conn.commit()
 
     def get_all_sessions(self) -> list[SessionRecord]:
         """Get all session records."""

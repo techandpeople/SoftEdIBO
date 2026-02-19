@@ -1,25 +1,21 @@
 """Robot connection management panel."""
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QKeyEvent
 from PySide6.QtWidgets import (
-    QComboBox,
     QDialog,
-    QGroupBox,
-    QHBoxLayout,
     QHeaderView,
     QInputDialog,
-    QLabel,
     QMenu,
     QMessageBox,
     QPushButton,
     QTreeWidget,
     QTreeWidgetItem,
-    QVBoxLayout,
     QWidget,
 )
 
 from src.config.settings import Settings
+from src.gui.ui_robot_panel import Ui_RobotPanel
 from src.hardware.espnow_gateway import ESPNowGateway
 from src.robots.base_robot import BaseRobot
 
@@ -27,11 +23,11 @@ from src.robots.base_robot import BaseRobot
 _YAML_KEY = {"turtle": "turtles", "tree": "trees", "thymio": "thymios"}
 
 
-class RobotPanel(QWidget):
+class RobotPanel(QWidget, Ui_RobotPanel):
     """Panel for managing robots and their ESP32 nodes.
 
     Displays a two-level tree per robot type:
-      • top-level items  = robot entries (with an inline "+ Node" button)
+      • top-level items  = robot entries (with an inline \"+ Node\" button)
       • child items      = ESP32 nodes with a ●/○ online indicator
 
     Double-clicking a node opens :class:`NodeConfigDialog`.
@@ -43,6 +39,7 @@ class RobotPanel(QWidget):
     """
 
     robot_configured = Signal()
+    gateway_changed = Signal(bool)   # True = connected, False = disconnected
 
     def __init__(self, gateway: ESPNowGateway, settings: Settings):
         super().__init__()
@@ -50,89 +47,41 @@ class RobotPanel(QWidget):
         self._settings = settings
         self._robots: list[BaseRobot] = []
 
-        self._port_combo: QComboBox
-        self._gateway_status: QLabel
-        self._connect_btn: QPushButton
-        self._scan_btn: QPushButton
-        self._turtle_tree: QTreeWidget
-        self._tree_tree: QTreeWidget
-        self._thymio_tree: QTreeWidget
+        self.setupUi(self)
 
-        self._build_ui()
+        # Apply column resize modes (not settable in .ui)
+        for tree in (self.turtle_tree, self.tree_tree, self.thymio_tree):
+            tree.setColumnCount(2)
+            tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+            tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+            tree.setColumnWidth(1, 72)
 
-    # ------------------------------------------------------------------
-    # UI construction
-    # ------------------------------------------------------------------
+        # Connect gateway controls
+        self.refresh_ports_btn.clicked.connect(self._refresh_ports)
+        self.connect_btn.clicked.connect(self._on_gateway_connect)
+        self.scan_btn.clicked.connect(self._on_scan)
 
-    def _build_ui(self) -> None:
-        layout = QVBoxLayout(self)
-        layout.addWidget(self._build_gateway_section())
-        layout.addWidget(self._build_type_section("Turtles", "turtle"))
-        layout.addWidget(self._build_type_section("Trees", "tree"))
-        layout.addWidget(self._build_type_section("Thymios", "thymio"))
-        layout.addStretch()
+        # Connect Add Robot buttons
+        self.add_turtle_btn.clicked.connect(lambda: self._on_add_robot("turtle"))
+        self.add_tree_btn.clicked.connect(lambda: self._on_add_robot("tree"))
+        self.add_thymio_btn.clicked.connect(lambda: self._on_add_robot("thymio"))
 
-    def _build_gateway_section(self) -> QGroupBox:
-        box = QGroupBox("ESP-NOW Gateway")
-        hbox = QHBoxLayout(box)
-
-        self._port_combo = QComboBox()
-        self._port_combo.setMinimumWidth(150)
-        hbox.addWidget(self._port_combo)
-
-        refresh_ports_btn = QPushButton("↺")
-        refresh_ports_btn.setToolTip("Refresh serial port list")
-        refresh_ports_btn.setFixedWidth(28)
-        refresh_ports_btn.clicked.connect(self._refresh_ports)
-        hbox.addWidget(refresh_ports_btn)
-
-        self._gateway_status = QLabel("Disconnected")
-        hbox.addWidget(self._gateway_status)
-        hbox.addStretch()
-
-        self._connect_btn = QPushButton("Connect")
-        self._connect_btn.clicked.connect(self._on_gateway_connect)
-        hbox.addWidget(self._connect_btn)
-
-        self._scan_btn = QPushButton("Scan Nodes")
-        self._scan_btn.setEnabled(False)
-        self._scan_btn.clicked.connect(self._on_scan)
-        hbox.addWidget(self._scan_btn)
+        # Connect tree signals
+        for tree, robot_type in (
+            (self.turtle_tree, "turtle"),
+            (self.tree_tree, "tree"),
+            (self.thymio_tree, "thymio"),
+        ):
+            tree.itemDoubleClicked.connect(self._on_item_double_clicked)
+            tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            tree.customContextMenuRequested.connect(
+                lambda pos, t=tree, rt=robot_type: self._on_context_menu(pos, t, rt)
+            )
+            tree.keyPressEvent = (
+                lambda event, t=tree: self._on_tree_key_press(event, t)
+            )
 
         self._refresh_ports()
-        return box
-
-    def _build_type_section(self, title: str, robot_type: str) -> QGroupBox:
-        box = QGroupBox(title)
-        vbox = QVBoxLayout(box)
-
-        tree = QTreeWidget()
-        tree.setColumnCount(2)
-        tree.setHeaderHidden(True)
-        tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
-        tree.setColumnWidth(1, 72)
-        tree.setRootIsDecorated(True)
-        tree.itemDoubleClicked.connect(self._on_item_double_clicked)
-        tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        tree.customContextMenuRequested.connect(
-            lambda pos, t=tree, rt=robot_type: self._on_context_menu(pos, t, rt)
-        )
-        vbox.addWidget(tree)
-
-        label = "Thymio" if robot_type == "thymio" else "Robot"
-        add_btn = QPushButton(f"+ Add {label}")
-        add_btn.clicked.connect(lambda _=False, rt=robot_type: self._on_add_robot(rt))
-        vbox.addWidget(add_btn)
-
-        if robot_type == "turtle":
-            self._turtle_tree = tree
-        elif robot_type == "tree":
-            self._tree_tree = tree
-        else:
-            self._thymio_tree = tree
-
-        return box
 
     # ------------------------------------------------------------------
     # Public interface
@@ -148,52 +97,54 @@ class RobotPanel(QWidget):
     # ------------------------------------------------------------------
 
     def _refresh_ports(self) -> None:
-        current = self._port_combo.currentText() or self._settings.gateway_port
+        current = self.port_combo.currentText() or self._settings.gateway_port
         try:
             import serial.tools.list_ports
             ports = [p.device for p in serial.tools.list_ports.comports()]
         except Exception:
             ports = []
 
-        self._port_combo.clear()
+        self.port_combo.clear()
         if not ports:
-            self._port_combo.addItem(current or "/dev/ttyUSB0")
+            self.port_combo.addItem(current or "/dev/ttyUSB0")
         else:
             for p in ports:
-                self._port_combo.addItem(p)
-            if current and self._port_combo.findText(current) < 0:
-                self._port_combo.insertItem(0, current)
+                self.port_combo.addItem(p)
+            if current and self.port_combo.findText(current) < 0:
+                self.port_combo.insertItem(0, current)
 
-        idx = self._port_combo.findText(current)
+        idx = self.port_combo.findText(current)
         if idx >= 0:
-            self._port_combo.setCurrentIndex(idx)
+            self.port_combo.setCurrentIndex(idx)
 
     def _on_gateway_connect(self) -> None:
         if self._gateway.is_connected:
             self._gateway.disconnect()
-            self._gateway_status.setText("Disconnected")
-            self._connect_btn.setText("Connect")
-            self._scan_btn.setEnabled(False)
+            self.gateway_status_label.setText("Disconnected")
+            self.connect_btn.setText("Connect")
+            self.scan_btn.setEnabled(False)
             self._refresh_all_trees()
+            self.gateway_changed.emit(False)
         else:
-            port = self._port_combo.currentText()
+            port = self.port_combo.currentText()
             self._gateway._port = port
             if self._gateway.connect():
-                self._gateway_status.setText(f"Connected ({port})")
-                self._connect_btn.setText("Disconnect")
-                self._scan_btn.setEnabled(True)
+                self.gateway_status_label.setText(f"Connected ({port})")
+                self.connect_btn.setText("Disconnect")
+                self.scan_btn.setEnabled(True)
+                self.gateway_changed.emit(True)
             else:
-                self._gateway_status.setText(f"Connection failed ({port})")
+                self.gateway_status_label.setText(f"Connection failed ({port})")
 
     def _on_scan(self) -> None:
-        self._scan_btn.setEnabled(False)
-        self._scan_btn.setText("Scanning…")
+        self.scan_btn.setEnabled(False)
+        self.scan_btn.setText("Scanning…")
         self._gateway.scan()
         QTimer.singleShot(2000, self._on_scan_done)
 
     def _on_scan_done(self) -> None:
-        self._scan_btn.setEnabled(True)
-        self._scan_btn.setText("Scan Nodes")
+        self.scan_btn.setEnabled(True)
+        self.scan_btn.setText("Scan Nodes")
         self._refresh_all_trees()
 
     # ------------------------------------------------------------------
@@ -203,9 +154,9 @@ class RobotPanel(QWidget):
     def _refresh_all_trees(self) -> None:
         known = self._gateway.known_macs if self._gateway.is_connected else frozenset()
         robot_data = self._settings.data.get("robots", {})
-        self._fill_tree(self._turtle_tree, "turtle", robot_data.get("turtles", []), known)
-        self._fill_tree(self._tree_tree,   "tree",   robot_data.get("trees",   []), known)
-        self._fill_tree(self._thymio_tree, "thymio", robot_data.get("thymios", []), known)
+        self._fill_tree(self.turtle_tree, "turtle", robot_data.get("turtles", []), known)
+        self._fill_tree(self.tree_tree,   "tree",   robot_data.get("trees",   []), known)
+        self._fill_tree(self.thymio_tree, "thymio", robot_data.get("thymios", []), known)
 
     def _fill_tree(
         self,
@@ -280,6 +231,40 @@ class RobotPanel(QWidget):
     # ------------------------------------------------------------------
     # Dialog / action handlers
     # ------------------------------------------------------------------
+
+    def _on_tree_key_press(self, event: QKeyEvent, tree: QTreeWidget) -> None:
+        if event.key() == Qt.Key.Key_Delete:
+            item = tree.currentItem()
+            if item is None:
+                return
+            data = item.data(0, Qt.ItemDataRole.UserRole)
+            if data is None:
+                return
+            if "node_index" in data:
+                self._delete_node(data["robot_type"], data["robot_index"], data["node_index"])
+            else:
+                self._on_delete_robot(data["robot_type"], data["robot_index"])
+        else:
+            QTreeWidget.keyPressEvent(tree, event)
+
+    def _delete_node(self, robot_type: str, robot_index: int, node_index: int) -> None:
+        reply = QMessageBox.question(
+            self,
+            "Delete Node",
+            "Delete this node? This cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        robots_list = (
+            self._settings.data.get("robots", {}).get(_YAML_KEY[robot_type], [])
+        )
+        if 0 <= robot_index < len(robots_list):
+            nodes = robots_list[robot_index].get("nodes", [])
+            if 0 <= node_index < len(nodes):
+                nodes.pop(node_index)
+                self._settings.save()
+                self.robot_configured.emit()
 
     def _on_item_double_clicked(self, item: QTreeWidgetItem, _column: int) -> None:
         data = item.data(0, Qt.ItemDataRole.UserRole)

@@ -3,7 +3,7 @@
  <class>RobotPanel</class>
  <widget class="QWidget" name="RobotPanel">
   <property name="geometry">
-   <rect><x>0</x><y>0</y><width>400</width><height>560</height></rect>
+   <rect><x>0</x><y>0</y><width>420</width><height>640</height></rect>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>
@@ -11,7 +11,19 @@
      <property name="title"><string>ESP-NOW Gateway</string></property>
      <layout class="QHBoxLayout" name="gateway_layout">
       <item>
-       <widget class="QLabel" name="gateway_status">
+       <widget class="QComboBox" name="port_combo">
+        <property name="minimumWidth"><number>150</number></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="refresh_ports_btn">
+        <property name="text"><string>↺</string></property>
+        <property name="maximumWidth"><number>28</number></property>
+        <property name="toolTip"><string>Refresh serial port list</string></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLabel" name="gateway_status_label">
         <property name="text"><string>Disconnected</string></property>
        </widget>
       </item>
@@ -22,8 +34,14 @@
        </spacer>
       </item>
       <item>
-       <widget class="QPushButton" name="gateway_connect_btn">
+       <widget class="QPushButton" name="connect_btn">
         <property name="text"><string>Connect</string></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="scan_btn">
+        <property name="text"><string>Scan Nodes</string></property>
+        <property name="enabled"><bool>false</bool></property>
        </widget>
       </item>
      </layout>
@@ -34,8 +52,36 @@
      <property name="title"><string>Turtles</string></property>
      <layout class="QVBoxLayout" name="turtle_layout">
       <item>
-       <widget class="QListWidget" name="turtle_list">
-        <property name="alternatingRowColors"><bool>true</bool></property>
+       <widget class="QTreeWidget" name="turtle_tree">
+        <property name="headerHidden"><bool>true</bool></property>
+        <property name="rootIsDecorated"><bool>true</bool></property>
+        <column><property name="text"><string notr="true">Name</string></property></column>
+        <column><property name="text"><string notr="true">Action</string></property></column>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="add_turtle_btn">
+        <property name="text"><string>+ Add Robot</string></property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="tree_group">
+     <property name="title"><string>Trees</string></property>
+     <layout class="QVBoxLayout" name="tree_layout">
+      <item>
+       <widget class="QTreeWidget" name="tree_tree">
+        <property name="headerHidden"><bool>true</bool></property>
+        <property name="rootIsDecorated"><bool>true</bool></property>
+        <column><property name="text"><string notr="true">Name</string></property></column>
+        <column><property name="text"><string notr="true">Action</string></property></column>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="add_tree_btn">
+        <property name="text"><string>+ Add Robot</string></property>
        </widget>
       </item>
      </layout>
@@ -46,20 +92,16 @@
      <property name="title"><string>Thymios</string></property>
      <layout class="QVBoxLayout" name="thymio_layout">
       <item>
-       <widget class="QListWidget" name="thymio_list">
-        <property name="alternatingRowColors"><bool>true</bool></property>
+       <widget class="QTreeWidget" name="thymio_tree">
+        <property name="headerHidden"><bool>true</bool></property>
+        <property name="rootIsDecorated"><bool>true</bool></property>
+        <column><property name="text"><string notr="true">Name</string></property></column>
+        <column><property name="text"><string notr="true">Action</string></property></column>
        </widget>
       </item>
-     </layout>
-    </widget>
-   </item>
-   <item>
-    <widget class="QGroupBox" name="tree_group">
-     <property name="title"><string>Tree</string></property>
-     <layout class="QVBoxLayout" name="tree_layout">
       <item>
-       <widget class="QListWidget" name="tree_list">
-        <property name="alternatingRowColors"><bool>true</bool></property>
+       <widget class="QPushButton" name="add_thymio_btn">
+        <property name="text"><string>+ Add Thymio</string></property>
        </widget>
       </item>
      </layout>

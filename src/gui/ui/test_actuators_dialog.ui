@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>TestActuatorsDialog</class>
+ <widget class="QDialog" name="TestActuatorsDialog">
+  <property name="geometry">
+   <rect><x>0</x><y>0</y><width>420</width><height>280</height></rect>
+  </property>
+  <property name="windowTitle"><string>Test Actuators</string></property>
+  <property name="minimumSize">
+   <size><width>420</width><height>200</height></size>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <widget class="QLabel" name="no_chambers_label">
+     <property name="text"><string>No air chambers configured for this node.</string></property>
+     <property name="visible"><bool>false</bool></property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QScrollArea" name="chambers_scroll">
+     <property name="widgetResizable"><bool>true</bool></property>
+     <property name="visible"><bool>false</bool></property>
+     <widget class="QWidget" name="chambers_content">
+      <layout class="QVBoxLayout" name="chambers_vbox"/>
+     </widget>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="close_row">
+     <item>
+      <spacer name="close_spacer">
+       <property name="orientation"><enum>Qt::Horizontal</enum></property>
+       <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="QPushButton" name="close_btn">
+       <property name="text"><string>Close</string></property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

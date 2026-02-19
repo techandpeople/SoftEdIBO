@@ -2,19 +2,16 @@
 
 import sys
 
-from PySide6.QtWidgets import (
-    QApplication,
-    QMainWindow,
-    QTabWidget,
-    QVBoxLayout,
-    QWidget,
-)
+from PySide6.QtWidgets import QApplication, QMainWindow
 
 from src.config.settings import Settings
 from src.data.database import Database
 from src.gui.data_panel import DataPanel
+from src.gui.home_panel import HomePanel
+from src.gui.participant_panel import ParticipantPanel
 from src.gui.robot_panel import RobotPanel
 from src.gui.session_panel import SessionPanel
+from src.gui.ui_main_window import Ui_MainWindow
 from src.hardware.espnow_gateway import ESPNowGateway
 from src.robots.base_robot import BaseRobot
 from src.robots.thymio.thymio_robot import ThymioRobot
@@ -22,13 +19,12 @@ from src.robots.tree.tree_robot import TreeRobot
 from src.robots.turtle.turtle_robot import TurtleRobot
 
 
-class MainWindow(QMainWindow):
+class MainWindow(QMainWindow, Ui_MainWindow):
     """Main application window with tabbed panels."""
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("SoftEdIBO - Robot Hospital")
-        self.setMinimumSize(1024, 768)
+        self.setupUi(self)
 
         self._settings = Settings()
 
@@ -44,22 +40,23 @@ class MainWindow(QMainWindow):
             baud_rate=self._settings.gateway_baud,
         )
 
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        layout = QVBoxLayout(central_widget)
-
-        self._tabs = QTabWidget()
-        layout.addWidget(self._tabs)
-
+        self._home_panel = HomePanel()
+        self._participant_panel = ParticipantPanel(self._db)
         self._session_panel = SessionPanel(self._db)
         self._robot_panel = RobotPanel(self._gateway, self._settings)
         self._data_panel = DataPanel(self._db)
 
-        self._tabs.addTab(self._session_panel, "Session")
-        self._tabs.addTab(self._robot_panel, "Robots")
-        self._tabs.addTab(self._data_panel, "Data")
+        self.tabs.addTab(self._home_panel, "Home")
+        self.tabs.addTab(self._participant_panel, "Participants")
+        self.tabs.addTab(self._session_panel, "Session")
+        self.tabs.addTab(self._robot_panel, "Robots")
+        self.tabs.addTab(self._data_panel, "Data")
 
+        self._home_panel.navigate_to.connect(self._on_navigate)
+        self._session_panel.session_started.connect(self._home_panel.set_session_status)
+        self._session_panel.session_stopped.connect(lambda: self._home_panel.set_session_status(None))
         self._session_panel.session_finished.connect(self._data_panel.refresh)
+        self._robot_panel.gateway_changed.connect(self._home_panel.set_gateway_status)
         self._robot_panel.robot_configured.connect(self._on_robot_configured)
 
         self._robots = self._load_robots()
@@ -100,6 +97,13 @@ class MainWindow(QMainWindow):
             )
 
         return robots
+
+    def _on_navigate(self, tab_name: str) -> None:
+        """Switch to the tab matching tab_name."""
+        for i in range(self.tabs.count()):
+            if self.tabs.tabText(i) == tab_name:
+                self.tabs.setCurrentIndex(i)
+                return
 
     def _on_robot_configured(self) -> None:
         """Reload settings and recreate robots after a config dialog saves."""

@@ -3,7 +3,13 @@
 import csv
 
 from PySide6.QtCore import QStandardPaths
-from PySide6.QtWidgets import QFileDialog, QMessageBox, QTableWidgetItem, QWidget
+from PySide6.QtWidgets import (
+    QFileDialog,
+    QHeaderView,
+    QMessageBox,
+    QTableWidgetItem,
+    QWidget,
+)
 
 from src.data.database import Database
 from src.gui.ui_data_panel import Ui_DataPanel
@@ -21,6 +27,14 @@ class DataPanel(QWidget, Ui_DataPanel):
         self.setupUi(self)
 
         self._db = db
+
+        for table in (self.sessions_table, self.events_table):
+            h = table.horizontalHeader()
+            for col in range(table.columnCount() - 1):
+                h.setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
+            h.setSectionResizeMode(table.columnCount() - 1, QHeaderView.ResizeMode.Stretch)
+            table.setSortingEnabled(True)
+
         self.sessions_table.itemSelectionChanged.connect(self._on_session_selected)
         self.export_btn.clicked.connect(self._on_export)
         self.export_all_btn.clicked.connect(self._on_export_all)

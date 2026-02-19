@@ -6,15 +6,15 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
+from src.gui.ui_test_actuators_dialog import Ui_TestActuatorsDialog
 from src.hardware.espnow_gateway import ESPNowGateway
 
 
-class TestActuatorsDialog(QDialog):
+class TestActuatorsDialog(QDialog, Ui_TestActuatorsDialog):
     """Dialog for sending inflate/deflate commands to a node's chambers.
 
     Commands are sent directly via the gateway without going through the
@@ -38,43 +38,29 @@ class TestActuatorsDialog(QDialog):
         super().__init__(parent)
         self._mac = mac
         self._gateway = gateway
+
+        self.setupUi(self)
         self.setWindowTitle(f"Test Actuators — {mac}")
-        self.setMinimumSize(420, 200)
-        self._build_ui(skin_cfgs)
+        self.close_btn.clicked.connect(self.accept)
+
+        if not skin_cfgs:
+            self.no_chambers_label.setVisible(True)
+        else:
+            self.chambers_scroll.setVisible(True)
+            content_layout = QVBoxLayout(self.chambers_content)
+            for skin_cfg in skin_cfgs:
+                content_layout.addWidget(self._build_chamber_group(skin_cfg))
+            content_layout.addStretch()
 
     # ------------------------------------------------------------------
     # UI
     # ------------------------------------------------------------------
 
-    def _build_ui(self, skin_cfgs: list[dict]) -> None:
-        main_layout = QVBoxLayout(self)
-
-        if not skin_cfgs:
-            main_layout.addWidget(QLabel("No skins configured for this node."))
-        else:
-            scroll = QScrollArea()
-            scroll.setWidgetResizable(True)
-            content = QWidget()
-            content_layout = QVBoxLayout(content)
-            scroll.setWidget(content)
-
-            for skin_cfg in skin_cfgs:
-                content_layout.addWidget(self._build_skin_group(skin_cfg))
-            content_layout.addStretch()
-            main_layout.addWidget(scroll)
-
-        close_btn = QPushButton("Close")
-        close_btn.clicked.connect(self.accept)
-        row = QHBoxLayout()
-        row.addStretch()
-        row.addWidget(close_btn)
-        main_layout.addLayout(row)
-
-    def _build_skin_group(self, skin_cfg: dict) -> QGroupBox:
+    def _build_chamber_group(self, skin_cfg: dict) -> QGroupBox:
         skin_id = skin_cfg.get("skin_id", "—")
         slots: list[int] = sorted(skin_cfg.get("slots", []))
 
-        box = QGroupBox(f"Skin: {skin_id}")
+        box = QGroupBox(f"Air Chamber: {skin_id}")
         vbox = QVBoxLayout(box)
 
         # Inflate All / Deflate All row

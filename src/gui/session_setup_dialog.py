@@ -5,6 +5,8 @@ from PySide6.QtWidgets import QDialog, QListWidgetItem, QWidget
 
 from src.activities.base_activity import BaseActivity
 from src.activities.group_touch import GroupTouchActivity
+from src.data.database import Database
+from src.data.models import ParticipantRecord
 from src.gui.ui_session_setup_dialog import Ui_SessionSetupDialog
 from src.robots.base_robot import BaseRobot
 
@@ -15,17 +17,20 @@ _ACTIVITIES: list[BaseActivity] = [
 
 
 class SessionSetupDialog(QDialog, Ui_SessionSetupDialog):
-    """Dialog that collects session ID, activity, and robot selection.
-
-    Pass the list of currently connected robots so the dialog can filter
-    them to only show robots compatible with the chosen activity.
+    """Dialog that collects session ID, activity, robot, and participant selection.
 
     Args:
         robots: All currently connected robots across all types.
+        db: Database instance used to load the participant roster.
         parent: Optional parent widget.
     """
 
-    def __init__(self, robots: list[BaseRobot], parent: QWidget | None = None):
+    def __init__(
+        self,
+        robots: list[BaseRobot],
+        db: Database,
+        parent: QWidget | None = None,
+    ):
         super().__init__(parent)
         self.setupUi(self)
 
@@ -38,7 +43,10 @@ class SessionSetupDialog(QDialog, Ui_SessionSetupDialog):
         self.button_box.accepted.connect(self.accept)
         self.button_box.rejected.connect(self.reject)
 
+        self.session_id_input.setText(db.next_session_id())
+
         self._on_activity_changed(0)
+        self._populate_participants(db.get_all_participants())
 
     # ------------------------------------------------------------------
     # Public result accessors (call after exec() == QDialog.Accepted)
@@ -64,6 +72,18 @@ class SessionSetupDialog(QDialog, Ui_SessionSetupDialog):
                 robot = item.data(Qt.ItemDataRole.UserRole)
                 if robot is not None:
                     result.append(robot)
+        return result
+
+    @property
+    def selected_participants(self) -> list[ParticipantRecord]:
+        """Participants checked by the user in the list."""
+        result = []
+        for i in range(self.participants_list.count()):
+            item = self.participants_list.item(i)
+            if item and item.checkState() == Qt.CheckState.Checked:
+                record = item.data(Qt.ItemDataRole.UserRole)
+                if record is not None:
+                    result.append(record)
         return result
 
     # ------------------------------------------------------------------
@@ -95,8 +115,30 @@ class SessionSetupDialog(QDialog, Ui_SessionSetupDialog):
         self.robots_list.setVisible(True)
 
         for robot in robots:
-            item = QListWidgetItem(f"{robot.name}  [{robot.status.value}]")
+            item = QListWidgetItem(f"{robot.robot_id}  [{robot.status.value}]")
             item.setData(Qt.ItemDataRole.UserRole, robot)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Checked)
             self.robots_list.addItem(item)
+
+    def _populate_participants(self, records: list[ParticipantRecord]) -> None:
+        """Fill the participants list with checkable entries."""
+        self.participants_list.clear()
+
+        if not records:
+            self.no_participants_label.setVisible(True)
+            self.participants_list.setVisible(False)
+            return
+
+        self.no_participants_label.setVisible(False)
+        self.participants_list.setVisible(True)
+
+        for record in records:
+            label = f"{record.participant_id}  {record.alias}"
+            if record.age is not None:
+                label += f"  (age {record.age})"
+            item = QListWidgetItem(label)
+            item.setData(Qt.ItemDataRole.UserRole, record)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Checked)
+            self.participants_list.addItem(item)

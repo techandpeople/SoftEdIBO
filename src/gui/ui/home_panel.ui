@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>HomePanel</class>
+ <widget class="QWidget" name="HomePanel">
+  <property name="geometry">
+   <rect><x>0</x><y>0</y><width>800</width><height>600</height></rect>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+
+   <item>
+    <spacer>
+     <property name="orientation"><enum>Qt::Vertical</enum></property>
+     <property name="sizeHint" stdset="0"><size><width>0</width><height>60</height></size></property>
+    </spacer>
+   </item>
+
+   <item>
+    <widget class="QLabel" name="title_label">
+     <property name="text"><string>SoftEdIBO</string></property>
+     <property name="alignment"><set>Qt::AlignCenter</set></property>
+     <property name="styleSheet"><string>font-size: 40px; font-weight: bold;</string></property>
+    </widget>
+   </item>
+
+   <item>
+    <widget class="QLabel" name="subtitle_label">
+     <property name="text"><string>Soft-based robot for inclusive education</string></property>
+     <property name="alignment"><set>Qt::AlignCenter</set></property>
+     <property name="styleSheet"><string>font-size: 18px; color: #888888;</string></property>
+    </widget>
+   </item>
+
+   <item>
+    <spacer>
+     <property name="orientation"><enum>Qt::Vertical</enum></property>
+     <property name="sizeHint" stdset="0"><size><width>0</width><height>16</height></size></property>
+    </spacer>
+   </item>
+
+   <item>
+    <widget class="QLabel" name="description_label">
+     <property name="text"><string>Robot Hospital Activity - Where children play “doctors” and “treat” soft silicone robots
+by synchronising touch, rhythm and collaboration</string></property>
+     <property name="alignment"><set>Qt::AlignCenter</set></property>
+     <property name="wordWrap"><bool>true</bool></property>
+     <property name="styleSheet"><string>color: #aaaaaa;</string></property>
+    </widget>
+   </item>
+
+   <item>
+    <spacer>
+     <property name="orientation"><enum>Qt::Vertical</enum></property>
+     <property name="sizeHint" stdset="0"><size><width>0</width><height>30</height></size></property>
+    </spacer>
+   </item>
+
+   <item>
+    <widget class="QFrame" name="separator">
+     <property name="frameShape"><enum>QFrame::HLine</enum></property>
+     <property name="frameShadow"><enum>QFrame::Sunken</enum></property>
+    </widget>
+   </item>
+
+   <item>
+    <spacer>
+     <property name="orientation"><enum>Qt::Vertical</enum></property>
+     <property name="sizeHint" stdset="0"><size><width>0</width><height>24</height></size></property>
+    </spacer>
+   </item>
+
+   <!-- Status -->
+   <item>
+    <layout class="QHBoxLayout" name="status_layout">
+     <item>
+      <spacer><property name="orientation"><enum>Qt::Horizontal</enum></property></spacer>
+     </item>
+     <item>
+      <layout class="QFormLayout" name="status_form">
+       <item row="0" column="0">
+        <widget class="QLabel">
+         <property name="text"><string>Session:</string></property>
+         <property name="styleSheet"><string>color: #888888;</string></property>
+        </widget>
+       </item>
+       <item row="0" column="1">
+        <widget class="QLabel" name="session_status_label">
+         <property name="text"><string>No active session</string></property>
+        </widget>
+       </item>
+       <item row="1" column="0">
+        <widget class="QLabel">
+         <property name="text"><string>Gateway:</string></property>
+         <property name="styleSheet"><string>color: #888888;</string></property>
+        </widget>
+       </item>
+       <item row="1" column="1">
+        <widget class="QLabel" name="gateway_status_label">
+         <property name="text"><string>Not connected</string></property>
+        </widget>
+       </item>
+      </layout>
+     </item>
+     <item>
+      <spacer><property name="orientation"><enum>Qt::Horizontal</enum></property></spacer>
+     </item>
+    </layout>
+   </item>
+
+   <item>
+    <spacer>
+     <property name="orientation"><enum>Qt::Vertical</enum></property>
+     <property name="sizeHint" stdset="0"><size><width>0</width><height>30</height></size></property>
+    </spacer>
+   </item>
+
+   <!-- Navigation buttons -->
+   <item>
+    <layout class="QHBoxLayout" name="nav_layout">
+     <item>
+      <spacer><property name="orientation"><enum>Qt::Horizontal</enum></property></spacer>
+     </item>
+     <item>
+      <widget class="QPushButton" name="nav_participants_btn">
+       <property name="text"><string>Participants</string></property>
+       <property name="minimumWidth"><number>110</number></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="nav_session_btn">
+       <property name="text"><string>Session</string></property>
+       <property name="minimumWidth"><number>110</number></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="nav_robots_btn">
+       <property name="text"><string>Robots</string></property>
+       <property name="minimumWidth"><number>110</number></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="nav_data_btn">
+       <property name="text"><string>Data</string></property>
+       <property name="minimumWidth"><number>110</number></property>
+      </widget>
+     </item>
+     <item>
+      <spacer><property name="orientation"><enum>Qt::Horizontal</enum></property></spacer>
+     </item>
+    </layout>
+   </item>
+
+   <item>
+    <spacer>
+     <property name="orientation"><enum>Qt::Vertical</enum></property>
+     <property name="sizeHint" stdset="0"><size><width>0</width><height>60</height></size></property>
+    </spacer>
+   </item>
+
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

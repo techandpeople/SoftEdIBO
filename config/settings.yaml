@@ -23,7 +23,10 @@ robots:
   - id: turtle-1
     nodes:
     - mac: AA:BB:CC:DD:EE:01
-      skins: []
+      skins:
+      - skin_id: '1'
+        slots:
+        - 0
     - mac: AA:BB:CC:DD:EE:04
       skins:
       - skin_id: turtle_skin_6
@@ -31,6 +34,8 @@ robots:
         - 0
         - 1
         - 2
+  - id: turtle-2
+    nodes: []
   trees:
   - id: tree-1
     nodes:

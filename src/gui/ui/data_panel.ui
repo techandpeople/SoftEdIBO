@@ -3,7 +3,7 @@
  <class>DataPanel</class>
  <widget class="QWidget" name="DataPanel">
   <property name="geometry">
-   <rect><x>0</x><y>0</y><width>600</width><height>500</height></rect>
+   <rect><x>0</x><y>0</y><width>800</width><height>600</height></rect>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>
@@ -12,6 +12,13 @@
      <layout class="QVBoxLayout" name="sessions_layout">
       <item>
        <widget class="QTableWidget" name="sessions_table">
+        <property name="selectionBehavior">
+         <enum>QAbstractItemView::SelectRows</enum>
+        </property>
+        <property name="editTriggers">
+         <set>QAbstractItemView::NoEditTriggers</set>
+        </property>
+        <property name="alternatingRowColors"><bool>true</bool></property>
         <property name="columnCount"><number>4</number></property>
         <column><property name="text"><string>Session ID</string></property></column>
         <column><property name="text"><string>Activity</string></property></column>
@@ -28,6 +35,13 @@
      <layout class="QVBoxLayout" name="events_layout">
       <item>
        <widget class="QTableWidget" name="events_table">
+        <property name="selectionBehavior">
+         <enum>QAbstractItemView::SelectRows</enum>
+        </property>
+        <property name="editTriggers">
+         <set>QAbstractItemView::NoEditTriggers</set>
+        </property>
+        <property name="alternatingRowColors"><bool>true</bool></property>
         <property name="columnCount"><number>6</number></property>
         <column><property name="text"><string>Time</string></property></column>
         <column><property name="text"><string>Participant</string></property></column>
@@ -42,6 +56,11 @@
    </item>
    <item>
     <layout class="QHBoxLayout" name="export_layout">
+     <item>
+      <spacer>
+       <property name="orientation"><enum>Qt::Horizontal</enum></property>
+      </spacer>
+     </item>
      <item>
       <widget class="QPushButton" name="export_btn">
        <property name="text"><string>Export Session to CSV</string></property>

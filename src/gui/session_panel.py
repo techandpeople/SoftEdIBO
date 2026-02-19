@@ -24,6 +24,8 @@ class SessionPanel(QWidget, Ui_SessionPanel):
     """
 
     session_finished = Signal()
+    session_started = Signal(str)   # emits session_id
+    session_stopped = Signal()
 
     def __init__(self, db: Database):
         super().__init__()
@@ -47,13 +49,14 @@ class SessionPanel(QWidget, Ui_SessionPanel):
 
     def _open_setup_dialog(self) -> None:
         """Open the session setup dialog and start a new session."""
-        dialog = SessionSetupDialog(self._available_robots, parent=self)
+        dialog = SessionSetupDialog(self._available_robots, self._db, parent=self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
 
         session_id = dialog.session_id
         activity = dialog.selected_activity
         robots = dialog.selected_robots
+        participants = dialog.selected_participants
 
         if not session_id or activity is None:
             return
@@ -65,6 +68,10 @@ class SessionPanel(QWidget, Ui_SessionPanel):
             start_time=start_time,
         )
         self._db.save_session(self._current_record)
+
+        for participant in participants:
+            self._db.link_participant_to_session(session_id, participant.participant_id)
+
         self._db.log_event(InteractionEvent(
             session_id=session_id,
             participant_id="system",
@@ -73,13 +80,20 @@ class SessionPanel(QWidget, Ui_SessionPanel):
             timestamp=start_time,
         ))
 
-        robot_names = ", ".join(r.name for r in robots) if robots else "none"
+        robot_names = ", ".join(r.robot_id for r in robots) if robots else "none"
+        participant_names = (
+            ", ".join(p.participant_id for p in participants)
+            if participants else "none"
+        )
         self.session_id_label.setText(session_id)
         self.activity_label.setText(activity.name)
         self.robots_label.setText(robot_names)
+        self.participants_label.setText(participant_names)
         self.status_label.setText("Status: Running")
         self.pause_btn.setEnabled(True)
         self.stop_btn.setEnabled(True)
+
+        self.session_started.emit(session_id)
 
     def _on_pause(self) -> None:
         """Toggle between paused and running state, logging a session event."""
@@ -119,9 +133,11 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         self.session_id_label.setText("—")
         self.activity_label.setText("—")
         self.robots_label.setText("—")
+        self.participants_label.setText("—")
         self.status_label.setText("Status: No active session")
         self.pause_btn.setText("Pause")
         self.pause_btn.setEnabled(False)
         self.stop_btn.setEnabled(False)
 
         self.session_finished.emit()
+        self.session_stopped.emit()
