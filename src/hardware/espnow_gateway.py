@@ -28,6 +28,12 @@ class ESPNowGateway:
         self._running = False
         self._read_thread: threading.Thread | None = None
         self._callbacks: list[Callable[[dict[str, Any]], None]] = []
+        self._known_macs: set[str] = set()
+
+    @property
+    def known_macs(self) -> frozenset[str]:
+        """MAC addresses of nodes that have sent at least one message."""
+        return frozenset(self._known_macs)
 
     @property
     def is_connected(self) -> bool:
@@ -61,6 +67,7 @@ class ESPNowGateway:
         if self._serial is not None:
             self._serial.close()
             self._serial = None
+        self._known_macs.clear()
         logger.info("Disconnected from ESP-NOW gateway")
 
     def send(self, target_mac: str, command: str, **kwargs: Any) -> bool:
@@ -79,6 +86,10 @@ class ESPNowGateway:
             logger.exception("Failed to send command to %s", target_mac)
             return False
 
+    def scan(self) -> None:
+        """Broadcast a ping to all nodes. Nodes that respond will appear in known_macs."""
+        self.send("FF:FF:FF:FF:FF:FF", "ping")
+
     def on_message(self, callback: Callable[[dict[str, Any]], None]) -> None:
         """Register a callback for incoming messages from ESP32 nodes."""
         self._callbacks.append(callback)
@@ -91,6 +102,8 @@ class ESPNowGateway:
                 if not line:
                     continue
                 data = json.loads(line.decode("utf-8").strip())
+                if "source" in data:
+                    self._known_macs.add(data["source"])
                 for callback in self._callbacks:
                     callback(data)
             except json.JSONDecodeError:

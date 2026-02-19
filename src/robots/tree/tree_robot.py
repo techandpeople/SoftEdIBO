@@ -22,23 +22,27 @@ class TreeRobot(BaseRobot):
         self,
         robot_id: str,
         gateway: ESPNowGateway,
-        esp32_mac: str,
-        branch_ids: list[int],
+        node_configs: list[dict[str, Any]],
     ):
         """Initialize the Tree robot.
 
         Args:
             robot_id: Unique identifier for this tree.
             gateway: ESP-NOW gateway for communication.
-            esp32_mac: MAC address of the ESP32 controlling the branches.
-            branch_ids: List of branch IDs available on this tree.
+            node_configs: List of node dicts from settings.yaml, each with
+                'mac' and 'skins' keys. Each skin's first slot becomes a branch.
         """
         super().__init__(robot_id, "Tree")
         self._gateway = gateway
-        self._esp32_mac = esp32_mac
-        self._branches: dict[int, Branch] = {
-            bid: Branch(bid, esp32_mac, gateway) for bid in branch_ids
-        }
+        self._branches: dict[int, Branch] = {}
+
+        for node in node_configs:
+            mac = node["mac"]
+            for skin_cfg in node.get("skins", []):
+                slots = skin_cfg.get("slots", [])
+                if slots:
+                    bid = slots[0]
+                    self._branches[bid] = Branch(bid, mac, gateway)
 
     @property
     def branches(self) -> dict[int, Branch]:
