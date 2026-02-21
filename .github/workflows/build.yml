@@ -58,7 +58,7 @@ jobs:
         run: pyinstaller softedibo.spec
 
       # ----------------------------------------------------------------
-      # AppImage — ficheiro único, duplo-clique para abrir
+      # AppImage — single file, double-click to open
       # ----------------------------------------------------------------
 
       - name: Download appimagetool
@@ -111,8 +111,8 @@ jobs:
           retention-days: 30
 
   # -----------------------------------------------------------------------
-  # develop branch: cria/actualiza um pré-release "nightly" no GitHub.
-  # Permite testar OTA sem tocar no master.
+  # develop branch: creates/updates a "nightly" pre-release on GitHub.
+  # Allows OTA testing without touching master.
   # -----------------------------------------------------------------------
   nightly:
     needs: build
@@ -135,15 +135,15 @@ jobs:
           prerelease: true
           files: SoftEdIBO-x86_64.AppImage
           body: |
-            Build automático do branch `develop`. Não é uma versão estável.
+            Automatic build from the `develop` branch. Not a stable release.
 
-            Instalar para testar OTA:
+            Install to test OTA updates:
             ```bash
             chmod +x SoftEdIBO-x86_64.AppImage && ./SoftEdIBO-x86_64.AppImage
             ```
 
   # -----------------------------------------------------------------------
-  # Tags v*: cria release estável no GitHub (disponível via OTA).
+  # Tags v*: creates a stable GitHub release (available via OTA).
   # -----------------------------------------------------------------------
   release:
     needs: build
@@ -164,16 +164,16 @@ jobs:
           files: SoftEdIBO-x86_64.AppImage
           generate_release_notes: true
           body: |
-            ## Download & Abrir (Linux x86-64)
+            ## Download & Open (Linux x86-64)
 
-            1. Descarregar **`SoftEdIBO-x86_64.AppImage`**
-            2. Tornar executável (uma única vez):
+            1. Download **`SoftEdIBO-x86_64.AppImage`**
+            2. Make it executable (once):
                ```bash
                chmod +x SoftEdIBO-x86_64.AppImage
                ```
-            3. **Duplo-clique** — o wizard de configuração abre automaticamente.
+            3. **Double-click** — the setup wizard opens automatically.
 
-            > **Porta série (USB):** se for a primeira vez, corre:
-            > `sudo usermod -aG dialout $USER`  e faz logout/login.
+            > **Serial port (USB):** if this is your first time, run:
+            > `sudo usermod -aG dialout $USER`  and log out/in.
 
-            Os dados da aplicação ficam em `~/.local/share/SoftEdIBO/`.
+            Application data is stored in `~/.local/share/SoftEdIBO/`.

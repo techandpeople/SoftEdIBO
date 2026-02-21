@@ -1,30 +1,42 @@
 """Main entry point for the SoftEdIBO application."""
 
 import sys
+import traceback
 from pathlib import Path
 
 # Add project root to path
 project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from src.gui.setup_wizard import SetupWizard, needs_setup
+
+
+def _fatal(msg: str) -> None:
+    """Show a graphical error dialog and exit — works even without a console."""
+    QMessageBox.critical(None, "SoftEdIBO — Startup Error", msg)
+    sys.exit(1)
 
 
 def main():
     app = QApplication(sys.argv)
 
     if needs_setup():
-        wizard = SetupWizard()
-        if not wizard.exec():
-            # User cancelled setup — exit cleanly without opening the main window
-            sys.exit(0)
+        try:
+            wizard = SetupWizard()
+            if not wizard.exec():
+                sys.exit(0)
+        except Exception:
+            _fatal(f"Error in setup wizard:\n\n{traceback.format_exc()}")
 
-    from src.gui.main_window import MainWindow
+    try:
+        from src.gui.main_window import MainWindow
+        window = MainWindow()
+        window.show()
+    except Exception:
+        _fatal(f"Error opening main window:\n\n{traceback.format_exc()}")
 
-    window = MainWindow()
-    window.show()
     sys.exit(app.exec())
 
 
