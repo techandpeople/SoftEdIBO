@@ -1,0 +1,38 @@
+{
+  "robot_ids": [
+    "turtle-1"
+  ],
+  "participant_ids": [
+    "P002",
+    "P003",
+    "P004"
+  ],
+  "assignments": [
+    {
+      "robot_id": "turtle-1",
+      "participant_id": "P002",
+      "unit_ids": [
+        "Camara0",
+        "Camara3",
+        "CamaraDireita"
+      ]
+    },
+    {
+      "robot_id": "turtle-1",
+      "participant_id": "P003",
+      "unit_ids": [
+        "Camara1",
+        "Camara4",
+        "CamaraEsquerda"
+      ]
+    },
+    {
+      "robot_id": "turtle-1",
+      "participant_id": "P004",
+      "unit_ids": [
+        "Camara2",
+        "Camara5"
+      ]
+    }
+  ]
+}

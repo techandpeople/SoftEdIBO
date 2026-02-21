@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>SettingsDialog</class>
+ <widget class="QDialog" name="SettingsDialog">
+  <property name="geometry">
+   <rect><x>0</x><y>0</y><width>460</width><height>380</height></rect>
+  </property>
+  <property name="windowTitle"><string>Settings</string></property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <widget class="QTabWidget" name="tabs">
+     <property name="currentIndex"><number>0</number></property>
+
+     <!-- Tab: Gateway -->
+     <widget class="QWidget" name="gateway_tab">
+      <attribute name="title"><string>Gateway</string></attribute>
+      <layout class="QFormLayout" name="gateway_form">
+       <item row="0" column="0"><widget class="QLabel"><property name="text"><string>Serial port:</string></property></widget></item>
+       <item row="0" column="1"><widget class="QLineEdit" name="serial_port_edit"/></item>
+       <item row="1" column="0"><widget class="QLabel"><property name="text"><string>Baud rate:</string></property></widget></item>
+       <item row="1" column="1">
+        <widget class="QComboBox" name="baud_rate_combo">
+         <item><property name="text"><string>9600</string></property></item>
+         <item><property name="text"><string>57600</string></property></item>
+         <item><property name="text"><string>115200</string></property></item>
+         <item><property name="text"><string>921600</string></property></item>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+
+     <!-- Tab: Database -->
+     <widget class="QWidget" name="database_tab">
+      <attribute name="title"><string>Database</string></attribute>
+      <layout class="QVBoxLayout" name="database_vbox">
+       <item>
+        <layout class="QFormLayout" name="backend_form">
+         <item row="0" column="0"><widget class="QLabel"><property name="text"><string>Backend:</string></property></widget></item>
+         <item row="0" column="1">
+          <widget class="QComboBox" name="backend_combo">
+           <item><property name="text"><string>SQLite</string></property></item>
+           <item><property name="text"><string>PostgreSQL</string></property></item>
+          </widget>
+         </item>
+        </layout>
+       </item>
+       <!-- SQLite group -->
+       <item>
+        <widget class="QGroupBox" name="sqlite_group">
+         <property name="title"><string>SQLite</string></property>
+         <layout class="QFormLayout" name="sqlite_form">
+          <item row="0" column="0"><widget class="QLabel"><property name="text"><string>File path:</string></property></widget></item>
+          <item row="0" column="1">
+           <layout class="QHBoxLayout">
+            <item><widget class="QLineEdit" name="db_path_edit"/></item>
+            <item><widget class="QPushButton" name="browse_btn"><property name="text"><string>…</string></property><property name="maximumWidth"><number>32</number></property></widget></item>
+           </layout>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <!-- PostgreSQL group -->
+       <item>
+        <widget class="QGroupBox" name="pg_group">
+         <property name="title"><string>PostgreSQL</string></property>
+         <property name="enabled"><bool>false</bool></property>
+         <layout class="QFormLayout" name="pg_form">
+          <item row="0" column="0"><widget class="QLabel"><property name="text"><string>Host:</string></property></widget></item>
+          <item row="0" column="1"><widget class="QLineEdit" name="pg_host_edit"/></item>
+          <item row="1" column="0"><widget class="QLabel"><property name="text"><string>Port:</string></property></widget></item>
+          <item row="1" column="1"><widget class="QSpinBox" name="pg_port_spin"><property name="minimum"><number>1</number></property><property name="maximum"><number>65535</number></property></widget></item>
+          <item row="2" column="0"><widget class="QLabel"><property name="text"><string>Database:</string></property></widget></item>
+          <item row="2" column="1"><widget class="QLineEdit" name="pg_name_edit"/></item>
+          <item row="3" column="0"><widget class="QLabel"><property name="text"><string>User:</string></property></widget></item>
+          <item row="3" column="1"><widget class="QLineEdit" name="pg_user_edit"/></item>
+          <item row="4" column="0"><widget class="QLabel"><property name="text"><string>Password:</string></property></widget></item>
+          <item row="4" column="1"><widget class="QLineEdit" name="pg_password_edit"><property name="echoMode"><enum>QLineEdit::Password</enum></property></widget></item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QLabel" name="db_restart_label">
+         <property name="text"><string>⚠ Database changes take effect on next launch.</string></property>
+         <property name="styleSheet"><string>color: #888888; font-style: italic;</string></property>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+
+     <!-- Tab: Thymio -->
+     <widget class="QWidget" name="thymio_tab">
+      <attribute name="title"><string>Thymio</string></attribute>
+      <layout class="QFormLayout" name="thymio_form">
+       <item row="0" column="0"><widget class="QLabel"><property name="text"><string>Host:</string></property></widget></item>
+       <item row="0" column="1"><widget class="QLineEdit" name="thymio_host_edit"/></item>
+       <item row="1" column="0"><widget class="QLabel"><property name="text"><string>Port:</string></property></widget></item>
+       <item row="1" column="1"><widget class="QSpinBox" name="thymio_port_spin"><property name="minimum"><number>1</number></property><property name="maximum"><number>65535</number></property></widget></item>
+      </layout>
+     </widget>
+
+    </widget>
+   </item>
+   <item>
+    <widget class="QDialogButtonBox" name="button_box">
+     <property name="standardButtons"><set>QDialogButtonBox::Cancel|QDialogButtonBox::Save</set></property>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

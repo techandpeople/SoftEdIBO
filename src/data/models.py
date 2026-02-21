@@ -23,6 +23,15 @@ class ParticipantRecord:
 
 
 @dataclass
+class SessionAssignment:
+    """Assignment of a robot's units (skins/branches) to a participant."""
+    session_id: str
+    robot_id: str
+    participant_id: str
+    unit_ids: list[str]  # skin_ids (Turtle) or branch ids (Tree) assigned to this participant
+
+
+@dataclass
 class InteractionEvent:
     """A single interaction event recorded during a session."""
     event_id: int | None = None

@@ -11,6 +11,7 @@ from src.gui.home_panel import HomePanel
 from src.gui.participant_panel import ParticipantPanel
 from src.gui.robot_panel import RobotPanel
 from src.gui.session_panel import SessionPanel
+from src.gui.settings_dialog import SettingsDialog
 from src.gui.ui_main_window import Ui_MainWindow
 from src.hardware.espnow_gateway import ESPNowGateway
 from src.robots.base_robot import BaseRobot
@@ -28,10 +29,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
         self._settings = Settings()
 
-        # Database — path resolved relative to project root via settings.yaml
-        db_path = self._settings.db_path
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._db = Database(str(db_path))
+        self._db = Database.from_settings(self._settings.db_cfg, Settings.ROOT)
         self._db.connect()
 
         # Shared ESP-NOW gateway (not connected yet; user clicks Connect)
@@ -62,6 +60,10 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self._robots = self._load_robots()
         self._session_panel.set_available_robots(self._robots)
         self._robot_panel.refresh(self._robots)
+
+        # Menu bar
+        settings_action = self.menuBar().addMenu("Edit").addAction("Settings…")
+        settings_action.triggered.connect(self._open_settings)
 
     # ------------------------------------------------------------------
     # Robot loading
@@ -97,6 +99,17 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             )
 
         return robots
+
+    def _open_settings(self) -> None:
+        dlg = SettingsDialog(self._settings, parent=self)
+        dlg.settings_saved.connect(self._on_settings_saved)
+        dlg.exec()
+
+    def _on_settings_saved(self) -> None:
+        """Apply settings changes that don't require a restart."""
+        self._gateway._port = self._settings.gateway_port
+        self._gateway._baud_rate = self._settings.gateway_baud
+        self._on_robot_configured()
 
     def _on_navigate(self, tab_name: str) -> None:
         """Switch to the tab matching tab_name."""

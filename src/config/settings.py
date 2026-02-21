@@ -49,8 +49,13 @@ class Settings:
         return self._data
 
     @property
+    def db_cfg(self) -> dict:
+        """Raw database configuration block."""
+        return self._data.get("database", {})
+
+    @property
     def db_path(self) -> Path:
-        """Resolved database file path (relative to project root)."""
+        """Resolved SQLite database file path (relative to project root)."""
         rel = self._data.get("database", {}).get("path", "data/softedibo.db")
         return self.ROOT / rel
 

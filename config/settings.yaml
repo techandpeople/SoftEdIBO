@@ -24,18 +24,34 @@ robots:
     nodes:
     - mac: AA:BB:CC:DD:EE:01
       skins:
-      - skin_id: '1'
+      - skin_id: Camara0
         slots:
         - 0
+      - skin_id: Camara1
+        slots:
+        - 1
+      - skin_id: Camara2
+        slots:
+        - 2
     - mac: AA:BB:CC:DD:EE:04
       skins:
-      - skin_id: turtle_skin_6
+      - skin_id: Camara3
         slots:
         - 0
+      - skin_id: Camara4
+        slots:
         - 1
+      - skin_id: Camara5
+        slots:
         - 2
-  - id: turtle-2
-    nodes: []
+    - mac: AA:BB:CC:DD:EE:01
+      skins:
+      - skin_id: CamaraDireita
+        slots:
+        - 0
+      - skin_id: CamaraEsquerda
+        slots:
+        - 1
   trees:
   - id: tree-1
     nodes:
@@ -64,4 +80,10 @@ thymio:
   host: localhost
   port: 8596
 database:
+  backend: sqlite
   path: data/softedibo.db
+  host: localhost
+  port: 5432
+  user: softedibo
+  password: ''
+  name: softedibo

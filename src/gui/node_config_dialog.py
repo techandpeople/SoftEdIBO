@@ -67,18 +67,18 @@ class NodeConfigDialog(QDialog, Ui_NodeConfigDialog):
         # Test button enabled only when gateway is connected
         self.test_btn.setEnabled(gateway.is_connected)
 
+        # Add-chamber button — must exist before _add_skin_row is called
+        self._add_chamber_btn = QPushButton("+ Add Air Chamber")
+        self._add_chamber_btn.clicked.connect(lambda: self._add_skin_row(None))
+        self.chambers_vbox.addWidget(self._add_chamber_btn)
+        self.chambers_vbox.addStretch()
+
         # Populate from config
         node_cfg = self._load_node_cfg()
         self.mac_edit.setText(node_cfg.get("mac", ""))
         for skin_cfg in node_cfg.get("skins", []):
             self._add_skin_row(skin_cfg)
         self._on_slot_changed()
-
-        # Add-chamber button — inserted before the stretch at end of chambers_vbox
-        self._add_chamber_btn = QPushButton("+ Add Air Chamber")
-        self._add_chamber_btn.clicked.connect(lambda: self._add_skin_row(None))
-        self.chambers_vbox.addWidget(self._add_chamber_btn)
-        self.chambers_vbox.addStretch()
         self._update_add_chamber_btn()
 
         # Connect buttons
