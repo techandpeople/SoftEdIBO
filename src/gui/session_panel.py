@@ -91,6 +91,7 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         self.robots_label.setText("—")
         self.participants_label.setText(participant_names)
         self.status_label.setText("Status: Running (resumed)")
+        self.new_session_btn.setEnabled(False)
         self.pause_btn.setEnabled(True)
         self.stop_btn.setEnabled(True)
 
@@ -177,6 +178,7 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         self.robots_label.setText(robot_names)
         self.participants_label.setText(participant_names)
         self.status_label.setText("Status: Running")
+        self.new_session_btn.setEnabled(False)
         self.pause_btn.setEnabled(True)
         self.stop_btn.setEnabled(True)
 
@@ -222,6 +224,7 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         self.robots_label.setText("—")
         self.participants_label.setText("—")
         self.status_label.setText("Status: No active session")
+        self.new_session_btn.setEnabled(True)
         self.pause_btn.setText("Pause")
         self.pause_btn.setEnabled(False)
         self.stop_btn.setEnabled(False)

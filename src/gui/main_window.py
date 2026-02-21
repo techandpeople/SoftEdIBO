@@ -1,10 +1,21 @@
 """Main application window for SoftEdIBO."""
 
+import os
 import sys
 
-from PySide6.QtWidgets import QApplication, QMainWindow
+from PySide6.QtCore import QTimer
+from PySide6.QtWidgets import (
+    QApplication,
+    QLabel,
+    QMainWindow,
+    QMessageBox,
+    QProgressDialog,
+    QPushButton,
+)
 
+from src._version import __version__
 from src.config.settings import Settings
+from src.updater import AppUpdater
 from src.data.database import Database
 from src.gui.data_panel import DataPanel
 from src.gui.home_panel import HomePanel
@@ -65,6 +76,22 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         settings_action = self.menuBar().addMenu("Edit").addAction("Settings…")
         settings_action.triggered.connect(self._open_settings)
 
+        tools_menu = self.menuBar().addMenu("Tools")
+        flash_action = tools_menu.addAction("Flash Firmware…")
+        flash_action.triggered.connect(self._open_flash_wizard)
+        tools_menu.addAction("Check for Updates…").triggered.connect(
+            self._check_updates_manual
+        )
+
+        # OTA updater — silent background check 5 s after startup
+        self._updater = AppUpdater(self)
+        self._updater.update_available.connect(self._on_update_available)
+        self._updater.error.connect(
+            lambda msg: self.statusBar().showMessage(f"Update error: {msg}", 6000)
+        )
+        self.setWindowTitle(f"SoftEdIBO  {__version__}")
+        QTimer.singleShot(5000, self._updater.check)
+
     # ------------------------------------------------------------------
     # Robot loading
     # ------------------------------------------------------------------
@@ -100,6 +127,11 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
         return robots
 
+    def _open_flash_wizard(self) -> None:
+        from src.gui.setup_wizard import SetupWizard
+        wizard = SetupWizard(parent=self)
+        wizard.exec()
+
     def _open_settings(self) -> None:
         dlg = SettingsDialog(self._settings, parent=self)
         dlg.settings_saved.connect(self._on_settings_saved)
@@ -124,6 +156,53 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self._robots = self._load_robots()
         self._session_panel.set_available_robots(self._robots)
         self._robot_panel.refresh(self._robots)
+
+    # ------------------------------------------------------------------
+    # OTA updates
+    # ------------------------------------------------------------------
+
+    def _on_update_available(self, version: str, url: str) -> None:
+        """Show a non-intrusive notification in the status bar."""
+        self._pending_update_url = url
+        lbl = QLabel(f"Update available: <b>{version}</b>")
+        btn = QPushButton(f"Install {version}")
+        btn.clicked.connect(lambda: self._start_update(version, url))
+        self.statusBar().addPermanentWidget(lbl)
+        self.statusBar().addPermanentWidget(btn)
+
+    def _check_updates_manual(self) -> None:
+        """Triggered from Tools → Check for Updates…"""
+        self.statusBar().showMessage("Checking for updates…", 4000)
+        self._updater.check()
+
+    def _start_update(self, version: str, url: str) -> None:
+        dlg = QProgressDialog(
+            f"Downloading SoftEdIBO {version}…", "Cancel", 0, 100, self
+        )
+        dlg.setWindowTitle("Updating SoftEdIBO")
+        dlg.setMinimumDuration(0)
+        dlg.setValue(0)
+        dlg.canceled.connect(self._updater.cancel)
+
+        def _on_progress(recv: int, total: int) -> None:
+            if total > 0:
+                dlg.setValue(int(recv / total * 100))
+
+        def _on_done(path) -> None:
+            dlg.close()
+            answer = QMessageBox.question(
+                self,
+                "Update ready",
+                f"SoftEdIBO {version} was downloaded.\n\nRestart now to apply it?",
+            )
+            if answer == QMessageBox.StandardButton.Yes:
+                appimage = os.environ.get("APPIMAGE", sys.executable)
+                os.execv(appimage, [appimage] + sys.argv[1:])
+
+        self._updater.download_progress.connect(_on_progress)
+        self._updater.download_done.connect(_on_done)
+        self._updater.download(url)
+        dlg.exec()
 
     # ------------------------------------------------------------------
     # Lifecycle

@@ -1,5 +1,7 @@
 """Application settings manager backed by config/settings.yaml."""
 
+import shutil
+import sys
 from pathlib import Path
 
 import yaml
@@ -8,17 +10,38 @@ import yaml
 class Settings:
     """Loads and persists application configuration from settings.yaml.
 
-    All file paths stored in the YAML (e.g. ``database.path``) are resolved
-    relative to the project root, not the current working directory.
+    In a frozen (AppImage / PyInstaller) bundle:
+    - BUNDLE = sys._MEIPASS  — read-only bundled assets (firmware, default config)
+    - ROOT   = ~/.local/share/SoftEdIBO  — writable user data (DB, config copy)
+    In development:
+    - BUNDLE = ROOT = project root
     """
 
-    ROOT: Path = Path(__file__).parents[2]
+    BUNDLE: Path = (
+        Path(sys._MEIPASS)                          # read-only assets inside AppImage
+        if getattr(sys, "frozen", False)
+        else Path(__file__).parents[2]
+    )
+    ROOT: Path = (
+        Path.home() / ".local" / "share" / "SoftEdIBO"  # writable user data dir
+        if getattr(sys, "frozen", False)
+        else Path(__file__).parents[2]
+    )
+    # Bundled default (read-only); user copy is at ROOT/config/settings.yaml
+    _DEFAULT_BUNDLE: Path = BUNDLE / "config" / "settings.yaml"
     DEFAULT_PATH: Path = ROOT / "config" / "settings.yaml"
 
     def __init__(self, path: Path | None = None):
         self._path = path or self.DEFAULT_PATH
+        self._ensure_user_config()
         self._data: dict = {}
         self.load()
+
+    def _ensure_user_config(self) -> None:
+        """On first frozen run, copy the bundled default config to the user dir."""
+        if not self._path.exists() and self._DEFAULT_BUNDLE.exists():
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(self._DEFAULT_BUNDLE, self._path)
 
     # ------------------------------------------------------------------
     # Load / save

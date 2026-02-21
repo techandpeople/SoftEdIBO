@@ -1,0 +1,186 @@
+"""OTA self-updater for the SoftEdIBO AppImage.
+
+Only active when the app is running as an AppImage (``$APPIMAGE`` env var is
+set) and ``GITHUB_REPO`` is configured.  Uses ``QNetworkAccessManager`` for
+fully async HTTP — no threads, no blocking.
+
+Typical flow
+------------
+1. ``AppUpdater.check()`` is called a few seconds after startup.
+2. GitHub API returns the latest release tag.
+3. If newer, ``update_available(version, url)`` is emitted.
+4. The user clicks "Update" → ``AppUpdater.download(url)`` starts.
+5. ``download_progress`` updates the UI.
+6. ``download_done`` fires → the new AppImage replaces the old one atomically.
+7. The app restarts itself via ``os.execv``.
+"""
+
+import json
+import os
+import stat
+from pathlib import Path
+
+from PySide6.QtCore import QObject, QUrl, Signal
+from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest
+
+from src._version import GITHUB_REPO, __version__
+
+_API_URL = "https://api.github.com/repos/{repo}/releases/latest"
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def is_appimage() -> bool:
+    """Return True when running as an AppImage."""
+    return bool(os.environ.get("APPIMAGE"))
+
+
+def _appimage_path() -> Path | None:
+    p = os.environ.get("APPIMAGE")
+    return Path(p) if p else None
+
+
+def _is_newer(remote: str, local: str) -> bool:
+    """Return True if *remote* version tag is strictly newer than *local*."""
+    if local in ("dev", "") or not remote:
+        return False
+
+    def parse(v: str) -> tuple:
+        return tuple(int(x) for x in v.lstrip("v").split(".") if x.isdigit())
+
+    try:
+        return parse(remote) > parse(local)
+    except ValueError:
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Updater
+# ---------------------------------------------------------------------------
+
+class AppUpdater(QObject):
+    """Async OTA updater using QNetworkAccessManager (no threads)."""
+
+    #: Emitted when a newer version is available. Args: (version_tag, download_url)
+    update_available = Signal(str, str)
+
+    #: Emitted during download. Args: (bytes_received, bytes_total)
+    download_progress = Signal(int, int)
+
+    #: Emitted when the new AppImage has been written. Arg: Path to the AppImage.
+    download_done = Signal(Path)
+
+    #: Emitted on network or I/O errors.
+    error = Signal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._nam = QNetworkAccessManager(self)
+        self._download_reply = None
+        self._download_file = None
+        self._tmp_path: Path | None = None
+
+    # ------------------------------------------------------------------
+    # Version check
+    # ------------------------------------------------------------------
+
+    def check(self) -> None:
+        """Async version check. Safe to call at startup — returns immediately."""
+        if not is_appimage() or not GITHUB_REPO:
+            return
+
+        url = _API_URL.format(repo=GITHUB_REPO)
+        request = QNetworkRequest(QUrl(url))
+        request.setRawHeader(b"Accept", b"application/vnd.github.v3+json")
+        request.setRawHeader(b"User-Agent", b"SoftEdIBO-Updater")
+
+        reply = self._nam.get(request)
+        reply.finished.connect(lambda: self._on_check_finished(reply))
+
+    def _on_check_finished(self, reply) -> None:
+        reply.deleteLater()
+        if reply.error() != reply.NetworkError.NoError:
+            return  # Silent fail — don't bother the user if offline
+
+        try:
+            data = json.loads(bytes(reply.readAll()))
+            tag = data["tag_name"]
+            assets = data.get("assets", [])
+            download_url = next(
+                (a["browser_download_url"] for a in assets
+                 if a["name"].endswith(".AppImage")),
+                None,
+            )
+        except (KeyError, ValueError, json.JSONDecodeError):
+            return
+
+        if download_url and _is_newer(tag, __version__):
+            self.update_available.emit(tag, download_url)
+
+    # ------------------------------------------------------------------
+    # Download
+    # ------------------------------------------------------------------
+
+    def download(self, url: str) -> None:
+        """Start downloading the new AppImage. Streams to disk — no big RAM spike."""
+        appimage = _appimage_path()
+        if not appimage:
+            return
+
+        self._tmp_path = appimage.with_suffix(".new")
+        self._download_file = open(self._tmp_path, "wb")
+
+        request = QNetworkRequest(QUrl(url))
+        request.setAttribute(
+            QNetworkRequest.Attribute.RedirectPolicyAttribute,
+            QNetworkRequest.RedirectPolicy.NoLessSafeRedirectPolicy,
+        )
+        request.setRawHeader(b"User-Agent", b"SoftEdIBO-Updater")
+
+        self._download_reply = self._nam.get(request)
+        self._download_reply.readyRead.connect(self._on_chunk)
+        self._download_reply.downloadProgress.connect(self.download_progress)
+        self._download_reply.finished.connect(self._on_download_finished)
+
+    def _on_chunk(self) -> None:
+        if self._download_file:
+            self._download_file.write(bytes(self._download_reply.readAll()))
+
+    def _on_download_finished(self) -> None:
+        reply = self._download_reply
+        self._download_reply = None
+
+        if self._download_file:
+            self._download_file.close()
+            self._download_file = None
+
+        reply.deleteLater()
+
+        if reply.error() != reply.NetworkError.NoError:
+            if self._tmp_path:
+                self._tmp_path.unlink(missing_ok=True)
+            self.error.emit(reply.errorString())
+            return
+
+        # Make the new AppImage executable
+        self._tmp_path.chmod(
+            self._tmp_path.stat().st_mode
+            | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
+        )
+
+        # Atomically replace the running AppImage
+        appimage = _appimage_path()
+        os.replace(self._tmp_path, appimage)
+        self.download_done.emit(appimage)
+
+    def cancel(self) -> None:
+        """Abort an in-progress download."""
+        if self._download_reply:
+            self._download_reply.abort()
+        if self._download_file:
+            self._download_file.close()
+            self._download_file = None
+        if self._tmp_path:
+            self._tmp_path.unlink(missing_ok=True)
