@@ -196,8 +196,13 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                 f"SoftEdIBO {version} was downloaded.\n\nRestart now to apply it?",
             )
             if answer == QMessageBox.StandardButton.Yes:
+                import subprocess
                 appimage = os.environ.get("APPIMAGE", sys.executable)
-                os.execv(appimage, [appimage] + sys.argv[1:])
+                if sys.platform == "win32":
+                    subprocess.Popen([appimage] + sys.argv[1:])
+                    QApplication.quit()
+                else:
+                    os.execv(appimage, [appimage] + sys.argv[1:])
 
         self._updater.download_progress.connect(_on_progress)
         self._updater.download_done.connect(_on_done)

@@ -118,21 +118,84 @@ jobs:
           retention-days: 30
 
   # -----------------------------------------------------------------------
+  # Windows build — produces a portable zip
+  # -----------------------------------------------------------------------
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Generate Qt UI Python files
+        shell: bash
+        run: |
+          for ui_file in src/gui/ui/*.ui; do
+            base=$(basename "$ui_file" .ui)
+            pyside6-uic "$ui_file" -o "src/gui/ui_${base}.py"
+          done
+
+      - name: Inject version into src/_version.py
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF_NAME}"
+          elif [[ "${GITHUB_REF_NAME}" == "develop" ]]; then
+            VERSION="nightly"
+          else
+            VERSION="dev"
+          fi
+          REPO="${GITHUB_REPOSITORY}"
+          printf '__version__ = "%s"\nGITHUB_REPO = "%s"\n' \
+            "$VERSION" "$REPO" > src/_version.py
+
+      - name: Build with PyInstaller
+        run: pyinstaller softedibo.spec
+
+      - name: Create zip archive
+        shell: pwsh
+        run: Compress-Archive -Path dist/SoftEdIBO/* -DestinationPath SoftEdIBO-windows-x64.zip
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SoftEdIBO-windows-x64
+          path: SoftEdIBO-windows-x64.zip
+          retention-days: 30
+
+  # -----------------------------------------------------------------------
   # develop branch: creates/updates a "nightly" pre-release on GitHub.
   # Allows OTA testing without touching master.
   # -----------------------------------------------------------------------
   nightly:
-    needs: build
+    needs: [build, build-windows]
     if: github.ref == 'refs/heads/develop'
     runs-on: ubuntu-22.04
     permissions:
       contents: write
 
     steps:
-      - name: Download artifact
+      - name: Download Linux artifact
         uses: actions/download-artifact@v4
         with:
           name: SoftEdIBO-linux-x86_64
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: SoftEdIBO-windows-x64
 
       - name: Create/update nightly pre-release
         uses: softprops/action-gh-release@v2
@@ -140,38 +203,45 @@ jobs:
           tag_name: nightly
           name: "Nightly (develop)"
           prerelease: true
-          files: SoftEdIBO-x86_64.AppImage
+          files: |
+            SoftEdIBO-x86_64.AppImage
+            SoftEdIBO-windows-x64.zip
           body: |
             Automatic build from the `develop` branch. Not a stable release.
 
-            Install to test OTA updates:
-            ```bash
-            chmod +x SoftEdIBO-x86_64.AppImage && ./SoftEdIBO-x86_64.AppImage
-            ```
+            **Linux:** `chmod +x SoftEdIBO-x86_64.AppImage && ./SoftEdIBO-x86_64.AppImage`
+            **Windows:** extract `SoftEdIBO-windows-x64.zip` and run `SoftEdIBO.exe`
 
   # -----------------------------------------------------------------------
   # Tags v*: creates a stable GitHub release (available via OTA).
   # -----------------------------------------------------------------------
   release:
-    needs: build
+    needs: [build, build-windows]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-22.04
     permissions:
       contents: write
 
     steps:
-      - name: Download artifact
+      - name: Download Linux artifact
         uses: actions/download-artifact@v4
         with:
           name: SoftEdIBO-linux-x86_64
 
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: SoftEdIBO-windows-x64
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: SoftEdIBO-x86_64.AppImage
+          files: |
+            SoftEdIBO-x86_64.AppImage
+            SoftEdIBO-windows-x64.zip
           generate_release_notes: true
           body: |
-            ## Download & Open (Linux x86-64)
+            ## Linux (x86-64)
 
             1. Download **`SoftEdIBO-x86_64.AppImage`**
             2. Make it executable (once):
@@ -184,3 +254,12 @@ jobs:
             > `sudo usermod -aG dialout $USER`  and log out/in.
 
             Application data is stored in `~/.local/share/SoftEdIBO/`.
+
+            ## Windows (x64)
+
+            1. Download and extract **`SoftEdIBO-windows-x64.zip`**
+            2. Run **`SoftEdIBO.exe`** — the setup wizard opens automatically.
+
+            > **Serial port (USB):** install the CH340 or CP210x driver if your device isn't detected.
+
+            Application data is stored in `%APPDATA%\SoftEdIBO\`.

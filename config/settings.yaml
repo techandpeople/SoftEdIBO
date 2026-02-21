@@ -19,63 +19,9 @@ node_pinout:
   - 34
   sensor_type: capacitive_copper
 robots:
-  turtles:
-  - id: turtle-1
-    nodes:
-    - mac: AA:BB:CC:DD:EE:01
-      skins:
-      - skin_id: Camara0
-        slots:
-        - 0
-      - skin_id: Camara1
-        slots:
-        - 1
-      - skin_id: Camara2
-        slots:
-        - 2
-    - mac: AA:BB:CC:DD:EE:04
-      skins:
-      - skin_id: Camara3
-        slots:
-        - 0
-      - skin_id: Camara4
-        slots:
-        - 1
-      - skin_id: Camara5
-        slots:
-        - 2
-    - mac: AA:BB:CC:DD:EE:01
-      skins:
-      - skin_id: CamaraDireita
-        slots:
-        - 0
-      - skin_id: CamaraEsquerda
-        slots:
-        - 1
-  trees:
-  - id: tree-1
-    nodes:
-    - mac: AA:BB:CC:DD:EE:20
-      skins:
-      - skin_id: tree_branch_0
-        slots:
-        - 0
-      - skin_id: tree_branch_1
-        slots:
-        - 1
-      - skin_id: tree_branch_2
-        slots:
-        - 2
-    - mac: AA:BB:CC:DD:EE:21
-      skins: []
-  thymios:
-  - thymio_id: thymio-1
-    nodes:
-    - mac: AA:BB:CC:DD:EE:10
-      skins:
-      - skin_id: thymio-1-skin
-        slots:
-        - 0
+  turtles: []
+  trees: []
+  thymios: []
 thymio:
   host: localhost
   port: 8596

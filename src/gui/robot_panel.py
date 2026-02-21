@@ -1,5 +1,7 @@
 """Robot connection management panel."""
 
+import sys
+
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QKeyEvent
 from PySide6.QtWidgets import (
@@ -106,7 +108,8 @@ class RobotPanel(QWidget, Ui_RobotPanel):
 
         self.port_combo.clear()
         if not ports:
-            self.port_combo.addItem(current or "/dev/ttyUSB0")
+            default_port = "COM3" if sys.platform == "win32" else "/dev/ttyUSB0"
+            self.port_combo.addItem(current or default_port)
         else:
             for p in ports:
                 self.port_combo.addItem(p)
