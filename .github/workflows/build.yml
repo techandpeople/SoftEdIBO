@@ -38,6 +38,13 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
+      - name: Generate Qt UI Python files
+        run: |
+          for ui_file in src/gui/ui/*.ui; do
+            base=$(basename "$ui_file" .ui)
+            pyside6-uic "$ui_file" -o "src/gui/ui_${base}.py"
+          done
+
       - name: Inject version into src/_version.py
         run: |
           # Tags: use the tag name (e.g. "v1.2.3")
