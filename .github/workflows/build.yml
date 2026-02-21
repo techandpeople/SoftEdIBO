@@ -2,10 +2,10 @@ name: Build
 
 on:
   push:
-    branches: [master]
+    branches: [master, develop]
     tags:     ["v*"]
   pull_request:
-    branches: [master]
+    branches: [master, develop]
 
 jobs:
   build:
@@ -40,7 +40,16 @@ jobs:
 
       - name: Inject version into src/_version.py
         run: |
-          VERSION="${GITHUB_REF_NAME:-dev}"
+          # Tags: use the tag name (e.g. "v1.2.3")
+          # develop branch: use "nightly" so _is_newer("vX.Y.Z", "nightly") is always true
+          # master branch / PRs: use "dev"
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF_NAME}"
+          elif [[ "${GITHUB_REF_NAME}" == "develop" ]]; then
+            VERSION="nightly"
+          else
+            VERSION="dev"
+          fi
           REPO="${GITHUB_REPOSITORY}"
           printf '__version__ = "%s"\nGITHUB_REPO = "%s"\n' \
             "$VERSION" "$REPO" > src/_version.py
@@ -102,7 +111,39 @@ jobs:
           retention-days: 30
 
   # -----------------------------------------------------------------------
-  # On version tags (v*): create a GitHub Release with the AppImage
+  # develop branch: cria/actualiza um pré-release "nightly" no GitHub.
+  # Permite testar OTA sem tocar no master.
+  # -----------------------------------------------------------------------
+  nightly:
+    needs: build
+    if: github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: SoftEdIBO-linux-x86_64
+
+      - name: Create/update nightly pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly
+          name: "Nightly (develop)"
+          prerelease: true
+          files: SoftEdIBO-x86_64.AppImage
+          body: |
+            Build automático do branch `develop`. Não é uma versão estável.
+
+            Instalar para testar OTA:
+            ```bash
+            chmod +x SoftEdIBO-x86_64.AppImage && ./SoftEdIBO-x86_64.AppImage
+            ```
+
+  # -----------------------------------------------------------------------
+  # Tags v*: cria release estável no GitHub (disponível via OTA).
   # -----------------------------------------------------------------------
   release:
     needs: build

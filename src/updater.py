@@ -43,9 +43,18 @@ def _appimage_path() -> Path | None:
 
 
 def _is_newer(remote: str, local: str) -> bool:
-    """Return True if *remote* version tag is strictly newer than *local*."""
-    if local in ("dev", "") or not remote:
+    """Return True if *remote* version tag is strictly newer than *local*.
+
+    Special cases:
+    - local == "dev"      → never update (development run)
+    - local == "nightly"  → update when a newer nightly or stable release exists
+                            (remote != "nightly" means a real tag is available)
+    """
+    if local == "dev" or not remote:
         return False
+    if local == "nightly":
+        # A nightly build updates to any stable release or a new nightly tag
+        return remote != "nightly"
 
     def parse(v: str) -> tuple:
         return tuple(int(x) for x in v.lstrip("v").split(".") if x.isdigit())
