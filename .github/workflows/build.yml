@@ -47,9 +47,6 @@ jobs:
 
       - name: Inject version into src/_version.py
         run: |
-          # Tags: use the tag name (e.g. "v1.2.3")
-          # develop branch: use "nightly" so _is_newer("vX.Y.Z", "nightly") is always true
-          # master branch / PRs: use "dev"
           if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             VERSION="${GITHUB_REF_NAME}"
           elif [[ "${GITHUB_REF_NAME}" == "develop" ]]; then
@@ -58,8 +55,9 @@ jobs:
             VERSION="dev"
           fi
           REPO="${GITHUB_REPOSITORY}"
-          printf '__version__ = "%s"\nGITHUB_REPO = "%s"\n' \
-            "$VERSION" "$REPO" > src/_version.py
+          BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          printf '__version__ = "%s"\nGITHUB_REPO = "%s"\n__build_time__ = "%s"\n' \
+            "$VERSION" "$REPO" "$BUILD_TIME" > src/_version.py
 
       - name: Build with PyInstaller
         run: pyinstaller softedibo.spec
@@ -158,8 +156,9 @@ jobs:
             VERSION="dev"
           fi
           REPO="${GITHUB_REPOSITORY}"
-          printf '__version__ = "%s"\nGITHUB_REPO = "%s"\n' \
-            "$VERSION" "$REPO" > src/_version.py
+          BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          printf '__version__ = "%s"\nGITHUB_REPO = "%s"\n__build_time__ = "%s"\n' \
+            "$VERSION" "$REPO" "$BUILD_TIME" > src/_version.py
 
       - name: Build with PyInstaller
         run: pyinstaller softedibo.spec

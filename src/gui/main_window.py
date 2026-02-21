@@ -2,6 +2,7 @@
 
 import os
 import sys
+from pathlib import Path
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
@@ -196,18 +197,42 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                 f"SoftEdIBO {version} was downloaded.\n\nRestart now to apply it?",
             )
             if answer == QMessageBox.StandardButton.Yes:
-                import subprocess
-                appimage = os.environ.get("APPIMAGE", sys.executable)
                 if sys.platform == "win32":
-                    subprocess.Popen([appimage] + sys.argv[1:])
-                    QApplication.quit()
+                    self._apply_windows_update(path)
                 else:
+                    appimage = os.environ.get("APPIMAGE", sys.executable)
                     os.execv(appimage, [appimage] + sys.argv[1:])
 
         self._updater.download_progress.connect(_on_progress)
         self._updater.download_done.connect(_on_done)
         self._updater.download(url)
         dlg.exec()
+
+    def _apply_windows_update(self, zip_path: Path) -> None:
+        """Launch a PowerShell script that extracts the update zip after we exit."""
+        import subprocess
+
+        exe = sys.executable
+        pid = os.getpid()
+
+        # zip_path is next to SoftEdIBO.exe — extract to its own directory
+        # so files are replaced in-place without needing a separate install_dir.
+        ps_script = (
+            f"Wait-Process -Id {pid} -Timeout 30 -ErrorAction SilentlyContinue\n"
+            f"Start-Sleep -Seconds 1\n"
+            f"Expand-Archive -Path '{zip_path}' -DestinationPath (Split-Path '{zip_path}') -Force\n"
+            f"Remove-Item '{zip_path}' -ErrorAction SilentlyContinue\n"
+            f"Start-Process '{exe}'\n"
+        )
+
+        ps_file = zip_path.with_name("softedibo-update.ps1")
+        ps_file.write_text(ps_script, encoding="utf-8")
+
+        subprocess.Popen(
+            ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File", str(ps_file)],
+            creationflags=0x08000000,  # CREATE_NO_WINDOW
+        )
+        QApplication.quit()
 
     # ------------------------------------------------------------------
     # Lifecycle
