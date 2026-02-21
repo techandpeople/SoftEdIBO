@@ -93,7 +93,7 @@ jobs:
           Icon=softedibo
           Terminal=false
           Type=Application
-          Categories=Education;Science;
+          Categories=Education;
           DESKTOP
 
           cp softedibo.png SoftEdIBO.AppDir/softedibo.png

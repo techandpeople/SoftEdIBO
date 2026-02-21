@@ -16,6 +16,8 @@
 #       gateway/firmware.bin
 #       air_chamber_node/firmware.bin
 
+from PyInstaller.utils.hooks import collect_submodules
+
 block_cipher = None
 
 # ---------------------------------------------------------------------------
@@ -44,6 +46,7 @@ main_a = Analysis(
         ("firmware/", "firmware/"),
     ],
     hiddenimports=[
+        *collect_submodules("src"),
         "sqlalchemy.dialects.sqlite",
         "serial.tools.list_ports",
         "PySide6.QtSvg",
