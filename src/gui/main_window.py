@@ -73,19 +73,11 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self._session_panel.set_available_robots(self._robots)
         self._robot_panel.refresh(self._robots)
 
-        # Menu bar
-        settings_action = self.menuBar().addMenu("Edit").addAction("Settings…")
-        settings_action.triggered.connect(self._open_settings)
-
-        tools_menu = self.menuBar().addMenu("Tools")
-        flash_action = tools_menu.addAction("Flash Firmware…")
-        flash_action.triggered.connect(self._open_flash_wizard)
-        tools_menu.addAction("Check for Updates…").triggered.connect(
-            self._check_updates_manual
-        )
-
-        help_menu = self.menuBar().addMenu("Help")
-        help_menu.addAction("About SoftEdIBO…").triggered.connect(self._show_about)
+        # Menu bar actions (structure defined in main_window.ui)
+        self.actionSettings.triggered.connect(self._open_settings)
+        self.actionFlashFirmware.triggered.connect(self._open_flash_wizard)
+        self.actionCheckForUpdates.triggered.connect(self._check_updates_manual)
+        self.actionAbout.triggered.connect(self._show_about)
 
         # OTA updater — silent background check 5 s after startup
         self._updater = AppUpdater(self)
@@ -249,7 +241,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             f"<b>SoftEdIBO</b><br>"
             f"Version: {__version__}"
             f"{build_line}<br><br>"
-            f"Soft-bodied robot platform for inclusive education.<br><br>"
+            f"Soft-based robot for inclusive education .<br><br>"
             f"LASIGE, Faculdade de Ciências, Universidade de Lisboa",
         )
 
