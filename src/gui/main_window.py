@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QPushButton,
 )
 
-from src._version import __version__
+from src._version import __build_time__, __version__
 from src.config.settings import Settings
 from src.updater import AppUpdater
 from src.data.database import Database
@@ -83,6 +83,9 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         tools_menu.addAction("Check for Updates…").triggered.connect(
             self._check_updates_manual
         )
+
+        help_menu = self.menuBar().addMenu("Help")
+        help_menu.addAction("About SoftEdIBO…").triggered.connect(self._show_about)
 
         # OTA updater — silent background check 5 s after startup
         self._updater = AppUpdater(self)
@@ -233,6 +236,22 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             creationflags=0x08000000,  # CREATE_NO_WINDOW
         )
         QApplication.quit()
+
+    def _show_about(self) -> None:
+        build_line = (
+            f"<br>Built: {__build_time__}"
+            if __build_time__
+            else ""
+        )
+        QMessageBox.about(
+            self,
+            "About SoftEdIBO",
+            f"<b>SoftEdIBO</b><br>"
+            f"Version: {__version__}"
+            f"{build_line}<br><br>"
+            f"Soft-bodied robot platform for inclusive education.<br><br>"
+            f"LASIGE, Faculdade de Ciências, Universidade de Lisboa",
+        )
 
     # ------------------------------------------------------------------
     # Lifecycle

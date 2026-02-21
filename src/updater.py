@@ -139,29 +139,31 @@ class AppUpdater(QObject):
             data = json.loads(bytes(reply.readAll()))
             tag = data["tag_name"]
             assets = data.get("assets", [])
-            published_at = data.get("published_at", "")
 
             if _is_frozen_windows():
-                download_url = next(
-                    (a["browser_download_url"] for a in assets
+                asset = next(
+                    (a for a in assets
                      if a["name"].endswith(".zip") and "windows" in a["name"].lower()),
                     None,
                 )
             else:
-                download_url = next(
-                    (a["browser_download_url"] for a in assets
-                     if a["name"].endswith(".AppImage")),
+                asset = next(
+                    (a for a in assets if a["name"].endswith(".AppImage")),
                     None,
                 )
         except (KeyError, ValueError, json.JSONDecodeError):
             return
 
-        if not download_url:
+        if not asset:
             return
 
+        download_url = asset["browser_download_url"]
+
         if __version__ == "nightly":
-            # For nightly users: update when the release was published after our build
-            if __build_time__ and published_at > __build_time__:
+            # published_at never changes on release updates — use the asset's
+            # updated_at which is refreshed every time the file is replaced.
+            asset_updated_at = asset.get("updated_at", "")
+            if __build_time__ and asset_updated_at > __build_time__:
                 self.update_available.emit(tag, download_url)
         elif _is_newer(tag, __version__):
             self.update_available.emit(tag, download_url)
