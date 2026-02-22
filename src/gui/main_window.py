@@ -113,12 +113,14 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                     TreeRobot(tree_cfg.get("id", "tree"), self._gateway, nodes)
                 )
 
-        # Thymios — one ThymioRobot per entry
-        thymio_host = self._settings.data.get("thymio", {}).get("host", "localhost")
-        thymio_port = self._settings.data.get("thymio", {}).get("port", 8596)
+        # Thymios — one ThymioRobot per entry, each with its own host/port
         for thymio_cfg in robot_data.get("thymios", []):
             robots.append(
-                ThymioRobot(thymio_cfg["thymio_id"], thymio_host, thymio_port)
+                ThymioRobot(
+                    thymio_cfg["thymio_id"],
+                    thymio_cfg.get("host", "localhost"),
+                    int(thymio_cfg.get("port", 8596)),
+                )
             )
 
         return robots
@@ -135,8 +137,6 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
     def _on_settings_saved(self) -> None:
         """Apply settings changes that don't require a restart."""
-        self._gateway._port = self._settings.gateway_port
-        self._gateway._baud_rate = self._settings.gateway_baud
         self._on_robot_configured()
 
     def _on_navigate(self, tab_name: str) -> None:

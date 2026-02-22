@@ -6,13 +6,18 @@ from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QKeyEvent
 from PySide6.QtWidgets import (
     QDialog,
+    QDialogButtonBox,
+    QFormLayout,
     QHeaderView,
     QInputDialog,
+    QLineEdit,
     QMenu,
     QMessageBox,
     QPushButton,
+    QSpinBox,
     QTreeWidget,
     QTreeWidgetItem,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -58,6 +63,12 @@ class RobotPanel(QWidget, Ui_RobotPanel):
             tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
             tree.setColumnWidth(1, 72)
 
+        # Initialise baud rate combo from settings
+        baud = str(self._settings.gateway_baud)
+        idx = self.baud_rate_combo.findText(baud)
+        if idx >= 0:
+            self.baud_rate_combo.setCurrentIndex(idx)
+
         # Connect gateway controls
         self.refresh_ports_btn.clicked.connect(self._refresh_ports)
         self.connect_btn.clicked.connect(self._on_gateway_connect)
@@ -69,11 +80,17 @@ class RobotPanel(QWidget, Ui_RobotPanel):
         self.add_thymio_btn.clicked.connect(lambda: self._on_add_robot("thymio"))
 
         # Connect tree signals
+        _all_trees = (self.turtle_tree, self.tree_tree, self.thymio_tree)
         for tree, robot_type in (
             (self.turtle_tree, "turtle"),
             (self.tree_tree, "tree"),
             (self.thymio_tree, "thymio"),
         ):
+            # Clear the other trees' selection when this one gets a click
+            others = [t for t in _all_trees if t is not tree]
+            tree.itemPressed.connect(
+                lambda _item, _col, o=others: [t.clearSelection() for t in o]
+            )
             tree.itemDoubleClicked.connect(self._on_item_double_clicked)
             tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
             tree.customContextMenuRequested.connect(
@@ -130,12 +147,19 @@ class RobotPanel(QWidget, Ui_RobotPanel):
             self.gateway_changed.emit(False)
         else:
             port = self.port_combo.currentText()
+            baud = int(self.baud_rate_combo.currentText())
             self._gateway._port = port
+            self._gateway._baud_rate = baud
             if self._gateway.connect():
                 self.gateway_status_label.setText(f"Connected ({port})")
                 self.connect_btn.setText("Disconnect")
                 self.scan_btn.setEnabled(True)
                 self.gateway_changed.emit(True)
+                # Persist the chosen port and baud rate for next launch
+                self._settings.data.setdefault("gateway", {})
+                self._settings.data["gateway"]["serial_port"] = port
+                self._settings.data["gateway"]["baud_rate"] = baud
+                self._settings.save()
             else:
                 self.gateway_status_label.setText(f"Connection failed ({port})")
 
@@ -222,11 +246,14 @@ class RobotPanel(QWidget, Ui_RobotPanel):
 
         robot_index = data["robot_index"]
         menu = QMenu(self)
-        rename_action = menu.addAction("Rename…")
+        configure_action = menu.addAction("Configure…") if robot_type == "thymio" else None
+        rename_action = menu.addAction("Rename…") if robot_type != "thymio" else None
         delete_action = menu.addAction("Delete Robot")
         action = menu.exec(tree.viewport().mapToGlobal(pos))
 
-        if action == rename_action:
+        if configure_action and action == configure_action:
+            self._on_configure_thymio(robot_index)
+        elif rename_action and action == rename_action:
             self._on_rename_robot(robot_type, robot_index)
         elif action == delete_action:
             self._on_delete_robot(robot_type, robot_index)
@@ -271,8 +298,17 @@ class RobotPanel(QWidget, Ui_RobotPanel):
 
     def _on_item_double_clicked(self, item: QTreeWidgetItem, _column: int) -> None:
         data = item.data(0, Qt.ItemDataRole.UserRole)
-        if data is None or "node_index" not in data:
-            return  # robot-level items — ignore double-click
+        if data is None:
+            return
+        if "node_index" not in data:
+            # Robot-level item: open the appropriate config dialog
+            rtype = data.get("robot_type")
+            ridx = data["robot_index"]
+            if rtype == "thymio":
+                self._on_configure_thymio(ridx)
+            else:
+                self._on_rename_robot(rtype, ridx)
+            return
         self._open_node_dialog(
             data["robot_type"], data["robot_index"], data["node_index"]
         )
@@ -296,14 +332,69 @@ class RobotPanel(QWidget, Ui_RobotPanel):
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.robot_configured.emit()
 
+    # ------------------------------------------------------------------
+    # Thymio config helpers
+    # ------------------------------------------------------------------
+
+    def _thymio_config_dialog(
+        self,
+        thymio_id: str = "",
+        host: str = "localhost",
+        port: int = 8596,
+    ) -> tuple[str, str, int] | None:
+        """Show a dialog to configure a Thymio robot. Returns (id, host, port) or None."""
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Thymio Configuration")
+        form = QFormLayout()
+        id_edit = QLineEdit(thymio_id)
+        host_edit = QLineEdit(host)
+        port_spin = QSpinBox()
+        port_spin.setRange(1, 65535)
+        port_spin.setValue(port)
+        form.addRow("Thymio ID:", id_edit)
+        form.addRow("Host:", host_edit)
+        form.addRow("Port:", port_spin)
+        btn_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btn_box.accepted.connect(dlg.accept)
+        btn_box.rejected.connect(dlg.reject)
+        layout = QVBoxLayout(dlg)
+        layout.addLayout(form)
+        layout.addWidget(btn_box)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return None
+        tid = id_edit.text().strip()
+        if not tid:
+            return None
+        return tid, host_edit.text().strip() or "localhost", port_spin.value()
+
+    def _on_configure_thymio(self, robot_index: int) -> None:
+        """Edit host/port (and ID) of an existing Thymio."""
+        robots_list = self._settings.data.get("robots", {}).get("thymios", [])
+        if not (0 <= robot_index < len(robots_list)):
+            return
+        cfg = robots_list[robot_index]
+        result = self._thymio_config_dialog(
+            thymio_id=cfg.get("thymio_id", ""),
+            host=cfg.get("host", "localhost"),
+            port=int(cfg.get("port", 8596)),
+        )
+        if result is None:
+            return
+        cfg["thymio_id"], cfg["host"], cfg["port"] = result
+        self._settings.save()
+        self.robot_configured.emit()
+
     def _on_add_robot(self, robot_type: str) -> None:
         if robot_type == "thymio":
             existing = self._settings.data.get("robots", {}).get("thymios", [])
-            default = f"thymio-{len(existing) + 1}"
-            name, ok = QInputDialog.getText(self, "Add Thymio", "Thymio ID:", text=default)
-            if not ok or not name.strip():
+            default_id = f"thymio-{len(existing) + 1}"
+            result = self._thymio_config_dialog(thymio_id=default_id)
+            if result is None:
                 return
-            entry: dict = {"thymio_id": name.strip(), "nodes": []}
+            tid, host, port = result
+            entry: dict = {"thymio_id": tid, "host": host, "port": port, "nodes": []}
         else:
             existing = (
                 self._settings.data.get("robots", {})
