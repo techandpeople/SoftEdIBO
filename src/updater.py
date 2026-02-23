@@ -29,8 +29,8 @@ from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest
 
 from src._version import GITHUB_REPO, __build_time__, __version__
 
-_API_LATEST = "https://api.github.com/repos/{repo}/releases/latest"
-_API_TAG    = "https://api.github.com/repos/{repo}/releases/tags/{tag}"
+_API_LATEST  = "https://api.github.com/repos/{repo}/releases/latest"
+_API_NIGHTLY = "https://api.github.com/repos/{repo}/releases/tags/nightly"
 
 
 # ---------------------------------------------------------------------------
@@ -52,31 +52,19 @@ def _can_update() -> bool:
     return is_appimage() or _is_frozen_windows()
 
 
-def _appimage_path() -> Path | None:
-    p = os.environ.get("APPIMAGE")
-    return Path(p) if p else None
-
-
 def _is_newer(remote: str, local: str) -> bool:
-    """Return True if *remote* version tag is strictly newer than *local*.
-
-    Special cases:
-    - local == "dev"      → never update (development run)
-    - local == "nightly"  → update when a newer nightly or stable release exists
-                            (remote != "nightly" means a real tag is available)
-    """
-    if local == "dev" or not remote:
-        return False
-    if local == "nightly":
-        return remote != "nightly"
-
+    """Return True if *remote* semver tag is strictly newer than *local*."""
     def parse(v: str) -> tuple:
         return tuple(int(x) for x in v.lstrip("v").split(".") if x.isdigit())
-
     try:
         return parse(remote) > parse(local)
     except ValueError:
         return False
+
+
+def _appimage_path() -> Path | None:
+    p = os.environ.get("APPIMAGE")
+    return Path(p) if p else None
 
 
 # ---------------------------------------------------------------------------
@@ -112,17 +100,17 @@ class AppUpdater(QObject):
     def check(self) -> None:
         """Async version check. Safe to call at startup — returns immediately.
 
-        Nightly builds check ``/releases/tags/nightly`` and compare build
-        timestamps.  Stable builds check ``/releases/latest``.
+        - nightly → checks the ``nightly`` release, compares build timestamps.
+        - stable  → checks the latest stable release, compares semver.
+        - dev     → never updated.
         """
-        if not _can_update() or not GITHUB_REPO:
+        if not _can_update() or not GITHUB_REPO or __version__ == "dev":
             return
 
         if __version__ == "nightly":
-            url = _API_TAG.format(repo=GITHUB_REPO, tag="nightly")
+            url = _API_NIGHTLY.format(repo=GITHUB_REPO)
         else:
             url = _API_LATEST.format(repo=GITHUB_REPO)
-
         request = QNetworkRequest(QUrl(url))
         request.setRawHeader(b"Accept", b"application/vnd.github.v3+json")
         request.setRawHeader(b"User-Agent", b"SoftEdIBO-Updater")
@@ -160,13 +148,13 @@ class AppUpdater(QObject):
         download_url = asset["browser_download_url"]
 
         if __version__ == "nightly":
-            # published_at never changes on release updates — use the asset's
-            # updated_at which is refreshed every time the file is replaced.
-            asset_updated_at = asset.get("updated_at", "")
-            if __build_time__ and asset_updated_at > __build_time__:
+            # published_at never changes when a release is updated; updated_at does.
+            if __build_time__ and asset.get("updated_at", "") > __build_time__:
                 self.update_available.emit(tag, download_url)
-        elif _is_newer(tag, __version__):
-            self.update_available.emit(tag, download_url)
+        else:
+            # Stable: only notify if the remote semver tag is strictly newer.
+            if _is_newer(tag, __version__):
+                self.update_available.emit(tag, download_url)
 
     # ------------------------------------------------------------------
     # Download
