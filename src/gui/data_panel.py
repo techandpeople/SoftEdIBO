@@ -1,6 +1,7 @@
 """Data visualization panel for reviewing session data."""
 
 import csv
+from pathlib import Path
 
 from PySide6.QtCore import QStandardPaths
 from PySide6.QtWidgets import (
@@ -91,7 +92,7 @@ class DataPanel(QWidget, Ui_DataPanel):
         session_id = self.sessions_table.item(row, 0).text()
         activity = self.sessions_table.item(row, 1).text()
         docs = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DocumentsLocation)
-        default_name = f"{docs}/SoftEdIBO_{session_id}_{activity.replace(' ', '_')}.csv"
+        default_name = str(Path(docs) / f"SoftEdIBO_{session_id}_{activity.replace(' ', '_')}.csv")
 
         path, _ = QFileDialog.getSaveFileName(
             self, "Export Session Events", default_name, "CSV files (*.csv)"
@@ -127,7 +128,7 @@ class DataPanel(QWidget, Ui_DataPanel):
         """Export all sessions and their events to a CSV file."""
         docs = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DocumentsLocation)
         path, _ = QFileDialog.getSaveFileName(
-            self, "Export All Sessions", f"{docs}/SoftEdIBO_all_sessions.csv", "CSV files (*.csv)"
+            self, "Export All Sessions", str(Path(docs) / "SoftEdIBO_all_sessions.csv"), "CSV files (*.csv)"
         )
         if not path:
             return

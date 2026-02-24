@@ -35,7 +35,8 @@ def _esptool_cmd(port: str, firmware: Path) -> tuple[str, list[str]]:
     """
     flash_args = ["--port", port, "--baud", "921600", "write_flash", "0x0", str(firmware)]
     if getattr(sys, "frozen", False):
-        esptool_bin = Path(sys.executable).parent / "esptool"
+        suffix = ".exe" if sys.platform == "win32" else ""
+        esptool_bin = Path(sys.executable).parent / f"esptool{suffix}"
         return str(esptool_bin), flash_args
     return sys.executable, ["-m", "esptool"] + flash_args
 

@@ -32,6 +32,10 @@ COMMON_EXCLUDES = [
     "PIL",
     "IPython",
     "jupyter",
+    # SQLAlchemy bundles hooks for every DB backend; exclude the ones we don't ship
+    "pysqlite2",   # legacy sqlite2 binding (we use the built-in sqlite3)
+    "MySQLdb",     # MySQL backend
+    "psycopg2",    # PostgreSQL backend (not installed in the frozen bundle)
 ]
 
 # ---------------------------------------------------------------------------

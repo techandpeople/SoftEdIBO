@@ -1,8 +1,12 @@
-"""OTA self-updater for the SoftEdIBO AppImage.
+"""OTA self-updater for SoftEdIBO.
 
-Only active when the app is running as an AppImage (``$APPIMAGE`` env var is
-set) and ``GITHUB_REPO`` is configured.  Uses ``QNetworkAccessManager`` for
-fully async HTTP — no threads, no blocking.
+Supports two environments:
+- **Linux AppImage**: replaces the AppImage atomically, restarts via ``os.execv``.
+- **Windows frozen (PyInstaller)**: downloads a zip, launches a PowerShell script
+  that extracts it after the app exits, then restarts ``SoftEdIBO.exe``.
+
+Only active when running as a frozen binary and ``GITHUB_REPO`` is configured.
+Uses ``QNetworkAccessManager`` for fully async HTTP — no threads, no blocking.
 
 Typical flow
 ------------
@@ -11,21 +15,22 @@ Typical flow
 3. If newer, ``update_available(version, url)`` is emitted.
 4. The user clicks "Update" → ``AppUpdater.download(url)`` starts.
 5. ``download_progress`` updates the UI.
-6. ``download_done`` fires → the new AppImage replaces the old one atomically.
-7. The app restarts itself via ``os.execv``.
+6. ``download_done`` fires → caller applies the update and restarts.
 """
 
 import json
 import os
 import stat
+import sys
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QUrl, Signal
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest
 
-from src._version import GITHUB_REPO, __version__
+from src._version import GITHUB_REPO, __build_time__, __version__
 
-_API_URL = "https://api.github.com/repos/{repo}/releases/latest"
+_API_LATEST  = "https://api.github.com/repos/{repo}/releases/latest"
+_API_NIGHTLY = "https://api.github.com/repos/{repo}/releases/tags/nightly"
 
 
 # ---------------------------------------------------------------------------
@@ -33,36 +38,33 @@ _API_URL = "https://api.github.com/repos/{repo}/releases/latest"
 # ---------------------------------------------------------------------------
 
 def is_appimage() -> bool:
-    """Return True when running as an AppImage."""
+    """Return True when running as a Linux AppImage."""
     return bool(os.environ.get("APPIMAGE"))
+
+
+def _is_frozen_windows() -> bool:
+    """Return True when running as a frozen PyInstaller app on Windows."""
+    return sys.platform == "win32" and getattr(sys, "frozen", False)
+
+
+def _can_update() -> bool:
+    """Return True if OTA updates are supported in the current environment."""
+    return is_appimage() or _is_frozen_windows()
+
+
+def _is_newer(remote: str, local: str) -> bool:
+    """Return True if *remote* semver tag is strictly newer than *local*."""
+    def parse(v: str) -> tuple:
+        return tuple(int(x) for x in v.lstrip("v").split(".") if x.isdigit())
+    try:
+        return parse(remote) > parse(local)
+    except ValueError:
+        return False
 
 
 def _appimage_path() -> Path | None:
     p = os.environ.get("APPIMAGE")
     return Path(p) if p else None
-
-
-def _is_newer(remote: str, local: str) -> bool:
-    """Return True if *remote* version tag is strictly newer than *local*.
-
-    Special cases:
-    - local == "dev"      → never update (development run)
-    - local == "nightly"  → update when a newer nightly or stable release exists
-                            (remote != "nightly" means a real tag is available)
-    """
-    if local == "dev" or not remote:
-        return False
-    if local == "nightly":
-        # A nightly build updates to any stable release or a new nightly tag
-        return remote != "nightly"
-
-    def parse(v: str) -> tuple:
-        return tuple(int(x) for x in v.lstrip("v").split(".") if x.isdigit())
-
-    try:
-        return parse(remote) > parse(local)
-    except ValueError:
-        return False
 
 
 # ---------------------------------------------------------------------------
@@ -78,7 +80,7 @@ class AppUpdater(QObject):
     #: Emitted during download. Args: (bytes_received, bytes_total)
     download_progress = Signal(int, int)
 
-    #: Emitted when the new AppImage has been written. Arg: Path to the AppImage.
+    #: Emitted when the download is complete. Arg: Path to the downloaded file.
     download_done = Signal(Path)
 
     #: Emitted on network or I/O errors.
@@ -96,11 +98,19 @@ class AppUpdater(QObject):
     # ------------------------------------------------------------------
 
     def check(self) -> None:
-        """Async version check. Safe to call at startup — returns immediately."""
-        if not is_appimage() or not GITHUB_REPO:
+        """Async version check. Safe to call at startup — returns immediately.
+
+        - nightly → checks the ``nightly`` release, compares build timestamps.
+        - stable  → checks the latest stable release, compares semver.
+        - dev     → never updated.
+        """
+        if not _can_update() or not GITHUB_REPO or __version__ == "dev":
             return
 
-        url = _API_URL.format(repo=GITHUB_REPO)
+        if __version__ == "nightly":
+            url = _API_NIGHTLY.format(repo=GITHUB_REPO)
+        else:
+            url = _API_LATEST.format(repo=GITHUB_REPO)
         request = QNetworkRequest(QUrl(url))
         request.setRawHeader(b"Accept", b"application/vnd.github.v3+json")
         request.setRawHeader(b"User-Agent", b"SoftEdIBO-Updater")
@@ -117,28 +127,50 @@ class AppUpdater(QObject):
             data = json.loads(bytes(reply.readAll()))
             tag = data["tag_name"]
             assets = data.get("assets", [])
-            download_url = next(
-                (a["browser_download_url"] for a in assets
-                 if a["name"].endswith(".AppImage")),
-                None,
-            )
+
+            if _is_frozen_windows():
+                asset = next(
+                    (a for a in assets
+                     if a["name"].endswith(".zip") and "windows" in a["name"].lower()),
+                    None,
+                )
+            else:
+                asset = next(
+                    (a for a in assets if a["name"].endswith(".AppImage")),
+                    None,
+                )
         except (KeyError, ValueError, json.JSONDecodeError):
             return
 
-        if download_url and _is_newer(tag, __version__):
-            self.update_available.emit(tag, download_url)
+        if not asset:
+            return
+
+        download_url = asset["browser_download_url"]
+
+        if __version__ == "nightly":
+            # published_at never changes when a release is updated; updated_at does.
+            if __build_time__ and asset.get("updated_at", "") > __build_time__:
+                self.update_available.emit(tag, download_url)
+        else:
+            # Stable: only notify if the remote semver tag is strictly newer.
+            if _is_newer(tag, __version__):
+                self.update_available.emit(tag, download_url)
 
     # ------------------------------------------------------------------
     # Download
     # ------------------------------------------------------------------
 
     def download(self, url: str) -> None:
-        """Start downloading the new AppImage. Streams to disk — no big RAM spike."""
-        appimage = _appimage_path()
-        if not appimage:
-            return
+        """Start downloading the update. Streams to disk — no big RAM spike."""
+        if _is_frozen_windows():
+            # Save next to the exe so the PS script can extract in-place
+            self._tmp_path = Path(sys.executable).parent / "SoftEdIBO-update.zip"
+        else:
+            appimage = _appimage_path()
+            if not appimage:
+                return
+            self._tmp_path = appimage.with_suffix(".new")
 
-        self._tmp_path = appimage.with_suffix(".new")
         self._download_file = open(self._tmp_path, "wb")
 
         request = QNetworkRequest(QUrl(url))
@@ -173,16 +205,18 @@ class AppUpdater(QObject):
             self.error.emit(reply.errorString())
             return
 
-        # Make the new AppImage executable
-        self._tmp_path.chmod(
-            self._tmp_path.stat().st_mode
-            | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
-        )
-
-        # Atomically replace the running AppImage
-        appimage = _appimage_path()
-        os.replace(self._tmp_path, appimage)
-        self.download_done.emit(appimage)
+        if _is_frozen_windows():
+            # Caller will apply the update via PowerShell after the app exits
+            self.download_done.emit(self._tmp_path)
+        else:
+            # Linux: make the new AppImage executable and atomically replace the old one
+            self._tmp_path.chmod(
+                self._tmp_path.stat().st_mode
+                | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
+            )
+            appimage = _appimage_path()
+            os.replace(self._tmp_path, appimage)
+            self.download_done.emit(appimage)
 
     def cancel(self) -> None:
         """Abort an in-progress download."""

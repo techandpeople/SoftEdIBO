@@ -1,5 +1,6 @@
 """Application settings manager backed by config/settings.yaml."""
 
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -23,7 +24,11 @@ class Settings:
         else Path(__file__).parents[2]
     )
     ROOT: Path = (
-        Path.home() / ".local" / "share" / "SoftEdIBO"  # writable user data dir
+        (
+            Path(os.environ.get("APPDATA", Path.home())) / "SoftEdIBO"
+            if sys.platform == "win32"
+            else Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")) / "SoftEdIBO"
+        )
         if getattr(sys, "frozen", False)
         else Path(__file__).parents[2]
     )
@@ -85,7 +90,8 @@ class Settings:
     @property
     def gateway_port(self) -> str:
         """Serial port for the ESP-NOW gateway."""
-        return self._data.get("gateway", {}).get("serial_port", "/dev/ttyUSB0")
+        default = "COM3" if sys.platform == "win32" else "/dev/ttyUSB0"
+        return self._data.get("gateway", {}).get("serial_port", default)
 
     @property
     def gateway_baud(self) -> int:
