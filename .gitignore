@@ -37,6 +37,7 @@ src/gui/ui_*.py
 # Data files
 data/*.db
 data/*.sqlite
+data/.setup_done
 
 # OS
 .DS_Store

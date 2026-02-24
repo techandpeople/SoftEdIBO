@@ -2,6 +2,7 @@
 
 import os
 import sys
+from pathlib import Path
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
@@ -13,7 +14,7 @@ from PySide6.QtWidgets import (
     QPushButton,
 )
 
-from src._version import __version__
+from src._version import __build_time__, __version__
 from src.config.settings import Settings
 from src.updater import AppUpdater
 from src.data.database import Database
@@ -72,16 +73,11 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self._session_panel.set_available_robots(self._robots)
         self._robot_panel.refresh(self._robots)
 
-        # Menu bar
-        settings_action = self.menuBar().addMenu("Edit").addAction("Settings…")
-        settings_action.triggered.connect(self._open_settings)
-
-        tools_menu = self.menuBar().addMenu("Tools")
-        flash_action = tools_menu.addAction("Flash Firmware…")
-        flash_action.triggered.connect(self._open_flash_wizard)
-        tools_menu.addAction("Check for Updates…").triggered.connect(
-            self._check_updates_manual
-        )
+        # Menu bar actions (structure defined in main_window.ui)
+        self.actionSettings.triggered.connect(self._open_settings)
+        self.actionFlashFirmware.triggered.connect(self._open_flash_wizard)
+        self.actionCheckForUpdates.triggered.connect(self._check_updates_manual)
+        self.actionAbout.triggered.connect(self._show_about)
 
         # OTA updater — silent background check 5 s after startup
         self._updater = AppUpdater(self)
@@ -117,12 +113,14 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                     TreeRobot(tree_cfg.get("id", "tree"), self._gateway, nodes)
                 )
 
-        # Thymios — one ThymioRobot per entry
-        thymio_host = self._settings.data.get("thymio", {}).get("host", "localhost")
-        thymio_port = self._settings.data.get("thymio", {}).get("port", 8596)
+        # Thymios — one ThymioRobot per entry, each with its own host/port
         for thymio_cfg in robot_data.get("thymios", []):
             robots.append(
-                ThymioRobot(thymio_cfg["thymio_id"], thymio_host, thymio_port)
+                ThymioRobot(
+                    thymio_cfg["thymio_id"],
+                    thymio_cfg.get("host", "localhost"),
+                    int(thymio_cfg.get("port", 8596)),
+                )
             )
 
         return robots
@@ -139,8 +137,6 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
     def _on_settings_saved(self) -> None:
         """Apply settings changes that don't require a restart."""
-        self._gateway._port = self._settings.gateway_port
-        self._gateway._baud_rate = self._settings.gateway_baud
         self._on_robot_configured()
 
     def _on_navigate(self, tab_name: str) -> None:
@@ -196,13 +192,58 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                 f"SoftEdIBO {version} was downloaded.\n\nRestart now to apply it?",
             )
             if answer == QMessageBox.StandardButton.Yes:
-                appimage = os.environ.get("APPIMAGE", sys.executable)
-                os.execv(appimage, [appimage] + sys.argv[1:])
+                if sys.platform == "win32":
+                    self._apply_windows_update(path)
+                else:
+                    appimage = os.environ.get("APPIMAGE", sys.executable)
+                    os.execv(appimage, [appimage] + sys.argv[1:])
 
         self._updater.download_progress.connect(_on_progress)
         self._updater.download_done.connect(_on_done)
         self._updater.download(url)
         dlg.exec()
+
+    def _apply_windows_update(self, zip_path: Path) -> None:
+        """Launch a PowerShell script that extracts the update zip after we exit."""
+        import subprocess
+
+        exe = sys.executable
+        pid = os.getpid()
+
+        # zip_path is next to SoftEdIBO.exe — extract to its own directory
+        # so files are replaced in-place without needing a separate install_dir.
+        ps_script = (
+            f"Wait-Process -Id {pid} -Timeout 30 -ErrorAction SilentlyContinue\n"
+            f"Start-Sleep -Seconds 1\n"
+            f"Expand-Archive -Path '{zip_path}' -DestinationPath (Split-Path '{zip_path}') -Force\n"
+            f"Remove-Item '{zip_path}' -ErrorAction SilentlyContinue\n"
+            f"Start-Process '{exe}'\n"
+        )
+
+        ps_file = zip_path.with_name("softedibo-update.ps1")
+        ps_file.write_text(ps_script, encoding="utf-8")
+
+        subprocess.Popen(
+            ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File", str(ps_file)],
+            creationflags=0x08000000,  # CREATE_NO_WINDOW
+        )
+        QApplication.quit()
+
+    def _show_about(self) -> None:
+        build_line = (
+            f"<br>Built: {__build_time__}"
+            if __build_time__
+            else ""
+        )
+        QMessageBox.about(
+            self,
+            "About SoftEdIBO",
+            f"<b>SoftEdIBO</b><br>"
+            f"Version: {__version__}"
+            f"{build_line}<br><br>"
+            f"Soft-based robot for inclusive education .<br><br>"
+            f"LASIGE, Faculdade de Ciências, Universidade de Lisboa",
+        )
 
     # ------------------------------------------------------------------
     # Lifecycle

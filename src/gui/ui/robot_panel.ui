@@ -12,7 +12,7 @@
      <layout class="QHBoxLayout" name="gateway_layout">
       <item>
        <widget class="QComboBox" name="port_combo">
-        <property name="minimumWidth"><number>150</number></property>
+        <property name="minimumWidth"><number>140</number></property>
        </widget>
       </item>
       <item>
@@ -20,6 +20,14 @@
         <property name="text"><string>↺</string></property>
         <property name="maximumWidth"><number>28</number></property>
         <property name="toolTip"><string>Refresh serial port list</string></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QComboBox" name="baud_rate_combo">
+        <item><property name="text"><string>9600</string></property></item>
+        <item><property name="text"><string>57600</string></property></item>
+        <item><property name="text"><string>115200</string></property></item>
+        <item><property name="text"><string>921600</string></property></item>
        </widget>
       </item>
       <item>
