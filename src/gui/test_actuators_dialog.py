@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+
 from src.gui.ui_test_actuators_dialog import Ui_TestActuatorsDialog
 from src.hardware.espnow_gateway import ESPNowGateway
 
@@ -47,10 +48,9 @@ class TestActuatorsDialog(QDialog, Ui_TestActuatorsDialog):
             self.no_chambers_label.setVisible(True)
         else:
             self.chambers_scroll.setVisible(True)
-            content_layout = QVBoxLayout(self.chambers_content)
             for skin_cfg in skin_cfgs:
-                content_layout.addWidget(self._build_chamber_group(skin_cfg))
-            content_layout.addStretch()
+                self.chambers_vbox.addWidget(self._build_chamber_group(skin_cfg))
+            self.chambers_vbox.addStretch()
 
     # ------------------------------------------------------------------
     # UI
