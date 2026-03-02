@@ -182,7 +182,9 @@ class AppUpdater(QObject):
 
         self._download_reply = self._nam.get(request)
         self._download_reply.readyRead.connect(self._on_chunk)
-        self._download_reply.downloadProgress.connect(self.download_progress)
+        self._download_reply.downloadProgress.connect(
+            lambda recv, total: self.download_progress.emit(int(recv), int(total))
+        )
         self._download_reply.finished.connect(self._on_download_finished)
 
     def _on_chunk(self) -> None:
