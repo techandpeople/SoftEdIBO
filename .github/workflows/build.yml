@@ -102,6 +102,7 @@ jobs:
           DESKTOP
 
           cp softedibo.png SoftEdIBO.AppDir/softedibo.png
+          cp softedibo.png SoftEdIBO.AppDir/.DirIcon
 
       - name: Build AppImage
         run: |
