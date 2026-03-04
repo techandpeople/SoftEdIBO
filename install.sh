@@ -74,28 +74,30 @@ echo "Installing from: $SRC"
 # ── Copy AppImage ──────────────────────────────────────────────────────────
 sudo mkdir -p "$INSTALL_DIR"
 sudo cp "$SRC" "$APPIMAGE_DEST"
-sudo chmod +x "$APPIMAGE_DEST"
+sudo chmod 755 "$APPIMAGE_DEST"
 echo "  → $APPIMAGE_DEST"
 
-# ── Symlink into PATH ──────────────────────────────────────────────────────
-sudo ln -sf "$APPIMAGE_DEST" "$BIN_LINK"
-echo "  → symlink: $BIN_LINK"
+# ── Wrapper script (no FUSE needed) ───────────────────────────────────────
+sudo tee "$BIN_LINK" > /dev/null << EOF
+#!/bin/bash
+export APPIMAGE_EXTRACT_AND_RUN=1
+exec "$APPIMAGE_DEST" "\$@"
+EOF
+sudo chmod +x "$BIN_LINK"
+echo "  → launcher: $BIN_LINK"
 
-# ── Extract icon from AppImage ─────────────────────────────────────────────
-TMP_ICON="$(mktemp -d)"
-trap 'rm -rf "$TMP_ICON"; rm -f "${TMP_APPIMAGE:-}"' EXIT
-pushd "$TMP_ICON" >/dev/null
-"$APPIMAGE_DEST" --appimage-extract softedibo.png >/dev/null 2>&1 || true
-popd >/dev/null
-
-if [[ -f "$TMP_ICON/squashfs-root/softedibo.png" ]]; then
-    mkdir -p "$(dirname "$ICON_FILE")"
-    cp "$TMP_ICON/squashfs-root/softedibo.png" "$ICON_FILE"
-    ICON="softedibo"
-    echo "  → icon: $ICON_FILE"
+# ── Download icon ──────────────────────────────────────────────────────────
+trap 'rm -f "${TMP_APPIMAGE:-}"' EXIT
+ICON_URL="https://raw.githubusercontent.com/$REPO/master/softedibo.png"
+mkdir -p "$(dirname "$ICON_FILE")"
+if command -v curl &>/dev/null; then
+    curl -fsSL -o "$ICON_FILE" "$ICON_URL" 2>/dev/null && ICON="softedibo" || ICON="application-x-executable"
+elif command -v wget &>/dev/null; then
+    wget -q -O "$ICON_FILE" "$ICON_URL" 2>/dev/null && ICON="softedibo" || ICON="application-x-executable"
 else
     ICON="application-x-executable"
 fi
+[[ "$ICON" == "softedibo" ]] && echo "  → icon: $ICON_FILE"
 
 # ── Desktop entry ──────────────────────────────────────────────────────────
 mkdir -p "$(dirname "$DESKTOP_FILE")"
@@ -103,7 +105,7 @@ cat > "$DESKTOP_FILE" << EOF
 [Desktop Entry]
 Name=SoftEdIBO
 Comment=Soft-based robot for inclusive education
-Exec=$APPIMAGE_DEST
+Exec=$BIN_LINK
 Icon=$ICON
 Terminal=false
 Type=Application
