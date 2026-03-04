@@ -1,5 +1,6 @@
 """Test actuators dialog — inflate/deflate individual chambers via the gateway."""
 
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QDialog,
     QGroupBox,
@@ -28,6 +29,9 @@ class TestActuatorsDialog(QDialog, Ui_TestActuatorsDialog):
         parent: Optional parent widget.
     """
 
+    # Emitted from the gateway read thread; connected to _update_pressure (main thread)
+    _pressure_received = Signal(int, int)   # chamber, pressure_adc
+
     def __init__(
         self,
         mac: str,
@@ -38,6 +42,8 @@ class TestActuatorsDialog(QDialog, Ui_TestActuatorsDialog):
         super().__init__(parent)
         self._mac = mac
         self._gateway = gateway
+        self._active = True
+        self._pressure_labels: dict[int, QLabel] = {}   # slot → label
 
         self.setupUi(self)
         self.setWindowTitle(f"Test Actuators — {mac}")
@@ -50,6 +56,10 @@ class TestActuatorsDialog(QDialog, Ui_TestActuatorsDialog):
             for skin_cfg in skin_cfgs:
                 self.chambers_vbox.addWidget(self._build_chamber_group(skin_cfg))
             self.chambers_vbox.addStretch()
+
+        self._pressure_received.connect(self._update_pressure)
+        self._gateway.on_message(self._on_gateway_message)
+        self.finished.connect(self._on_closed)
 
     # ------------------------------------------------------------------
     # UI
@@ -83,10 +93,38 @@ class TestActuatorsDialog(QDialog, Ui_TestActuatorsDialog):
             def_btn.clicked.connect(lambda _=False, s=slot: self._deflate_slot(s))
             slot_row.addWidget(inf_btn)
             slot_row.addWidget(def_btn)
-            slot_row.addStretch()
+            pressure_lbl = QLabel("—")
+            pressure_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            pressure_lbl.setMinimumWidth(110)
+            slot_row.addWidget(pressure_lbl)
+            self._pressure_labels[slot] = pressure_lbl
             vbox.addLayout(slot_row)
 
         return box
+
+    # ------------------------------------------------------------------
+    # Pressure updates (gateway callback → signal → main thread)
+    # ------------------------------------------------------------------
+
+    def _on_gateway_message(self, data: dict) -> None:
+        """Called from the gateway read thread."""
+        if not self._active:
+            return
+        if data.get("source") != self._mac or data.get("type") != "status":
+            return
+        chamber = data.get("chamber")
+        pressure = data.get("pressure")
+        if isinstance(chamber, int) and isinstance(pressure, int):
+            self._pressure_received.emit(chamber, pressure)
+
+    def _update_pressure(self, chamber: int, pressure: int) -> None:
+        """Called in the main thread via Signal."""
+        lbl = self._pressure_labels.get(chamber)
+        if lbl:
+            lbl.setText(f"ADC: {pressure}")
+
+    def _on_closed(self) -> None:
+        self._active = False
 
     # ------------------------------------------------------------------
     # Commands

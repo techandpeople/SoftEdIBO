@@ -55,8 +55,8 @@ class ESPNowGateway:
             self._read_thread.start()
             logger.info("Connected to ESP-NOW gateway on %s", self._port)
             return True
-        except serial.SerialException:
-            logger.exception("Failed to connect to gateway on %s", self._port)
+        except serial.SerialException as e:
+            logger.warning("Failed to connect to gateway on %s: %s", self._port, e)
             return False
 
     def disconnect(self) -> None:
