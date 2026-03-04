@@ -48,7 +48,8 @@ desktop.ini
 .env
 .env.*
 
-# PlatformIO build artifacts (keep firmware.bin at root of each firmware dir)
+# PlatformIO build artifacts
 firmware/**/.pio/
 firmware/**/libdeps/
 firmware/**/.pioenvs/
+firmware/*/firmware.bin
