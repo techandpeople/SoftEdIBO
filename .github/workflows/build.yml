@@ -54,8 +54,8 @@ jobs:
           fi
           REPO="${GITHUB_REPOSITORY}"
           BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          printf '__version__ = "%s"\nGITHUB_REPO = "%s"\n__build_time__ = "%s"\n' \
-            "$VERSION" "$REPO" "$BUILD_TIME" > src/_version.py
+          printf '__version__ = "%s"\nGITHUB_REPO = "%s"\n__build_time__ = "%s"\n__commit__ = "%s"\n' \
+            "$VERSION" "$REPO" "$BUILD_TIME" "${GITHUB_SHA}" > src/_version.py
 
       - name: Install PlatformIO
         run: pip install platformio esptool
@@ -114,8 +114,15 @@ jobs:
           mkdir -p SoftEdIBO.AppDir
           cp -r dist/SoftEdIBO/. SoftEdIBO.AppDir/
 
+          # Empty gio-modules dir prevents loading incompatible system GIO modules
+          mkdir -p SoftEdIBO.AppDir/gio-modules
+
           cat > SoftEdIBO.AppDir/AppRun << 'APPRUN'
           #!/bin/bash
+          # Prevent loading incompatible system GIO/GVfs modules
+          export GIO_MODULE_DIR="$APPDIR/gio-modules"
+          # Suppress atk-bridge / AT-SPI accessibility warnings
+          export NO_AT_BRIDGE=1
           exec "$APPDIR/SoftEdIBO" "$@"
           APPRUN
           chmod +x SoftEdIBO.AppDir/AppRun
@@ -186,8 +193,8 @@ jobs:
           fi
           REPO="${GITHUB_REPOSITORY}"
           BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          printf '__version__ = "%s"\nGITHUB_REPO = "%s"\n__build_time__ = "%s"\n' \
-            "$VERSION" "$REPO" "$BUILD_TIME" > src/_version.py
+          printf '__version__ = "%s"\nGITHUB_REPO = "%s"\n__build_time__ = "%s"\n__commit__ = "%s"\n' \
+            "$VERSION" "$REPO" "$BUILD_TIME" "${GITHUB_SHA}" > src/_version.py
 
       - name: Install PlatformIO
         run: pip install platformio esptool
