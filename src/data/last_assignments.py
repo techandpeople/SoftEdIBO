@@ -1,4 +1,4 @@
-"""Persistence of the most recent robot-unit→participant assignments.
+"""Persistence of the most recent robot-unit=>participant assignments.
 
 Stored as a JSON file (``data/last_assignments.json``) so it survives
 between sessions without polluting the relational database.

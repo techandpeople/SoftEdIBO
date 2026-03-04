@@ -22,9 +22,9 @@ from src.robots.turtle.turtle_robot import TurtleRobot
 def _units_for_robot(robot: BaseRobot) -> list[str]:
     """Return the list of assignable unit IDs for a robot.
 
-    - TurtleRobot → skin IDs (e.g. "turtle_skin_6")
-    - TreeRobot   → branch IDs as strings (e.g. "branch-0")
-    - Other       → single unit with the robot's own ID
+    - TurtleRobot => skin IDs (e.g. "turtle_skin_6")
+    - TreeRobot   => branch IDs as strings (e.g. "branch-0")
+    - Other       => single unit with the robot's own ID
     """
     if isinstance(robot, TurtleRobot):
         return list(robot.skins.keys())

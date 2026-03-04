@@ -13,7 +13,7 @@
  *   {"cmd":"stop","chamber":2}
  *   {"cmd":"ping"}
  *
- * Status sent back (ESP-NOW → gateway, every STATUS_REPORT_MS):
+ * Status sent back (ESP-NOW => gateway, every STATUS_REPORT_MS):
  *   {"type":"status","chamber":0,"pressure":2048}
  */
 
