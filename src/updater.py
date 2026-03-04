@@ -20,12 +20,14 @@ Typical flow
 
 import json
 import os
+import re
 import stat
 import sys
 from pathlib import Path
+from typing import IO
 
 from PySide6.QtCore import QObject, QUrl, Signal
-from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest
+from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 
 from src._version import GITHUB_REPO, __build_time__, __commit__, __version__
 
@@ -54,7 +56,7 @@ def _can_update() -> bool:
 
 def _is_newer(remote: str, local: str) -> bool:
     """Return True if *remote* semver tag is strictly newer than *local*."""
-    def parse(v: str) -> tuple:
+    def parse(v: str) -> tuple[int, ...]:
         return tuple(int(x) for x in v.lstrip("v").split(".") if x.isdigit())
     try:
         return parse(remote) > parse(local)
@@ -89,8 +91,8 @@ class AppUpdater(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._nam = QNetworkAccessManager(self)
-        self._download_reply = None
-        self._download_file = None
+        self._download_reply: QNetworkReply | None = None
+        self._download_file: IO[bytes] | None = None
         self._tmp_path: Path | None = None
 
     # ------------------------------------------------------------------
@@ -118,13 +120,13 @@ class AppUpdater(QObject):
         reply = self._nam.get(request)
         reply.finished.connect(lambda: self._on_check_finished(reply))
 
-    def _on_check_finished(self, reply) -> None:
+    def _on_check_finished(self, reply: QNetworkReply) -> None:
         reply.deleteLater()
         if reply.error() != reply.NetworkError.NoError:
             return  # Silent fail — don't bother the user if offline
 
         try:
-            data = json.loads(bytes(reply.readAll()))
+            data = json.loads(reply.readAll().data())
             tag = data["tag_name"]
             assets = data.get("assets", [])
 
@@ -148,9 +150,11 @@ class AppUpdater(QObject):
         download_url = asset["browser_download_url"]
 
         if __version__ == "nightly":
-            # Compare commit SHAs: target_commitish is the SHA the CI pushed from.
-            # Avoids false positives from build_time vs asset upload_time skew.
-            remote_sha = data.get("target_commitish", "")
+            # SHA is embedded in the release body as <!-- commit: <sha> -->
+            # target_commitish is not updated when overwriting a rolling release.
+            body = data.get("body", "")
+            m = re.search(r"<!--\s*commit:\s*([0-9a-f]{40})\s*-->", body)
+            remote_sha = m.group(1) if m else ""
             if remote_sha and __commit__ and remote_sha != __commit__:
                 self.update_available.emit(tag, download_url)
         else:
