@@ -1,11 +1,9 @@
 """Per-node configuration dialog with actuator testing."""
 
-from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
     QHBoxLayout,
-    QInputDialog,
     QLabel,
     QLineEdit,
     QMessageBox,
@@ -46,6 +44,7 @@ class NodeConfigDialog(QDialog, Ui_NodeConfigDialog):
         settings: Settings,
         gateway: ESPNowGateway,
         parent: QWidget | None = None,
+        prefill_mac: str = "",
     ):
         super().__init__(parent)
         self._robot_type = robot_type
@@ -66,10 +65,8 @@ class NodeConfigDialog(QDialog, Ui_NodeConfigDialog):
         # Delete button only shown when editing an existing node
         self.delete_btn.setVisible(not is_new)
 
-        # Test / Detect buttons enabled only when gateway is connected
+        # Test button enabled only when gateway is connected
         self.test_btn.setEnabled(gateway.is_connected)
-        self.detect_btn.setEnabled(gateway.is_connected)
-        self.detect_btn.clicked.connect(self._on_detect)
 
         # Add-chamber button — must exist before _add_skin_row is called
         self._add_chamber_btn = QPushButton("+ Add Air Chamber")
@@ -79,7 +76,7 @@ class NodeConfigDialog(QDialog, Ui_NodeConfigDialog):
 
         # Populate from config
         node_cfg = self._load_node_cfg()
-        self.mac_edit.setText(node_cfg.get("mac", ""))
+        self.mac_edit.setText(node_cfg.get("mac", "") or prefill_mac)
         for skin_cfg in node_cfg.get("skins", []):
             self._add_skin_row(skin_cfg)
         self._on_slot_changed()
@@ -214,26 +211,6 @@ class NodeConfigDialog(QDialog, Ui_NodeConfigDialog):
     # ------------------------------------------------------------------
     # Actions
     # ------------------------------------------------------------------
-
-    def _on_detect(self) -> None:
-        self.detect_btn.setEnabled(False)
-        self.detect_btn.setText("Scanning…")
-        self._gateway.scan()
-
-        def _done() -> None:
-            self.detect_btn.setEnabled(True)
-            self.detect_btn.setText("Detect")
-            macs = sorted(self._gateway.known_macs)
-            if not macs:
-                QMessageBox.information(self, "Detect Node", "No nodes found.")
-                return
-            mac, ok = QInputDialog.getItem(
-                self, "Select Node", "Available nodes:", macs, 0, False
-            )
-            if ok and mac:
-                self.mac_edit.setText(mac)
-
-        QTimer.singleShot(2000, _done)
 
     def _on_test_actuators(self) -> None:
         mac = self.mac_edit.text().strip()

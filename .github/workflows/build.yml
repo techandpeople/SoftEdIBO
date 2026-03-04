@@ -2,10 +2,10 @@ name: Build
 
 on:
   push:
-    branches: [master, develop]
+    branches: [master]
     tags:     ["v*"]
   pull_request:
-    branches: [master, develop]
+    branches: [master]
 
 jobs:
   build:
@@ -49,10 +49,8 @@ jobs:
         run: |
           if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             VERSION="${GITHUB_REF_NAME}"
-          elif [[ "${GITHUB_REF_NAME}" == "develop" ]]; then
-            VERSION="nightly"
           else
-            VERSION="dev"
+            VERSION="nightly"
           fi
           REPO="${GITHUB_REPOSITORY}"
           BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -183,10 +181,8 @@ jobs:
         run: |
           if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             VERSION="${GITHUB_REF_NAME}"
-          elif [[ "${GITHUB_REF_NAME}" == "develop" ]]; then
-            VERSION="nightly"
           else
-            VERSION="dev"
+            VERSION="nightly"
           fi
           REPO="${GITHUB_REPOSITORY}"
           BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -242,12 +238,12 @@ jobs:
           retention-days: 30
 
   # -----------------------------------------------------------------------
-  # develop branch: creates/updates a "nightly" pre-release on GitHub.
-  # Allows OTA testing without touching master.
+  # Every push to master: creates/updates a rolling "nightly" pre-release.
+  # Not triggered on tag pushes (release job handles those).
   # -----------------------------------------------------------------------
   nightly:
     needs: [build, build-windows]
-    if: github.ref == 'refs/heads/develop'
+    if: github.ref == 'refs/heads/master'
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -267,13 +263,13 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: nightly
-          name: "Nightly (develop)"
+          name: "Nightly"
           prerelease: true
           files: |
             SoftEdIBO-x86_64.AppImage
             SoftEdIBO-windows-x64.zip
           body: |
-            Automatic build from the `develop` branch. Not a stable release.
+            Automatic build from the latest commit on `master`. Not a stable release.
 
             **Linux:** `chmod +x SoftEdIBO-x86_64.AppImage && ./SoftEdIBO-x86_64.AppImage`
             **Windows:** extract `SoftEdIBO-windows-x64.zip` and run `SoftEdIBO.exe`
