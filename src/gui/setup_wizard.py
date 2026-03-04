@@ -4,7 +4,6 @@ import re
 import sys
 from pathlib import Path
 
-import serial.tools.list_ports
 from PySide6.QtCore import QProcess
 from PySide6.QtWidgets import (
     QComboBox,
@@ -19,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from src.config.settings import Settings
+from src.hardware.serial_ports import list_esp32_ports
 
 SENTINEL_PATH: Path = Settings.ROOT / "data" / ".setup_done"
 # Read-only bundled assets live in BUNDLE (_internal/ when frozen, ROOT in dev)
@@ -48,8 +48,8 @@ def needs_setup() -> bool:
 
 
 def _list_ports() -> list[str]:
-    """Return sorted list of available serial port names."""
-    return sorted(p.device for p in serial.tools.list_ports.comports())
+    """Return serial port names for ESP32 devices (all COM* on Windows)."""
+    return [p.device for p in list_esp32_ports()]
 
 
 # ------------------------------------------------------------------

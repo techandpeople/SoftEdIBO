@@ -24,34 +24,11 @@ from PySide6.QtWidgets import (
 from src.config.settings import Settings
 from src.gui.ui_robot_panel import Ui_RobotPanel
 from src.hardware.espnow_gateway import ESPNowGateway
+from src.hardware.serial_ports import list_esp32_ports
 from src.robots.base_robot import BaseRobot
 
 # Maps internal robot_type strings to the settings.yaml list key
 _YAML_KEY = {"turtle": "turtles", "tree": "trees", "thymio": "thymios"}
-
-# USB Vendor IDs of chips commonly found on ESP32 dev boards
-_ESP32_VIDS: frozenset[int] = frozenset({
-    0x1A86,  # QinHeng: CH340, CH341, CH9102
-    0x10C4,  # Silicon Labs: CP2102 / CP210x
-    0x0403,  # FTDI: FT232
-    0x303A,  # Espressif: native USB (ESP32-S3, C3, C6, H2)
-})
-
-# Description substrings used as fallback when the driver doesn't expose VID (Windows)
-_ESP32_DESC_KEYWORDS: tuple[str, ...] = (
-    "ch340", "ch341", "ch9102",
-    "cp210", "cp2102", "cp2104",
-    "ft232", "ftdi",
-    "usb serial", "usb-serial",
-    "espressif",
-)
-
-
-def _is_esp32_port(p) -> bool:
-    if p.vid in _ESP32_VIDS:
-        return True
-    desc = (p.description or "").lower()
-    return any(kw in desc for kw in _ESP32_DESC_KEYWORDS)
 
 
 class RobotPanel(QWidget, Ui_RobotPanel):
@@ -146,14 +123,7 @@ class RobotPanel(QWidget, Ui_RobotPanel):
             or self.port_combo.currentText()
             or self._settings.gateway_port
         )
-        try:
-            import serial.tools.list_ports
-            esp_ports = [
-                p for p in serial.tools.list_ports.comports()
-                if _is_esp32_port(p)
-            ]
-        except Exception:
-            esp_ports = []
+        esp_ports = list_esp32_ports()
 
         self.port_combo.clear()
         if not esp_ports:
