@@ -29,6 +29,30 @@ from src.robots.base_robot import BaseRobot
 # Maps internal robot_type strings to the settings.yaml list key
 _YAML_KEY = {"turtle": "turtles", "tree": "trees", "thymio": "thymios"}
 
+# USB Vendor IDs of chips commonly found on ESP32 dev boards
+_ESP32_VIDS: frozenset[int] = frozenset({
+    0x1A86,  # QinHeng: CH340, CH341, CH9102
+    0x10C4,  # Silicon Labs: CP2102 / CP210x
+    0x0403,  # FTDI: FT232
+    0x303A,  # Espressif: native USB (ESP32-S3, C3, C6, H2)
+})
+
+# Description substrings used as fallback when the driver doesn't expose VID (Windows)
+_ESP32_DESC_KEYWORDS: tuple[str, ...] = (
+    "ch340", "ch341", "ch9102",
+    "cp210", "cp2102", "cp2104",
+    "ft232", "ftdi",
+    "usb serial", "usb-serial",
+    "espressif",
+)
+
+
+def _is_esp32_port(p) -> bool:
+    if p.vid in _ESP32_VIDS:
+        return True
+    desc = (p.description or "").lower()
+    return any(kw in desc for kw in _ESP32_DESC_KEYWORDS)
+
 
 class RobotPanel(QWidget, Ui_RobotPanel):
     """Panel for managing robots and their ESP32 nodes.
@@ -116,26 +140,40 @@ class RobotPanel(QWidget, Ui_RobotPanel):
     # ------------------------------------------------------------------
 
     def _refresh_ports(self) -> None:
-        current = self.port_combo.currentText() or self._settings.gateway_port
+        # Prefer data() (device path) over text() which may include description
+        current = (
+            self.port_combo.currentData()
+            or self.port_combo.currentText()
+            or self._settings.gateway_port
+        )
         try:
             import serial.tools.list_ports
-            ports = [p.device for p in serial.tools.list_ports.comports()]
+            esp_ports = [
+                p for p in serial.tools.list_ports.comports()
+                if _is_esp32_port(p)
+            ]
         except Exception:
-            ports = []
+            esp_ports = []
 
         self.port_combo.clear()
-        if not ports:
+        if not esp_ports:
             default_port = "COM3" if sys.platform == "win32" else "/dev/ttyUSB0"
-            self.port_combo.addItem(current or default_port)
+            port = current or default_port
+            self.port_combo.addItem(port, port)
         else:
-            for p in ports:
-                self.port_combo.addItem(p)
-            if current and self.port_combo.findText(current) < 0:
-                self.port_combo.insertItem(0, current)
+            for p in esp_ports:
+                desc = p.description or ""
+                label = f"{p.device} — {desc}" if desc and desc != "n/a" else p.device
+                self.port_combo.addItem(label, p.device)
+            # Keep previously selected port even if no longer detected
+            devices = [self.port_combo.itemData(i) for i in range(self.port_combo.count())]
+            if current and current not in devices:
+                self.port_combo.insertItem(0, current, current)
 
-        idx = self.port_combo.findText(current)
-        if idx >= 0:
-            self.port_combo.setCurrentIndex(idx)
+        for i in range(self.port_combo.count()):
+            if self.port_combo.itemData(i) == current:
+                self.port_combo.setCurrentIndex(i)
+                break
 
     def _on_gateway_connect(self) -> None:
         if self._gateway.is_connected:
@@ -146,7 +184,7 @@ class RobotPanel(QWidget, Ui_RobotPanel):
             self._refresh_all_trees()
             self.gateway_changed.emit(False)
         else:
-            port = self.port_combo.currentText()
+            port = self.port_combo.currentData() or self.port_combo.currentText()
             baud = int(self.baud_rate_combo.currentText())
             self._gateway._port = port
             self._gateway._baud_rate = baud
@@ -174,7 +212,7 @@ class RobotPanel(QWidget, Ui_RobotPanel):
         self.scan_btn.setText("Scan Nodes")
         self._refresh_all_trees()
         n = len(self._gateway.known_macs)
-        port = self.port_combo.currentText()
+        port = self.port_combo.currentData() or self.port_combo.currentText()
         suffix = f" · {n} node{'s' if n != 1 else ''} found" if n else " · no nodes found"
         self.gateway_status_label.setText(f"Connected ({port}){suffix}")
 
@@ -318,10 +356,30 @@ class RobotPanel(QWidget, Ui_RobotPanel):
         )
 
     def _on_add_node(self, robot_type: str, robot_index: int) -> None:
-        self._open_node_dialog(robot_type, robot_index, -1)
+        prefill_mac = ""
+        known = self._gateway.known_macs
+        if known:
+            all_assigned = {
+                node.get("mac", "")
+                for robots in self._settings.data.get("robots", {}).values()
+                for robot in robots
+                for node in robot.get("nodes", [])
+            }
+            unassigned = sorted(known - all_assigned)
+            if unassigned:
+                items = unassigned + ["Enter manually…"]
+                choice, ok = QInputDialog.getItem(
+                    self, "Add Node", "Select a discovered node:", items, 0, False
+                )
+                if not ok:
+                    return
+                if choice != "Enter manually…":
+                    prefill_mac = choice
+        self._open_node_dialog(robot_type, robot_index, -1, prefill_mac)
 
     def _open_node_dialog(
-        self, robot_type: str, robot_index: int, node_index: int
+        self, robot_type: str, robot_index: int, node_index: int,
+        prefill_mac: str = "",
     ) -> None:
         from src.gui.node_config_dialog import NodeConfigDialog
 
@@ -332,6 +390,7 @@ class RobotPanel(QWidget, Ui_RobotPanel):
             settings=self._settings,
             gateway=self._gateway,
             parent=self,
+            prefill_mac=prefill_mac,
         )
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.robot_configured.emit()
