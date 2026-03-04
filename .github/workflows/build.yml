@@ -276,6 +276,7 @@ jobs:
             SoftEdIBO-x86_64.AppImage
             SoftEdIBO-windows-x64.zip
           body: |
+            <!-- commit: ${{ github.sha }} -->
             Automatic build from the latest commit on `master`. Not a stable release.
 
             **Linux:** `chmod +x SoftEdIBO-x86_64.AppImage && ./SoftEdIBO-x86_64.AppImage`
