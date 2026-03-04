@@ -60,7 +60,7 @@ jobs:
             "$VERSION" "$REPO" "$BUILD_TIME" > src/_version.py
 
       - name: Install PlatformIO
-        run: pip install platformio
+        run: pip install platformio esptool
 
       - name: Cache PlatformIO toolchain
         uses: actions/cache@v4
@@ -73,13 +73,23 @@ jobs:
         run: |
           cd firmware/gateway
           pio run
-          cp .pio/build/esp32dev/firmware.bin firmware.bin
+          python -m esptool --chip esp32 merge_bin \
+            --flash_mode dio --flash_freq 40m --flash_size 4MB \
+            -o firmware.bin \
+            0x1000 .pio/build/esp32dev/bootloader.bin \
+            0x8000 .pio/build/esp32dev/partitions.bin \
+            0x10000 .pio/build/esp32dev/firmware.bin
 
       - name: Build air_chamber_node firmware
         run: |
           cd firmware/air_chamber_node
           pio run
-          cp .pio/build/esp32dev/firmware.bin firmware.bin
+          python -m esptool --chip esp32 merge_bin \
+            --flash_mode dio --flash_freq 40m --flash_size 4MB \
+            -o firmware.bin \
+            0x1000 .pio/build/esp32dev/bootloader.bin \
+            0x8000 .pio/build/esp32dev/partitions.bin \
+            0x10000 .pio/build/esp32dev/firmware.bin
 
       - name: Build with PyInstaller
         run: pyinstaller softedibo.spec
@@ -184,7 +194,7 @@ jobs:
             "$VERSION" "$REPO" "$BUILD_TIME" > src/_version.py
 
       - name: Install PlatformIO
-        run: pip install platformio
+        run: pip install platformio esptool
 
       - name: Cache PlatformIO toolchain
         uses: actions/cache@v4
@@ -198,14 +208,24 @@ jobs:
         run: |
           cd firmware/gateway
           pio run
-          cp .pio/build/esp32dev/firmware.bin firmware.bin
+          python -m esptool --chip esp32 merge_bin \
+            --flash_mode dio --flash_freq 40m --flash_size 4MB \
+            -o firmware.bin \
+            0x1000 .pio/build/esp32dev/bootloader.bin \
+            0x8000 .pio/build/esp32dev/partitions.bin \
+            0x10000 .pio/build/esp32dev/firmware.bin
 
       - name: Build air_chamber_node firmware
         shell: bash
         run: |
           cd firmware/air_chamber_node
           pio run
-          cp .pio/build/esp32dev/firmware.bin firmware.bin
+          python -m esptool --chip esp32 merge_bin \
+            --flash_mode dio --flash_freq 40m --flash_size 4MB \
+            -o firmware.bin \
+            0x1000 .pio/build/esp32dev/bootloader.bin \
+            0x8000 .pio/build/esp32dev/partitions.bin \
+            0x10000 .pio/build/esp32dev/firmware.bin
 
       - name: Build with PyInstaller
         run: pyinstaller softedibo.spec

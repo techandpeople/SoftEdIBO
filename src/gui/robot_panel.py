@@ -173,6 +173,10 @@ class RobotPanel(QWidget, Ui_RobotPanel):
         self.scan_btn.setEnabled(True)
         self.scan_btn.setText("Scan Nodes")
         self._refresh_all_trees()
+        n = len(self._gateway.known_macs)
+        port = self.port_combo.currentText()
+        suffix = f" · {n} node{'s' if n != 1 else ''} found" if n else " · no nodes found"
+        self.gateway_status_label.setText(f"Connected ({port}){suffix}")
 
     # ------------------------------------------------------------------
     # Tree population
