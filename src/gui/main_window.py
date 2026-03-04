@@ -159,6 +159,9 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
     def _on_update_available(self, version: str, url: str) -> None:
         """Show a non-intrusive notification in the status bar."""
+        if getattr(self, "_update_notified", False):
+            return
+        self._update_notified = True
         self._pending_update_url = url
         lbl = QLabel(f"Update available: <b>{version}</b>")
         btn = QPushButton(f"Install {version}")

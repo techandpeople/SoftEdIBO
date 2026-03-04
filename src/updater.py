@@ -27,7 +27,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QUrl, Signal
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest
 
-from src._version import GITHUB_REPO, __build_time__, __version__
+from src._version import GITHUB_REPO, __build_time__, __commit__, __version__
 
 _API_LATEST  = "https://api.github.com/repos/{repo}/releases/latest"
 _API_NIGHTLY = "https://api.github.com/repos/{repo}/releases/tags/nightly"
@@ -148,8 +148,10 @@ class AppUpdater(QObject):
         download_url = asset["browser_download_url"]
 
         if __version__ == "nightly":
-            # published_at never changes when a release is updated; updated_at does.
-            if __build_time__ and asset.get("updated_at", "") > __build_time__:
+            # Compare commit SHAs: target_commitish is the SHA the CI pushed from.
+            # Avoids false positives from build_time vs asset upload_time skew.
+            remote_sha = data.get("target_commitish", "")
+            if remote_sha and __commit__ and remote_sha != __commit__:
                 self.update_available.emit(tag, download_url)
         else:
             # Stable: only notify if the remote semver tag is strictly newer.
