@@ -20,13 +20,13 @@ is downloaded automatically on first build and cached for subsequent builds.
 
 ## Serial Protocol (newline-terminated JSON)
 
-**PC → Gateway:**
+**PC => Gateway:**
 ```json
 {"target":"AA:BB:CC:DD:EE:01","cmd":"inflate","chamber":0,"value":255,"target":1000}
 {"target":"FF:FF:FF:FF:FF:FF","cmd":"ping"}
 ```
 
-**Gateway → PC:**
+**Gateway => PC:**
 ```json
 {"source":"AA:BB:CC:DD:EE:01","type":"status","chamber":0,"pressure":2048}
 {"status":"gateway_ready","mac":"AA:BB:CC:DD:EE:00"}

@@ -1,7 +1,7 @@
 """SQLAlchemy-backed database for SoftEdIBO.
 
 Supports SQLite (default, local file) and PostgreSQL.
-Backend is selected via settings.yaml → database.backend.
+Backend is selected via settings.yaml => database.backend.
 """
 
 import logging
@@ -317,7 +317,7 @@ class Database:
                 )
 
     # ------------------------------------------------------------------
-    # Session assignments (robot unit → participant mapping)
+    # Session assignments (robot unit => participant mapping)
     # ------------------------------------------------------------------
 
     def save_assignment(self, assignment: SessionAssignment) -> None:
@@ -343,7 +343,7 @@ class Database:
                 conn.execute(_session_assignments.insert().values(**values))
 
     def get_session_assignments(self, session_id: str) -> list[SessionAssignment]:
-        """Return all robot-unit→participant assignments for a session."""
+        """Return all robot-unit=>participant assignments for a session."""
         import json
         with self._engine.connect() as conn:
             rows = conn.execute(

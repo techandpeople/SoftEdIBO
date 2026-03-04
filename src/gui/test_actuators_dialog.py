@@ -43,7 +43,7 @@ class TestActuatorsDialog(QDialog, Ui_TestActuatorsDialog):
         self._mac = mac
         self._gateway = gateway
         self._active = True
-        self._pressure_labels: dict[int, QLabel] = {}   # slot → label
+        self._pressure_labels: dict[int, QLabel] = {}   # slot => label
 
         self.setupUi(self)
         self.setWindowTitle(f"Test Actuators — {mac}")
@@ -103,7 +103,7 @@ class TestActuatorsDialog(QDialog, Ui_TestActuatorsDialog):
         return box
 
     # ------------------------------------------------------------------
-    # Pressure updates (gateway callback → signal → main thread)
+    # Pressure updates (gateway callback => signal => main thread)
     # ------------------------------------------------------------------
 
     def _on_gateway_message(self, data: dict) -> None:

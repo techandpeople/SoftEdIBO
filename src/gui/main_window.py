@@ -170,7 +170,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.statusBar().addPermanentWidget(btn)
 
     def _check_updates_manual(self) -> None:
-        """Triggered from Tools → Check for Updates…"""
+        """Triggered from Tools => Check for Updates…"""
         self.statusBar().showMessage("Checking for updates…", 4000)
         self._updater.check()
 

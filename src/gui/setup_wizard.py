@@ -68,7 +68,7 @@ class WelcomePage(QWizardPage):
             "<li>Each <b>air-chamber node</b></li>"
             "</ul>"
             "<p>Connect each device via USB before the corresponding step.</p>"
-            "<p>You can re-run this wizard at any time from <b>Tools → Flash Firmware…</b></p>"
+            "<p>You can re-run this wizard at any time from <b>Tools => Flash Firmware…</b></p>"
         ))
         layout.addStretch()
 
@@ -247,7 +247,7 @@ class DonePage(QWizardPage):
             "<p>Setup is complete.</p>"
             "<p>Click <b>Finish</b> to open the application.</p>"
             "<p>You can re-flash firmware at any time from "
-            "<b>Tools → Flash Firmware…</b></p>"
+            "<b>Tools => Flash Firmware…</b></p>"
         ))
         layout.addStretch()
 

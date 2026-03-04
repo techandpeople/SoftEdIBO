@@ -5,11 +5,11 @@
  * Bridges JSON commands from the PC (USB/serial) to remote ESP32 nodes via
  * ESP-NOW, and forwards replies from nodes back to the PC.
  *
- * PC → Gateway (serial, newline-terminated JSON):
+ * PC => Gateway (serial, newline-terminated JSON):
  *   {"target":"AA:BB:CC:DD:EE:01","cmd":"inflate","chamber":0,"value":255}
  *   {"target":"FF:FF:FF:FF:FF:FF","cmd":"ping"}   ← broadcast scan
  *
- * Gateway → PC (serial, newline-terminated JSON):
+ * Gateway => PC (serial, newline-terminated JSON):
  *   {"source":"AA:BB:CC:DD:EE:01","type":"status","chamber":0,"pressure":128}
  *   {"status":"gateway_ready","mac":"AA:BB:CC:DD:EE:00"}
  */

@@ -13,9 +13,9 @@ Typical flow
 1. ``AppUpdater.check()`` is called a few seconds after startup.
 2. GitHub API returns the latest release tag.
 3. If newer, ``update_available(version, url)`` is emitted.
-4. The user clicks "Update" → ``AppUpdater.download(url)`` starts.
+4. The user clicks "Update" => ``AppUpdater.download(url)`` starts.
 5. ``download_progress`` updates the UI.
-6. ``download_done`` fires → caller applies the update and restarts.
+6. ``download_done`` fires => caller applies the update and restarts.
 """
 
 import json
@@ -102,9 +102,9 @@ class AppUpdater(QObject):
     def check(self) -> None:
         """Async version check. Safe to call at startup — returns immediately.
 
-        - nightly → checks the ``nightly`` release, compares build timestamps.
-        - stable  → checks the latest stable release, compares semver.
-        - dev     → never updated.
+        - nightly => checks the ``nightly`` release, compares build timestamps.
+        - stable  => checks the latest stable release, compares semver.
+        - dev     => never updated.
         """
         if not _can_update() or not GITHUB_REPO or __version__ == "dev":
             return

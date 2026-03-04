@@ -37,7 +37,41 @@ for arg in "$@"; do
             exit 0
             ;;
         --nightly) NIGHTLY=true ;;
-        --*) echo "Unknown option: $arg" >&2; exit 1 ;;
+        --help|-h)
+            cat << 'EOF'
+Usage:
+  ./install.sh [OPTIONS] [APPIMAGE]
+
+Options:
+  --nightly     Install the latest nightly build instead of the stable release
+  --uninstall   Remove SoftEdIBO from the system
+  -h, --help    Show this help message
+
+Arguments:
+  APPIMAGE      Path to a local .AppImage file (skips download)
+
+Examples:
+  # Install latest stable release (downloads automatically):
+  curl -fsSL https://raw.githubusercontent.com/techandpeople/SoftEdIBO/master/install.sh | bash
+
+  # Install latest nightly build:
+  curl -fsSL https://raw.githubusercontent.com/techandpeople/SoftEdIBO/master/install.sh | bash -s -- --nightly
+
+  # Install from a local AppImage:
+  ./install.sh SoftEdIBO-x86_64.AppImage
+
+  # Uninstall:
+  ./install.sh --uninstall
+
+Installs to:
+  /opt/SoftEdIBO/SoftEdIBO.AppImage   AppImage
+  /usr/local/bin/softedibo             Launcher (no FUSE required)
+  ~/.local/share/applications/         Desktop entry
+  ~/.local/share/icons/                App icon
+EOF
+            exit 0
+            ;;
+        --*) echo "Unknown option: $arg. Try --help." >&2; exit 1 ;;
         *)   LOCAL_FILE="$arg" ;;
     esac
 done
@@ -75,7 +109,7 @@ echo "Installing from: $SRC"
 sudo mkdir -p "$INSTALL_DIR"
 sudo cp "$SRC" "$APPIMAGE_DEST"
 sudo chmod 755 "$APPIMAGE_DEST"
-echo "  → $APPIMAGE_DEST"
+echo "  => $APPIMAGE_DEST"
 
 # ── Wrapper script (no FUSE needed) ───────────────────────────────────────
 sudo tee "$BIN_LINK" > /dev/null << EOF
@@ -84,7 +118,7 @@ export APPIMAGE_EXTRACT_AND_RUN=1
 exec "$APPIMAGE_DEST" "\$@"
 EOF
 sudo chmod +x "$BIN_LINK"
-echo "  → launcher: $BIN_LINK"
+echo "  => launcher: $BIN_LINK"
 
 # ── Download icon ──────────────────────────────────────────────────────────
 trap 'rm -f "${TMP_APPIMAGE:-}"' EXIT
@@ -97,7 +131,7 @@ elif command -v wget &>/dev/null; then
 else
     ICON="application-x-executable"
 fi
-[[ "$ICON" == "softedibo" ]] && echo "  → icon: $ICON_FILE"
+[[ "$ICON" == "softedibo" ]] && echo "  => icon: $ICON_FILE"
 
 # ── Desktop entry ──────────────────────────────────────────────────────────
 mkdir -p "$(dirname "$DESKTOP_FILE")"
@@ -111,14 +145,14 @@ Terminal=false
 Type=Application
 Categories=Education;Science;
 EOF
-echo "  → desktop entry: $DESKTOP_FILE"
+echo "  => desktop entry: $DESKTOP_FILE"
 command -v update-desktop-database &>/dev/null && \
     update-desktop-database "$(dirname "$DESKTOP_FILE")" 2>/dev/null || true
 
 # ── Serial port permissions ────────────────────────────────────────────────
 if ! id -nG "$USER" | grep -qw dialout; then
     echo ""
-    echo "  → Adding $USER to 'dialout' for serial port access..."
+    echo "  => Adding $USER to 'dialout' for serial port access..."
     sudo usermod -aG dialout "$USER"
     echo "     Log out and back in (or run 'newgrp dialout') for this to take effect."
 fi

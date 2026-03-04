@@ -11,7 +11,7 @@ OUT_DIR="src/gui"
 for ui_file in "$UI_DIR"/*.ui; do
     base=$(basename "$ui_file" .ui)
     out="$OUT_DIR/ui_${base}.py"
-    echo "  $ui_file → $out"
+    echo "  $ui_file => $out"
     "$VENV" "$ui_file" -o "$out"
 done
 
