@@ -72,7 +72,7 @@ jobs:
       - name: Build gateway firmware
         run: |
           cd firmware/gateway
-          pio run
+          python -m platformio run
           python -m esptool --chip esp32 merge_bin \
             --flash_mode dio --flash_freq 40m --flash_size 4MB \
             -o firmware.bin \
@@ -83,7 +83,7 @@ jobs:
       - name: Build air_chamber_node firmware
         run: |
           cd firmware/air_chamber_node
-          pio run
+          python -m platformio run
           python -m esptool --chip esp32 merge_bin \
             --flash_mode dio --flash_freq 40m --flash_size 4MB \
             -o firmware.bin \
@@ -207,7 +207,7 @@ jobs:
         shell: bash
         run: |
           cd firmware/gateway
-          pio run
+          python -m platformio run
           python -m esptool --chip esp32 merge_bin \
             --flash_mode dio --flash_freq 40m --flash_size 4MB \
             -o firmware.bin \
@@ -219,7 +219,7 @@ jobs:
         shell: bash
         run: |
           cd firmware/air_chamber_node
-          pio run
+          python -m platformio run
           python -m esptool --chip esp32 merge_bin \
             --flash_mode dio --flash_freq 40m --flash_size 4MB \
             -o firmware.bin \
