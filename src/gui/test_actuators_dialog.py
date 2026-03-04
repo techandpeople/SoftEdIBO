@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-
 from src.gui.ui_test_actuators_dialog import Ui_TestActuatorsDialog
 from src.hardware.espnow_gateway import ESPNowGateway
 

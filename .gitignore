@@ -47,3 +47,8 @@ desktop.ini
 # Environment variables
 .env
 .env.*
+
+# PlatformIO build artifacts (keep firmware.bin at root of each firmware dir)
+firmware/**/.pio/
+firmware/**/libdeps/
+firmware/**/.pioenvs/
