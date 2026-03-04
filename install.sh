@@ -26,7 +26,7 @@ NIGHTLY=false
 LOCAL_FILE=""
 
 # ── Parse arguments ────────────────────────────────────────────────────────
-for arg in "${@:-}"; do
+for arg in "$@"; do
     case "$arg" in
         --uninstall)
             echo "Uninstalling SoftEdIBO..."
