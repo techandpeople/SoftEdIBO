@@ -47,7 +47,8 @@ main_a = Analysis(
     binaries=[],
     datas=[
         ("config/", "config/"),
-        ("firmware/", "firmware/"),
+        ("firmware/gateway/firmware.bin", "firmware/gateway"),
+        ("firmware/air_chamber_node/firmware.bin", "firmware/air_chamber_node"),
     ],
     hiddenimports=[
         *collect_submodules("src"),
@@ -97,6 +98,7 @@ esptool_a = Analysis(
     hiddenimports=[
         "esptool",
         "esptool.targets",
+        "esptool.targets.esp32",
         "esptool.loader",
         "esptool.cmds",
         "esptool.util",
