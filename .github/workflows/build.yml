@@ -59,6 +59,28 @@ jobs:
           printf '__version__ = "%s"\nGITHUB_REPO = "%s"\n__build_time__ = "%s"\n' \
             "$VERSION" "$REPO" "$BUILD_TIME" > src/_version.py
 
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Cache PlatformIO toolchain
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: ${{ runner.os }}-pio-${{ hashFiles('firmware/**/platformio.ini') }}
+          restore-keys: ${{ runner.os }}-pio-
+
+      - name: Build gateway firmware
+        run: |
+          cd firmware/gateway
+          pio run
+          cp .pio/build/esp32dev/firmware.bin firmware.bin
+
+      - name: Build air_chamber_node firmware
+        run: |
+          cd firmware/air_chamber_node
+          pio run
+          cp .pio/build/esp32dev/firmware.bin firmware.bin
+
       - name: Build with PyInstaller
         run: pyinstaller softedibo.spec
 
@@ -160,6 +182,30 @@ jobs:
           BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           printf '__version__ = "%s"\nGITHUB_REPO = "%s"\n__build_time__ = "%s"\n' \
             "$VERSION" "$REPO" "$BUILD_TIME" > src/_version.py
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Cache PlatformIO toolchain
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: ${{ runner.os }}-pio-${{ hashFiles('firmware/**/platformio.ini') }}
+          restore-keys: ${{ runner.os }}-pio-
+
+      - name: Build gateway firmware
+        shell: bash
+        run: |
+          cd firmware/gateway
+          pio run
+          cp .pio/build/esp32dev/firmware.bin firmware.bin
+
+      - name: Build air_chamber_node firmware
+        shell: bash
+        run: |
+          cd firmware/air_chamber_node
+          pio run
+          cp .pio/build/esp32dev/firmware.bin firmware.bin
 
       - name: Build with PyInstaller
         run: pyinstaller softedibo.spec

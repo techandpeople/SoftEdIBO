@@ -19,7 +19,11 @@ node_pinout:
   - 34
   sensor_type: capacitive_copper
 robots:
-  turtles: []
+  turtles:
+  - id: turtle-1
+    nodes: []
+  - id: turtle-2
+    nodes: []
   trees:
   - id: tree-1
     nodes: []
@@ -28,10 +32,6 @@ robots:
     nodes: []
     host: localhost
     port: 8596
-  - thymio_id: thymio-2
-    host: localhost
-    port: 8596
-    nodes: []
 database:
   backend: sqlite
   path: data/softedibo.db
