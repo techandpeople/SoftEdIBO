@@ -1,7 +1,51 @@
 # SoftEdIBO
 
-Soft-based robot platform for inclusive education.
+Soft-based robot platform for inclusive, embodied interaction.
 Developed at [LASIGE](https://www.lasige.pt/), Faculdade de Ciências, Universidade de Lisboa.
+
+SoftEdIBO controls soft robots equipped with inflatable air chambers.
+Participants interact by touching the robots, which respond through inflation and deflation.
+The system supports multiple robot types (Turtle, Tree, Thymio) and activity modes.
+
+---
+
+## Hardware requirements
+
+| Component | Quantity | Notes |
+|-----------|----------|-------|
+| ESP32-WROOM-32 (gateway) | 1 | Connected to PC via USB |
+| ESP32-WROOM-32 (air chamber nodes) | 1 per skin | Up to 3 chambers per node |
+| DRV8833 H-bridge | 2 per node | Inflate and deflate pumps |
+| XGZP6847 pressure sensor | 1 per chamber | Analog output (0–3.3 V) |
+| Solenoid valves | 2 per chamber | Inflate + deflate |
+
+Flash the [gateway firmware](firmware/gateway/) to the USB-connected ESP32
+and the [air chamber node firmware](firmware/air_chamber_node/) to each sensor/valve node.
+
+---
+
+## Architecture
+
+```
+PC ──USB──► Gateway (ESP32) ──ESP-NOW──► Node(s) (ESP32)
+                                            │
+                                     3 air chambers each
+                                     (inflate/deflate valves + pressure sensors)
+```
+
+**Software layers:**
+
+```
+SessionPanel
+  └── Activity (GroupTouch, Simulation, …)
+        └── Robot (Turtle / Tree / Thymio / Simulated)
+              └── Skin  (1 ESP32 node, 1–3 chambers)
+                    └── AirChamber  (pressure 0–100 %)
+```
+
+- **Activity** decides which robots participate and can replace real robots with simulated ones (`SimulationActivity`).
+- **Skin** is the basic tactile unit. Multiple skins can share one ESP32 node (up to 3 chambers total).
+- **Pressure** is expressed as **0–100 %** of the maximum pressure configured on each node.
 
 ---
 
@@ -52,6 +96,8 @@ On first launch, a setup wizard guides you through flashing the firmware to the 
 
 ## Development
 
+### Python application
+
 ```bash
 git clone https://github.com/techandpeople/SoftEdIBO.git
 cd SoftEdIBO
@@ -61,3 +107,30 @@ python scripts/run.py
 ```
 
 Requires Python 3.12+.
+
+### Firmware
+
+```bash
+# Gateway
+cd firmware/gateway && pio run --target upload
+
+# Air chamber node
+cd firmware/air_chamber_node && pio run --target upload
+```
+
+Requires [PlatformIO](https://platformio.org/).
+
+### Key source paths
+
+| Path | Description |
+|------|-------------|
+| `src/hardware/skin.py` | Skin model — groups 1–3 AirChambers on one ESP32 node |
+| `src/hardware/air_chamber.py` | AirChamber model — pressure 0–100 % |
+| `src/hardware/esp32_controller.py` | Real hardware controller (via ESP-NOW gateway) |
+| `src/hardware/simulated_controller.py` | Mock controller for simulation mode |
+| `src/robots/` | TurtleRobot, TreeRobot, ThymioRobot, SimulatedRobot |
+| `src/activities/` | Activity registry + GroupTouch + SimulationActivity |
+| `src/gui/monitor/` | Live pressure monitor widgets |
+| `config/settings.yaml` | Robot and hardware configuration |
+| `firmware/gateway/` | Gateway ESP32 firmware |
+| `firmware/air_chamber_node/` | Air chamber node ESP32 firmware |

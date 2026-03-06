@@ -1,5 +1,6 @@
 """Per-robot configuration and actuator test dialog."""
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -11,6 +12,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QScrollArea,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -25,9 +27,10 @@ from src.robots.turtle.turtle_robot import TurtleRobot
 class RobotConfigDialog(QDialog):
     """Dialog for editing a robot's hardware configuration and testing its actuators.
 
-    The top section shows editable fields loaded from ``settings.yaml``
-    (MAC addresses, skin IDs, chamber slots).  The bottom section provides
-    inflate/deflate buttons that operate on the live robot object.
+    The top section shows editable skin entries loaded from ``settings.yaml``
+    (skin ID, display name, MAC address, chamber slots).  The bottom section
+    provides a sequential actuator test that inflates then deflates each
+    chamber one at a time.
 
     Args:
         robot: Live robot instance.
@@ -46,7 +49,7 @@ class RobotConfigDialog(QDialog):
         self._settings = settings
 
         # Tracked widget entries for save
-        self._node_entries: list[dict] = []
+        self._skin_entries: list[dict] = []
         self._thymio_entries: list[dict] = []
 
         self.setWindowTitle(f"Configure: {robot.name}")
@@ -65,11 +68,11 @@ class RobotConfigDialog(QDialog):
         main_layout.addWidget(scroll)
 
         if isinstance(robot, TurtleRobot):
-            self._build_node_config("turtle")
-            self._build_turtle_test()
+            self._build_skin_config("turtle")
+            self._build_test_section()
         elif isinstance(robot, TreeRobot):
-            self._build_node_config("tree")
-            self._build_tree_test()
+            self._build_skin_config("tree")
+            self._build_test_section()
         elif isinstance(robot, ThymioRobot):
             self._build_thymio_config()
 
@@ -84,118 +87,125 @@ class RobotConfigDialog(QDialog):
         main_layout.addWidget(btn_box)
 
     # ------------------------------------------------------------------
-    # Node-based config (Turtle + Tree share the same YAML structure)
+    # Sequential actuator test
     # ------------------------------------------------------------------
 
-    def _build_node_config(self, robot_key: str) -> None:
+    def _run_sequential_test(self, btn: QPushButton) -> None:
+        """Inflate then deflate each chamber of each skin, one at a time."""
+        skins = getattr(self._robot, "skins", {})
+        steps: list[tuple] = [
+            (skin, slot)
+            for skin in skins.values()
+            for slot in sorted(skin.chambers)
+        ]
+        if not steps:
+            return
+
+        btn.setEnabled(False)
+        btn.setText("Testing…")
+        idx = [0]
+
+        def _inflate() -> None:
+            if idx[0] >= len(steps):
+                btn.setEnabled(True)
+                btn.setText("Test Actuators")
+                return
+            skin, slot = steps[idx[0]]
+            skin.inflate(slot)
+            QTimer.singleShot(500, _deflate)
+
+        def _deflate() -> None:
+            skin, slot = steps[idx[0]]
+            skin.deflate(slot)
+            idx[0] += 1
+            QTimer.singleShot(1000, _inflate)
+
+        _inflate()
+
+    # ------------------------------------------------------------------
+    # Skin config (Turtle + Tree share the same flat skins[] structure)
+    # ------------------------------------------------------------------
+
+    def _find_robot_cfg(self, robot_key: str) -> dict | None:
+        """Find the settings dict for self._robot by matching robot_id."""
+        yaml_key = {"turtle": "turtles", "tree": "trees"}[robot_key]
+        robots_list = self._settings.data.get("robots", {}).get(yaml_key, [])
+        for cfg in robots_list:
+            if cfg.get("id") == self._robot.robot_id:
+                return cfg
+        return None
+
+    def _build_skin_config(self, robot_key: str) -> None:
         config_group = QGroupBox("Configuration")
         config_layout = QVBoxLayout(config_group)
 
-        nodes = (
-            self._settings.data
-            .get("robots", {})
-            .get(robot_key, {})
-            .get("nodes", [])
+        # Robot ID row + inline test button
+        id_row = QHBoxLayout()
+        id_row.addWidget(QLabel(f"Robot ID: <b>{self._robot.robot_id}</b>"))
+        id_row.addStretch()
+        test_btn = QPushButton("Test Actuators")
+        test_btn.clicked.connect(
+            lambda _=False, b=test_btn: self._run_sequential_test(b)
         )
-        for node_cfg in nodes:
-            self._add_node_widgets(config_layout, node_cfg)
+        id_row.addWidget(test_btn)
+        config_layout.addLayout(id_row)
 
-        add_node_btn = QPushButton("+ Add Node")
-        add_node_btn.clicked.connect(
-            lambda: self._add_node_widgets(config_layout, None)
-        )
-        config_layout.addWidget(add_node_btn)
-
-        self._content_layout.addWidget(config_group)
-
-    def _add_node_widgets(
-        self, parent_layout: QVBoxLayout, node_cfg: dict | None
-    ) -> None:
-        mac = node_cfg["mac"] if node_cfg else ""
-        skins = node_cfg.get("skins", []) if node_cfg else []
-
-        node_group = QGroupBox(f"Node: {mac}")
-        node_outer = QVBoxLayout(node_group)
-
-        mac_row = QHBoxLayout()
-        mac_row.addWidget(QLabel("MAC:"))
-        mac_edit = QLineEdit(mac)
-        mac_edit.textChanged.connect(
-            lambda t, g=node_group: g.setTitle(f"Node: {t}")
-        )
-        mac_row.addWidget(mac_edit)
-        del_node_btn = QPushButton("Delete Node")
-        mac_row.addWidget(del_node_btn)
-        node_outer.addLayout(mac_row)
-
-        skin_container = QWidget()
-        skin_layout = QVBoxLayout(skin_container)
-        skin_layout.setContentsMargins(0, 0, 0, 0)
-        node_outer.addWidget(skin_container)
-
-        entry: dict = {
-            "mac_edit": mac_edit,
-            "group": node_group,
-            "skin_entries": [],
-            "skin_layout": skin_layout,
-            "deleted": False,
-        }
-
-        for skin_cfg in skins:
-            se = self._add_skin_widgets(skin_layout, skin_cfg)
-            entry["skin_entries"].append(se)
+        robot_cfg = self._find_robot_cfg(robot_key) or {}
+        for skin_cfg in robot_cfg.get("skins", []):
+            self._add_skin_widgets(config_layout, skin_cfg)
 
         add_skin_btn = QPushButton("+ Add Skin")
         add_skin_btn.clicked.connect(
-            lambda: entry["skin_entries"].append(
-                self._add_skin_widgets(entry["skin_layout"], None)
-            )
+            lambda: self._add_skin_widgets(config_layout, None)
         )
-        node_outer.addWidget(add_skin_btn)
+        config_layout.addWidget(add_skin_btn)
 
-        self._node_entries.append(entry)
-
-        def _delete_node() -> None:
-            entry["deleted"] = True
-            node_group.hide()
-
-        del_node_btn.clicked.connect(_delete_node)
-        parent_layout.addWidget(node_group)
+        self._content_layout.addWidget(config_group)
 
     def _add_skin_widgets(
         self, parent_layout: QVBoxLayout, skin_cfg: dict | None
-    ) -> dict:
-        skin_id = skin_cfg["skin_id"] if skin_cfg else ""
+    ) -> None:
+        skin_id = skin_cfg.get("skin_id", "") if skin_cfg else ""
+        name = skin_cfg.get("name", skin_id) if skin_cfg else ""
+        mac = skin_cfg.get("mac", "") if skin_cfg else ""
         active_slots = set(skin_cfg.get("slots", [])) if skin_cfg else set()
 
-        skin_group = QGroupBox(f"Skin: {skin_id}")
-        skin_layout = QVBoxLayout(skin_group)
+        skin_group = QGroupBox(f"Skin: {name or skin_id}")
+        form = QFormLayout(skin_group)
 
-        header = QHBoxLayout()
-        header.addWidget(QLabel("Skin ID:"))
-        id_edit = QLineEdit(skin_id)
-        id_edit.textChanged.connect(
+        skin_id_edit = QLineEdit(skin_id)
+        name_edit = QLineEdit(name)
+        name_edit.textChanged.connect(
             lambda t, g=skin_group: g.setTitle(f"Skin: {t}")
         )
-        header.addWidget(id_edit)
+        mac_edit = QLineEdit(mac)
+
+        form.addRow("Skin ID:", skin_id_edit)
+        form.addRow("Name:", name_edit)
+        form.addRow("MAC:", mac_edit)
 
         slot_checks: list[QCheckBox] = []
+        slot_row = QHBoxLayout()
         for slot in range(3):
             cb = QCheckBox(f"Slot {slot}")
             cb.setChecked(slot in active_slots)
-            header.addWidget(cb)
+            slot_row.addWidget(cb)
             slot_checks.append(cb)
+        slot_row.addStretch()
+        form.addRow("Slots:", slot_row)
 
-        del_btn = QPushButton("Delete")
-        header.addWidget(del_btn)
-        skin_layout.addLayout(header)
+        del_btn = QPushButton("Delete Skin")
+        form.addRow("", del_btn)
 
         entry: dict = {
-            "skin_id_edit": id_edit,
+            "skin_id_edit": skin_id_edit,
+            "name_edit": name_edit,
+            "mac_edit": mac_edit,
             "slot_checks": slot_checks,
             "group": skin_group,
             "deleted": False,
         }
+        self._skin_entries.append(entry)
 
         def _delete_skin() -> None:
             entry["deleted"] = True
@@ -203,108 +213,50 @@ class RobotConfigDialog(QDialog):
 
         del_btn.clicked.connect(_delete_skin)
         parent_layout.addWidget(skin_group)
-        return entry
 
-    def _collect_nodes(self) -> list[dict]:
-        nodes = []
-        for ne in self._node_entries:
-            if ne["deleted"]:
+    def _collect_skins(self) -> list[dict]:
+        skins = []
+        for se in self._skin_entries:
+            if se["deleted"]:
                 continue
-            mac = ne["mac_edit"].text().strip()
-            skins = []
-            for se in ne["skin_entries"]:
-                if se["deleted"]:
-                    continue
-                slots = [
-                    i for i, cb in enumerate(se["slot_checks"])
-                    if cb.isChecked()
-                ]
-                skin_id = se["skin_id_edit"].text().strip()
-                if skin_id and slots:
-                    skins.append({"skin_id": skin_id, "slots": slots})
-            if mac:
-                nodes.append({"mac": mac, "skins": skins})
-        return nodes
+            skin_id = se["skin_id_edit"].text().strip()
+            name = se["name_edit"].text().strip() or skin_id
+            mac = se["mac_edit"].text().strip()
+            slots = [
+                i for i, cb in enumerate(se["slot_checks"])
+                if cb.isChecked()
+            ]
+            if skin_id and mac and slots:
+                skins.append({"skin_id": skin_id, "name": name, "mac": mac, "slots": slots})
+        return skins
 
     # ------------------------------------------------------------------
-    # Turtle test
+    # Test section (Turtle + Tree)
     # ------------------------------------------------------------------
 
-    def _build_turtle_test(self) -> None:
+    def _build_test_section(self) -> None:
         test_group = QGroupBox("Test Actuators")
         test_layout = QVBoxLayout(test_group)
 
-        if not isinstance(self._robot, TurtleRobot) or not self._robot.skins:
+        skins = getattr(self._robot, "skins", {})
+        if not skins:
             test_layout.addWidget(
                 QLabel("No skins available (robot not connected).")
             )
         else:
-            for skin_id, skin in self._robot.skins.items():
-                skin_box = QGroupBox(skin_id)
-                skin_box_layout = QVBoxLayout(skin_box)
-
-                all_row = QHBoxLayout()
-                inflate_all_btn = QPushButton("Inflate All")
-                deflate_all_btn = QPushButton("Deflate All")
-                inflate_all_btn.clicked.connect(
-                    lambda _=False, s=skin: s.inflate()
+            # List skins and their chambers for reference
+            for skin in skins.values():
+                slots = sorted(skin.chambers)
+                slot_str = ", ".join(f"Slot {s}" for s in slots)
+                test_layout.addWidget(
+                    QLabel(f"  {skin.name}: {slot_str}")
                 )
-                deflate_all_btn.clicked.connect(
-                    lambda _=False, s=skin: s.deflate()
-                )
-                all_row.addWidget(inflate_all_btn)
-                all_row.addWidget(deflate_all_btn)
-                all_row.addStretch()
-                skin_box_layout.addLayout(all_row)
 
-                for slot in sorted(skin.chambers.keys()):
-                    slot_row = QHBoxLayout()
-                    slot_row.addWidget(QLabel(f"  Chamber {slot}:"))
-                    inf_btn = QPushButton("Inflate")
-                    def_btn = QPushButton("Deflate")
-                    inf_btn.clicked.connect(
-                        lambda _=False, s=skin, sl=slot: s.inflate(sl)
-                    )
-                    def_btn.clicked.connect(
-                        lambda _=False, s=skin, sl=slot: s.deflate(sl)
-                    )
-                    slot_row.addWidget(inf_btn)
-                    slot_row.addWidget(def_btn)
-                    slot_row.addStretch()
-                    skin_box_layout.addLayout(slot_row)
-
-                test_layout.addWidget(skin_box)
-
-        self._content_layout.addWidget(test_group)
-
-    # ------------------------------------------------------------------
-    # Tree test
-    # ------------------------------------------------------------------
-
-    def _build_tree_test(self) -> None:
-        test_group = QGroupBox("Test Actuators")
-        test_layout = QVBoxLayout(test_group)
-
-        if not isinstance(self._robot, TreeRobot) or not self._robot.branches:
-            test_layout.addWidget(
-                QLabel("No branches available (robot not connected).")
+            run_btn = QPushButton("Test Actuators")
+            run_btn.clicked.connect(
+                lambda _=False, b=run_btn: self._run_sequential_test(b)
             )
-        else:
-            for branch_id, branch in self._robot.branches.items():
-                row = QHBoxLayout()
-                row.addWidget(QLabel(f"Branch {branch_id}:"))
-                inf_btn = QPushButton("Inflate")
-                def_btn = QPushButton("Deflate")
-                inf_btn.clicked.connect(
-                    lambda _=False, b=branch: b.inflate()
-                )
-                def_btn.clicked.connect(
-                    lambda _=False, b=branch: b.deflate()
-                )
-                row.addWidget(inf_btn)
-                row.addWidget(def_btn)
-                row.addStretch()
-                test_layout.addLayout(row)
+            test_layout.addWidget(run_btn)
 
         self._content_layout.addWidget(test_group)
 
@@ -332,6 +284,8 @@ class RobotConfigDialog(QDialog):
         self, parent_layout: QVBoxLayout, thymio_cfg: dict | None
     ) -> None:
         thymio_id = thymio_cfg["thymio_id"] if thymio_cfg else ""
+        host = thymio_cfg.get("host", "localhost") if thymio_cfg else "localhost"
+        port = int(thymio_cfg.get("port", 8596)) if thymio_cfg else 8596
         mac = thymio_cfg.get("node_mac", "") if thymio_cfg else ""
         skins_cfg = thymio_cfg.get("skins", []) if thymio_cfg else []
 
@@ -342,15 +296,33 @@ class RobotConfigDialog(QDialog):
         id_edit.textChanged.connect(
             lambda t, g=box: g.setTitle(f"Thymio: {t}")
         )
+        host_edit = QLineEdit(host)
+        port_spin = QSpinBox()
+        port_spin.setRange(1, 65535)
+        port_spin.setValue(port)
         mac_edit = QLineEdit(mac)
+
         form.addRow("Thymio ID:", id_edit)
+        form.addRow("Host:", host_edit)
+        form.addRow("Port:", port_spin)
         form.addRow("Node MAC:", mac_edit)
+
+        # Test button only for the robot currently open
+        is_current = thymio_cfg and thymio_cfg.get("thymio_id") == self._robot.robot_id
+        if is_current:
+            test_btn = QPushButton("Test Actuators")
+            test_btn.clicked.connect(
+                lambda _=False, b=test_btn: self._run_sequential_test(b)
+            )
+            form.addRow("", test_btn)
 
         del_btn = QPushButton("Delete")
         form.addRow("", del_btn)
 
         entry: dict = {
             "id_edit": id_edit,
+            "host_edit": host_edit,
+            "port_spin": port_spin,
             "mac_edit": mac_edit,
             "group": box,
             "skins_cfg": skins_cfg,
@@ -371,10 +343,14 @@ class RobotConfigDialog(QDialog):
             if te["deleted"]:
                 continue
             thymio_id = te["id_edit"].text().strip()
+            host = te["host_edit"].text().strip() or "localhost"
+            port = te["port_spin"].value()
             mac = te["mac_edit"].text().strip()
             if thymio_id:
                 thymios.append({
                     "thymio_id": thymio_id,
+                    "host": host,
+                    "port": port,
                     "node_mac": mac,
                     "skins": te["skins_cfg"],
                 })
@@ -390,9 +366,13 @@ class RobotConfigDialog(QDialog):
         robots_data = data.setdefault("robots", {})
 
         if isinstance(self._robot, TurtleRobot):
-            robots_data["turtle"] = {"nodes": self._collect_nodes()}
+            robot_cfg = self._find_robot_cfg("turtle")
+            if robot_cfg is not None:
+                robot_cfg["skins"] = self._collect_skins()
         elif isinstance(self._robot, TreeRobot):
-            robots_data["tree"] = {"nodes": self._collect_nodes()}
+            robot_cfg = self._find_robot_cfg("tree")
+            if robot_cfg is not None:
+                robot_cfg["skins"] = self._collect_skins()
         elif isinstance(self._robot, ThymioRobot):
             robots_data["thymios"] = self._collect_thymios()
 

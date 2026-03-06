@@ -15,21 +15,17 @@ from PySide6.QtWidgets import (
 
 from src.data.models import ParticipantRecord, SessionAssignment
 from src.robots.base_robot import BaseRobot
-from src.robots.tree.tree_robot import TreeRobot
-from src.robots.turtle.turtle_robot import TurtleRobot
 
 
 def _units_for_robot(robot: BaseRobot) -> list[str]:
     """Return the list of assignable unit IDs for a robot.
 
-    - TurtleRobot => skin IDs (e.g. "turtle_skin_6")
-    - TreeRobot   => branch IDs as strings (e.g. "branch-0")
-    - Other       => single unit with the robot's own ID
+    - TurtleRobot / TreeRobot / ThymioRobot => skin IDs
+    - Other => single unit with the robot's own ID
     """
-    if isinstance(robot, TurtleRobot):
-        return list(robot.skins.keys())
-    if isinstance(robot, TreeRobot):
-        return [f"branch-{bid}" for bid in sorted(robot.branches.keys())]
+    skins = getattr(robot, "skins", None)
+    if skins:
+        return list(skins.keys())
     return [robot.robot_id]
 
 

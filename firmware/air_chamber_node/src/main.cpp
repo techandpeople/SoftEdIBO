@@ -7,14 +7,14 @@
  * the gateway.
  *
  * Commands received (ESP-NOW, newline-terminated JSON stripped by gateway):
- *   {"cmd":"inflate","chamber":0,"value":200,"target":1000}
- *   {"cmd":"deflate","chamber":1}
- *   {"cmd":"stop"}            ← all chambers
- *   {"cmd":"stop","chamber":2}
+ *   {"cmd":"inflate","chamber":0,"delta":20}        ← inflate by 20% of max
+ *   {"cmd":"deflate","chamber":1,"delta":20}        ← deflate by 20% of max
+ *   {"cmd":"set_pressure","chamber":0,"value":75}   ← absolute target 75% of max
+ *   {"cmd":"hold","chamber":2}                      ← freeze chamber at current pressure
  *   {"cmd":"ping"}
  *
  * Status sent back (ESP-NOW => gateway, every STATUS_REPORT_MS):
- *   {"type":"status","chamber":0,"pressure":2048}
+ *   {"type":"status","chamber":0,"pressure":75}     ← pressure as % of MAX_PRESSURE_ADC
  */
 
 #include <Arduino.h>
@@ -116,13 +116,13 @@ static void stopChamber(int n) {
     chambers[n] = Chamber{};
 }
 
-static void sendStatus(int chamber, int pressure) {
+static void sendStatus(int chamber, int pressure_adc) {
     if (!gatewayKnown) return;
-    // Fixed format — snprintf avoids heap allocation (no ArduinoJson needed)
+    int pct = pressure_adc * 100 / MAX_PRESSURE_ADC;
     char buf[48];
     int len = snprintf(buf, sizeof(buf),
                        "{\"type\":\"status\",\"chamber\":%d,\"pressure\":%d}",
-                       chamber, pressure);
+                       chamber, pct);
     esp_now_send(gatewayMac, reinterpret_cast<uint8_t*>(buf), len);
 }
 
@@ -201,27 +201,45 @@ static void onReceived(const uint8_t* mac_addr,
     if (strcmp(cmd, "inflate") == 0) {
         int n = doc["chamber"] | -1;
         if (n < 0 || n > 2) return;
-        uint8_t duty   = doc["value"]  | DEFAULT_INFLATE_DUTY;
-        int     target = doc["target"] | MAX_PRESSURE_ADC;
-        cmdInflate(n, duty, target);
+        int delta_pct = doc["delta"] | 10;
+        int current   = readPressure(PSENSOR_PINS[n]);
+        int delta_adc = delta_pct * MAX_PRESSURE_ADC / 100;
+        int target    = min(current + delta_adc, MAX_PRESSURE_ADC);
+        cmdInflate(n, DEFAULT_INFLATE_DUTY, target);
         return;
     }
 
     if (strcmp(cmd, "deflate") == 0) {
         int n = doc["chamber"] | -1;
         if (n < 0 || n > 2) return;
-        int target = doc["target"] | MIN_PRESSURE_ADC;
+        int delta_pct = doc["delta"] | 10;
+        int current   = readPressure(PSENSOR_PINS[n]);
+        int delta_adc = delta_pct * MAX_PRESSURE_ADC / 100;
+        int target    = max(current - delta_adc, 0);
         cmdDeflate(n, target);
         return;
     }
 
-    if (strcmp(cmd, "stop") == 0) {
-        if (doc["chamber"].is<int>()) {
-            int n = doc["chamber"] | -1;
-            if (n >= 0 && n <= 2) cmdStop(n);
-        } else {
-            for (int i = 0; i < 3; i++) cmdStop(i);
-        }
+    if (strcmp(cmd, "set_pressure") == 0) {
+        int n = doc["chamber"] | -1;
+        if (n < 0 || n > 2) return;
+        int value_pct = doc["value"] | 0;
+        int target    = value_pct * MAX_PRESSURE_ADC / 100;
+        target        = max(0, min(target, MAX_PRESSURE_ADC));
+        int current   = readPressure(PSENSOR_PINS[n]);
+        if (current < target)
+            cmdInflate(n, DEFAULT_INFLATE_DUTY, target);
+        else if (current > target)
+            cmdDeflate(n, target);
+        return;
+    }
+
+    if (strcmp(cmd, "hold") == 0) {
+        int n = doc["chamber"] | -1;
+        if (n < 0 || n > 2) return;
+        cmdStop(n);
+        recalcPump1();
+        recalcPump2();
         return;
     }
 }

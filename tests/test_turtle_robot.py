@@ -10,22 +10,12 @@ def _make_turtle():
     type(gateway).is_connected = PropertyMock(return_value=True)
     gateway.send.return_value = True
 
-    node_configs = [
-        {
-            "mac": "AA:BB:CC:DD:EE:01",
-            "skins": [
-                {"skin_id": "skin_full", "slots": [0, 1, 2]},
-            ],
-        },
-        {
-            "mac": "AA:BB:CC:DD:EE:02",
-            "skins": [
-                {"skin_id": "skin_small_a", "slots": [0]},
-                {"skin_id": "skin_small_b", "slots": [1, 2]},
-            ],
-        },
+    skin_configs = [
+        {"skin_id": "skin_full", "mac": "AA:BB:CC:DD:EE:01", "slots": [0, 1, 2]},
+        {"skin_id": "skin_small_a", "mac": "AA:BB:CC:DD:EE:02", "slots": [0]},
+        {"skin_id": "skin_small_b", "mac": "AA:BB:CC:DD:EE:02", "slots": [1, 2]},
     ]
-    turtle = TurtleRobot("turtle-1", gateway, node_configs)
+    turtle = TurtleRobot("turtle-1", gateway, skin_configs)
     return turtle, gateway
 
 

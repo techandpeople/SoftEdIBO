@@ -64,6 +64,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
         self._home_panel.navigate_to.connect(self._on_navigate)
         self._session_panel.session_started.connect(self._home_panel.set_session_status)
+        self._session_panel.session_started.connect(lambda _: self._on_navigate("Session"))
         self._session_panel.session_stopped.connect(lambda: self._home_panel.set_session_status(None))
         self._session_panel.session_finished.connect(self._data_panel.refresh)
         self._robot_panel.gateway_changed.connect(self._home_panel.set_gateway_status)
@@ -86,6 +87,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             lambda msg: self.statusBar().showMessage(f"Update error: {msg}", 6000)
         )
         self.setWindowTitle(f"SoftEdIBO  {__version__}")
+        self.statusBar().show()  # keep bar always visible to prevent layout shifts
         QTimer.singleShot(5000, self._updater.check)
 
     # ------------------------------------------------------------------
@@ -97,20 +99,20 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         robots: list[BaseRobot] = []
         robot_data = self._settings.data.get("robots", {})
 
-        # Turtles — one TurtleRobot per entry, each aggregating its nodes
+        # Turtles — one TurtleRobot per entry
         for turtle_cfg in robot_data.get("turtles", []):
-            nodes = turtle_cfg.get("nodes", [])
-            if nodes:
+            skin_cfgs = turtle_cfg.get("skins", [])
+            if skin_cfgs:
                 robots.append(
-                    TurtleRobot(turtle_cfg.get("id", "turtle"), self._gateway, nodes)
+                    TurtleRobot(turtle_cfg.get("id", "turtle"), self._gateway, skin_cfgs)
                 )
 
-        # Trees — one TreeRobot per entry, each aggregating its nodes
+        # Trees — one TreeRobot per entry
         for tree_cfg in robot_data.get("trees", []):
-            nodes = tree_cfg.get("nodes", [])
-            if nodes:
+            skin_cfgs = tree_cfg.get("skins", [])
+            if skin_cfgs:
                 robots.append(
-                    TreeRobot(tree_cfg.get("id", "tree"), self._gateway, nodes)
+                    TreeRobot(tree_cfg.get("id", "tree"), self._gateway, skin_cfgs)
                 )
 
         # Thymios — one ThymioRobot per entry, each with its own host/port
@@ -120,6 +122,8 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                     thymio_cfg["thymio_id"],
                     thymio_cfg.get("host", "localhost"),
                     int(thymio_cfg.get("port", 8596)),
+                    gateway=self._gateway,
+                    skin_configs=thymio_cfg.get("skins", []),
                 )
             )
 
