@@ -5,12 +5,15 @@ from datetime import datetime
 from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import QDialog, QMessageBox, QWidget
 
+from src.activities import get_activity
+from src.activities.base_activity import BaseActivity
 from src.config.settings import Settings
 from src.data import last_assignments as last_asgn
 from src.data.database import Database
 from src.data.models import InteractionEvent, SessionRecord
 from src.gui.assignment_dialog import AssignmentDialog
 from src.gui.session_setup_dialog import SessionSetupDialog
+from src.gui.monitor import RobotMonitorPanel
 from src.gui.ui_session_panel import Ui_SessionPanel
 from src.robots.base_robot import BaseRobot
 
@@ -37,10 +40,17 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         self._db = db
         self._available_robots: list[BaseRobot] = []
         self._current_record: SessionRecord | None = None
+        self._current_activity: BaseActivity | None = None
+        self._skin_participant: dict[str, str] = {}  # skin_id -> participant_id
 
         self.new_session_btn.clicked.connect(self._open_setup_dialog)
         self.pause_btn.clicked.connect(self._on_pause)
         self.stop_btn.clicked.connect(self._on_stop)
+
+        self._monitor = RobotMonitorPanel()
+        self._monitor.touch_event.connect(self._on_touch_event)
+        self.verticalLayout.removeItem(self.verticalSpacer)
+        self.verticalLayout.addWidget(self._monitor)
 
         QTimer.singleShot(0, self._check_for_resume)
 
@@ -104,6 +114,19 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         ))
         self.session_started.emit(record.session_id)
 
+        last_path = Settings.ROOT / "data" / "last_assignments.json"
+        last_data = last_asgn.load(last_path)
+        if last_data and last_data.get("session_id") == record.session_id:
+            ids = set(last_data.get("robot_ids", []))
+            session_robots = [r for r in self._available_robots if r.robot_id in ids]
+        else:
+            session_robots = []
+        self._current_activity = get_activity(record.activity_name)
+        if self._current_activity is not None:
+            session_robots = self._current_activity.prepare_robots(session_robots)
+        self._monitor.set_robots(session_robots)
+        self._build_skin_participant_map(record.session_id)
+
     def _open_setup_dialog(self) -> None:
         """Open the session setup dialog and start a new session."""
         dialog = SessionSetupDialog(self._available_robots, self._db, parent=self)
@@ -119,9 +142,9 @@ class SessionPanel(QWidget, Ui_SessionPanel):
             return
 
         # Open assignment dialog if there are robots and participants to assign
+        last_path = Settings.ROOT / "data" / "last_assignments.json"
         assignments = []
         if robots and participants:
-            last_path = Settings.ROOT / "data" / "last_assignments.json"
             last_data = last_asgn.load(last_path)
             prefill = []
             if last_data and last_asgn.should_prefill(
@@ -139,12 +162,15 @@ class SessionPanel(QWidget, Ui_SessionPanel):
             if assign_dlg.exec() != QDialog.DialogCode.Accepted:
                 return
             assignments = assign_dlg.assignments
-            last_asgn.save(
-                last_path,
-                [r.robot_id for r in robots],
-                [p.participant_id for p in participants],
-                assignments,
-            )
+
+        # Always persist session robots so resume can filter correctly
+        last_asgn.save(
+            last_path,
+            [r.robot_id for r in robots],
+            [p.participant_id for p in participants],
+            assignments,
+            session_id=session_id,
+        )
 
         start_time = datetime.now()
         self._current_record = SessionRecord(
@@ -182,7 +208,32 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         self.pause_btn.setEnabled(True)
         self.stop_btn.setEnabled(True)
 
+        self._current_activity = activity
+        robots = activity.prepare_robots(robots)
         self.session_started.emit(session_id)
+        self._monitor.set_robots(robots)
+        self._build_skin_participant_map(session_id)
+
+    def _build_skin_participant_map(self, session_id: str) -> None:
+        """Build a skin_id → participant_id lookup from session assignments."""
+        self._skin_participant = {}
+        for assignment in self._db.get_session_assignments(session_id):
+            for skin_id in assignment.unit_ids:
+                self._skin_participant[skin_id] = assignment.participant_id
+
+    def _on_touch_event(self, skin_id: str, chamber_id: int, action: str) -> None:
+        """Log a touch interaction attributed to the participant assigned to the skin."""
+        if self._current_record is None:
+            return
+        participant_id = self._skin_participant.get(skin_id, "unknown")
+        self._db.log_event(InteractionEvent(
+            session_id=self._current_record.session_id,
+            participant_id=participant_id,
+            type="touch",
+            action=action,
+            target=f"{skin_id}:{chamber_id}",
+            timestamp=datetime.now(),
+        ))
 
     def _on_pause(self) -> None:
         """Toggle between paused and running state, logging a session event."""
@@ -190,10 +241,16 @@ class SessionPanel(QWidget, Ui_SessionPanel):
             action = "pause"
             self.pause_btn.setText("Resume")
             self.status_label.setText("Status: Paused")
+            if self._current_activity is not None:
+                self._current_activity.pause()
+            self._monitor.set_paused(True)
         else:
             action = "resume"
             self.pause_btn.setText("Pause")
             self.status_label.setText("Status: Running")
+            if self._current_activity is not None:
+                self._current_activity.resume()
+            self._monitor.set_paused(False)
 
         if self._current_record is not None:
             self._db.log_event(InteractionEvent(
@@ -229,5 +286,11 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         self.pause_btn.setEnabled(False)
         self.stop_btn.setEnabled(False)
 
+        if self._current_activity is not None:
+            self._current_activity.stop()
+            self._current_activity = None
+
         self.session_finished.emit()
         self.session_stopped.emit()
+        self._monitor.set_robots([])
+        self._skin_participant = {}

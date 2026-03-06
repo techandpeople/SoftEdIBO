@@ -35,32 +35,50 @@ pio run --target upload
 
 | Constant | Default | Description |
 |----------|---------|-------------|
-| `MAX_PRESSURE_ADC` | 1500 | ADC limit — burst protection |
-| `MIN_PRESSURE_ADC` | 200  | ADC threshold for "empty" |
-| `DEFAULT_INFLATE_DUTY` | 255 | Pump PWM when `value` omitted |
+| `MAX_PRESSURE_ADC` | 1500 | ADC hard cap — burst protection. All pressure % values are relative to this. |
+| `MIN_PRESSURE_ADC` | 200  | ADC threshold treated as "empty" |
+| `DEFAULT_INFLATE_DUTY` | 255 | Pump PWM duty (0–255) used for inflate/set_pressure commands |
 | `PRESSURE_CHECK_MS` | 200 | Safety check interval (ms) |
-| `STATUS_REPORT_MS` | 500 | Status broadcast interval (ms) |
+| `STATUS_REPORT_MS` | 500 | Pressure status broadcast interval (ms) |
 | `VALVE_SETTLE_MS` | 20 | Pause after valve toggle (ms) |
-| `PUMP_PWM_FREQ` | 20000 | Pump PWM frequency (Hz) |
+| `PUMP_PWM_FREQ` | 20000 | Pump PWM frequency (Hz) — above audible range |
 
-Adjust `MAX_PRESSURE_ADC` and `MIN_PRESSURE_ADC` after measuring sensor
-output at known pressures with your specific voltage divider circuit.
+Calibrate `MAX_PRESSURE_ADC` after measuring sensor output at your target maximum pressure.
+This value is the single safety boundary enforced in hardware — the PC cannot exceed it
+regardless of what commands it sends.
 
 ## ESP-NOW Protocol
 
-Commands received from gateway (gateway strips its own `"target"` field):
+All pressure values exchanged with the PC are in **percent (0–100)** of `MAX_PRESSURE_ADC`.
+The node converts internally to ADC units; the PC never needs to know raw ADC values.
+
+### Commands received from gateway
+
+The gateway strips its own `"target"` field before forwarding.
 
 | `cmd` | Fields | Description |
 |-------|--------|-------------|
-| `inflate` | `chamber` (0-2), `value` (0-255), `target` (ADC) | Inflate until `target` pressure |
-| `deflate` | `chamber` (0-2), `target` (ADC) | Deflate until `target` pressure |
-| `stop` | `chamber` (optional) | Stop one or all chambers |
+| `inflate` | `chamber` (0–2), `delta` (0–100, default 10) | Inflate by `delta`% relative to current pressure |
+| `deflate` | `chamber` (0–2), `delta` (0–100, default 10) | Deflate by `delta`% relative to current pressure |
+| `set_pressure` | `chamber` (0–2), `value` (0–100) | Inflate or deflate to an absolute target of `value`% |
+| `hold` | `chamber` (0–2) | Stop pump and close both valves — freeze at current pressure |
 | `ping` | — | Responds `{"type":"pong"}` |
 
-Status sent to gateway every `STATUS_REPORT_MS`:
+#### Examples
 ```json
-{"type":"status","chamber":0,"pressure":2048}
+{"cmd":"inflate","chamber":0,"delta":20}
+{"cmd":"deflate","chamber":1,"delta":15}
+{"cmd":"set_pressure","chamber":2,"value":75}
+{"cmd":"hold","chamber":0}
 ```
+
+### Status sent to gateway
+
+Broadcast every `STATUS_REPORT_MS` (500 ms) for all 3 chambers:
+```json
+{"type":"status","chamber":0,"pressure":75}
+```
+`pressure` is current ADC reading expressed as `current_adc * 100 / MAX_PRESSURE_ADC`.
 
 ## Behaviour
 

@@ -18,7 +18,8 @@ class AirChamber:
         self.chamber_id = chamber_id
         self.esp32_mac = esp32_mac
         self._state = ChamberState.IDLE
-        self._pressure: int = 0  # 0-255
+        self._pressure: int = 0         # 0-100 (% of max), current measured value
+        self._target_pressure: int = 0  # 0-100 (% of max), commanded target
 
     @property
     def state(self) -> ChamberState:
@@ -31,15 +32,24 @@ class AirChamber:
 
     @property
     def pressure(self) -> int:
-        """Get current pressure level (0-255)."""
+        """Get current pressure level (0-100 %)."""
         return self._pressure
 
     @pressure.setter
     def pressure(self, value: int) -> None:
-        self._pressure = max(0, min(255, value))
+        self._pressure = max(0, min(100, value))
+
+    @property
+    def target_pressure(self) -> int:
+        """Get commanded target pressure (0-100 %)."""
+        return self._target_pressure
+
+    @target_pressure.setter
+    def target_pressure(self, value: int) -> None:
+        self._target_pressure = max(0, min(100, value))
 
     def __repr__(self) -> str:
         return (
             f"AirChamber(id={self.chamber_id}, "
-            f"state={self._state.value}, pressure={self._pressure})"
+            f"state={self._state.value}, pressure={self._pressure}%)"
         )

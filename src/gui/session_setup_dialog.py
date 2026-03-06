@@ -3,17 +3,12 @@
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDialog, QListWidgetItem, QWidget
 
+from src.activities import ACTIVITIES
 from src.activities.base_activity import BaseActivity
-from src.activities.group_touch import GroupTouchActivity
 from src.data.database import Database
 from src.data.models import ParticipantRecord
 from src.gui.ui_session_setup_dialog import Ui_SessionSetupDialog
 from src.robots.base_robot import BaseRobot
-
-# All activities available for selection, in display order.
-_ACTIVITIES: list[BaseActivity] = [
-    GroupTouchActivity(),
-]
 
 
 class SessionSetupDialog(QDialog, Ui_SessionSetupDialog):
@@ -36,7 +31,7 @@ class SessionSetupDialog(QDialog, Ui_SessionSetupDialog):
 
         self._robots = robots
 
-        for activity in _ACTIVITIES:
+        for activity in ACTIVITIES:
             self.activity_combo.addItem(activity.name, userData=activity)
 
         self.activity_combo.currentIndexChanged.connect(self._on_activity_changed)
