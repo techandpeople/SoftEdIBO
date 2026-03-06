@@ -46,5 +46,11 @@ class BaseRobot(ABC):
         """Get detailed status data from the robot."""
         ...
 
+    def pause(self) -> None:
+        """Freeze all chambers at current pressure. Override for hardware-specific behaviour."""
+
+    def resume(self) -> None:
+        """Allow new commands after a pause. Override if needed."""
+
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(id={self.robot_id!r}, status={self._status.value})"

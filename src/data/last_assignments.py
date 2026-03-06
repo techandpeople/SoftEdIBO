@@ -41,10 +41,12 @@ def save(
     robot_ids: list[str],
     participant_ids: list[str],
     assignments: list[SessionAssignment],
+    session_id: str = "",
 ) -> None:
     """Persist current assignments to *path*."""
     path.parent.mkdir(parents=True, exist_ok=True)
     data = {
+        "session_id": session_id,
         "robot_ids": robot_ids,
         "participant_ids": participant_ids,
         "assignments": [

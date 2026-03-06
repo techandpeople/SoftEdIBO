@@ -28,6 +28,14 @@ class BaseActivity(ABC):
         self.name = name
         self.description = description
 
+    def prepare_robots(self, robots: list[BaseRobot]) -> list[BaseRobot]:
+        """Prepare robots for this activity before a session starts.
+
+        Override to substitute or wrap robots (e.g. with mock hardware).
+        Default: return the list unchanged.
+        """
+        return robots
+
     def setup(self, session: "Session", robots: list[BaseRobot]) -> None:
         """Validate robot types and delegate to :meth:`_setup`.
 
@@ -51,6 +59,12 @@ class BaseActivity(ABC):
     def start(self) -> None:
         """Start the activity."""
         ...
+
+    def pause(self) -> None:
+        """Pause the activity. Default: no-op."""
+
+    def resume(self) -> None:
+        """Resume the activity after a pause. Default: no-op."""
 
     @abstractmethod
     def stop(self) -> None:

@@ -20,17 +20,25 @@ is downloaded automatically on first build and cached for subsequent builds.
 
 ## Serial Protocol (newline-terminated JSON)
 
-**PC => Gateway:**
+**PC => Gateway** — every command must include a `"target"` MAC:
 ```json
-{"target":"AA:BB:CC:DD:EE:01","cmd":"inflate","chamber":0,"value":255,"target":1000}
+{"target":"AA:BB:CC:DD:EE:01","cmd":"inflate","chamber":0,"delta":20}
+{"target":"AA:BB:CC:DD:EE:01","cmd":"deflate","chamber":1,"delta":15}
+{"target":"AA:BB:CC:DD:EE:01","cmd":"set_pressure","chamber":2,"value":75}
+{"target":"AA:BB:CC:DD:EE:01","cmd":"hold","chamber":0}
 {"target":"FF:FF:FF:FF:FF:FF","cmd":"ping"}
 ```
 
-**Gateway => PC:**
+The gateway strips `"target"` before forwarding so nodes receive only the command fields.
+
+**Gateway => PC** — every message from a node gets a `"source"` MAC added:
 ```json
-{"source":"AA:BB:CC:DD:EE:01","type":"status","chamber":0,"pressure":2048}
+{"source":"AA:BB:CC:DD:EE:01","type":"status","chamber":0,"pressure":75}
+{"source":"AA:BB:CC:DD:EE:01","type":"pong"}
 {"status":"gateway_ready","mac":"AA:BB:CC:DD:EE:00"}
 ```
+
+All `"pressure"` values are **0–100 %** of the node's configured maximum pressure.
 
 Maximum line length: **256 bytes** (`SERIAL_BUF_LEN` constant).
 

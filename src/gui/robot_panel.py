@@ -219,28 +219,65 @@ class RobotPanel(QWidget, Ui_RobotPanel):
             })
             tree.addTopLevelItem(robot_item)
 
-            # Inline "+ Node" button in column 1
-            add_node_btn = QPushButton("+ Node")
-            add_node_btn.setMaximumHeight(22)
+            # Inline "+ Skin" button in column 1
+            add_skin_btn = QPushButton("+ Skin")
+            add_skin_btn.setMaximumHeight(22)
             ri = robot_index
-            add_node_btn.clicked.connect(
-                lambda _=False, rt=robot_type, ridx=ri: self._on_add_node(rt, ridx)
+            add_skin_btn.clicked.connect(
+                lambda _=False, rt=robot_type, ridx=ri: self._on_add_skin(rt, ridx)
             )
-            tree.setItemWidget(robot_item, 1, add_node_btn)
+            tree.setItemWidget(robot_item, 1, add_skin_btn)
 
-            # Node children
-            for node_index, node_cfg in enumerate(robot_cfg.get("nodes", [])):
-                mac = node_cfg.get("mac", "")
+            # Group skins by MAC (preserving order of first appearance)
+            mac_order: list[str] = []
+            mac_groups: dict[str, list[tuple[int, dict]]] = {}
+            for skin_index, skin_cfg in enumerate(robot_cfg.get("skins", [])):
+                mac = skin_cfg.get("mac", "")
+                if mac not in mac_groups:
+                    mac_order.append(mac)
+                    mac_groups[mac] = []
+                mac_groups[mac].append((skin_index, skin_cfg))
+
+            for mac in mac_order:
+                skins_in_group = mac_groups[mac]
                 online = bool(mac and mac in known)
                 dot = "●" if online else "○"
-                node_item = QTreeWidgetItem([f"{dot}  {mac}"])
-                node_item.setForeground(0, QColor("#2a9d2a") if online else QColor("#cc2222"))
-                node_item.setData(0, Qt.ItemDataRole.UserRole, {
-                    "robot_type": robot_type,
-                    "robot_index": robot_index,
-                    "node_index": node_index,
-                })
-                robot_item.addChild(node_item)
+                color = QColor("#2a9d2a") if online else QColor("#cc2222")
+
+                if len(skins_in_group) == 1:
+                    # Single skin — "● MAC - Name"
+                    skin_index, skin_cfg = skins_in_group[0]
+                    skin_name = skin_cfg.get("name") or skin_cfg.get("skin_id", "")
+                    item = QTreeWidgetItem([f"{dot}  {mac} - {skin_name}"])
+                    item.setForeground(0, color)
+                    item.setData(0, Qt.ItemDataRole.UserRole, {
+                        "robot_type": robot_type,
+                        "robot_index": robot_index,
+                        "skin_index": skin_index,
+                    })
+                    robot_item.addChild(item)
+                else:
+                    # Multiple skins share this MAC — "● MAC" group with "Name" children
+                    mac_item = QTreeWidgetItem([f"{dot}  {mac}"])
+                    mac_item.setForeground(0, color)
+                    mac_item.setData(0, Qt.ItemDataRole.UserRole, {
+                        "robot_type": robot_type,
+                        "robot_index": robot_index,
+                        "mac_group": mac,
+                    })
+                    robot_item.addChild(mac_item)
+
+                    for skin_index, skin_cfg in skins_in_group:
+                        skin_name = skin_cfg.get("name") or skin_cfg.get("skin_id", "")
+                        skin_item = QTreeWidgetItem([skin_name])
+                        skin_item.setData(0, Qt.ItemDataRole.UserRole, {
+                            "robot_type": robot_type,
+                            "robot_index": robot_index,
+                            "skin_index": skin_index,
+                        })
+                        mac_item.addChild(skin_item)
+
+                    mac_item.setExpanded(True)
 
             robot_item.setExpanded(True)
 
@@ -253,8 +290,8 @@ class RobotPanel(QWidget, Ui_RobotPanel):
         if item is None:
             return
         data = item.data(0, Qt.ItemDataRole.UserRole)
-        if data is None or "node_index" in data:
-            return  # node items handled via double-click
+        if data is None or "skin_index" in data or "mac_group" in data:
+            return  # skin / mac-group items handled via double-click
 
         robot_index = data["robot_index"]
         menu = QMenu(self)
@@ -282,18 +319,18 @@ class RobotPanel(QWidget, Ui_RobotPanel):
             data = item.data(0, Qt.ItemDataRole.UserRole)
             if data is None:
                 return
-            if "node_index" in data:
-                self._delete_node(data["robot_type"], data["robot_index"], data["node_index"])
-            else:
+            if "skin_index" in data:
+                self._delete_skin(data["robot_type"], data["robot_index"], data["skin_index"])
+            elif "mac_group" not in data:
                 self._on_delete_robot(data["robot_type"], data["robot_index"])
         else:
             QTreeWidget.keyPressEvent(tree, event)
 
-    def _delete_node(self, robot_type: str, robot_index: int, node_index: int) -> None:
+    def _delete_skin(self, robot_type: str, robot_index: int, skin_index: int) -> None:
         reply = QMessageBox.question(
             self,
-            "Delete Node",
-            "Delete this node? This cannot be undone.",
+            "Delete Skin",
+            "Delete this skin? This cannot be undone.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply != QMessageBox.StandardButton.Yes:
@@ -302,9 +339,9 @@ class RobotPanel(QWidget, Ui_RobotPanel):
             self._settings.data.get("robots", {}).get(_YAML_KEY[robot_type], [])
         )
         if 0 <= robot_index < len(robots_list):
-            nodes = robots_list[robot_index].get("nodes", [])
-            if 0 <= node_index < len(nodes):
-                nodes.pop(node_index)
+            skins = robots_list[robot_index].get("skins", [])
+            if 0 <= skin_index < len(skins):
+                skins.pop(skin_index)
                 self._settings.save()
                 self.robot_configured.emit()
 
@@ -312,7 +349,9 @@ class RobotPanel(QWidget, Ui_RobotPanel):
         data = item.data(0, Qt.ItemDataRole.UserRole)
         if data is None:
             return
-        if "node_index" not in data:
+        if "skin_index" not in data:
+            if "mac_group" in data:
+                return  # MAC group item — no action on double-click
             # Robot-level item: open the appropriate config dialog
             rtype = data.get("robot_type")
             ridx = data["robot_index"]
@@ -321,34 +360,34 @@ class RobotPanel(QWidget, Ui_RobotPanel):
             else:
                 self._on_rename_robot(rtype, ridx)
             return
-        self._open_node_dialog(
-            data["robot_type"], data["robot_index"], data["node_index"]
+        self._open_skin_dialog(
+            data["robot_type"], data["robot_index"], data["skin_index"]
         )
 
-    def _on_add_node(self, robot_type: str, robot_index: int) -> None:
+    def _on_add_skin(self, robot_type: str, robot_index: int) -> None:
         prefill_mac = ""
         known = self._gateway.known_macs
         if known:
             all_assigned = {
-                node.get("mac", "")
+                skin.get("mac", "")
                 for robots in self._settings.data.get("robots", {}).values()
                 for robot in robots
-                for node in robot.get("nodes", [])
+                for skin in robot.get("skins", [])
             }
             unassigned = sorted(known - all_assigned)
             if unassigned:
                 items = unassigned + ["Enter manually…"]
                 choice, ok = QInputDialog.getItem(
-                    self, "Add Node", "Select a discovered node:", items, 0, False
+                    self, "Add Skin", "Select a discovered node:", items, 0, False
                 )
                 if not ok:
                     return
                 if choice != "Enter manually…":
                     prefill_mac = choice
-        self._open_node_dialog(robot_type, robot_index, -1, prefill_mac)
+        self._open_skin_dialog(robot_type, robot_index, -1, prefill_mac)
 
-    def _open_node_dialog(
-        self, robot_type: str, robot_index: int, node_index: int,
+    def _open_skin_dialog(
+        self, robot_type: str, robot_index: int, skin_index: int,
         prefill_mac: str = "",
     ) -> None:
         from src.gui.node_config_dialog import NodeConfigDialog
@@ -356,7 +395,7 @@ class RobotPanel(QWidget, Ui_RobotPanel):
         dialog = NodeConfigDialog(
             robot_type=robot_type,
             robot_index=robot_index,
-            node_index=node_index,
+            skin_index=skin_index,
             settings=self._settings,
             gateway=self._gateway,
             parent=self,
@@ -427,7 +466,7 @@ class RobotPanel(QWidget, Ui_RobotPanel):
             if result is None:
                 return
             tid, host, port = result
-            entry: dict = {"thymio_id": tid, "host": host, "port": port, "nodes": []}
+            entry: dict = {"thymio_id": tid, "host": host, "port": port, "skins": []}
         else:
             existing = (
                 self._settings.data.get("robots", {})
@@ -439,7 +478,7 @@ class RobotPanel(QWidget, Ui_RobotPanel):
             )
             if not ok or not name.strip():
                 return
-            entry = {"id": name.strip(), "nodes": []}
+            entry = {"id": name.strip(), "skins": []}
 
         (
             self._settings.data

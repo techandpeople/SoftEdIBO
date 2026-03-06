@@ -1,4 +1,12 @@
-"""Per-node configuration dialog with actuator testing."""
+"""Skin configuration dialog.
+
+Edits a single skin entry: display name, skin ID, node MAC address, and
+which slots (0–2) on that node this skin occupies.
+
+Constraints enforced on save:
+  - No slot may be used by another skin that shares the same MAC.
+  - The total slots on a single MAC (across all its skins) cannot exceed 3.
+"""
 
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -7,7 +15,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMessageBox,
-    QPushButton,
     QWidget,
 )
 
@@ -15,32 +22,28 @@ from src.config.settings import Settings
 from src.gui.ui_node_config_dialog import Ui_NodeConfigDialog
 from src.hardware.espnow_gateway import ESPNowGateway
 
-_MAX_CHAMBERS = 3
 _YAML_KEY = {"turtle": "turtles", "tree": "trees", "thymio": "thymios"}
 
 
 class NodeConfigDialog(QDialog, Ui_NodeConfigDialog):
-    """Dialog for configuring a single ESP32 node and its air chambers.
-
-    Each chamber row has three slot checkboxes (0–2).  Checking a slot in one
-    chamber automatically unchecks it in every other chamber (cross-chamber)
-    and unchecks the other slots in the same row (one slot per chamber).
+    """Dialog for adding or editing a single skin entry.
 
     Args:
         robot_type: One of ``"turtle"``, ``"tree"``, or ``"thymio"``.
         robot_index: Index of the parent robot in the settings list.
-        node_index: Index of this node in the robot's ``nodes`` list, or
-            ``-1`` to add a new node.
+        skin_index: Index of this skin in the robot's ``skins`` list, or
+            ``-1`` to add a new skin.
         settings: Application settings instance.
         gateway: Shared ESP-NOW gateway (used by the test dialog).
         parent: Optional parent widget.
+        prefill_mac: MAC address to pre-fill when adding a new skin.
     """
 
     def __init__(
         self,
         robot_type: str,
         robot_index: int,
-        node_index: int,
+        skin_index: int,
         settings: Settings,
         gateway: ESPNowGateway,
         parent: QWidget | None = None,
@@ -49,38 +52,59 @@ class NodeConfigDialog(QDialog, Ui_NodeConfigDialog):
         super().__init__(parent)
         self._robot_type = robot_type
         self._robot_index = robot_index
-        self._node_index = node_index
+        self._skin_index = skin_index
         self._settings = settings
         self._gateway = gateway
-        self._skin_entries: list[dict] = []
 
         self.setupUi(self)
 
-        is_new = node_index < 0
+        is_new = skin_index < 0
         type_label = {
-            "turtle": "Turtle Node", "tree": "Tree Node", "thymio": "Thymio Node",
-        }.get(robot_type, "Node")
+            "turtle": "Turtle Skin", "tree": "Tree Skin", "thymio": "Thymio Skin",
+        }.get(robot_type, "Skin")
         self.setWindowTitle(("Add " if is_new else "Configure ") + type_label)
 
-        # Delete button only shown when editing an existing node
+        # Delete button only shown when editing an existing skin
         self.delete_btn.setVisible(not is_new)
+        self.delete_btn.setText("Delete Skin")
 
         # Test button enabled only when gateway is connected
         self.test_btn.setEnabled(gateway.is_connected)
 
-        # Add-chamber button — must exist before _add_skin_row is called
-        self._add_chamber_btn = QPushButton("+ Add Air Chamber")
-        self._add_chamber_btn.clicked.connect(lambda: self._add_skin_row(None))
-        self.chambers_vbox.addWidget(self._add_chamber_btn)
+        # Repurpose mac_form: add skin_id and name rows above MAC
+        self._name_edit = QLineEdit()
+        self._name_edit.setPlaceholderText("Display name (e.g. Skin 1)")
+        self._skin_id_edit = QLineEdit()
+        self._skin_id_edit.setPlaceholderText("skin_id (e.g. skin_1)")
+
+        self.mac_form.insertRow(0, QLabel("Skin ID:"), self._skin_id_edit)
+        self.mac_form.insertRow(1, QLabel("Name:"), self._name_edit)
+        # mac_form row 2 is now "Node MAC:" / mac_edit (from .ui)
+
+        # Repurpose chambers_group as slot selector
+        self.chambers_group.setTitle("Slots (max 3 per MAC)")
+
+        # 3 static slot checkboxes
+        row_widget = QWidget()
+        hbox = QHBoxLayout(row_widget)
+        hbox.setContentsMargins(4, 4, 4, 4)
+        self._slot_checks: list[QCheckBox] = []
+        for slot in range(3):
+            cb = QCheckBox(f"Slot {slot}")
+            self._slot_checks.append(cb)
+            hbox.addWidget(cb)
+        hbox.addStretch()
+        self.chambers_vbox.addWidget(row_widget)
         self.chambers_vbox.addStretch()
 
-        # Populate from config
-        node_cfg = self._load_node_cfg()
-        self.mac_edit.setText(node_cfg.get("mac", "") or prefill_mac)
-        for skin_cfg in node_cfg.get("skins", []):
-            self._add_skin_row(skin_cfg)
-        self._on_slot_changed()
-        self._update_add_chamber_btn()
+        # Populate from existing config
+        skin_cfg = self._load_skin_cfg()
+        self._skin_id_edit.setText(skin_cfg.get("skin_id", ""))
+        self._name_edit.setText(skin_cfg.get("name", ""))
+        self.mac_edit.setText(skin_cfg.get("mac", "") or prefill_mac)
+        for slot in skin_cfg.get("slots", []):
+            if 0 <= slot < 3:
+                self._slot_checks[slot].setChecked(True)
 
         # Connect buttons
         self.delete_btn.clicked.connect(self._on_delete)
@@ -89,124 +113,28 @@ class NodeConfigDialog(QDialog, Ui_NodeConfigDialog):
         self.cancel_btn.clicked.connect(self.reject)
 
     # ------------------------------------------------------------------
-    # Load / collect helpers
+    # Helpers
     # ------------------------------------------------------------------
 
-    def _load_node_cfg(self) -> dict:
-        if self._node_index < 0:
+    def _load_skin_cfg(self) -> dict:
+        if self._skin_index < 0:
             return {}
         robots = self._settings.data.get("robots", {})
         robots_list = robots.get(_YAML_KEY[self._robot_type], [])
         if 0 <= self._robot_index < len(robots_list):
-            nodes = robots_list[self._robot_index].get("nodes", [])
-            if 0 <= self._node_index < len(nodes):
-                return nodes[self._node_index]
+            skins = robots_list[self._robot_index].get("skins", [])
+            if 0 <= self._skin_index < len(skins):
+                return skins[self._skin_index]
         return {}
 
-    def _collect_skins(self) -> list[dict]:
-        skins = []
-        for se in self._skin_entries:
-            if se["deleted"]:
-                continue
-            skin_id = se["id_edit"].text().strip()
-            slots = [i for i, cb in enumerate(se["slot_checks"]) if cb.isChecked()]
-            if skin_id and slots:
-                skins.append({"skin_id": skin_id, "slots": slots})
-        return skins
-
-    def _active_chamber_count(self) -> int:
-        return sum(1 for se in self._skin_entries if not se["deleted"])
-
-    # ------------------------------------------------------------------
-    # Enforcement
-    # ------------------------------------------------------------------
-
-    def _on_slot_changed(self) -> None:
-        """Disable in every other chamber any slot that is already checked here."""
-        active: list[tuple[int, set[int]]] = [
-            (i, {s for s, cb in enumerate(se["slot_checks"]) if cb.isChecked()})
-            for i, se in enumerate(self._skin_entries)
-            if not se["deleted"]
-        ]
-        for i, se in enumerate(self._skin_entries):
-            if se["deleted"]:
-                continue
-            others_used: set[int] = set()
-            for j, used in active:
-                if j != i:
-                    others_used |= used
-            for slot_idx, cb in enumerate(se["slot_checks"]):
-                cb.setEnabled(slot_idx not in others_used)
-
-    # ------------------------------------------------------------------
-    # Dynamic chamber rows
-    # ------------------------------------------------------------------
-
-    def _add_skin_row(self, skin_cfg: dict | None) -> None:
-        if self._active_chamber_count() >= _MAX_CHAMBERS:
-            return
-
-        skin_id = skin_cfg.get("skin_id", "") if skin_cfg else ""
-        active_slots = set(skin_cfg.get("slots", [])) if skin_cfg else set()
-
-        row_widget = QWidget()
-        hbox = QHBoxLayout(row_widget)
-        hbox.setContentsMargins(0, 0, 0, 0)
-
-        id_edit = QLineEdit(skin_id)
-        id_edit.setPlaceholderText("chamber_id")
-        id_edit.setMinimumWidth(120)
-        hbox.addWidget(QLabel("Chamber ID:"))
-        hbox.addWidget(id_edit)
-
-        slot_checks: list[QCheckBox] = []
-        for slot in range(3):
-            cb = QCheckBox(f"Slot {slot}")
-            cb.setChecked(slot in active_slots)
-            hbox.addWidget(cb)
-            slot_checks.append(cb)
-
-        # Connect each checkbox: uncheck siblings in this row, then enforce cross-chamber
-        for this_slot, cb in enumerate(slot_checks):
-            def _make_handler(s: int, checks: list[QCheckBox]):
-                def _handler(checked: bool) -> None:
-                    if checked:
-                        for j, sibling in enumerate(checks):
-                            if j != s and sibling.isChecked():
-                                sibling.blockSignals(True)
-                                sibling.setChecked(False)
-                                sibling.blockSignals(False)
-                    self._on_slot_changed()
-                return _handler
-            cb.toggled.connect(_make_handler(this_slot, slot_checks))
-
-        del_btn = QPushButton("✕")
-        del_btn.setFixedWidth(28)
-        del_btn.setToolTip("Remove this air chamber")
-        hbox.addWidget(del_btn)
-
-        entry: dict = {
-            "widget": row_widget,
-            "id_edit": id_edit,
-            "slot_checks": slot_checks,
-            "deleted": False,
-        }
-        self._skin_entries.append(entry)
-
-        def _delete_skin() -> None:
-            entry["deleted"] = True
-            row_widget.hide()
-            self._update_add_chamber_btn()
-            self._on_slot_changed()
-
-        del_btn.clicked.connect(_delete_skin)
-        # Insert before the "+ Add Air Chamber" button and the stretch
-        self.chambers_vbox.insertWidget(self.chambers_vbox.count() - 2, row_widget)
-        self._update_add_chamber_btn()
-        self._on_slot_changed()
-
-    def _update_add_chamber_btn(self) -> None:
-        self._add_chamber_btn.setEnabled(self._active_chamber_count() < _MAX_CHAMBERS)
+    def _sibling_skins(self) -> list[dict]:
+        """Return all skin entries for this robot except the one being edited."""
+        robots = self._settings.data.get("robots", {})
+        robots_list = robots.get(_YAML_KEY[self._robot_type], [])
+        if not (0 <= self._robot_index < len(robots_list)):
+            return []
+        all_skins = robots_list[self._robot_index].get("skins", [])
+        return [sc for i, sc in enumerate(all_skins) if i != self._skin_index]
 
     # ------------------------------------------------------------------
     # Actions
@@ -218,19 +146,59 @@ class NodeConfigDialog(QDialog, Ui_NodeConfigDialog):
             QMessageBox.warning(self, "Test Actuators", "Enter a MAC address first.")
             return
 
+        skin_id = self._skin_id_edit.text().strip() or "preview"
+        slots = [i for i, cb in enumerate(self._slot_checks) if cb.isChecked()]
+        skin_cfgs = [{"skin_id": skin_id, "slots": slots}]
+
         from src.gui.test_actuators_dialog import TestActuatorsDialog
 
         dlg = TestActuatorsDialog(
             mac=mac,
-            skin_cfgs=self._collect_skins(),
+            skin_cfgs=skin_cfgs,
             gateway=self._gateway,
             parent=self,
         )
         dlg.exec()
 
     def _on_save(self) -> None:
+        skin_id = self._skin_id_edit.text().strip()
+        name = self._name_edit.text().strip() or skin_id
         mac = self.mac_edit.text().strip()
-        node_entry = {"mac": mac, "skins": self._collect_skins()}
+        slots = [i for i, cb in enumerate(self._slot_checks) if cb.isChecked()]
+
+        if not skin_id:
+            QMessageBox.warning(self, "Missing Field", "Skin ID cannot be empty.")
+            return
+        if not mac:
+            QMessageBox.warning(self, "Missing Field", "Node MAC cannot be empty.")
+            return
+        if not slots:
+            QMessageBox.warning(self, "Missing Field", "Select at least one slot.")
+            return
+
+        # Validate slot conflicts on same MAC
+        siblings = self._sibling_skins()
+        used_on_mac = {
+            slot
+            for sc in siblings
+            if sc.get("mac") == mac
+            for slot in sc.get("slots", [])
+        }
+        conflicts = set(slots) & used_on_mac
+        if conflicts:
+            QMessageBox.warning(
+                self, "Slot Conflict",
+                f"Slot(s) {sorted(conflicts)} are already used by another skin on MAC {mac}.",
+            )
+            return
+        if len(set(slots) | used_on_mac) > 3:
+            QMessageBox.warning(
+                self, "Capacity Exceeded",
+                f"MAC {mac} would exceed 3 total slots.",
+            )
+            return
+
+        skin_entry = {"skin_id": skin_id, "name": name, "mac": mac, "slots": slots}
 
         data = self._settings.data
         robots_list = (
@@ -238,11 +206,11 @@ class NodeConfigDialog(QDialog, Ui_NodeConfigDialog):
             .setdefault(_YAML_KEY[self._robot_type], [])
         )
         if 0 <= self._robot_index < len(robots_list):
-            nodes = robots_list[self._robot_index].setdefault("nodes", [])
-            if self._node_index < 0:
-                nodes.append(node_entry)
+            skins = robots_list[self._robot_index].setdefault("skins", [])
+            if self._skin_index < 0:
+                skins.append(skin_entry)
             else:
-                nodes[self._node_index] = node_entry
+                skins[self._skin_index] = skin_entry
 
         self._settings.save()
         self.accept()
@@ -251,7 +219,7 @@ class NodeConfigDialog(QDialog, Ui_NodeConfigDialog):
         reply = QMessageBox.question(
             self,
             "Confirm Delete",
-            "Delete this node? This cannot be undone.",
+            "Delete this skin? This cannot be undone.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply != QMessageBox.StandardButton.Yes:
@@ -262,9 +230,9 @@ class NodeConfigDialog(QDialog, Ui_NodeConfigDialog):
             .get(_YAML_KEY[self._robot_type], [])
         )
         if 0 <= self._robot_index < len(robots_list):
-            nodes = robots_list[self._robot_index].get("nodes", [])
-            if 0 <= self._node_index < len(nodes):
-                nodes.pop(self._node_index)
+            skins = robots_list[self._robot_index].get("skins", [])
+            if 0 <= self._skin_index < len(skins):
+                skins.pop(self._skin_index)
 
         self._settings.save()
         self.accept()
