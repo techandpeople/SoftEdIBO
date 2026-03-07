@@ -138,7 +138,7 @@ class AssignmentDialog(QDialog):
             group_layout.addLayout(row)
 
         # Auto button
-        auto_btn = QPushButton("Auto (distribute evenly)")
+        auto_btn = QPushButton("Auto")
         auto_btn.clicked.connect(lambda _=False, r=robot, u=units: self._auto_assign(r, u))
         group_layout.addWidget(auto_btn)
 
@@ -149,7 +149,7 @@ class AssignmentDialog(QDialog):
     # ------------------------------------------------------------------
 
     def _auto_assign(self, robot: BaseRobot, units: list[str]) -> None:
-        """Round-robin distribute units across participants, one unit per participant at a time."""
+        """Assign one skin to each participant (cycling through skins), ensuring every participant has at least one."""
         robot_checks = self._checks.get(robot.robot_id, {})
         if not robot_checks or not units:
             return
@@ -159,10 +159,9 @@ class AssignmentDialog(QDialog):
             for cb in p_checks.values():
                 cb.setChecked(False)
 
-        participants = list(robot_checks.keys())
-        for idx, uid in enumerate(units):
-            pid = participants[idx % len(participants)]
-            robot_checks[pid][uid].setChecked(True)
+        for idx, (pid, p_checks) in enumerate(robot_checks.items()):
+            uid = units[idx % len(units)]
+            p_checks[uid].setChecked(True)
 
     # ------------------------------------------------------------------
     # Result accessor (call after exec() == Accepted)
