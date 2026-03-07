@@ -109,12 +109,22 @@ echo "Installing from: $SRC"
 sudo mkdir -p "$INSTALL_DIR"
 sudo cp "$SRC" "$APPIMAGE_DEST"
 sudo chmod 755 "$APPIMAGE_DEST"
+sudo chown "$USER" "$APPIMAGE_DEST"
 echo "  => $APPIMAGE_DEST"
 
 # ── Wrapper script (no FUSE needed) ───────────────────────────────────────
 sudo tee "$BIN_LINK" > /dev/null << EOF
 #!/bin/bash
+if [[ "\${1:-}" == "--uninstall" ]]; then
+    echo "Uninstalling SoftEdIBO..."
+    sudo rm -rf  "$INSTALL_DIR"
+    sudo rm -f   "$BIN_LINK"
+    rm -f "$DESKTOP_FILE" "$ICON_FILE"
+    echo "Done. User data in ~/.local/share/SoftEdIBO (if any) was NOT removed."
+    exit 0
+fi
 export APPIMAGE_EXTRACT_AND_RUN=1
+export APPIMAGE="$APPIMAGE_DEST"
 exec "$APPIMAGE_DEST" "\$@"
 EOF
 sudo chmod +x "$BIN_LINK"
@@ -162,4 +172,4 @@ echo "Installation complete!"
 echo "  Run:  softedibo"
 echo "   or open it from the application menu."
 echo ""
-echo "To uninstall: $0 --uninstall"
+echo "To uninstall: softedibo --uninstall"
