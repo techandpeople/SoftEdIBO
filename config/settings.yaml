@@ -19,73 +19,9 @@ node_pinout:
   - 34
   sensor_type: capacitive_copper
 robots:
-  turtles:
-  - id: turtle-1
-    skins:
-    - skin_id: skin_1
-      name: Centro
-      mac: '1'
-      slots:
-      - 0
-      - 1
-      - 2
-    - skin_id: skin_2
-      name: Esquerda
-      mac: '2'
-      slots:
-      - 0
-      - 1
-      - 2
-    - skin_id: skin_3
-      name: Direita
-      mac: '3'
-      slots:
-      - 0
-      - 1
-      - 2
-    - skin_id: skin_4
-      name: Esquerda-Tras
-      mac: '4'
-      slots:
-      - 0
-      - 1
-      - 2
-    - skin_id: skin_5
-      name: Direta-Tras
-      mac: '5'
-      slots:
-      - 0
-      - 1
-      - 2
-    - skin_id: front
-      name: Front
-      mac: '6'
-      slots:
-      - 0
-    - skin_id: tail
-      name: Tail
-      mac: '6'
-      slots:
-      - 1
-  trees:
-  - id: tree-1
-    skins: []
-  thymios:
-  - thymio_id: thymio-1
-    host: localhost
-    port: 8596
-    skins:
-    - skin_id: '1'
-      name: Thymio1
-      mac: '20'
-      slots:
-      - 0
-      - 1
-      - 2
-  - thymio_id: thymio-2
-    host: localhost
-    port: 8596
-    skins: []
+  turtles: []
+  trees: []
+  thymios: []
 database:
   backend: sqlite
   path: data/softedibo.db
