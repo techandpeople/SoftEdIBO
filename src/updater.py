@@ -21,8 +21,10 @@ Typical flow
 import json
 import os
 import re
+import shutil
 import stat
 import sys
+import tempfile
 from pathlib import Path
 from typing import IO
 
@@ -175,7 +177,9 @@ class AppUpdater(QObject):
             appimage = _appimage_path()
             if not appimage:
                 return
-            self._tmp_path = appimage.with_suffix(".new")
+            fd, tmp = tempfile.mkstemp(suffix=".AppImage", prefix="softedibo-update-")
+            os.close(fd)
+            self._tmp_path = Path(tmp)
 
         self._download_file = open(self._tmp_path, "wb")
 
@@ -217,13 +221,17 @@ class AppUpdater(QObject):
             # Caller will apply the update via PowerShell after the app exits
             self.download_done.emit(self._tmp_path)
         else:
-            # Linux: make the new AppImage executable and atomically replace the old one
-            self._tmp_path.chmod(
-                self._tmp_path.stat().st_mode
-                | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
-            )
+            # Linux: copy from /tmp to the AppImage path (avoids cross-device rename),
+            # set executable bit, then remove the temp file.
             appimage = _appimage_path()
-            os.replace(self._tmp_path, appimage)
+            try:
+                shutil.copy2(self._tmp_path, appimage)
+                appimage.chmod(
+                    appimage.stat().st_mode
+                    | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
+                )
+            finally:
+                self._tmp_path.unlink(missing_ok=True)
             self.download_done.emit(appimage)
 
     def cancel(self) -> None:
