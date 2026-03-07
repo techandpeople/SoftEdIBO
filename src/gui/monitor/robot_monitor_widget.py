@@ -8,7 +8,7 @@ Works for any robot that exposes a `skins: dict[str, Skin]` attribute
 from __future__ import annotations
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QGroupBox, QHBoxLayout, QLabel
+from PySide6.QtWidgets import QGroupBox, QHBoxLayout, QLabel, QSizePolicy
 
 from src.gui.monitor.skin_widget import SkinWidget
 from src.hardware.skin import Skin
@@ -22,6 +22,7 @@ class RobotMonitorWidget(QGroupBox):
 
     def __init__(self, robot: BaseRobot) -> None:
         super().__init__(robot.robot_id)
+        self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
         self._skin_widgets: list[SkinWidget] = []
 
         layout = QHBoxLayout(self)
