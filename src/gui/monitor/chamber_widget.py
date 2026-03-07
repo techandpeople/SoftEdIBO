@@ -98,6 +98,7 @@ class ChamberWidget(QWidget):
         self._chamber = chamber
         self._skin = skin
         self._press_time: float = 0.0
+        self.setFixedWidth(50)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(2, 2, 2, 2)
@@ -122,7 +123,7 @@ class ChamberWidget(QWidget):
 
         self._touch_btn.pressed.connect(_on_press)
         self._touch_btn.released.connect(_on_release)
-        layout.addWidget(self._touch_btn)
+        layout.addWidget(self._touch_btn, alignment=Qt.AlignmentFlag.AlignHCenter)
 
         # Pressure bar (current fill + target line)
         self._bar = _PressureBar()

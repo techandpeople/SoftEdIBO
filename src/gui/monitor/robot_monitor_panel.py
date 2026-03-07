@@ -9,6 +9,10 @@ from __future__ import annotations
 from PySide6.QtCore import QEvent, QObject, QTimer, Signal
 from PySide6.QtWidgets import QScrollArea, QVBoxLayout, QWidget
 
+from src.gui.monitor.flow_layout import FlowLayout
+from src.gui.monitor.robot_monitor_widget import RobotMonitorWidget
+from src.robots.base_robot import BaseRobot
+
 
 class _WheelFilter(QObject):
     """Forwards wheel events from a child widget to a QScrollArea."""
@@ -22,9 +26,6 @@ class _WheelFilter(QObject):
             self._scroll.wheelEvent(event)
             return True
         return False
-
-from src.gui.monitor.robot_monitor_widget import RobotMonitorWidget
-from src.robots.base_robot import BaseRobot
 
 
 class RobotMonitorPanel(QWidget):
@@ -43,9 +44,7 @@ class RobotMonitorPanel(QWidget):
         outer.addWidget(scroll)
 
         self._inner = QWidget()
-        self._layout = QVBoxLayout(self._inner)
-        self._layout.setSpacing(8)
-        self._layout.addStretch()
+        self._layout = FlowLayout(self._inner, h_spacing=6, v_spacing=6)
         scroll.setWidget(self._inner)
         self._inner.installEventFilter(_WheelFilter(scroll))
 
@@ -63,14 +62,11 @@ class RobotMonitorPanel(QWidget):
             rw.deleteLater()
         self._robot_widgets.clear()
 
-        stretch = self._layout.takeAt(self._layout.count() - 1)
         for robot in robots:
             rw = RobotMonitorWidget(robot)
             rw.touch_event.connect(self.touch_event)
             self._robot_widgets.append(rw)
             self._layout.addWidget(rw)
-        if stretch:
-            self._layout.addStretch()
 
         if robots:
             self._timer.start()

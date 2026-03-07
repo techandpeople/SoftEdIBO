@@ -1,0 +1,54 @@
+{
+  "session_id": "S029",
+  "robot_ids": [
+    "turtle-1",
+    "thymio-1",
+    "thymio-2"
+  ],
+  "participant_ids": [
+    "P002",
+    "P003",
+    "P004"
+  ],
+  "assignments": [
+    {
+      "robot_id": "turtle-1",
+      "participant_id": "P002",
+      "unit_ids": [
+        "skin_1",
+        "skin_4",
+        "tail"
+      ]
+    },
+    {
+      "robot_id": "turtle-1",
+      "participant_id": "P003",
+      "unit_ids": [
+        "skin_2",
+        "skin_5"
+      ]
+    },
+    {
+      "robot_id": "turtle-1",
+      "participant_id": "P004",
+      "unit_ids": [
+        "skin_3",
+        "front"
+      ]
+    },
+    {
+      "robot_id": "thymio-1",
+      "participant_id": "P002",
+      "unit_ids": [
+        "1"
+      ]
+    },
+    {
+      "robot_id": "thymio-2",
+      "participant_id": "P002",
+      "unit_ids": [
+        "thymio-2"
+      ]
+    }
+  ]
+}

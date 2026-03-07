@@ -20,11 +20,11 @@ from src.hardware.touch_sensor import SensorType, TouchSensor
 class SimulatedController(QObject):
     """Mock ESP32 controller — responds to inflate/deflate with local pressure animation."""
 
-    _SIM_STEP = 6    # % per tick (300 ms → ~6%/tick)
+    _SIM_STEP = 10    # % per tick (300 ms → ~6%/tick)
     _TICK_MS  = 300
-    _RAMP_STEP_MS   = 80   # target ramp step interval
-    _RAMP_TARGET_STEP = 10  # % per ramp step
-    _TOUCH_INFLATE_MULTIPLIER = 2  # deflate starts after hold_ms × this + 300 ms
+    _RAMP_STEP_MS   = 50   # target ramp step interval
+    _RAMP_TARGET_STEP = 25  # % per ramp step
+    _TOUCH_INFLATE_MULTIPLIER = 1  # deflate starts after hold_ms × this + 300 ms
 
     def __init__(self, mac_address: str, parent: QObject | None = None) -> None:
         super().__init__(parent)
