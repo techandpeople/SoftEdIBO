@@ -92,6 +92,10 @@ class AssignmentDialog(QDialog):
         )
         btn_box.accepted.connect(self.accept)
         btn_box.rejected.connect(self.reject)
+        skip_btn = btn_box.addButton(
+            "Skip (assign on touch)", QDialogButtonBox.ButtonRole.ResetRole
+        )
+        skip_btn.clicked.connect(self.accept)
         main_layout.addWidget(btn_box)
 
     # ------------------------------------------------------------------
@@ -137,10 +141,15 @@ class AssignmentDialog(QDialog):
                 row.addWidget(cb, stretch=1)
             group_layout.addLayout(row)
 
-        # Auto button
+        # Auto / Clear buttons
+        btn_row = QHBoxLayout()
         auto_btn = QPushButton("Auto")
         auto_btn.clicked.connect(lambda _=False, r=robot, u=units: self._auto_assign(r, u))
-        group_layout.addWidget(auto_btn)
+        clear_btn = QPushButton("Clear")
+        clear_btn.clicked.connect(lambda _=False, r=robot: self._clear_assignments(r))
+        btn_row.addWidget(auto_btn)
+        btn_row.addWidget(clear_btn)
+        group_layout.addLayout(btn_row)
 
         self._container_layout.addWidget(group)
 
@@ -162,6 +171,12 @@ class AssignmentDialog(QDialog):
         for idx, (pid, p_checks) in enumerate(robot_checks.items()):
             uid = units[idx % len(units)]
             p_checks[uid].setChecked(True)
+
+    def _clear_assignments(self, robot: BaseRobot) -> None:
+        """Uncheck all assignments for a robot."""
+        for p_checks in self._checks.get(robot.robot_id, {}).values():
+            for cb in p_checks.values():
+                cb.setChecked(False)
 
     # ------------------------------------------------------------------
     # Result accessor (call after exec() == Accepted)
