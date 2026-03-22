@@ -10,10 +10,11 @@ from src.activities.base_activity import BaseActivity
 from src.config.settings import Settings
 from src.data import last_assignments as last_asgn
 from src.data.database import Database
-from src.data.models import InteractionEvent, SessionRecord
+from src.data.models import InteractionEvent, ParticipantRecord, SessionAssignment, SessionRecord
 from src.gui.assignment_dialog import AssignmentDialog
 from src.gui.session_setup_dialog import SessionSetupDialog
 from src.gui.monitor import RobotMonitorPanel
+from src.gui.touch_assignment_panel import TouchAssignmentPanel
 from src.gui.ui_session_panel import Ui_SessionPanel
 from src.robots.base_robot import BaseRobot
 
@@ -41,7 +42,11 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         self._available_robots: list[BaseRobot] = []
         self._current_record: SessionRecord | None = None
         self._current_activity: BaseActivity | None = None
-        self._skin_participant: dict[str, str] = {}  # skin_id -> participant_id
+        self._skin_participant: dict[str, str] = {}   # skin_id -> participant_id
+        self._skin_robot: dict[str, str] = {}         # skin_id -> robot_id
+        self._session_participants: list[ParticipantRecord] = []
+        self._pending_touches: list[tuple[str, int]] = []  # (skin_id, chamber_id) waiting for assignment
+        self._assignment_panel: TouchAssignmentPanel | None = None
 
         self.new_session_btn.clicked.connect(self._open_setup_dialog)
         self.pause_btn.clicked.connect(self._on_pause)
@@ -126,6 +131,8 @@ class SessionPanel(QWidget, Ui_SessionPanel):
             session_robots = self._current_activity.prepare_robots(session_robots)
         self._monitor.set_robots(session_robots)
         self._build_skin_participant_map(record.session_id)
+        self._session_participants = list(participants)
+        self._open_assignment_panel(session_robots)
 
     def _open_setup_dialog(self) -> None:
         """Open the session setup dialog and start a new session."""
@@ -210,9 +217,11 @@ class SessionPanel(QWidget, Ui_SessionPanel):
 
         self._current_activity = activity
         robots = activity.prepare_robots(robots)
+        self._session_participants = list(participants)
         self.session_started.emit(session_id)
         self._monitor.set_robots(robots)
         self._build_skin_participant_map(session_id)
+        self._open_assignment_panel(robots)
 
     def _build_skin_participant_map(self, session_id: str) -> None:
         """Build a skin_id → participant_id lookup from session assignments."""
@@ -225,6 +234,15 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         """Log a touch interaction attributed to the participant assigned to the skin."""
         if self._current_record is None:
             return
+
+        if action == "press" and skin_id not in self._skin_participant:
+            if self._assignment_panel is not None:
+                # Defer logging — accumulate all chamber touches for this skin.
+                # enqueue() adds to queue on first touch; warns if skin already pending.
+                self._pending_touches.append((skin_id, chamber_id))
+                self._assignment_panel.enqueue(skin_id)
+                return
+            # No panel (no participants) — log immediately as unknown
         participant_id = self._skin_participant.get(skin_id, "unknown")
         self._db.log_event(InteractionEvent(
             session_id=self._current_record.session_id,
@@ -234,6 +252,84 @@ class SessionPanel(QWidget, Ui_SessionPanel):
             target=f"{skin_id}:{chamber_id}",
             timestamp=datetime.now(),
         ))
+
+    def _open_assignment_panel(self, robots: list[BaseRobot]) -> None:
+        """Open the on-touch assignment panel if there are unassigned skins."""
+        if self._assignment_panel is not None:
+            self._assignment_panel.close()
+            self._assignment_panel = None
+
+        if not self._session_participants:
+            return
+
+        all_skins: list[tuple[str, str]] = []
+        for robot in robots:
+            for skin in getattr(robot, "skins", {}).values():
+                all_skins.append((skin.skin_id, skin.name))
+                self._skin_robot[skin.skin_id] = robot.robot_id
+
+        if not all_skins:
+            return
+
+        unassigned = [sid for sid, _ in all_skins if sid not in self._skin_participant]
+        if not unassigned:
+            return
+
+        panel = TouchAssignmentPanel(all_skins, self._session_participants, parent=self)
+        # Mark already-assigned skins
+        for skin_id, participant_id in self._skin_participant.items():
+            panel.mark_pre_assigned(skin_id, participant_id)
+
+        panel.assigned.connect(self._on_skin_assigned)
+        panel.skipped.connect(self._on_skin_touch_skipped)
+        self._assignment_panel = panel
+
+    def _on_skin_assigned(self, skin_id: str, participant_id: str) -> None:
+        """Called when the operator assigns a skin to a participant via the panel."""
+        if self._current_record is None:
+            return
+        self._skin_participant[skin_id] = participant_id
+        robot_id = self._skin_robot.get(skin_id, "")
+        if robot_id:
+            self._db.save_assignment(SessionAssignment(
+                session_id=self._current_record.session_id,
+                robot_id=robot_id,
+                participant_id=participant_id,
+                unit_ids=[skin_id],
+            ))
+        # Log all pending touches for this skin with the now-known participant
+        remaining = []
+        for sk, ch in self._pending_touches:
+            if sk == skin_id:
+                self._db.log_event(InteractionEvent(
+                    session_id=self._current_record.session_id,
+                    participant_id=participant_id,
+                    type="touch",
+                    action="press",
+                    target=f"{sk}:{ch}",
+                    timestamp=datetime.now(),
+                ))
+            else:
+                remaining.append((sk, ch))
+        self._pending_touches = remaining
+
+    def _on_skin_touch_skipped(self, skin_id: str) -> None:
+        """Called when the operator skips the first queued touch for a skin."""
+        if self._current_record is None:
+            return
+        # Log the first pending touch for this skin as unknown
+        for i, (sk, ch) in enumerate(self._pending_touches):
+            if sk == skin_id:
+                self._db.log_event(InteractionEvent(
+                    session_id=self._current_record.session_id,
+                    participant_id="unknown",
+                    type="touch",
+                    action="press",
+                    target=f"{sk}:{ch}",
+                    timestamp=datetime.now(),
+                ))
+                self._pending_touches.pop(i)
+                break
 
     def _on_pause(self) -> None:
         """Toggle between paused and running state, logging a session event."""
@@ -261,6 +357,36 @@ class SessionPanel(QWidget, Ui_SessionPanel):
                 timestamp=datetime.now(),
             ))
 
+    def _flush_last_assignments(self, session_id: str) -> None:
+        """Overwrite last_assignments.json with the complete final skin→participant map.
+
+        Called on session stop so that on-touch assignments made during the session
+        are included in the prefill for the next session, not just pre-session ones.
+        """
+        if not self._skin_participant or not self._session_participants:
+            return
+        # Group skin_ids by (robot_id, participant_id)
+        grouped: dict[tuple[str, str], list[str]] = {}
+        for skin_id, participant_id in self._skin_participant.items():
+            robot_id = self._skin_robot.get(skin_id, "")
+            if robot_id:
+                grouped.setdefault((robot_id, participant_id), []).append(skin_id)
+        final_assignments = [
+            SessionAssignment(
+                session_id=session_id,
+                robot_id=robot_id,
+                participant_id=participant_id,
+                unit_ids=skin_ids,
+            )
+            for (robot_id, participant_id), skin_ids in grouped.items()
+        ]
+        robot_ids = list({
+            self._skin_robot[s] for s in self._skin_participant if s in self._skin_robot
+        })
+        participant_ids = [p.participant_id for p in self._session_participants]
+        last_path = Settings.ROOT / "data" / "last_assignments.json"
+        last_asgn.save(last_path, robot_ids, participant_ids, final_assignments, session_id)
+
     def _on_stop(self) -> None:
         """Finish the session, persist end time, and reset the panel."""
         if self._current_record is not None:
@@ -274,6 +400,7 @@ class SessionPanel(QWidget, Ui_SessionPanel):
                 action="stop",
                 timestamp=end_time,
             ))
+            self._flush_last_assignments(self._current_record.session_id)
             self._current_record = None
 
         self.session_id_label.setText("—")
@@ -290,7 +417,14 @@ class SessionPanel(QWidget, Ui_SessionPanel):
             self._current_activity.stop()
             self._current_activity = None
 
+        if self._assignment_panel is not None:
+            self._assignment_panel.close()
+            self._assignment_panel = None
+
         self.session_finished.emit()
         self.session_stopped.emit()
         self._monitor.set_robots([])
         self._skin_participant = {}
+        self._skin_robot = {}
+        self._session_participants = []
+        self._pending_touches = []

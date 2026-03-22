@@ -11,26 +11,26 @@ import yaml
 class Settings:
     """Loads and persists application configuration from settings.yaml.
 
+    Always:
+    - ROOT   = ~/.local/share/SoftEdIBO  — writable user data (DB, config, robots)
     In a frozen (AppImage / PyInstaller) bundle:
     - BUNDLE = sys._MEIPASS  — read-only bundled assets (firmware, default config)
-    - ROOT   = ~/.local/share/SoftEdIBO  — writable user data (DB, config copy)
     In development:
-    - BUNDLE = ROOT = project root
+    - BUNDLE = project root  — read-only assets from the repo
     """
 
     BUNDLE: Path = (
-        Path(sys._MEIPASS)                          # read-only assets inside AppImage
+        Path(getattr(sys, "_MEIPASS", ""))          # read-only assets inside AppImage
         if getattr(sys, "frozen", False)
         else Path(__file__).parents[2]
     )
+    # On Linux, prefer SNAP_REAL_HOME over HOME so that running inside a Snap
+    # (e.g. VS Code) still resolves to the real user data directory.
+    _real_home: Path = Path(os.environ.get("SNAP_REAL_HOME", Path.home()))
     ROOT: Path = (
-        (
-            Path(os.environ.get("APPDATA", Path.home())) / "SoftEdIBO"
-            if sys.platform == "win32"
-            else Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")) / "SoftEdIBO"
-        )
-        if getattr(sys, "frozen", False)
-        else Path(__file__).parents[2]
+        Path(os.environ.get("APPDATA", _real_home)) / "SoftEdIBO"
+        if sys.platform == "win32"
+        else _real_home / ".local" / "share" / "SoftEdIBO"
     )
     # Bundled default (read-only); user copy is at ROOT/config/settings.yaml
     _DEFAULT_BUNDLE: Path = BUNDLE / "config" / "settings.yaml"
