@@ -153,7 +153,7 @@ class Skin:
         if chamber is None:
             logger.error("Skin %s has no chamber at slot %d", self.skin_id, slot)
             return False
-        new_target = min(100, chamber.pressure + delta)
+        new_target = min(100, chamber.target_pressure + delta)
         chamber.target_pressure = new_target
         if chamber.pressure < new_target:
             chamber.state = ChamberState.INFLATING
@@ -166,7 +166,7 @@ class Skin:
         if chamber is None:
             logger.error("Skin %s has no chamber at slot %d", self.skin_id, slot)
             return False
-        new_target = max(0, chamber.pressure - delta)
+        new_target = max(0, chamber.target_pressure - delta)
         chamber.target_pressure = new_target
         if chamber.pressure > new_target:
             chamber.state = ChamberState.DEFLATING

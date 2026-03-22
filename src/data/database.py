@@ -321,26 +321,34 @@ class Database:
     # ------------------------------------------------------------------
 
     def save_assignment(self, assignment: SessionAssignment) -> None:
-        """Insert or replace an assignment of robot units to a participant."""
+        """Insert or merge an assignment of robot units to a participant.
+
+        If a row already exists for the same (session, robot, participant),
+        the new unit_ids are merged into the existing list (no duplicates).
+        """
         import json
-        values = dict(
-            session_id=assignment.session_id,
-            robot_id=assignment.robot_id,
-            participant_id=assignment.participant_id,
-            unit_ids=json.dumps(assignment.unit_ids),
+        key_filter = (
+            (_session_assignments.c.session_id == assignment.session_id)
+            & (_session_assignments.c.robot_id == assignment.robot_id)
+            & (_session_assignments.c.participant_id == assignment.participant_id)
         )
         with self._engine.begin() as conn:
-            result = conn.execute(
-                _session_assignments.update()
-                .where(
-                    (_session_assignments.c.session_id == assignment.session_id)
-                    & (_session_assignments.c.robot_id == assignment.robot_id)
-                    & (_session_assignments.c.participant_id == assignment.participant_id)
+            existing = conn.execute(
+                select(_session_assignments.c.unit_ids).where(key_filter)
+            ).scalar()
+            if existing is not None:
+                merged = list(dict.fromkeys(json.loads(existing) + assignment.unit_ids))
+                conn.execute(
+                    _session_assignments.update().where(key_filter)
+                    .values(unit_ids=json.dumps(merged))
                 )
-                .values(**values)
-            )
-            if result.rowcount == 0:
-                conn.execute(_session_assignments.insert().values(**values))
+            else:
+                conn.execute(_session_assignments.insert().values(
+                    session_id=assignment.session_id,
+                    robot_id=assignment.robot_id,
+                    participant_id=assignment.participant_id,
+                    unit_ids=json.dumps(assignment.unit_ids),
+                ))
 
     def get_session_assignments(self, session_id: str) -> list[SessionAssignment]:
         """Return all robot-unit=>participant assignments for a session."""

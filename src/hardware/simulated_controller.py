@@ -23,7 +23,7 @@ class SimulatedController(QObject):
     _SIM_STEP = 10    # % per tick (300 ms → ~6%/tick)
     _TICK_MS  = 300
     _RAMP_STEP_MS   = 50   # target ramp step interval
-    _RAMP_TARGET_STEP = 25  # % per ramp step
+        _RAMP_TARGET_STEP = 5   # % per ramp step
     _TOUCH_INFLATE_MULTIPLIER = 1  # deflate starts after hold_ms × this + 300 ms
 
     def __init__(self, mac_address: str, parent: QObject | None = None) -> None:
@@ -46,9 +46,10 @@ class SimulatedController(QObject):
         return True
 
     def inflate(self, chamber: int, delta: int = 10) -> bool:
-        """Inflate by delta % (relative to current pressure)."""
-        current = self._current.setdefault(chamber, 0)
-        new_target = min(100, current + delta)
+        """Inflate by delta % (relative to current target)."""
+        self._current.setdefault(chamber, 0)
+        base = self._targets.get(chamber, self._current[chamber])
+        new_target = min(100, base + delta)
         self._targets[chamber] = new_target
         for cb in self._target_callbacks:
             cb(chamber, new_target)
@@ -57,9 +58,10 @@ class SimulatedController(QObject):
         return True
 
     def deflate(self, chamber: int, delta: int = 10) -> bool:
-        """Deflate by delta % (relative to current pressure)."""
-        current = self._current.setdefault(chamber, 0)
-        new_target = max(0, current - delta)
+        """Deflate by delta % (relative to current target)."""
+        self._current.setdefault(chamber, 0)
+        base = self._targets.get(chamber, self._current[chamber])
+        new_target = max(0, base - delta)
         self._targets[chamber] = new_target
         for cb in self._target_callbacks:
             cb(chamber, new_target)
