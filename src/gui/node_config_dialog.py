@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMessageBox,
+    QSpinBox,
     QWidget,
 )
 
@@ -84,17 +85,32 @@ class NodeConfigDialog(QDialog, Ui_NodeConfigDialog):
         # Repurpose chambers_group as slot selector
         self.chambers_group.setTitle("Slots (max 3 per MAC)")
 
-        # 3 static slot checkboxes
-        row_widget = QWidget()
-        hbox = QHBoxLayout(row_widget)
-        hbox.setContentsMargins(4, 4, 4, 4)
+        # 3 slot rows: checkbox + max pressure spinbox
         self._slot_checks: list[QCheckBox] = []
+        self._max_spins: list[QSpinBox] = []
         for slot in range(3):
+            row_widget = QWidget()
+            hbox = QHBoxLayout(row_widget)
+            hbox.setContentsMargins(4, 2, 4, 2)
+
             cb = QCheckBox(f"Slot {slot}")
             self._slot_checks.append(cb)
             hbox.addWidget(cb)
-        hbox.addStretch()
-        self.chambers_vbox.addWidget(row_widget)
+
+            hbox.addWidget(QLabel("Max:"))
+            max_spin = QSpinBox()
+            max_spin.setRange(1, 100)
+            max_spin.setValue(100)
+            max_spin.setSuffix(" %")
+            max_spin.setFixedWidth(70)
+            max_spin.setEnabled(False)
+            self._max_spins.append(max_spin)
+            hbox.addWidget(max_spin)
+
+            cb.toggled.connect(max_spin.setEnabled)
+
+            hbox.addStretch()
+            self.chambers_vbox.addWidget(row_widget)
         self.chambers_vbox.addStretch()
 
         # Populate from existing config
@@ -102,9 +118,13 @@ class NodeConfigDialog(QDialog, Ui_NodeConfigDialog):
         self._skin_id_edit.setText(skin_cfg.get("skin_id", ""))
         self._name_edit.setText(skin_cfg.get("name", ""))
         self.mac_edit.setText(skin_cfg.get("mac", "") or prefill_mac)
+        max_pressures = skin_cfg.get("max_pressure", {})
         for slot in skin_cfg.get("slots", []):
             if 0 <= slot < 3:
                 self._slot_checks[slot].setChecked(True)
+                val = max_pressures.get(slot, max_pressures.get(str(slot)))
+                if val is not None:
+                    self._max_spins[slot].setValue(val)
 
         # Connect buttons
         self.delete_btn.clicked.connect(self._on_delete)
@@ -198,7 +218,16 @@ class NodeConfigDialog(QDialog, Ui_NodeConfigDialog):
             )
             return
 
-        skin_entry = {"skin_id": skin_id, "name": name, "mac": mac, "slots": slots}
+        # Collect max pressure per slot (only store non-default values)
+        max_pressure: dict[int, int] = {}
+        for slot in slots:
+            val = self._max_spins[slot].value()
+            if val != 100:
+                max_pressure[slot] = val
+
+        skin_entry: dict = {"skin_id": skin_id, "name": name, "mac": mac, "slots": slots}
+        if max_pressure:
+            skin_entry["max_pressure"] = max_pressure
 
         data = self._settings.data
         robots_list = (

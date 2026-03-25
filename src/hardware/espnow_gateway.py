@@ -28,6 +28,7 @@ class ESPNowGateway:
         self._running = False
         self._read_thread: threading.Thread | None = None
         self._callbacks: list[Callable[[dict[str, Any]], None]] = []
+        self._logged_disconnected = False
         self._known_macs: set[str] = set()
 
     @property
@@ -73,8 +74,11 @@ class ESPNowGateway:
     def send(self, target_mac: str, command: str, **kwargs: Any) -> bool:
         """Send a command to a remote ESP32 node via the gateway."""
         if not self.is_connected:
-            logger.error("Gateway not connected")
+            if not self._logged_disconnected:
+                logger.debug("Gateway not connected — commands will be dropped")
+                self._logged_disconnected = True
             return False
+        self._logged_disconnected = False
 
         message = {"target": target_mac, "cmd": command, **kwargs}
         try:

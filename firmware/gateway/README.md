@@ -22,6 +22,7 @@ is downloaded automatically on first build and cached for subsequent builds.
 
 **PC => Gateway** — every command must include a `"target"` MAC:
 ```json
+{"target":"AA:BB:CC:DD:EE:01","cmd":"set_max_pressure","chamber":0,"value":80}
 {"target":"AA:BB:CC:DD:EE:01","cmd":"inflate","chamber":0,"delta":20}
 {"target":"AA:BB:CC:DD:EE:01","cmd":"deflate","chamber":1,"delta":15}
 {"target":"AA:BB:CC:DD:EE:01","cmd":"set_pressure","chamber":2,"value":75}

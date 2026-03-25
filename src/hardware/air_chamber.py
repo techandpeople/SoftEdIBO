@@ -14,9 +14,15 @@ class ChamberState(Enum):
 class AirChamber:
     """Represents a single air chamber with inflate/deflate capabilities."""
 
-    def __init__(self, chamber_id: int, esp32_mac: str):
+    def __init__(
+        self,
+        chamber_id: int,
+        esp32_mac: str,
+        max_pressure: int = 100,
+    ):
         self.chamber_id = chamber_id
         self.esp32_mac = esp32_mac
+        self.max_pressure = max(0, min(100, max_pressure))
         self._state = ChamberState.IDLE
         self._pressure: int = 0         # 0-100 (% of max), current measured value
         self._target_pressure: int = 0  # 0-100 (% of max), commanded target
@@ -37,7 +43,7 @@ class AirChamber:
 
     @pressure.setter
     def pressure(self, value: int) -> None:
-        self._pressure = max(0, min(100, value))
+        self._pressure = max(0, min(self.max_pressure, value))
 
     @property
     def target_pressure(self) -> int:
@@ -46,7 +52,7 @@ class AirChamber:
 
     @target_pressure.setter
     def target_pressure(self, value: int) -> None:
-        self._target_pressure = max(0, min(100, value))
+        self._target_pressure = max(0, min(self.max_pressure, value))
 
     def __repr__(self) -> str:
         return (
