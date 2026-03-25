@@ -16,7 +16,7 @@
 #       gateway/firmware.bin
 #       air_chamber_node/firmware.bin
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 block_cipher = None
 
@@ -94,7 +94,9 @@ esptool_a = Analysis(
     ["_esptool_main.py"],
     pathex=["."],
     binaries=[],
-    datas=[],
+    datas=[
+        *collect_data_files("esptool"),
+    ],
     hiddenimports=[
         *collect_submodules("esptool"),
         "serial.tools.list_ports",

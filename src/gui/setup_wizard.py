@@ -34,7 +34,7 @@ def _esptool_cmd(port: str, firmware: Path) -> tuple[str, list[str]]:
     the current Python interpreter.
     """
     flash_args = ["--chip", "esp32", "--port", port, "--baud", "921600",
-                  "write_flash", "0x0", str(firmware)]
+                  "write-flash", "0x0", str(firmware)]
     if getattr(sys, "frozen", False):
         suffix = ".exe" if sys.platform == "win32" else ""
         esptool_bin = Path(sys.executable).parent / f"esptool{suffix}"
