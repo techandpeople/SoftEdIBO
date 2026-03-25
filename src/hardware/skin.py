@@ -24,6 +24,7 @@ class Skin:
         controller: Any,
         chamber_slots: list[int],
         name: str | None = None,
+        pressure_limits: dict[int, int] | None = None,
     ):
         """Initialize a skin.
 
@@ -33,14 +34,26 @@ class Skin:
             chamber_slots: Which chamber slots (0-2) on the ESP32 this skin uses.
                 e.g. [0] for a 1-chamber skin, [0, 1, 2] for a full 3-chamber skin.
             name: Human-readable display label. Defaults to skin_id if not given.
+            pressure_limits: Per-slot max pressure, e.g. {0: 80, 1: 100}.
         """
         self.skin_id = skin_id
         self.name = name or skin_id
         self._controller = controller
+        limits = pressure_limits or {}
         self._chambers: dict[int, AirChamber] = {
-            slot: AirChamber(chamber_id=slot, esp32_mac=controller.mac_address)
+            slot: AirChamber(
+                chamber_id=slot,
+                esp32_mac=controller.mac_address,
+                max_pressure=limits.get(slot, 100),
+            )
             for slot in chamber_slots
         }
+        # Propagate limits to controller (used by SimulatedController touch ramps)
+        set_limit = getattr(controller, "set_max_pressure", None)
+        if set_limit is not None:
+            for slot, chamber in self._chambers.items():
+                set_limit(slot, chamber.max_pressure)
+
         controller.on_pressure(self._on_pressure_update)
         on_target = getattr(controller, "on_target", None)
         if on_target is not None:
@@ -153,7 +166,7 @@ class Skin:
         if chamber is None:
             logger.error("Skin %s has no chamber at slot %d", self.skin_id, slot)
             return False
-        new_target = min(100, chamber.target_pressure + delta)
+        new_target = min(chamber.max_pressure, chamber.target_pressure + delta)
         chamber.target_pressure = new_target
         if chamber.pressure < new_target:
             chamber.state = ChamberState.INFLATING
@@ -179,7 +192,7 @@ class Skin:
         if chamber is None:
             logger.error("Skin %s has no chamber at slot %d", self.skin_id, slot)
             return False
-        value = max(0, min(100, value))
+        value = max(0, min(chamber.max_pressure, value))
         chamber.target_pressure = value
         if chamber.pressure < value:
             chamber.state = ChamberState.INFLATING

@@ -39,11 +39,14 @@ class SimulatedRobot(BaseRobot):
             mac = cfg["mac"]
             if mac not in self._controllers:
                 self._controllers[mac] = SimulatedController(mac)
+            raw_max = cfg.get("max_pressure", {})
+            max_pressure = {int(k): v for k, v in raw_max.items()} if raw_max else None
             skin = Skin(
                 skin_id=cfg["skin_id"],
                 controller=self._controllers[mac],
                 chamber_slots=cfg["slots"],
                 name=cfg.get("name"),
+                pressure_limits=max_pressure,
             )
             self._skins[skin.skin_id] = skin
 

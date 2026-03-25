@@ -46,6 +46,7 @@ SessionPanel
 - **Activity** decides which robots participate and can replace real robots with simulated ones (`SimulationActivity`).
 - **Skin** is the basic tactile unit. Multiple skins can share one ESP32 node (up to 3 chambers total).
 - **Pressure** is expressed as **0–100 %** of the maximum pressure configured on each node.
+- **Per-chamber max pressure** can be set in `settings.yaml` and is enforced both in the app and on the ESP32 node (hardware safety — survives app crashes).
 
 ---
 
@@ -92,6 +93,30 @@ softedibo --uninstall 2>/dev/null || /opt/SoftEdIBO/install.sh --uninstall
 
 On first launch, a setup wizard guides you through flashing the firmware to the ESP32 nodes.
 
+### Configuration (`config/settings.yaml`)
+
+Robots are configured as a flat list of skins per type. Each skin maps to an ESP32 node (by MAC address) and specifies which chamber slots it uses. An optional `max_pressure` field sets per-chamber safety limits (in % of the hardware maximum).
+
+```yaml
+robots:
+  turtles:
+    - id: turtle_1
+      skins:
+        - skin_id: shell_top
+          name: Shell Top
+          mac: "AA:BB:CC:DD:EE:01"
+          slots: [0, 1, 2]
+          max_pressure:       # optional — defaults to 100%
+            0: 80             # chamber 0 capped at 80%
+            1: 60             # chamber 1 capped at 60%
+  trees: []
+  thymios: []
+```
+
+- Multiple skins can share the same MAC (up to 3 slots total per node).
+- `max_pressure` is sent to the ESP32 node on startup. The node enforces it independently — even if the app crashes, chambers will not exceed their configured limit.
+- If `max_pressure` is omitted, all chambers default to 100% (the full hardware range).
+
 ---
 
 ## Development
@@ -125,7 +150,7 @@ Requires [PlatformIO](https://platformio.org/).
 | Path | Description |
 |------|-------------|
 | `src/hardware/skin.py` | Skin model — groups 1–3 AirChambers on one ESP32 node |
-| `src/hardware/air_chamber.py` | AirChamber model — pressure 0–100 % |
+| `src/hardware/air_chamber.py` | AirChamber model — pressure 0–100 %, configurable max |
 | `src/hardware/esp32_controller.py` | Real hardware controller (via ESP-NOW gateway) |
 | `src/hardware/simulated_controller.py` | Mock controller for simulation mode |
 | `src/robots/` | TurtleRobot, TreeRobot, ThymioRobot, SimulatedRobot |

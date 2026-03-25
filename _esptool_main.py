@@ -7,6 +7,11 @@ it via QProcess when flashing firmware in frozen (packaged) mode.
 
 import sys
 
-import esptool
-
-sys.exit(esptool.main())
+try:
+    # esptool >= 4.x
+    import esptool
+    sys.exit(esptool.main())
+except AttributeError:
+    # esptool 3.x
+    from esptool.__main__ import _main
+    sys.exit(_main())

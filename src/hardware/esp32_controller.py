@@ -45,6 +45,13 @@ class ESP32Controller:
         """Set absolute target pressure for a chamber (0-100 %)."""
         return self.send_command("set_pressure", chamber=chamber, value=value)
 
+    def set_max_pressure(self, chamber: int, value: int) -> bool:
+        """Set per-chamber max pressure on the ESP32 node (0-100 %).
+
+        The node will refuse to inflate past this limit, even if the app crashes.
+        """
+        return self.send_command("set_max_pressure", chamber=chamber, value=value)
+
     def calibrate_sensor(self, sensor_id: int) -> bool:
         """Request sensor calibration on the ESP32."""
         return self.send_command("calibrate_sensor", sensor=sensor_id)
