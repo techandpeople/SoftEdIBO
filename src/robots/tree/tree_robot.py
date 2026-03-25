@@ -43,11 +43,14 @@ class TreeRobot(BaseRobot):
             mac = skin_cfg["mac"]
             if mac not in self._controllers:
                 self._controllers[mac] = ESP32Controller(mac, gateway)
+            raw_max = skin_cfg.get("max_pressure", {})
+            max_pressure = {int(k): v for k, v in raw_max.items()} if raw_max else None
             skin = Skin(
                 skin_id=skin_cfg["skin_id"],
                 controller=self._controllers[mac],
                 chamber_slots=skin_cfg["slots"],
                 name=skin_cfg.get("name"),
+                pressure_limits=max_pressure,
             )
             self._skins[skin.skin_id] = skin
             self._owners[skin.skin_id] = None

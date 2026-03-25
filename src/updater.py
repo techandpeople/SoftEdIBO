@@ -177,7 +177,13 @@ class AppUpdater(QObject):
             appimage = _appimage_path()
             if not appimage:
                 return
-            fd, tmp = tempfile.mkstemp(suffix=".AppImage", prefix="softedibo-update-")
+            # Write temp file in the SAME directory as the AppImage so
+            # os.rename() works atomically (avoids cross-device issues with /tmp).
+            fd, tmp = tempfile.mkstemp(
+                suffix=".AppImage",
+                prefix=".softedibo-update-",
+                dir=str(appimage.parent),
+            )
             os.close(fd)
             self._tmp_path = Path(tmp)
 
@@ -221,17 +227,20 @@ class AppUpdater(QObject):
             # Caller will apply the update via PowerShell after the app exits
             self.download_done.emit(self._tmp_path)
         else:
-            # Linux: copy from /tmp to the AppImage path (avoids cross-device rename),
-            # set executable bit, then remove the temp file.
+            # Linux: atomic rename over the running AppImage.
+            # The temp file is already in the same directory (same filesystem),
+            # so os.rename() is atomic and avoids ETXTBSY from shutil.copy2.
             appimage = _appimage_path()
             try:
-                shutil.copy2(self._tmp_path, appimage)
-                appimage.chmod(
-                    appimage.stat().st_mode
+                self._tmp_path.chmod(
+                    self._tmp_path.stat().st_mode
                     | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
                 )
-            finally:
+                os.rename(self._tmp_path, appimage)
+            except OSError as exc:
                 self._tmp_path.unlink(missing_ok=True)
+                self.error.emit(f"Failed to apply update: {exc}")
+                return
             self.download_done.emit(appimage)
 
     def cancel(self) -> None:

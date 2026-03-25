@@ -35,7 +35,7 @@ pio run --target upload
 
 | Constant | Default | Description |
 |----------|---------|-------------|
-| `MAX_PRESSURE_ADC` | 1500 | ADC hard cap — burst protection. All pressure % values are relative to this. |
+| `MAX_PRESSURE_ADC` | 1500 | ADC hard cap — absolute burst protection. Per-chamber limits can be set lower at runtime via `set_max_pressure`. |
 | `MIN_PRESSURE_ADC` | 200  | ADC threshold treated as "empty" |
 | `DEFAULT_INFLATE_DUTY` | 255 | Pump PWM duty (0–255) used for inflate/set_pressure commands |
 | `PRESSURE_CHECK_MS` | 200 | Safety check interval (ms) |
@@ -44,8 +44,11 @@ pio run --target upload
 | `PUMP_PWM_FREQ` | 20000 | Pump PWM frequency (Hz) — above audible range |
 
 Calibrate `MAX_PRESSURE_ADC` after measuring sensor output at your target maximum pressure.
-This value is the single safety boundary enforced in hardware — the PC cannot exceed it
-regardless of what commands it sends.
+This value is the absolute safety boundary enforced in hardware — no command can exceed it.
+
+Additionally, the PC sends `set_max_pressure` per chamber on startup to set a lower
+software limit. This limit is stored in RAM and defaults to `MAX_PRESSURE_ADC` on
+boot. If the PC app crashes, the node continues to enforce the last received limit.
 
 ## ESP-NOW Protocol
 
@@ -61,11 +64,13 @@ The gateway strips its own `"target"` field before forwarding.
 | `inflate` | `chamber` (0–2), `delta` (0–100, default 10) | Inflate by `delta`% relative to current pressure |
 | `deflate` | `chamber` (0–2), `delta` (0–100, default 10) | Deflate by `delta`% relative to current pressure |
 | `set_pressure` | `chamber` (0–2), `value` (0–100) | Inflate or deflate to an absolute target of `value`% |
+| `set_max_pressure` | `chamber` (0–2), `value` (0–100, default 100) | Set per-chamber pressure ceiling. Capped to `MAX_PRESSURE_ADC`. Survives until reboot. |
 | `hold` | `chamber` (0–2) | Stop pump and close both valves — freeze at current pressure |
 | `ping` | — | Responds `{"type":"pong"}` |
 
 #### Examples
 ```json
+{"cmd":"set_max_pressure","chamber":0,"value":80}
 {"cmd":"inflate","chamber":0,"delta":20}
 {"cmd":"deflate","chamber":1,"delta":15}
 {"cmd":"set_pressure","chamber":2,"value":75}
@@ -87,7 +92,10 @@ Broadcast every `STATUS_REPORT_MS` (500 ms) for all 3 chambers:
 - **Parallel operation:** multiple chambers can inflate/deflate simultaneously.
   The inflate pump runs at `max(duty)` of all active inflate chambers.
 - **Pressure safety:** each chamber stops independently when its pressure
-  target is reached; the pump stops automatically when no chamber is active.
+  target is reached or when the per-chamber `max_pressure_adc` ceiling is hit;
+  the pump stops automatically when no chamber is active.
+- **Per-chamber limits:** the app sends `set_max_pressure` on startup. The node
+  enforces this limit even if the app disconnects or crashes.
 - **Valve interlock:** switching from inflate to deflate (or vice versa) on
   the same chamber closes the current valve before opening the next one
   (`VALVE_SETTLE_MS` delay).

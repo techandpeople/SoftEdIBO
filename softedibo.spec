@@ -96,12 +96,7 @@ esptool_a = Analysis(
     binaries=[],
     datas=[],
     hiddenimports=[
-        "esptool",
-        "esptool.targets",
-        "esptool.targets.esp32",
-        "esptool.loader",
-        "esptool.cmds",
-        "esptool.util",
+        *collect_submodules("esptool"),
         "serial.tools.list_ports",
     ],
     hookspath=[],
