@@ -319,7 +319,12 @@ void loop() {
     // ---- Status broadcast ----
     if (now - lastStatusMs >= STATUS_REPORT_MS) {
         lastStatusMs = now;
-        for (int i = 0; i < 3; i++)
-            sendStatus(i, readPressure(PSENSOR_PINS[i]));
+        for (int i = 0; i < 3; i++) {
+            int adc = readPressure(PSENSOR_PINS[i]);
+            Serial.printf("CH%d raw_adc=%d  max=%d  pct=%d%%\n",
+                          i, adc, chambers[i].max_pressure_adc,
+                          adc * 100 / MAX_PRESSURE_ADC);
+            sendStatus(i, adc);
+        }
     }
 }
