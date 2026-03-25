@@ -3,8 +3,7 @@
  * Target: ESP32-WROOM-32 (esp32dev)
  *
  * Controls 3 air chambers (inflate + deflate solenoid valves per chamber)
- * driven by 2 global pumps (DRV8833 H-bridge) via ESP-NOW commands from
- * the gateway.
+ * driven by 2 global pumps (PWM + GND) via ESP-NOW commands from the gateway.
  *
  * Commands received (ESP-NOW, newline-terminated JSON stripped by gateway):
  *   {"cmd":"inflate","chamber":0,"delta":20}            ← inflate by 20% of max
@@ -30,15 +29,15 @@
 // [chamber][0] = inflate valve GPIO, [chamber][1] = deflate valve GPIO
 // HIGH = valve open, LOW = valve closed
 constexpr int VALVE_PINS[3][2] = {
-    {15,  4},   // chamber 0
-    {16, 17},   // chamber 1
-    { 5, 18},   // chamber 2
+    {22, 23},   // chamber 0
+    {21, 13},   // chamber 1
+    {14, 33},   // chamber 2
 };
 
-constexpr int PUMP1_A = 32, PUMP1_B = 33;   // inflate pump  (DRV8833)
-constexpr int PUMP2_A = 25, PUMP2_B = 26;   // deflate pump  (DRV8833)
+constexpr int PUMP1_PIN = 25;   // inflate pump  (PWM, other wire to GND)
+constexpr int PUMP2_PIN = 26;   // deflate pump  (PWM, other wire to GND)
 
-constexpr int PSENSOR_PINS[3] = {34, 35, 36};  // XGZP6847 analog (12-bit ADC)
+constexpr int PSENSOR_PINS[3] = {34, 35, 32};  // XGZP6847 analog (12-bit ADC)
 
 // ---------------------------------------------------------------------------
 // Tuning constants — edit these before flashing
@@ -46,7 +45,7 @@ constexpr int PSENSOR_PINS[3] = {34, 35, 36};  // XGZP6847 analog (12-bit ADC)
 
 // Pressure limits (raw 12-bit ADC, 0-4095)
 // Adjust after measuring sensor output at known pressures.
-constexpr int MAX_PRESSURE_ADC     = 1500;  // ~37 kPa — burst protection
+constexpr int MAX_PRESSURE_ADC     =  500;  // ADC hard cap — ~8 kPa burst protection (100 kPa sensor)
 constexpr int MIN_PRESSURE_ADC     =  200;  // near-empty threshold
 
 constexpr uint8_t DEFAULT_INFLATE_DUTY = 255;   // pump PWM duty when 'value' omitted
@@ -270,10 +269,8 @@ void setup() {
     // Pump PWM via LEDC (channel-based API, compatible with all ESP32 core versions)
     ledcSetup(PUMP1_LEDC_CH, PUMP_PWM_FREQ, PUMP_PWM_RES);
     ledcSetup(PUMP2_LEDC_CH, PUMP_PWM_FREQ, PUMP_PWM_RES);
-    ledcAttachPin(PUMP1_A, PUMP1_LEDC_CH);
-    ledcAttachPin(PUMP2_A, PUMP2_LEDC_CH);
-    pinMode(PUMP1_B, OUTPUT); digitalWrite(PUMP1_B, LOW);
-    pinMode(PUMP2_B, OUTPUT); digitalWrite(PUMP2_B, LOW);
+    ledcAttachPin(PUMP1_PIN, PUMP1_LEDC_CH);
+    ledcAttachPin(PUMP2_PIN, PUMP2_LEDC_CH);
 
     // Pressure sensor ADC pins are input-only by default on ESP32 (34,35,36)
 

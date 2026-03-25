@@ -15,7 +15,7 @@ The system supports multiple robot types (Turtle, Tree, Thymio) and activity mod
 |-----------|----------|-------|
 | ESP32-WROOM-32 (gateway) | 1 | Connected to PC via USB |
 | ESP32-WROOM-32 (air chamber nodes) | 1 per skin | Up to 3 chambers per node |
-| DRV8833 H-bridge | 2 per node | Inflate and deflate pumps |
+| Air pump | 2 per node | Inflate and deflate (PWM + GND) |
 | XGZP6847 pressure sensor | 1 per chamber | Analog output (0–3.3 V) |
 | Solenoid valves | 2 per chamber | Inflate + deflate |
 

@@ -7,22 +7,20 @@ via solenoid valves and two DRV8833-driven pumps.
 
 | Component | GPIO |
 |-----------|------|
-| Chamber 0 — inflate valve | 15 |
-| Chamber 0 — deflate valve | 4  |
-| Chamber 1 — inflate valve | 16 |
-| Chamber 1 — deflate valve | 17 |
-| Chamber 2 — inflate valve | 5  |
-| Chamber 2 — deflate valve | 18 |
-| Inflate pump — DRV8833 IN1 (PWM) | 32 |
-| Inflate pump — DRV8833 IN2       | 33 |
-| Deflate pump — DRV8833 IN1 (PWM) | 25 |
-| Deflate pump — DRV8833 IN2       | 26 |
-| Pressure sensor ch0 — XGZP6847 (ADC) | 34 |
-| Pressure sensor ch1 — XGZP6847 (ADC) | 35 |
-| Pressure sensor ch2 — XGZP6847 (ADC) | 36 |
+| Chamber 0 — inflate valve | 22 |
+| Chamber 0 — deflate valve | 23 |
+| Chamber 1 — inflate valve | 21 |
+| Chamber 1 — deflate valve | 13 |
+| Chamber 2 — inflate valve | 14 |
+| Chamber 2 — deflate valve | 33 |
+| Inflate pump (PWM) | 25 |
+| Deflate pump (PWM) | 26 |
+| Pressure sensor ch0 — XGZP6847A (ADC) | 34 |
+| Pressure sensor ch1 — XGZP6847A (ADC) | 35 |
+| Pressure sensor ch2 — XGZP6847A (ADC) | 32 |
 
 Valves: `HIGH` = open, `LOW` = closed.
-Pumps: PWM on IN1, IN2 kept LOW (forward only).
+Pumps: PWM pin + GND (no H-bridge).
 
 ## Build & Flash
 
