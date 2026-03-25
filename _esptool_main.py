@@ -7,6 +7,6 @@ it via QProcess when flashing firmware in frozen (packaged) mode.
 
 import sys
 
-from esptool.__main__ import _main
+import esptool
 
-sys.exit(_main())
+sys.exit(esptool.main())

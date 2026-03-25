@@ -4,7 +4,7 @@ import re
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QProcess
+from PySide6.QtCore import QProcess, QProcessEnvironment
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
@@ -168,17 +168,30 @@ class _FlashPage(QWizardPage):
 
         prog, args = _esptool_cmd(port, self._firmware)
         self._proc = QProcess(self)
-        self._proc.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
+        env = QProcessEnvironment.systemEnvironment()
+        env.insert("PYTHONUNBUFFERED", "1")
+        self._proc.setProcessEnvironment(env)
         self._proc.readyReadStandardOutput.connect(self._on_output)
+        self._proc.readyReadStandardError.connect(self._on_error_output)
         self._proc.finished.connect(self._on_finished)
         self._proc.start(prog, args)
 
+    def _parse_progress(self, raw: str) -> None:
+        """Parse and display esptool output, updating the progress bar."""
+        self._log.appendPlainText(raw.rstrip())
+        # Parse percentage from esptool output (both old and new formats)
+        # Old: "Writing at 0x00000000... (42 %)"
+        # New: "Writing at 0x00000000 [====] 42.0% 212992/516100 bytes..."
+        for m in re.finditer(r'(\d+(?:\.\d+)?)\s*%', raw):
+            self._progress.setValue(int(float(m.group(1))))
+
     def _on_output(self) -> None:
         raw = self._proc.readAllStandardOutput().data().decode(errors="replace")
-        self._log.appendPlainText(raw.rstrip())
-        # Parse percentage from esptool output: "Writing at 0x00000000... (42 %)"
-        for m in re.finditer(r'\((\d+)\s*%\)', raw):
-            self._progress.setValue(int(m.group(1)))
+        self._parse_progress(raw)
+
+    def _on_error_output(self) -> None:
+        raw = self._proc.readAllStandardError().data().decode(errors="replace")
+        self._parse_progress(raw)
 
     def _on_finished(self, exit_code: int, _exit_status) -> None:
         if exit_code == 0:
