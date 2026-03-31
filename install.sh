@@ -12,12 +12,16 @@
 #
 # Uninstall:
 #   ./install.sh --uninstall
+#
+# System-wide install (legacy behavior, requires sudo):
+#   ./install.sh --system
 set -euo pipefail
 
 REPO="techandpeople/SoftEdIBO"
-INSTALL_DIR="/opt/SoftEdIBO"
+SYSTEM_INSTALL=false
+INSTALL_DIR="$HOME/.local/opt/SoftEdIBO"
 APPIMAGE_DEST="$INSTALL_DIR/SoftEdIBO.AppImage"
-BIN_LINK="/usr/local/bin/softedibo"
+BIN_LINK="$HOME/.local/bin/softedibo"
 DESKTOP_FILE="$HOME/.local/share/applications/softedibo.desktop"
 ICON_FILE="$HOME/.local/share/icons/hicolor/256x256/apps/softedibo.png"
 
@@ -30,13 +34,16 @@ for arg in "$@"; do
     case "$arg" in
         --uninstall)
             echo "Uninstalling SoftEdIBO..."
-            sudo rm -rf  "$INSTALL_DIR"
-            sudo rm -f   "$BIN_LINK"
+            rm -rf "$HOME/.local/opt/SoftEdIBO"
+            rm -f "$HOME/.local/bin/softedibo"
+            sudo rm -rf /opt/SoftEdIBO 2>/dev/null || true
+            sudo rm -f /usr/local/bin/softedibo 2>/dev/null || true
             rm -f "$DESKTOP_FILE" "$ICON_FILE"
             echo "Done. User data in ~/.local/share/SoftEdIBO (if any) was NOT removed."
             exit 0
             ;;
         --nightly) NIGHTLY=true ;;
+        --system) SYSTEM_INSTALL=true ;;
         --help|-h)
             cat << 'EOF'
 Usage:
@@ -44,6 +51,7 @@ Usage:
 
 Options:
   --nightly     Install the latest nightly build instead of the stable release
+    --system      Install system-wide to /opt + /usr/local/bin (requires sudo)
   --uninstall   Remove SoftEdIBO from the system
   -h, --help    Show this help message
 
@@ -60,12 +68,15 @@ Examples:
   # Install from a local AppImage:
   ./install.sh SoftEdIBO-x86_64.AppImage
 
+    # Install system-wide (legacy behavior):
+    ./install.sh --system
+
   # Uninstall:
   ./install.sh --uninstall
 
 Installs to:
-  /opt/SoftEdIBO/SoftEdIBO.AppImage   AppImage
-  /usr/local/bin/softedibo             Launcher (no FUSE required)
+    ~/.local/opt/SoftEdIBO/SoftEdIBO.AppImage      AppImage (default)
+    ~/.local/bin/softedibo                         Launcher (default, no sudo)
   ~/.local/share/applications/         Desktop entry
   ~/.local/share/icons/                App icon
 EOF
@@ -75,6 +86,12 @@ EOF
         *)   LOCAL_FILE="$arg" ;;
     esac
 done
+
+if $SYSTEM_INSTALL; then
+    INSTALL_DIR="/opt/SoftEdIBO"
+    BIN_LINK="/usr/local/bin/softedibo"
+    APPIMAGE_DEST="$INSTALL_DIR/SoftEdIBO.AppImage"
+fi
 
 # ── Locate or download AppImage ────────────────────────────────────────────
 if [[ -n "$LOCAL_FILE" ]]; then
@@ -106,14 +123,22 @@ fi
 echo "Installing from: $SRC"
 
 # ── Copy AppImage ──────────────────────────────────────────────────────────
-sudo mkdir -p "$INSTALL_DIR"
-sudo cp "$SRC" "$APPIMAGE_DEST"
-sudo chmod 755 "$APPIMAGE_DEST"
-sudo chown "$USER" "$APPIMAGE_DEST"
+if $SYSTEM_INSTALL; then
+    sudo mkdir -p "$INSTALL_DIR"
+    sudo cp "$SRC" "$APPIMAGE_DEST"
+    sudo chmod 755 "$APPIMAGE_DEST"
+    sudo chown "$USER" "$APPIMAGE_DEST"
+else
+    mkdir -p "$INSTALL_DIR"
+    cp "$SRC" "$APPIMAGE_DEST"
+    chmod 755 "$APPIMAGE_DEST"
+fi
 echo "  => $APPIMAGE_DEST"
 
 # ── Wrapper script (no FUSE needed) ───────────────────────────────────────
-sudo tee "$BIN_LINK" > /dev/null << EOF
+mkdir -p "$(dirname "$BIN_LINK")"
+if $SYSTEM_INSTALL; then
+    sudo tee "$BIN_LINK" > /dev/null << EOF
 #!/bin/bash
 if [[ "\${1:-}" == "--uninstall" ]]; then
     echo "Uninstalling SoftEdIBO..."
@@ -127,7 +152,24 @@ export APPIMAGE_EXTRACT_AND_RUN=1
 export APPIMAGE="$APPIMAGE_DEST"
 exec "$APPIMAGE_DEST" "\$@"
 EOF
-sudo chmod +x "$BIN_LINK"
+    sudo chmod +x "$BIN_LINK"
+else
+    cat > "$BIN_LINK" << EOF
+#!/bin/bash
+if [[ "\${1:-}" == "--uninstall" ]]; then
+    echo "Uninstalling SoftEdIBO..."
+    rm -rf "$INSTALL_DIR"
+    rm -f "$BIN_LINK"
+    rm -f "$DESKTOP_FILE" "$ICON_FILE"
+    echo "Done. User data in ~/.local/share/SoftEdIBO (if any) was NOT removed."
+    exit 0
+fi
+export APPIMAGE_EXTRACT_AND_RUN=1
+export APPIMAGE="$APPIMAGE_DEST"
+exec "$APPIMAGE_DEST" "\$@"
+EOF
+    chmod +x "$BIN_LINK"
+fi
 echo "  => launcher: $BIN_LINK"
 
 # ── Download icon ──────────────────────────────────────────────────────────
@@ -170,6 +212,9 @@ fi
 echo ""
 echo "Installation complete!"
 echo "  Run:  softedibo"
+if ! command -v softedibo >/dev/null 2>&1; then
+    echo "  Note: add ~/.local/bin to PATH if command is not found."
+fi
 echo "   or open it from the application menu."
 echo ""
 echo "To uninstall: softedibo --uninstall"

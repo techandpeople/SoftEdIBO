@@ -45,12 +45,12 @@ class ESP32Controller:
         """Set target pressure for a chamber as 0-100 % of that chamber max."""
         return self.send_command("set_pressure", chamber=chamber, value=value)
 
-    def set_max_pressure(self, chamber: int, value: int) -> bool:
+    def set_max_pressure(self, chamber: int, value: float) -> bool:
         """Set per-chamber max pressure on the ESP32 node (kPa).
 
         The node will refuse to inflate past this limit, even if the app crashes.
         """
-        return self.send_command("set_max_pressure", chamber=chamber, value=value)
+        return self.send_command("set_max_pressure", chamber=chamber, value=float(value))
 
     def debug(self) -> bool:
         """Request a debug snapshot from the node (debug firmware only)."""

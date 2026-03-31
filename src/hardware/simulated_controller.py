@@ -31,7 +31,7 @@ class SimulatedController(QObject):
         self.mac_address = mac_address
         self._targets:  dict[int, int] = {}
         self._current:  dict[int, int] = {}
-        self._max_pressures: dict[int, int] = {}
+        self._max_pressures: dict[int, float] = {}
         self._pressure_callbacks: list[Callable[[int, int], None]] = []
         self._target_callbacks:   list[Callable[[int, int], None]] = []
         self._touch_callbacks:    list[Callable[[int, int], None]] = []
@@ -42,9 +42,9 @@ class SimulatedController(QObject):
         self._timer.setInterval(self._TICK_MS)
         self._timer.timeout.connect(self._tick)
 
-    def set_max_pressure(self, chamber: int, max_p: int) -> None:
+    def set_max_pressure(self, chamber: int, max_p: float) -> None:
         """Set max pressure for a chamber in kPa (used by Skin to propagate config)."""
-        self._max_pressures[chamber] = max_p
+        self._max_pressures[chamber] = float(max_p)
 
     @property
     def is_connected(self) -> bool:

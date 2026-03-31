@@ -5,6 +5,7 @@ Backend is selected via settings.yaml => database.backend.
 """
 
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -86,8 +87,25 @@ class Database:
     """
 
     def __init__(self, url: str):
-        self._url = url
+        self._url = self._normalize_url(url)
         self._engine: Engine | None = None
+
+    @staticmethod
+    def _normalize_url(url: str) -> str:
+        """Accept SQLAlchemy URLs or plain filesystem paths for SQLite.
+
+        Tests and local utilities often pass ``/tmp/test.db`` directly.
+        Convert those paths to ``sqlite:///...`` so SQLAlchemy can parse them.
+        """
+        if "://" in url:
+            return url
+        return f"sqlite:///{Path(url)}"
+
+    @staticmethod
+    def _extract_counter_num(identifier: str) -> int | None:
+        """Extract trailing numeric part from IDs like S001, P002, test-003."""
+        m = re.search(r"(\d+)$", identifier)
+        return int(m.group(1)) if m else None
 
     # ------------------------------------------------------------------
     # Factory
@@ -181,7 +199,9 @@ class Database:
             )
             if result.rowcount == 0:
                 conn.execute(_sessions.insert().values(**values))
-            self._bump_counter(conn, "session", int(session.session_id[1:]))
+            n = self._extract_counter_num(session.session_id)
+            if n is not None:
+                self._bump_counter(conn, "session", n)
 
     def get_all_sessions(self) -> list[SessionRecord]:
         """Return all session records ordered by start time."""
@@ -267,7 +287,9 @@ class Database:
             )
             if result.rowcount == 0:
                 conn.execute(_participants.insert().values(**values))
-            self._bump_counter(conn, "participant", int(participant.participant_id[1:]))
+            n = self._extract_counter_num(participant.participant_id)
+            if n is not None:
+                self._bump_counter(conn, "participant", n)
 
     def get_all_participants(self) -> list[ParticipantRecord]:
         """Return all participant records ordered by ID."""

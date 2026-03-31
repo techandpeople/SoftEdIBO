@@ -10,12 +10,12 @@ Constraints enforced on save:
 
 from PySide6.QtWidgets import (
     QCheckBox,
+    QDoubleSpinBox,
     QDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
-    QSpinBox,
     QWidget,
 )
 
@@ -87,8 +87,10 @@ class NodeConfigDialog(QDialog, Ui_NodeConfigDialog):
 
         # 3 slot rows: checkbox + max pressure spinbox
         self._slot_checks: list[QCheckBox] = []
-        self._max_spins: list[QSpinBox] = []
-        self._default_max_kpa = 8
+        self._max_spins: list[QDoubleSpinBox] = []
+        self._default_max_kpa = 8.0
+        self._max_allowed_kpa = 12.0
+        self._confirm_delta_kpa = 2.0
         for slot in range(3):
             row_widget = QWidget()
             hbox = QHBoxLayout(row_widget)
@@ -99,8 +101,10 @@ class NodeConfigDialog(QDialog, Ui_NodeConfigDialog):
             hbox.addWidget(cb)
 
             hbox.addWidget(QLabel("Max (kPa):"))
-            max_spin = QSpinBox()
-            max_spin.setRange(1, 8)
+            max_spin = QDoubleSpinBox()
+            max_spin.setDecimals(1)
+            max_spin.setSingleStep(0.1)
+            max_spin.setRange(0.1, self._max_allowed_kpa)
             max_spin.setValue(self._default_max_kpa)
             max_spin.setSuffix(" kPa")
             max_spin.setFixedWidth(70)
@@ -125,7 +129,7 @@ class NodeConfigDialog(QDialog, Ui_NodeConfigDialog):
                 self._slot_checks[slot].setChecked(True)
                 val = max_pressures.get(slot, max_pressures.get(str(slot)))
                 if val is not None:
-                    self._max_spins[slot].setValue(int(val))
+                    self._max_spins[slot].setValue(float(val))
 
         # Connect buttons
         self.delete_btn.clicked.connect(self._on_delete)
@@ -220,11 +224,37 @@ class NodeConfigDialog(QDialog, Ui_NodeConfigDialog):
             return
 
         # Collect max pressure (kPa) per slot (only store non-default values)
-        max_pressure: dict[int, int] = {}
+        max_pressure: dict[int, float] = {}
         for slot in slots:
-            val = self._max_spins[slot].value()
-            if val != self._default_max_kpa:
+            val = round(self._max_spins[slot].value(), 1)
+            if abs(val - self._default_max_kpa) > 1e-9:
                 max_pressure[slot] = val
+
+        # Confirm unusually large per-slot changes from previous config.
+        prev_cfg = self._load_skin_cfg()
+        prev_max = prev_cfg.get("max_pressure", {})
+        large_changes: list[str] = []
+        for slot in slots:
+            old = prev_max.get(slot, prev_max.get(str(slot), self._default_max_kpa))
+            try:
+                old_val = float(old)
+            except (TypeError, ValueError):
+                old_val = self._default_max_kpa
+            new_val = round(self._max_spins[slot].value(), 1)
+            if abs(new_val - old_val) >= self._confirm_delta_kpa:
+                large_changes.append(f"Slot {slot}: {old_val:.1f} -> {new_val:.1f} kPa")
+
+        if large_changes:
+            reply = QMessageBox.question(
+                self,
+                "Confirm Large Pressure Change",
+                "Large max-pressure change detected:\n"
+                + "\n".join(large_changes)
+                + "\n\nDo you want to keep these changes?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
 
         skin_entry: dict = {"skin_id": skin_id, "name": name, "mac": mac, "slots": slots}
         if max_pressure:

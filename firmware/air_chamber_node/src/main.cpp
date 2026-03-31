@@ -10,7 +10,7 @@
  *   {"cmd":"inflate","chamber":0,"delta":20}            <- inflate by 20% of max
  *   {"cmd":"deflate","chamber":1,"delta":20}            <- deflate by 20% of max
  *   {"cmd":"set_pressure","chamber":0,"value":75}       <- target 75% of chamber max
- *   {"cmd":"set_max_pressure","chamber":0,"value":6}    <- cap chamber 0 at 6 kPa
+ *   {"cmd":"set_max_pressure","chamber":0,"value":6.5}  <- cap chamber 0 at 6.5 kPa
  *   {"cmd":"hold","chamber":2}                          <- freeze at current pressure
  *   {"cmd":"ping"}
  *   {"cmd":"debug"}                                     <- (debug build only)
@@ -43,7 +43,8 @@
 // Tuning constants
 // ---------------------------------------------------------------------------
 
-constexpr float MAX_KPA = 8.0f;    // hard safety cap (~8 kPa burst protection)
+constexpr float DEFAULT_MAX_KPA = 8.0f;         // default per-chamber cap
+constexpr float HARD_MAX_KPA    = 12.0f;        // absolute safety ceiling for chamber protection
 
 constexpr uint8_t DEFAULT_INFLATE_DUTY = 255;
 
@@ -86,6 +87,7 @@ struct Cmd {
     CmdType type;
     int8_t  chamber;
     int16_t param;
+    float   param_kpa;
 };
 
 static constexpr uint8_t QUEUE_MASK = 0x0F;   // size 16, power-of-2
@@ -137,7 +139,7 @@ struct Chamber {
     ChamberState state      = CH_IDLE;
     uint8_t      duty       = 0;
     float        target_kpa = 0.0f;
-    float        max_kpa    = MAX_KPA;
+    float        max_kpa    = DEFAULT_MAX_KPA;
     uint32_t     settle_ts  = 0;
 };
 
@@ -146,6 +148,8 @@ static uint8_t   gatewayMac[6]  = {};
 static bool      gatewayKnown   = false;
 static uint32_t  lastPressureMs = 0;
 static uint32_t  lastStatusMs   = 0;
+static int       cachedAdc[3]   = {};
+static float     cachedVolt[3]  = {};
 static float     cachedKpa[3]   = {};
 
 #ifdef DEBUG_BUILD
@@ -262,16 +266,24 @@ static void processCommand(const Cmd& c) {
 #ifdef DEBUG_BUILD
     if (c.type == CMD_DEBUG) {
         if (!gatewayKnown) return;
-        char buf[200];
+        char buf[900];
         int len = snprintf(buf, sizeof(buf),
             "{\"type\":\"debug\""
-            ",\"ch\":[{\"s\":%d,\"kpa\":%.1f,\"tgt\":%.1f,\"max\":%.1f}"
-                    ",{\"s\":%d,\"kpa\":%.1f,\"tgt\":%.1f,\"max\":%.1f}"
-                    ",{\"s\":%d,\"kpa\":%.1f,\"tgt\":%.1f,\"max\":%.1f}]"
+            ",\"defaults\":{\"max_kpa\":%.1f,\"hard_max_kpa\":%.1f,\"sensor_max_kpa\":%.1f}"
+            ",\"ch\":[{\"s\":%d,\"st\":\"%s\",\"adc\":%d,\"v\":%.3f,\"kpa\":%.3f,\"pct_max\":%d,\"pct_sensor\":%d,\"tgt_kpa\":%.3f,\"tgt_pct\":%d,\"max_kpa\":%.3f}"
+                    ",{\"s\":%d,\"st\":\"%s\",\"adc\":%d,\"v\":%.3f,\"kpa\":%.3f,\"pct_max\":%d,\"pct_sensor\":%d,\"tgt_kpa\":%.3f,\"tgt_pct\":%d,\"max_kpa\":%.3f}"
+                    ",{\"s\":%d,\"st\":\"%s\",\"adc\":%d,\"v\":%.3f,\"kpa\":%.3f,\"pct_max\":%d,\"pct_sensor\":%d,\"tgt_kpa\":%.3f,\"tgt_pct\":%d,\"max_kpa\":%.3f}]"
             ",\"tx_ok\":%lu,\"tx_fail\":%lu,\"drop\":%lu,\"up\":%lu}",
-            chambers[0].state, cachedKpa[0], chambers[0].target_kpa, chambers[0].max_kpa,
-            chambers[1].state, cachedKpa[1], chambers[1].target_kpa, chambers[1].max_kpa,
-            chambers[2].state, cachedKpa[2], chambers[2].target_kpa, chambers[2].max_kpa,
+            DEFAULT_MAX_KPA, HARD_MAX_KPA, pressure::P_MAX,
+            chambers[0].state, stateStr(chambers[0].state), cachedAdc[0], cachedVolt[0], cachedKpa[0],
+            kpaToPctOf(cachedKpa[0], chambers[0].max_kpa), kpaToPctOf(cachedKpa[0], pressure::P_MAX),
+            chambers[0].target_kpa, kpaToPctOf(chambers[0].target_kpa, chambers[0].max_kpa), chambers[0].max_kpa,
+            chambers[1].state, stateStr(chambers[1].state), cachedAdc[1], cachedVolt[1], cachedKpa[1],
+            kpaToPctOf(cachedKpa[1], chambers[1].max_kpa), kpaToPctOf(cachedKpa[1], pressure::P_MAX),
+            chambers[1].target_kpa, kpaToPctOf(chambers[1].target_kpa, chambers[1].max_kpa), chambers[1].max_kpa,
+            chambers[2].state, stateStr(chambers[2].state), cachedAdc[2], cachedVolt[2], cachedKpa[2],
+            kpaToPctOf(cachedKpa[2], chambers[2].max_kpa), kpaToPctOf(cachedKpa[2], pressure::P_MAX),
+            chambers[2].target_kpa, kpaToPctOf(chambers[2].target_kpa, chambers[2].max_kpa), chambers[2].max_kpa,
             sendOk, sendFail, cmdDropped, millis() / 1000);
         esp_now_send(gatewayMac, reinterpret_cast<uint8_t*>(buf), len);
         return;
@@ -317,8 +329,7 @@ static void processCommand(const Cmd& c) {
         break;
     }
     case CMD_SET_MAX: {
-        int value_kpa = max(0, min(static_cast<int>(MAX_KPA), static_cast<int>(c.param)));
-        float new_max = static_cast<float>(value_kpa);
+        float new_max = constrain(c.param_kpa, 0.1f, HARD_MAX_KPA);
         DBG_PRINT("CH%d set_max %.2f -> %.2f kPa\n", n, chambers[n].max_kpa, new_max);
         chambers[n].max_kpa = new_max;
         if (chambers[n].state == CH_INFLATING && cachedKpa[n] >= chambers[n].max_kpa) {
@@ -370,7 +381,11 @@ static void onReceived(const uint8_t* mac_addr,
     else if (strcmp(cmd, "inflate") == 0)           { c.type = CMD_INFLATE;      c.chamber = doc["chamber"] | -1; c.param = doc["delta"] | 10; }
     else if (strcmp(cmd, "deflate") == 0)           { c.type = CMD_DEFLATE;      c.chamber = doc["chamber"] | -1; c.param = doc["delta"] | 10; }
     else if (strcmp(cmd, "set_pressure") == 0)      { c.type = CMD_SET_PRESSURE; c.chamber = doc["chamber"] | -1; c.param = doc["value"] | 0; }
-    else if (strcmp(cmd, "set_max_pressure") == 0)  { c.type = CMD_SET_MAX;      c.chamber = doc["chamber"] | -1; c.param = doc["value"] | static_cast<int>(MAX_KPA); }
+    else if (strcmp(cmd, "set_max_pressure") == 0)  {
+        c.type = CMD_SET_MAX;
+        c.chamber = doc["chamber"] | -1;
+        c.param_kpa = doc["value"] | DEFAULT_MAX_KPA;
+    }
     else if (strcmp(cmd, "hold") == 0)              { c.type = CMD_HOLD;         c.chamber = doc["chamber"] | -1; }
 #ifdef DEBUG_BUILD
     else if (strcmp(cmd, "debug") == 0)             { c.type = CMD_DEBUG;        c.chamber = -1; }
@@ -414,12 +429,15 @@ void setup() {
 #endif
     esp_now_register_recv_cb(onReceived);
 
-    for (int i = 0; i < 3; i++)
-        cachedKpa[i] = pressure::readKpa(PSENSOR_PINS[i]);
+    for (int i = 0; i < 3; i++) {
+        cachedAdc[i] = pressure::readRawAdc(PSENSOR_PINS[i]);
+        cachedVolt[i] = pressure::adcToVoltage(cachedAdc[i]);
+        cachedKpa[i] = pressure::voltageToPressure(cachedVolt[i]);
+    }
 
     DBG_PRINTLN(F("{\"status\":\"node_ready\"}"));
-    DBG_PRINT("MAX_KPA=%.1f  CHECK=%lums  STATUS=%lums  SETTLE=%lums\n",
-              MAX_KPA, PRESSURE_CHECK_MS, STATUS_REPORT_MS, VALVE_SETTLE_MS);
+    DBG_PRINT("DEFAULT_MAX_KPA=%.1f  HARD_MAX_KPA=%.1f  CHECK=%lums  STATUS=%lums  SETTLE=%lums\n",
+              DEFAULT_MAX_KPA, HARD_MAX_KPA, PRESSURE_CHECK_MS, STATUS_REPORT_MS, VALVE_SETTLE_MS);
 }
 
 void loop() {
@@ -452,8 +470,11 @@ void loop() {
     if (now - lastPressureMs >= PRESSURE_CHECK_MS) {
         lastPressureMs = now;
 
-        for (int i = 0; i < 3; i++)
-            cachedKpa[i] = pressure::readKpa(PSENSOR_PINS[i]);
+        for (int i = 0; i < 3; i++) {
+            cachedAdc[i] = pressure::readRawAdc(PSENSOR_PINS[i]);
+            cachedVolt[i] = pressure::adcToVoltage(cachedAdc[i]);
+            cachedKpa[i] = pressure::voltageToPressure(cachedVolt[i]);
+        }
 
         for (int i = 0; i < 3; i++) {
             float kpa = cachedKpa[i];

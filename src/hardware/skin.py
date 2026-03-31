@@ -24,7 +24,7 @@ class Skin:
         controller: Any,
         chamber_slots: list[int],
         name: str | None = None,
-        pressure_limits: dict[int, int] | None = None,
+        pressure_limits: dict[int, float] | None = None,
     ):
         """Initialize a skin.
 
@@ -34,7 +34,7 @@ class Skin:
             chamber_slots: Which chamber slots (0-2) on the ESP32 this skin uses.
                 e.g. [0] for a 1-chamber skin, [0, 1, 2] for a full 3-chamber skin.
             name: Human-readable display label. Defaults to skin_id if not given.
-            pressure_limits: Per-slot max pressure in kPa, e.g. {0: 6, 1: 8}.
+            pressure_limits: Per-slot max pressure in kPa, e.g. {0: 6.5, 1: 8.0}.
         """
         self.skin_id = skin_id
         self.name = name or skin_id
@@ -44,7 +44,7 @@ class Skin:
             slot: AirChamber(
                 chamber_id=slot,
                 esp32_mac=controller.mac_address,
-                max_pressure=limits.get(slot, 8),
+                max_pressure=float(limits.get(slot, 8.0)),
             )
             for slot in chamber_slots
         }
