@@ -10,6 +10,7 @@ project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.log import setup as setup_logging
+from src.crash_handler import install_exception_hooks
 
 _debug = "--debug" in sys.argv
 if _debug:
@@ -29,6 +30,7 @@ def _fatal(msg: str) -> None:
 
 def main():
     app = QApplication(sys.argv)
+    install_exception_hooks("SoftEdIBO")
 
     if needs_setup():
         try:

@@ -202,8 +202,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                 if sys.platform == "win32":
                     self._apply_windows_update(path)
                 else:
-                    appimage = os.environ.get("APPIMAGE", sys.executable)
-                    os.execv(appimage, [appimage] + sys.argv[1:])
+                    self._apply_linux_update(Path(path))
 
         self._updater.download_progress.connect(_on_progress)
         self._updater.download_done.connect(_on_done)
@@ -234,6 +233,54 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File", str(ps_file)],
             creationflags=0x08000000,  # CREATE_NO_WINDOW
         )
+        QApplication.quit()
+
+    def _apply_linux_update(self, new_appimage: Path) -> None:
+        """Replace the AppImage after exit, then relaunch it.
+
+        Running from a detached shell avoids replacing the currently executing
+        binary, which would fail with errno 26 (Text file busy).
+        """
+        import shlex
+        import subprocess
+
+        target = Path(os.environ.get("APPIMAGE", sys.executable))
+        pid = os.getpid()
+
+        if not os.access(target.parent, os.W_OK):
+            new_appimage.unlink(missing_ok=True)
+            QMessageBox.critical(
+                self,
+                "Update failed",
+                f"No write permission to {target.parent}.\n"
+                "Move the AppImage to a writable folder or run with permissions to update it.",
+            )
+            return
+
+        quoted_new = shlex.quote(str(new_appimage))
+        quoted_target = shlex.quote(str(target))
+        quoted_args = " ".join(shlex.quote(arg) for arg in sys.argv[1:])
+        restart_cmd = f"{quoted_target} {quoted_args}".strip()
+
+        script = (
+            f"while kill -0 {pid} 2>/dev/null; do sleep 0.2; done; "
+            f"mv -f {quoted_new} {quoted_target} && "
+            f"chmod +x {quoted_target} && "
+            f"nohup {restart_cmd} >/dev/null 2>&1 &"
+        )
+
+        try:
+            subprocess.Popen(
+                ["/bin/sh", "-c", script],
+                start_new_session=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except OSError as exc:
+            new_appimage.unlink(missing_ok=True)
+            QMessageBox.critical(self, "Update failed", f"Could not schedule update: {exc}")
+            return
+
         QApplication.quit()
 
     def _show_about(self) -> None:
