@@ -54,3 +54,4 @@ firmware/**/.pio/
 firmware/**/libdeps/
 firmware/**/.pioenvs/
 firmware/*/firmware.bin
+firmware/*/compile_commands.json

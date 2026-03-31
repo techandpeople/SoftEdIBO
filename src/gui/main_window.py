@@ -243,6 +243,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         """
         import shlex
         import subprocess
+        import tempfile
 
         target = Path(os.environ.get("APPIMAGE", sys.executable))
         pid = os.getpid()
@@ -260,23 +261,46 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         quoted_new = shlex.quote(str(new_appimage))
         quoted_target = shlex.quote(str(target))
         quoted_args = " ".join(shlex.quote(arg) for arg in sys.argv[1:])
-        restart_cmd = f"{quoted_target} {quoted_args}".strip()
+        # Relaunch with APPIMAGE_EXTRACT_AND_RUN to avoid FUSE/runtime issues.
+        restart_cmd = (
+            f"env APPIMAGE_EXTRACT_AND_RUN=1 APPIMAGE={quoted_target} "
+            f"{quoted_target} {quoted_args}"
+        ).strip()
 
-        script = (
-            f"while kill -0 {pid} 2>/dev/null; do sleep 0.2; done; "
-            f"mv -f {quoted_new} {quoted_target} && "
-            f"chmod +x {quoted_target} && "
-            f"nohup {restart_cmd} >/dev/null 2>&1 &"
+        log_dir = Path.home() / ".local" / "share" / "SoftEdIBO" / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        update_log = shlex.quote(str(log_dir / "update-apply.log"))
+
+        script_content = (
+            "#!/bin/sh\n"
+            "set -eu\n"
+            f"while kill -0 {pid} 2>/dev/null; do sleep 0.2; done\n"
+            f"echo '[update] applying at '$(date -Is) >> {update_log}\n"
+            f"if mv -f {quoted_new} {quoted_target}; then\n"
+            "  :\n"
+            "else\n"
+            f"  cp -f {quoted_new} {quoted_target}\n"
+            f"  rm -f {quoted_new}\n"
+            "fi\n"
+            f"chmod +x {quoted_target}\n"
+            f"nohup {restart_cmd} >> {update_log} 2>&1 &\n"
         )
+
+        fd, script_path = tempfile.mkstemp(prefix="softedibo-update-", suffix=".sh")
+        os.close(fd)
+        script_file = Path(script_path)
+        script_file.write_text(script_content, encoding="utf-8")
+        script_file.chmod(0o700)
 
         try:
             subprocess.Popen(
-                ["/bin/sh", "-c", script],
+                ["/bin/sh", str(script_file)],
                 start_new_session=True,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
         except OSError as exc:
+            script_file.unlink(missing_ok=True)
             new_appimage.unlink(missing_ok=True)
             QMessageBox.critical(self, "Update failed", f"Could not schedule update: {exc}")
             return

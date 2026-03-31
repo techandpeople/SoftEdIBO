@@ -18,12 +18,12 @@ class AirChamber:
         self,
         chamber_id: int,
         esp32_mac: str,
-        max_pressure: int = 8,
+        max_pressure: float = 8.0,
     ):
         self.chamber_id = chamber_id
         self.esp32_mac = esp32_mac
         # Configured per-chamber maximum pressure in kPa.
-        self.max_pressure = max(0, max_pressure)
+        self.max_pressure = max(0.0, float(max_pressure))
         self._state = ChamberState.IDLE
         self._pressure: int = 0         # 0-100 (% of configured max), current measured value
         self._target_pressure: int = 0  # 0-100 (% of configured max), commanded target
