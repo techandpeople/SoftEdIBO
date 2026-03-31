@@ -239,31 +239,22 @@ class AppUpdater(QObject):
         logger.info("Download complete: %s (%d bytes)",
                      self._tmp_path, self._tmp_path.stat().st_size)
 
-        if _is_frozen_windows():
-            self.download_done.emit(self._tmp_path)
-        else:
-            # Linux: atomic rename over the running AppImage.
-            appimage = _appimage_path()
-            logger.info("Applying update: %s -> %s", self._tmp_path, appimage)
+        if not _is_frozen_windows():
+            # Linux: make downloaded AppImage executable now.
+            # The final replacement is deferred until the app exits to avoid
+            # errno 26 (Text file busy) when replacing a running binary.
             try:
                 self._tmp_path.chmod(
                     self._tmp_path.stat().st_mode
                     | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
                 )
-                # Try atomic rename first; falls back to copy+delete
-                # if temp is on a different filesystem.
-                try:
-                    os.rename(self._tmp_path, appimage)
-                except OSError:
-                    import shutil
-                    shutil.move(str(self._tmp_path), str(appimage))
             except OSError as exc:
-                logger.error("Failed to apply update: %s", exc)
+                logger.error("Failed to prepare update file: %s", exc)
                 self._tmp_path.unlink(missing_ok=True)
-                self.error.emit(f"Failed to apply update: {exc}")
+                self.error.emit(f"Failed to prepare update file: {exc}")
                 return
-            logger.info("Update applied successfully")
-            self.download_done.emit(appimage)
+
+        self.download_done.emit(self._tmp_path)
 
     def cancel(self) -> None:
         """Abort an in-progress download."""
