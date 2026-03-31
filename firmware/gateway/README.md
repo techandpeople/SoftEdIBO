@@ -1,6 +1,6 @@
 # ESP-NOW Gateway Firmware
 
-ESP32-WROOM-32 firmware that bridges USB/serial (PC) ↔ ESP-NOW (nodes).
+ESP32-WROOM-32 firmware that bridges USB/serial (PC) <-> ESP-NOW (nodes).
 
 ## Hardware
 
@@ -28,6 +28,7 @@ is downloaded automatically on first build and cached for subsequent builds.
 {"target":"AA:BB:CC:DD:EE:01","cmd":"set_pressure","chamber":2,"value":75}
 {"target":"AA:BB:CC:DD:EE:01","cmd":"hold","chamber":0}
 {"target":"FF:FF:FF:FF:FF:FF","cmd":"ping"}
+{"target":"AA:BB:CC:DD:EE:01","cmd":"debug"}
 ```
 
 The gateway strips `"target"` before forwarding so nodes receive only the command fields.
@@ -36,10 +37,12 @@ The gateway strips `"target"` before forwarding so nodes receive only the comman
 ```json
 {"source":"AA:BB:CC:DD:EE:01","type":"status","chamber":0,"pressure":75}
 {"source":"AA:BB:CC:DD:EE:01","type":"pong"}
+{"source":"AA:BB:CC:DD:EE:01","type":"debug","ch":[...],"tx_ok":1520,"tx_fail":3,"drop":0,"up":342}
 {"status":"gateway_ready","mac":"AA:BB:CC:DD:EE:00"}
 ```
 
-All `"pressure"` values are **0–100 %** of the node's configured maximum pressure.
+All `"pressure"` values are **0-100 %** of the node's configured maximum pressure.
+The `"debug"` response is only available from nodes flashed with the debug firmware.
 
 Maximum line length: **256 bytes** (`SERIAL_BUF_LEN` constant).
 
@@ -53,10 +56,11 @@ Maximum line length: **256 bytes** (`SERIAL_BUF_LEN` constant).
   `"source"` field with the sender MAC.
 - Broadcast address `FF:FF:FF:FF:FF:FF` is pre-registered as peer for scan/ping.
 - Unknown sender MACs are dynamically added as peers on first send.
+- **Fire-and-forget** delivery — no retry logic. ESP-NOW provides link-layer
+  ACKs automatically; the app can resend if it doesn't see a pressure change.
 
 ## Performance notes
 
-- **`-O3`** compiler flag — maximum runtime optimization.
 - Serial loop uses a **fixed char buffer** instead of Arduino `String` — zero heap
   allocation per received line, no fragmentation.
 - `serializeJson` writes directly into a stack-allocated `char[256]` for outgoing
