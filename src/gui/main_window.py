@@ -261,10 +261,13 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         quoted_new = shlex.quote(str(new_appimage))
         quoted_target = shlex.quote(str(target))
         quoted_args = " ".join(shlex.quote(arg) for arg in sys.argv[1:])
-        # Relaunch with APPIMAGE_EXTRACT_AND_RUN to avoid FUSE/runtime issues.
+        # Prefer APPIMAGE_EXTRACT_AND_RUN, but keep a plain AppImage fallback.
         restart_cmd = (
             f"env APPIMAGE_EXTRACT_AND_RUN=1 APPIMAGE={quoted_target} "
             f"{quoted_target} {quoted_args}"
+        ).strip()
+        restart_cmd_fallback = (
+            f"env APPIMAGE={quoted_target} {quoted_target} {quoted_args}"
         ).strip()
 
         log_dir = Path.home() / ".local" / "share" / "SoftEdIBO" / "logs"
@@ -275,7 +278,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             "#!/bin/sh\n"
             "set -eu\n"
             f"while kill -0 {pid} 2>/dev/null; do sleep 0.2; done\n"
-            f"echo '[update] applying at '$(date -Is) >> {update_log}\n"
+            f"echo '[update] applying at '$(date '+%Y-%m-%dT%H:%M:%S%z') >> {update_log}\n"
             f"if mv -f {quoted_new} {quoted_target}; then\n"
             "  :\n"
             "else\n"
@@ -283,7 +286,15 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             f"  rm -f {quoted_new}\n"
             "fi\n"
             f"chmod +x {quoted_target}\n"
-            f"nohup {restart_cmd} >> {update_log} 2>&1 &\n"
+            f"echo '[update] relaunch attempt 1' >> {update_log}\n"
+            f"if {restart_cmd} >> {update_log} 2>&1; then\n"
+            "  exit 0\n"
+            "fi\n"
+            f"echo '[update] relaunch attempt 1 failed, trying fallback' >> {update_log}\n"
+            f"if {restart_cmd_fallback} >> {update_log} 2>&1; then\n"
+            "  exit 0\n"
+            "fi\n"
+            f"echo '[update] relaunch failed' >> {update_log}\n"
         )
 
         fd, script_path = tempfile.mkstemp(prefix="softedibo-update-", suffix=".sh")
