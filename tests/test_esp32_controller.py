@@ -10,10 +10,10 @@ def test_inflate_sends_command():
     gateway.send.return_value = True
     controller = ESP32Controller("AA:BB:CC:DD:EE:01", gateway)
 
-    result = controller.inflate(chamber=0, value=200)
+    result = controller.inflate(chamber=0, delta=20)
     assert result is True
     gateway.send.assert_called_once_with(
-        "AA:BB:CC:DD:EE:01", "inflate", chamber=0, value=200
+        "AA:BB:CC:DD:EE:01", "inflate", chamber=0, delta=20
     )
 
 
@@ -25,7 +25,7 @@ def test_deflate_sends_command():
     result = controller.deflate(chamber=2)
     assert result is True
     gateway.send.assert_called_once_with(
-        "AA:BB:CC:DD:EE:01", "deflate", chamber=2
+        "AA:BB:CC:DD:EE:01", "deflate", chamber=2, delta=10
     )
 
 

@@ -34,7 +34,7 @@ class Skin:
             chamber_slots: Which chamber slots (0-2) on the ESP32 this skin uses.
                 e.g. [0] for a 1-chamber skin, [0, 1, 2] for a full 3-chamber skin.
             name: Human-readable display label. Defaults to skin_id if not given.
-            pressure_limits: Per-slot max pressure, e.g. {0: 80, 1: 100}.
+            pressure_limits: Per-slot max pressure in kPa, e.g. {0: 6, 1: 8}.
         """
         self.skin_id = skin_id
         self.name = name or skin_id
@@ -44,7 +44,7 @@ class Skin:
             slot: AirChamber(
                 chamber_id=slot,
                 esp32_mac=controller.mac_address,
-                max_pressure=limits.get(slot, 100),
+                max_pressure=limits.get(slot, 8),
             )
             for slot in chamber_slots
         }
@@ -92,7 +92,7 @@ class Skin:
         return all(self._deflate_one(s, delta) for s in self._chambers)
 
     def set_pressure(self, slot: int | None = None, value: int = 100) -> bool:
-        """Set absolute target pressure (0-100 %), or all chambers if slot is None."""
+        """Set absolute target pressure (0-100 % of max), or all chambers if slot is None."""
         if slot is not None:
             return self._set_pressure_one(slot, value)
         return all(self._set_pressure_one(s, value) for s in self._chambers)
@@ -166,7 +166,7 @@ class Skin:
         if chamber is None:
             logger.error("Skin %s has no chamber at slot %d", self.skin_id, slot)
             return False
-        new_target = min(chamber.max_pressure, chamber.target_pressure + delta)
+        new_target = min(100, chamber.target_pressure + delta)
         chamber.target_pressure = new_target
         if chamber.pressure < new_target:
             chamber.state = ChamberState.INFLATING
@@ -192,7 +192,7 @@ class Skin:
         if chamber is None:
             logger.error("Skin %s has no chamber at slot %d", self.skin_id, slot)
             return False
-        value = max(0, min(chamber.max_pressure, value))
+        value = max(0, min(100, value))
         chamber.target_pressure = value
         if chamber.pressure < value:
             chamber.state = ChamberState.INFLATING
