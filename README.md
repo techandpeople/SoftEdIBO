@@ -1,7 +1,7 @@
 # SoftEdIBO
 
 Soft-based robot platform for inclusive, embodied interaction.
-Developed at [LASIGE](https://www.lasige.pt/), Faculdade de Ciências, Universidade de Lisboa.
+Developed at [LASIGE](https://www.lasige.pt/), Faculdade de Ciencias, Universidade de Lisboa.
 
 SoftEdIBO controls soft robots equipped with inflatable air chambers.
 Participants interact by touching the robots, which respond through inflation and deflation.
@@ -15,8 +15,9 @@ The system supports multiple robot types (Turtle, Tree, Thymio) and activity mod
 |-----------|----------|-------|
 | ESP32-WROOM-32 (gateway) | 1 | Connected to PC via USB |
 | ESP32-WROOM-32 (air chamber nodes) | 1 per skin | Up to 3 chambers per node |
-| Air pump | 2 per node | Inflate and deflate (PWM + GND) |
-| XGZP6847 pressure sensor | 1 per chamber | Analog output (0–3.3 V) |
+| DRV8833 motor driver | 1 per node | Drives inflate + deflate pumps |
+| Air pump | 2 per node | Inflate and deflate |
+| XGZP6847A pressure sensor | 1 per chamber | Analog output (0-3.3 V) |
 | Solenoid valves | 2 per chamber | Inflate + deflate |
 
 Flash the [gateway firmware](firmware/gateway/) to the USB-connected ESP32
@@ -27,8 +28,8 @@ and the [air chamber node firmware](firmware/air_chamber_node/) to each sensor/v
 ## Architecture
 
 ```
-PC ──USB──► Gateway (ESP32) ──ESP-NOW──► Node(s) (ESP32)
-                                            │
+PC --USB--> Gateway (ESP32) --ESP-NOW--> Node(s) (ESP32)
+                                            |
                                      3 air chambers each
                                      (inflate/deflate valves + pressure sensors)
 ```
@@ -37,16 +38,17 @@ PC ──USB──► Gateway (ESP32) ──ESP-NOW──► Node(s) (ESP32)
 
 ```
 SessionPanel
-  └── Activity (GroupTouch, Simulation, …)
-        └── Robot (Turtle / Tree / Thymio / Simulated)
-              └── Skin  (1 ESP32 node, 1–3 chambers)
-                    └── AirChamber  (pressure 0–100 %)
+  +-- Activity (GroupTouch, Simulation, ...)
+        +-- Robot (Turtle / Tree / Thymio / Simulated)
+              +-- Skin  (1 ESP32 node, 1-3 chambers)
+                    +-- AirChamber  (pressure 0-100 %)
 ```
 
 - **Activity** decides which robots participate and can replace real robots with simulated ones (`SimulationActivity`).
 - **Skin** is the basic tactile unit. Multiple skins can share one ESP32 node (up to 3 chambers total).
-- **Pressure** is expressed as **0–100 %** of the maximum pressure configured on each node.
+- **Pressure** is expressed as **0-100 %** of the maximum pressure configured on each node.
 - **Per-chamber max pressure** can be set in `settings.yaml` and is enforced both in the app and on the ESP32 node (hardware safety — survives app crashes).
+- **Pressure sensing** uses the XGZP6847A datasheet transfer function for accurate kPa readings (see [pressure.h](firmware/air_chamber_node/src/pressure.h)).
 
 ---
 
@@ -133,29 +135,56 @@ python scripts/run.py
 
 Requires Python 3.12+.
 
+**Debug mode** — shows all log levels on the console (DEBUG+):
+
+```bash
+python scripts/run.py --debug
+```
+
+Without `--debug`, only warnings and errors are shown on the console. All log
+levels are always written to `data/softedibo.log` (rotating, 2 MB x 3 backups).
+
 ### Firmware
 
 ```bash
 # Gateway
 cd firmware/gateway && pio run --target upload
 
-# Air chamber node
-cd firmware/air_chamber_node && pio run --target upload
+# Air chamber node — release (production)
+cd firmware/air_chamber_node && pio run -e release --target upload
+
+# Air chamber node — debug (Serial logs + debug command)
+cd firmware/air_chamber_node && pio run -e debug --target upload
 ```
 
 Requires [PlatformIO](https://platformio.org/).
+
+The CI pipeline automatically selects the firmware environment:
+- **Nightly** (push to `master`) → node debug build
+- **Stable release** (tag `v*`) → node release build
+
+### Debug builds
+
+| Layer | Production | Development |
+|-------|-----------|-------------|
+| **Python app** | `run.py` — warnings only on console | `run.py --debug` — all levels on console |
+| **Node firmware** | `release` env — no Serial, no debug overhead | `debug` env — Serial logs, tx counters, `{"cmd":"debug"}` |
+| **Gateway firmware** | Single build, no debug overhead | Same (transparent bridge, nothing to gate) |
 
 ### Key source paths
 
 | Path | Description |
 |------|-------------|
-| `src/hardware/skin.py` | Skin model — groups 1–3 AirChambers on one ESP32 node |
-| `src/hardware/air_chamber.py` | AirChamber model — pressure 0–100 %, configurable max |
+| `src/hardware/skin.py` | Skin model — groups 1-3 AirChambers on one ESP32 node |
+| `src/hardware/air_chamber.py` | AirChamber model — pressure 0-100 %, configurable max |
 | `src/hardware/esp32_controller.py` | Real hardware controller (via ESP-NOW gateway) |
 | `src/hardware/simulated_controller.py` | Mock controller for simulation mode |
 | `src/robots/` | TurtleRobot, TreeRobot, ThymioRobot, SimulatedRobot |
 | `src/activities/` | Activity registry + GroupTouch + SimulationActivity |
 | `src/gui/monitor/` | Live pressure monitor widgets |
+| `src/log.py` | Centralized logging setup (console + rotating file) |
 | `config/settings.yaml` | Robot and hardware configuration |
 | `firmware/gateway/` | Gateway ESP32 firmware |
 | `firmware/air_chamber_node/` | Air chamber node ESP32 firmware |
+| `firmware/air_chamber_node/src/pins.h` | Node pin definitions |
+| `firmware/air_chamber_node/src/pressure.h` | XGZP6847A pressure conversion |
