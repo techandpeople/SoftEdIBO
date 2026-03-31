@@ -78,16 +78,25 @@ jobs:
             0x8000 .pio/build/esp32dev/partitions.bin \
             0x10000 .pio/build/esp32dev/firmware.bin
 
-      - name: Build air_chamber_node firmware
+      - name: Choose air_chamber_node firmware build environment
+        id: fw-env
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            echo "env=release" >> "$GITHUB_OUTPUT"
+          else
+            echo "env=debug" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build air_chamber_node firmware (${{ steps.fw-env.outputs.env }})
         run: |
           cd firmware/air_chamber_node
-          python -m platformio run
+          python -m platformio run -e ${{ steps.fw-env.outputs.env }}
           python -m esptool --chip esp32 merge_bin \
             --flash_mode dio --flash_freq 40m --flash_size 4MB \
             -o firmware.bin \
-            0x1000 .pio/build/esp32dev/bootloader.bin \
-            0x8000 .pio/build/esp32dev/partitions.bin \
-            0x10000 .pio/build/esp32dev/firmware.bin
+            0x1000 .pio/build/${{ steps.fw-env.outputs.env }}/bootloader.bin \
+            0x8000 .pio/build/${{ steps.fw-env.outputs.env }}/partitions.bin \
+            0x10000 .pio/build/${{ steps.fw-env.outputs.env }}/firmware.bin
 
       - name: Build with PyInstaller
         run: pyinstaller softedibo.spec
@@ -218,17 +227,27 @@ jobs:
             0x8000 .pio/build/esp32dev/partitions.bin \
             0x10000 .pio/build/esp32dev/firmware.bin
 
-      - name: Build air_chamber_node firmware
+      - name: Choose air_chamber_node firmware build environment
+        id: fw-env
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            echo "env=release" >> "$GITHUB_OUTPUT"
+          else
+            echo "env=debug" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build air_chamber_node firmware (${{ steps.fw-env.outputs.env }})
         shell: bash
         run: |
           cd firmware/air_chamber_node
-          python -m platformio run
+          python -m platformio run -e ${{ steps.fw-env.outputs.env }}
           python -m esptool --chip esp32 merge_bin \
             --flash_mode dio --flash_freq 40m --flash_size 4MB \
             -o firmware.bin \
-            0x1000 .pio/build/esp32dev/bootloader.bin \
-            0x8000 .pio/build/esp32dev/partitions.bin \
-            0x10000 .pio/build/esp32dev/firmware.bin
+            0x1000 .pio/build/${{ steps.fw-env.outputs.env }}/bootloader.bin \
+            0x8000 .pio/build/${{ steps.fw-env.outputs.env }}/partitions.bin \
+            0x10000 .pio/build/${{ steps.fw-env.outputs.env }}/firmware.bin
 
       - name: Build with PyInstaller
         run: pyinstaller softedibo.spec

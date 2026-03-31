@@ -13,45 +13,61 @@ via solenoid valves and two DRV8833-driven pumps.
 | Chamber 1 — deflate valve | 13 |
 | Chamber 2 — inflate valve | 14 |
 | Chamber 2 — deflate valve | 33 |
-| Inflate pump (PWM) | 25 |
-| Deflate pump (PWM) | 26 |
+| Inflate pump — DRV8833 ch A (PWM) | 25 |
+| Deflate pump — DRV8833 ch B (PWM) | 26 |
 | Pressure sensor ch0 — XGZP6847A (ADC) | 34 |
 | Pressure sensor ch1 — XGZP6847A (ADC) | 35 |
 | Pressure sensor ch2 — XGZP6847A (ADC) | 32 |
 
+Pin definitions are in [`src/pins.h`](src/pins.h).
+
 Valves: `HIGH` = open, `LOW` = closed.
-Pumps: PWM pin + GND (no H-bridge).
+Pumps: DRV8833 H-bridge, single PWM pin per channel (other pin tied on PCB).
 
 ## Build & Flash
 
+Two build environments — **release** (production) and **debug** (development):
+
 ```bash
-cd firmware/air_chamber_node
-pio run --target upload
+# Production — no Serial output, no debug overhead
+pio run -e release --target upload
+
+# Development — Serial logs, tx counters, "debug" command via ESP-NOW
+pio run -e debug --target upload
 ```
+
+The CI pipeline automatically selects the right environment:
+- **Nightly** (push to `master`) → `debug` build
+- **Stable release** (tag `v*`) → `release` build
+
+## Pressure sensing
+
+Pressure is read from XGZP6847A sensors using the datasheet transfer function
+(see [`src/pressure.h`](src/pressure.h)):
+
+```
+P(kPa) = ((V_out / 3.3) - 0.05) * 100 / 0.9
+```
+
+All internal calculations use **kPa**. The ESP-NOW protocol exchanges values
+as **percent (0–100)** of `MAX_KPA` (default 8.0 kPa). The PC never sees raw
+ADC or kPa values.
 
 ## Tuning Constants (`src/main.cpp`)
 
 | Constant | Default | Description |
 |----------|---------|-------------|
-| `MAX_PRESSURE_ADC` | 1500 | ADC hard cap — absolute burst protection. Per-chamber limits can be set lower at runtime via `set_max_pressure`. |
-| `MIN_PRESSURE_ADC` | 200  | ADC threshold treated as "empty" |
-| `DEFAULT_INFLATE_DUTY` | 255 | Pump PWM duty (0–255) used for inflate/set_pressure commands |
+| `MAX_KPA` | 8.0 | Hard safety cap in kPa — absolute burst protection |
+| `DEFAULT_INFLATE_DUTY` | 255 | Pump PWM duty (0–255) for inflate/set_pressure |
 | `PRESSURE_CHECK_MS` | 200 | Safety check interval (ms) |
 | `STATUS_REPORT_MS` | 500 | Pressure status broadcast interval (ms) |
-| `VALVE_SETTLE_MS` | 20 | Pause after valve toggle (ms) |
+| `VALVE_SETTLE_MS` | 20 | Delay between closing one valve and opening the other (ms) |
 | `PUMP_PWM_FREQ` | 20000 | Pump PWM frequency (Hz) — above audible range |
 
-Calibrate `MAX_PRESSURE_ADC` after measuring sensor output at your target maximum pressure.
-This value is the absolute safety boundary enforced in hardware — no command can exceed it.
-
-Additionally, the PC sends `set_max_pressure` per chamber on startup to set a lower
-software limit. This limit is stored in RAM and defaults to `MAX_PRESSURE_ADC` on
-boot. If the PC app crashes, the node continues to enforce the last received limit.
+Per-chamber software limits can be set at runtime via `set_max_pressure`
+(clamped to `MAX_KPA`). These survive until reboot.
 
 ## ESP-NOW Protocol
-
-All pressure values exchanged with the PC are in **percent (0–100)** of `MAX_PRESSURE_ADC`.
-The node converts internally to ADC units; the PC never needs to know raw ADC values.
 
 ### Commands received from gateway
 
@@ -62,9 +78,10 @@ The gateway strips its own `"target"` field before forwarding.
 | `inflate` | `chamber` (0–2), `delta` (0–100, default 10) | Inflate by `delta`% relative to current pressure |
 | `deflate` | `chamber` (0–2), `delta` (0–100, default 10) | Deflate by `delta`% relative to current pressure |
 | `set_pressure` | `chamber` (0–2), `value` (0–100) | Inflate or deflate to an absolute target of `value`% |
-| `set_max_pressure` | `chamber` (0–2), `value` (0–100, default 100) | Set per-chamber pressure ceiling. Capped to `MAX_PRESSURE_ADC`. Survives until reboot. |
+| `set_max_pressure` | `chamber` (0–2), `value` (0–100, default 100) | Set per-chamber pressure ceiling (clamped to `MAX_KPA`) |
 | `hold` | `chamber` (0–2) | Stop pump and close both valves — freeze at current pressure |
 | `ping` | — | Responds `{"type":"pong"}` |
+| `debug` | — | **(debug build only)** Responds with full node state snapshot |
 
 #### Examples
 ```json
@@ -81,36 +98,61 @@ Broadcast every `STATUS_REPORT_MS` (500 ms) for all 3 chambers:
 ```json
 {"type":"status","chamber":0,"pressure":75}
 ```
-`pressure` is current ADC reading expressed as `current_adc * 100 / MAX_PRESSURE_ADC`.
 
-## Behaviour
+### Debug response (debug build only)
 
-- **Gateway discovery:** the MAC of the first ESP-NOW sender is stored as the
-  gateway peer — no hardcoding needed.
-- **Parallel operation:** multiple chambers can inflate/deflate simultaneously.
-  The inflate pump runs at `max(duty)` of all active inflate chambers.
-- **Pressure safety:** each chamber stops independently when its pressure
-  target is reached or when the per-chamber `max_pressure_adc` ceiling is hit;
-  the pump stops automatically when no chamber is active.
-- **Per-chamber limits:** the app sends `set_max_pressure` on startup. The node
-  enforces this limit even if the app disconnects or crashes.
-- **Valve interlock:** switching from inflate to deflate (or vice versa) on
-  the same chamber closes the current valve before opening the next one
-  (`VALVE_SETTLE_MS` delay).
+```json
+{"type":"debug","ch":[{"s":3,"kpa":2.4,"tgt":4.0,"max":8.0},...],"tx_ok":1520,"tx_fail":3,"drop":0,"up":342}
+```
+
+`s` = chamber state (0=idle, 1=pre-inflate, 2=pre-deflate, 3=inflating, 4=deflating),
+`drop` = commands dropped due to queue overflow, `up` = uptime in seconds.
+
+## Architecture
+
+### Command queue
+
+Commands are **queued** from the ESP-NOW callback (WiFi task) and processed in
+`loop()` (Arduino task). This avoids blocking the WiFi stack — critical when
+5+ nodes share the same gateway. The queue is a lock-free single-producer /
+single-consumer ring buffer (16 slots).
+
+### Non-blocking valve settle
+
+When switching direction (inflate ↔ deflate) on a chamber, the old valve closes
+and a settle timer starts. The new valve only opens after `VALVE_SETTLE_MS`
+elapses in `loop()` — no `delay()` calls anywhere. Both valves are **never open
+simultaneously** on the same chamber.
+
+### Pump sharing
+
+Multiple chambers can inflate/deflate simultaneously. The inflate pump runs at
+`max(duty)` of all actively inflating chambers. The deflate pump runs at full
+duty if any chamber is deflating. Pumps stop automatically when no chamber is
+active.
+
+## Debug vs Release builds
+
+| Feature | Release | Debug |
+|---------|---------|-------|
+| `Serial.begin()` | not called | initialized at 115200 |
+| Serial log output | compiled out | state transitions, safety stops, commands |
+| `onSent` callback | not registered | tracks `tx_ok` / `tx_fail` |
+| `{"cmd":"debug"}` | unknown command (ignored) | returns full state snapshot |
+| Queue drop counter | not tracked | counted in `cmdDropped` |
+| Compiler flags | `-O2 -DNDEBUG` | `-O0 -g -DDEBUG_BUILD` |
 
 ## Performance notes
 
-- **`-O3`** compiler flag — maximum runtime optimization.
-- **ADC multisampling:** `readPressure()` averages `ADC_SAMPLES` (4) readings
-  per call, reducing noise on the XGZP6847 analog output.
-- **Pressure check skipped** when no chamber is active — avoids redundant ADC
-  reads on every loop iteration.
-- **`snprintf` for status messages** — fixed-format JSON (`sendStatus`,
-  `pong`) written directly into a stack buffer; no ArduinoJson heap allocation.
-- **`static const char pong[]`** — constant response stored in flash, never
-  copied to the heap.
-- **LEDC channels:** inflate pump on channel `PUMP1_LEDC_CH` (0), deflate
-  pump on `PUMP2_LEDC_CH` (1). PWM at 20 kHz — above audible range.
+- **Non-blocking loop** — no `delay()` anywhere; valve settle uses timestamps.
+- **Cached ADC readings** — pressure read once per `PRESSURE_CHECK_MS`, reused
+  by both safety checks and status broadcasts.
+- **Unified pump recalc** — single `recalcPumps()` iterates chambers once for
+  both inflate and deflate pumps.
+- **`snprintf` for status messages** — fixed-format JSON written directly into
+  stack buffers; no ArduinoJson heap allocation for outgoing packets.
+- **LEDC channels:** inflate pump on channel 0, deflate pump on channel 1.
+  PWM at 20 kHz — above audible range.
 
 ## Important caveats
 
@@ -118,7 +160,5 @@ Broadcast every `STATUS_REPORT_MS` (500 ms) for all 3 chambers:
   **without** connecting to an AP (channel 1 by default). The gateway must be
   on the same WiFi channel.
 - Maximum ESP-NOW payload: **250 bytes**. Status messages are ~48 bytes.
-- ADC pins 34, 35, 36 are **input-only** on the ESP32 (no pull-up/pull-down
+- ADC pins 34, 35, 32 are **input-only** on the ESP32 (no pull-up/pull-down
   support). Ensure the sensor output is within 0–3.3 V.
-- Calibrate `MAX_PRESSURE_ADC` / `MIN_PRESSURE_ADC` after measuring sensor
-  output at known pressures with your voltage divider.

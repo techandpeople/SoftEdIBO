@@ -1,5 +1,6 @@
 """Main entry point for the SoftEdIBO application."""
 
+import logging
 import sys
 import traceback
 from pathlib import Path
@@ -9,7 +10,11 @@ project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.log import setup as setup_logging
-setup_logging()
+
+_debug = "--debug" in sys.argv
+if _debug:
+    sys.argv.remove("--debug")
+setup_logging(console_level=logging.DEBUG if _debug else logging.WARNING)
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 

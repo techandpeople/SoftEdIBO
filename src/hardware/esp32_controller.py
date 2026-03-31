@@ -52,6 +52,10 @@ class ESP32Controller:
         """
         return self.send_command("set_max_pressure", chamber=chamber, value=value)
 
+    def debug(self) -> bool:
+        """Request a debug snapshot from the node (debug firmware only)."""
+        return self.send_command("debug")
+
     def calibrate_sensor(self, sensor_id: int) -> bool:
         """Request sensor calibration on the ESP32."""
         return self.send_command("calibrate_sensor", sensor=sensor_id)
@@ -82,7 +86,10 @@ class ESP32Controller:
             self._last_status.update(data)
             logger.debug("Status from %s: %s", self.mac_address, data)
 
-            if data.get("type") == "touch":
+            if data.get("type") == "debug":
+                logger.info("Debug from %s: %s", self.mac_address, data)
+
+            elif data.get("type") == "touch":
                 sensor_id = data.get("sensor", 0)
                 raw_value = data.get("value", 0)
                 for callback in self._touch_callbacks:
