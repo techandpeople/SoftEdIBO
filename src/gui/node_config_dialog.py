@@ -88,6 +88,7 @@ class NodeConfigDialog(QDialog, Ui_NodeConfigDialog):
         # 3 slot rows: checkbox + max pressure spinbox
         self._slot_checks: list[QCheckBox] = []
         self._max_spins: list[QSpinBox] = []
+        self._default_max_kpa = 8
         for slot in range(3):
             row_widget = QWidget()
             hbox = QHBoxLayout(row_widget)
@@ -97,11 +98,11 @@ class NodeConfigDialog(QDialog, Ui_NodeConfigDialog):
             self._slot_checks.append(cb)
             hbox.addWidget(cb)
 
-            hbox.addWidget(QLabel("Max:"))
+            hbox.addWidget(QLabel("Max (kPa):"))
             max_spin = QSpinBox()
-            max_spin.setRange(1, 100)
-            max_spin.setValue(100)
-            max_spin.setSuffix(" %")
+            max_spin.setRange(1, 8)
+            max_spin.setValue(self._default_max_kpa)
+            max_spin.setSuffix(" kPa")
             max_spin.setFixedWidth(70)
             max_spin.setEnabled(False)
             self._max_spins.append(max_spin)
@@ -124,7 +125,7 @@ class NodeConfigDialog(QDialog, Ui_NodeConfigDialog):
                 self._slot_checks[slot].setChecked(True)
                 val = max_pressures.get(slot, max_pressures.get(str(slot)))
                 if val is not None:
-                    self._max_spins[slot].setValue(val)
+                    self._max_spins[slot].setValue(int(val))
 
         # Connect buttons
         self.delete_btn.clicked.connect(self._on_delete)
@@ -218,11 +219,11 @@ class NodeConfigDialog(QDialog, Ui_NodeConfigDialog):
             )
             return
 
-        # Collect max pressure per slot (only store non-default values)
+        # Collect max pressure (kPa) per slot (only store non-default values)
         max_pressure: dict[int, int] = {}
         for slot in slots:
             val = self._max_spins[slot].value()
-            if val != 100:
+            if val != self._default_max_kpa:
                 max_pressure[slot] = val
 
         skin_entry: dict = {"skin_id": skin_id, "name": name, "mac": mac, "slots": slots}

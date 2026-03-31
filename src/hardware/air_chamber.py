@@ -18,14 +18,15 @@ class AirChamber:
         self,
         chamber_id: int,
         esp32_mac: str,
-        max_pressure: int = 100,
+        max_pressure: int = 8,
     ):
         self.chamber_id = chamber_id
         self.esp32_mac = esp32_mac
-        self.max_pressure = max(0, min(100, max_pressure))
+        # Configured per-chamber maximum pressure in kPa.
+        self.max_pressure = max(0, max_pressure)
         self._state = ChamberState.IDLE
-        self._pressure: int = 0         # 0-100 (% of max), current measured value
-        self._target_pressure: int = 0  # 0-100 (% of max), commanded target
+        self._pressure: int = 0         # 0-100 (% of configured max), current measured value
+        self._target_pressure: int = 0  # 0-100 (% of configured max), commanded target
 
     @property
     def state(self) -> ChamberState:
@@ -38,24 +39,24 @@ class AirChamber:
 
     @property
     def pressure(self) -> int:
-        """Get current pressure level (0-100 %)."""
+        """Get current pressure level (0-100 % of chamber max)."""
         return self._pressure
 
     @pressure.setter
     def pressure(self, value: int) -> None:
-        self._pressure = max(0, min(self.max_pressure, value))
+        self._pressure = max(0, min(100, value))
 
     @property
     def target_pressure(self) -> int:
-        """Get commanded target pressure (0-100 %)."""
+        """Get commanded target pressure (0-100 % of chamber max)."""
         return self._target_pressure
 
     @target_pressure.setter
     def target_pressure(self, value: int) -> None:
-        self._target_pressure = max(0, min(self.max_pressure, value))
+        self._target_pressure = max(0, min(100, value))
 
     def __repr__(self) -> str:
         return (
             f"AirChamber(id={self.chamber_id}, "
-            f"state={self._state.value}, pressure={self._pressure}%)"
+            f"state={self._state.value}, pressure={self._pressure}%, max={self.max_pressure}kPa)"
         )

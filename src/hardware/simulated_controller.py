@@ -43,7 +43,7 @@ class SimulatedController(QObject):
         self._timer.timeout.connect(self._tick)
 
     def set_max_pressure(self, chamber: int, max_p: int) -> None:
-        """Set max pressure for a chamber (used by Skin to propagate config)."""
+        """Set max pressure for a chamber in kPa (used by Skin to propagate config)."""
         self._max_pressures[chamber] = max_p
 
     @property
@@ -54,8 +54,7 @@ class SimulatedController(QObject):
         """Inflate by delta % (relative to current target)."""
         self._current.setdefault(chamber, 0)
         base = self._targets.get(chamber, self._current[chamber])
-        max_p = self._max_pressures.get(chamber, 100)
-        new_target = min(max_p, base + delta)
+        new_target = min(100, base + delta)
         self._targets[chamber] = new_target
         for cb in self._target_callbacks:
             cb(chamber, new_target)
@@ -77,8 +76,7 @@ class SimulatedController(QObject):
 
     def set_pressure(self, chamber: int, value: int) -> bool:
         """Set absolute target pressure (clamped to chamber limits)."""
-        max_p = self._max_pressures.get(chamber, 100)
-        value = max(0, min(max_p, value))
+        value = max(0, min(100, value))
         self._current.setdefault(chamber, 0)
         self._targets[chamber] = value
         for cb in self._target_callbacks:
@@ -139,10 +137,8 @@ class SimulatedController(QObject):
         timer.setInterval(self._RAMP_STEP_MS)
         self._ramp_timers[chamber_id] = timer
 
-        max_p = self._max_pressures.get(chamber_id, 100)
-
         def _press_tick() -> None:
-            if self._targets.get(chamber_id, 0) >= max_p:
+            if self._targets.get(chamber_id, 0) >= 100:
                 timer.stop()
                 self._ramp_timers.pop(chamber_id, None)
                 return

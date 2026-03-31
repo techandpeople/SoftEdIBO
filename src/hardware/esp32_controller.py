@@ -42,11 +42,11 @@ class ESP32Controller:
         return self.send_command("hold", chamber=chamber)
 
     def set_pressure(self, chamber: int, value: int) -> bool:
-        """Set absolute target pressure for a chamber (0-100 %)."""
+        """Set target pressure for a chamber as 0-100 % of that chamber max."""
         return self.send_command("set_pressure", chamber=chamber, value=value)
 
     def set_max_pressure(self, chamber: int, value: int) -> bool:
-        """Set per-chamber max pressure on the ESP32 node (0-100 %).
+        """Set per-chamber max pressure on the ESP32 node (kPa).
 
         The node will refuse to inflate past this limit, even if the app crashes.
         """

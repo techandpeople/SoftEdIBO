@@ -9,14 +9,14 @@
  * Commands received (ESP-NOW, newline-terminated JSON stripped by gateway):
  *   {"cmd":"inflate","chamber":0,"delta":20}            <- inflate by 20% of max
  *   {"cmd":"deflate","chamber":1,"delta":20}            <- deflate by 20% of max
- *   {"cmd":"set_pressure","chamber":0,"value":75}       <- absolute target 75% of max
- *   {"cmd":"set_max_pressure","chamber":0,"value":80}   <- cap chamber 0 at 80 kPa
+ *   {"cmd":"set_pressure","chamber":0,"value":75}       <- target 75% of chamber max
+ *   {"cmd":"set_max_pressure","chamber":0,"value":6}    <- cap chamber 0 at 6 kPa
  *   {"cmd":"hold","chamber":2}                          <- freeze at current pressure
  *   {"cmd":"ping"}
  *   {"cmd":"debug"}                                     <- (debug build only)
  *
  * Status sent back (ESP-NOW => gateway, every STATUS_REPORT_MS):
- *   {"type":"status","chamber":0,"pressure":42}     <- pressure as % of MAX_KPA
+ *   {"type":"status","chamber":0,"pressure":42}     <- pressure as % of chamber max
  */
 
 #include <Arduino.h>
@@ -57,16 +57,16 @@ constexpr int PUMP1_LEDC_CH   =     0;
 constexpr int PUMP2_LEDC_CH   =     1;
 
 // ---------------------------------------------------------------------------
-// Helpers: kPa  <->  percentage (0-100 of MAX_KPA)
+// Helpers: kPa  <->  percentage (0-100 of a reference max)
 // ---------------------------------------------------------------------------
 
-static inline float pctToKpa(int pct) {
-    return constrain(pct, 0, 100) * MAX_KPA / 100.0f;
+static inline float pctToKpaOf(int pct, float ref_kpa) {
+    return constrain(pct, 0, 100) * max(0.0f, ref_kpa) / 100.0f;
 }
 
-static inline int kpaToPct(float kpa) {
-    if (kpa <= 0.0f) return 0;
-    int pct = static_cast<int>(kpa * 100.0f / MAX_KPA + 0.5f);
+static inline int kpaToPctOf(float kpa, float ref_kpa) {
+    if (kpa <= 0.0f || ref_kpa <= 0.0f) return 0;
+    int pct = static_cast<int>(kpa * 100.0f / ref_kpa + 0.5f);
     return min(pct, 100);
 }
 
@@ -184,7 +184,7 @@ static void stopChamber(int n) {
 
 static void sendStatus(int ch, float kpa) {
     if (!gatewayKnown) return;
-    int pct = kpaToPct(kpa);
+    int pct = kpaToPctOf(kpa, chambers[ch].max_kpa);
     char buf[48];
     int len = snprintf(buf, sizeof(buf),
                        "{\"type\":\"status\",\"chamber\":%d,\"pressure\":%d}",
@@ -287,7 +287,7 @@ static void processCommand(const Cmd& c) {
     switch (c.type) {
     case CMD_INFLATE: {
         int delta_pct  = constrain(c.param, 0, 100);
-        float delta    = pctToKpa(delta_pct);
+        float delta    = pctToKpaOf(delta_pct, chambers[n].max_kpa);
         float current  = cachedKpa[n];
         float target   = min(current + delta, chambers[n].max_kpa);
         beginInflate(n, DEFAULT_INFLATE_DUTY, target);
@@ -295,7 +295,7 @@ static void processCommand(const Cmd& c) {
     }
     case CMD_DEFLATE: {
         int delta_pct  = constrain(c.param, 0, 100);
-        float delta    = pctToKpa(delta_pct);
+        float delta    = pctToKpaOf(delta_pct, chambers[n].max_kpa);
         float current  = cachedKpa[n];
         float target   = max(current - delta, 0.0f);
         beginDeflate(n, target);
@@ -303,8 +303,7 @@ static void processCommand(const Cmd& c) {
     }
     case CMD_SET_PRESSURE: {
         int value_pct  = constrain(c.param, 0, 100);
-        float target   = pctToKpa(value_pct);
-        target         = max(0.0f, min(target, chambers[n].max_kpa));
+        float target   = pctToKpaOf(value_pct, chambers[n].max_kpa);
         float current  = cachedKpa[n];
         if (current < target)
             beginInflate(n, DEFAULT_INFLATE_DUTY, target);
@@ -318,8 +317,8 @@ static void processCommand(const Cmd& c) {
         break;
     }
     case CMD_SET_MAX: {
-        int value_pct = constrain(c.param, 0, 100);
-        float new_max = pctToKpa(value_pct);
+        int value_kpa = max(0, min(static_cast<int>(MAX_KPA), static_cast<int>(c.param)));
+        float new_max = static_cast<float>(value_kpa);
         DBG_PRINT("CH%d set_max %.2f -> %.2f kPa\n", n, chambers[n].max_kpa, new_max);
         chambers[n].max_kpa = new_max;
         if (chambers[n].state == CH_INFLATING && cachedKpa[n] >= chambers[n].max_kpa) {
@@ -371,7 +370,7 @@ static void onReceived(const uint8_t* mac_addr,
     else if (strcmp(cmd, "inflate") == 0)           { c.type = CMD_INFLATE;      c.chamber = doc["chamber"] | -1; c.param = doc["delta"] | 10; }
     else if (strcmp(cmd, "deflate") == 0)           { c.type = CMD_DEFLATE;      c.chamber = doc["chamber"] | -1; c.param = doc["delta"] | 10; }
     else if (strcmp(cmd, "set_pressure") == 0)      { c.type = CMD_SET_PRESSURE; c.chamber = doc["chamber"] | -1; c.param = doc["value"] | 0; }
-    else if (strcmp(cmd, "set_max_pressure") == 0)  { c.type = CMD_SET_MAX;      c.chamber = doc["chamber"] | -1; c.param = doc["value"] | 100; }
+    else if (strcmp(cmd, "set_max_pressure") == 0)  { c.type = CMD_SET_MAX;      c.chamber = doc["chamber"] | -1; c.param = doc["value"] | static_cast<int>(MAX_KPA); }
     else if (strcmp(cmd, "hold") == 0)              { c.type = CMD_HOLD;         c.chamber = doc["chamber"] | -1; }
 #ifdef DEBUG_BUILD
     else if (strcmp(cmd, "debug") == 0)             { c.type = CMD_DEBUG;        c.chamber = -1; }
@@ -487,7 +486,7 @@ void loop() {
             DBG_PRINT("CH%d  %s  %.2f kPa  tgt=%.2f  max=%.2f  pct=%d%%\n",
                       i, stateStr(chambers[i].state),
                       cachedKpa[i], chambers[i].target_kpa,
-                      chambers[i].max_kpa, kpaToPct(cachedKpa[i]));
+                      chambers[i].max_kpa, kpaToPctOf(cachedKpa[i], chambers[i].max_kpa));
         DBG_PRINT("tx ok=%lu fail=%lu drop=%lu  up=%lus\n",
                   sendOk, sendFail, cmdDropped, millis() / 1000);
 #endif

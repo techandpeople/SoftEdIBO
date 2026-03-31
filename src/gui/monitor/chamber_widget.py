@@ -45,13 +45,10 @@ class _PressureBar(QWidget):
     _BAR_COLOR    = QColor("#3daee9")   # current fill
     _TARGET_COLOR = QColor("#da4453")   # target line
     _BG_COLOR     = QColor("#e0e0e0")   # empty portion
-    _LIMIT_COLOR  = QColor(200, 200, 200, 80)  # disabled zone (above max)
-
-    def __init__(self, max_pressure: int = 100) -> None:
+    def __init__(self) -> None:
         super().__init__()
         self._current: int = 0
         self._target:  int = 0
-        self._max_p = max_pressure
         self.setFixedWidth(18)
         self.setMinimumHeight(50)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
@@ -69,14 +66,6 @@ class _PressureBar(QWidget):
 
         # Background
         p.fillRect(0, 0, w, h, self._BG_COLOR)
-
-        # Shade zone above max pressure limit
-        if self._max_p < 100:
-            top_h = int(h * (100 - self._max_p) / 100)
-            p.fillRect(0, 0, w, top_h, self._LIMIT_COLOR)
-            pen = QPen(QColor("#888888"), 1, Qt.PenStyle.DashLine)
-            p.setPen(pen)
-            p.drawLine(0, top_h, w, top_h)
 
         # Current pressure fill (from bottom)
         if self._current > 0:
@@ -135,8 +124,8 @@ class ChamberWidget(QWidget):
         self._touch_btn.released.connect(_on_release)
         layout.addWidget(self._touch_btn, alignment=Qt.AlignmentFlag.AlignHCenter)
 
-        # Pressure bar (current fill + target line + max limit zone)
-        self._bar = _PressureBar(chamber.max_pressure)
+        # Pressure bar (current fill + target line), all in percent scale.
+        self._bar = _PressureBar()
         layout.addWidget(self._bar, alignment=Qt.AlignmentFlag.AlignHCenter)
 
         # Info labels — small font to save space
