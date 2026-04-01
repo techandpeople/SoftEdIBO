@@ -98,7 +98,7 @@ class TurtleRobot(BaseRobot):
         if skin is None:
             logger.error("Invalid skin ID: %s", kwargs.get("skin"))
             return False
-        idx = kwargs.get("slot")
+        idx: int | None = kwargs.get("slot")
         if command == "set_pressure":
             return skin.set_pressure(idx, kwargs.get("value", 100))
         if command == "inflate":
@@ -106,6 +106,8 @@ class TurtleRobot(BaseRobot):
         if command == "deflate":
             return skin.deflate(idx, kwargs.get("delta", 10))
         if command == "hold":
+            if idx is None:
+                return False
             return skin.hold(idx)
         return False
 

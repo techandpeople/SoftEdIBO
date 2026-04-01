@@ -21,9 +21,20 @@ from src.config.settings import Settings
 from src.hardware.serial_ports import list_esp32_ports
 
 SENTINEL_PATH: Path = Settings.ROOT / "data" / ".setup_done"
-# Read-only bundled assets live in BUNDLE (_internal/ when frozen, ROOT in dev)
+# Read-only bundled assets live in BUNDLE (_internal/ when frozen, repo root in dev)
 GATEWAY_BIN: Path = Settings.BUNDLE / "firmware" / "gateway" / "firmware.bin"
-NODE_BIN: Path = Settings.BUNDLE / "firmware" / "air_chamber_node" / "firmware.bin"
+
+# Available node firmware binaries, keyed by display label
+NODE_FIRMWARES: dict[str, Path] = {
+    "node_pump  (3 chambers, GPIO valves, own pumps)":
+        Settings.BUNDLE / "firmware" / "node_pump" / "firmware.bin",
+    "node_multiplexed_pump  (N chambers, 74HC595 + 74HC4051, own pumps)":
+        Settings.BUNDLE / "firmware" / "node_multiplexed_pump" / "firmware.bin",
+    "node_reservoir  (single tank, GPIO pumps)":
+        Settings.BUNDLE / "firmware" / "node_reservoir" / "firmware.bin",
+    "node_multiplexed_reservoir  (multi-tank, shift-register relays + sensor mux)":
+        Settings.BUNDLE / "firmware" / "node_multiplexed_reservoir" / "firmware.bin",
+}
 
 
 def _esptool_cmd(port: str, firmware: Path) -> tuple[str, list[str]]:
@@ -65,7 +76,7 @@ class WelcomePage(QWizardPage):
             "<p>This wizard will flash the firmware to:</p>"
             "<ul>"
             "<li>The <b>ESP-NOW gateway</b></li>"
-            "<li>Each <b>air-chamber node</b></li>"
+            "<li>Each <b>node</b> (pump, multiplexed pump, reservoir, or multiplexed reservoir)</li>"
             "</ul>"
             "<p>Connect each device via USB before the corresponding step.</p>"
             "<p>You can re-run this wizard at any time from <b>Tools => Flash Firmware…</b></p>"
@@ -186,10 +197,14 @@ class _FlashPage(QWizardPage):
             self._progress.setValue(int(float(m.group(1))))
 
     def _on_output(self) -> None:
+        if self._proc is None:
+            return
         raw = self._proc.readAllStandardOutput().data().decode(errors="replace")
         self._parse_progress(raw)
 
     def _on_error_output(self) -> None:
+        if self._proc is None:
+            return
         raw = self._proc.readAllStandardError().data().decode(errors="replace")
         self._parse_progress(raw)
 
@@ -217,23 +232,39 @@ class FlashGatewayPage(_FlashPage):
 
 
 class FlashNodePage(_FlashPage):
-    """Flash page for air-chamber nodes; allows flashing multiple units."""
+    """Flash page for nodes; lets the user pick node type and flash multiple units."""
 
     def __init__(self):
+        first_bin = next(iter(NODE_FIRMWARES.values()))
         super().__init__(
             "Flash Node Firmware",
-            "Connect an air-chamber node via USB, select the port, then click Flash.",
-            NODE_BIN,
+            "Select the node type, connect it via USB, then click Flash.",
+            first_bin,
         )
+
+        layout: QVBoxLayout = self.layout()  # type: ignore[assignment]
+
+        # Node type selector — inserted at position 0 (above the port row)
+        type_row = QHBoxLayout()
+        type_row.addWidget(QLabel("Node type:"))
+        self._type_combo = QComboBox()
+        self._type_combo.setMinimumWidth(320)
+        for label in NODE_FIRMWARES:
+            self._type_combo.addItem(label)
+        self._type_combo.currentTextChanged.connect(self._on_type_changed)
+        type_row.addWidget(self._type_combo)
+        type_row.addStretch()
+        layout.insertLayout(0, type_row)
 
         # "Flash another node" button — enabled after each successful flash
         self._another_btn = QPushButton("Flash Another Node")
         self._another_btn.clicked.connect(self._reset_for_another)
         self._another_btn.setEnabled(False)
-
-        layout = self.layout()
         # Insert before the log (last widget)
         layout.insertWidget(layout.count() - 1, self._another_btn)
+
+    def _on_type_changed(self, label: str) -> None:
+        self._firmware = NODE_FIRMWARES[label]
 
     def _on_finished(self, exit_code: int, exit_status) -> None:
         super()._on_finished(exit_code, exit_status)
