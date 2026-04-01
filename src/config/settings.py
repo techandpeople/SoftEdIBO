@@ -52,6 +52,14 @@ class Settings:
     # Load / save
     # ------------------------------------------------------------------
 
+    def reset_to_default(self) -> None:
+        """Overwrite the user config with the bundled default and reload."""
+        if self._DEFAULT_BUNDLE.exists():
+            shutil.copy(self._DEFAULT_BUNDLE, self._path)
+        else:
+            self._path.write_text("", encoding="utf-8")
+        self.load()
+
     def load(self) -> None:
         """Reload configuration from disk."""
         with open(self._path, encoding="utf-8") as f:

@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import QTimer
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QApplication,
     QLabel,
@@ -70,7 +71,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self._robot_panel.gateway_changed.connect(self._home_panel.set_gateway_status)
         self._robot_panel.robot_configured.connect(self._on_robot_configured)
 
-        self._robots = self._load_robots()
+        self._robots = self._load_robots_safe()
         self._session_panel.set_available_robots(self._robots)
         self._robot_panel.refresh(self._robots)
 
@@ -135,6 +136,38 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
         return robots
 
+    def _load_robots_safe(self) -> list[BaseRobot]:
+        """Wrapper around ``_load_robots`` that catches config errors.
+
+        On failure a dialog offers to reset the config to the bundled default
+        (dropping robot definitions but preserving nothing else) or to continue
+        with no robots loaded.
+        """
+        import traceback
+        try:
+            return self._load_robots()
+        except Exception:
+            msg = traceback.format_exc()
+            dlg = QMessageBox(self)
+            dlg.setWindowTitle("Configuration error")
+            dlg.setIcon(QMessageBox.Icon.Critical)
+            dlg.setText(
+                "Failed to load robots from settings.yaml.\n\n"
+                "This usually means the config file is from an older version "
+                "or contains invalid data."
+            )
+            dlg.setDetailedText(msg)
+            reset_btn = dlg.addButton("Reset config", QMessageBox.ButtonRole.ResetRole)
+            dlg.addButton("Continue without robots", QMessageBox.ButtonRole.AcceptRole)
+            dlg.exec()
+            if dlg.clickedButton() is reset_btn:
+                self._settings.reset_to_default()
+                try:
+                    return self._load_robots()
+                except Exception:
+                    pass
+            return []
+
     def _open_flash_wizard(self) -> None:
         from src.gui.setup_wizard import SetupWizard
         wizard = SetupWizard(parent=self)
@@ -159,7 +192,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
     def _on_robot_configured(self) -> None:
         """Reload settings and recreate robots after a config dialog saves."""
         self._settings.load()
-        self._robots = self._load_robots()
+        self._robots = self._load_robots_safe()
         self._session_panel.set_available_robots(self._robots)
         self._robot_panel.refresh(self._robots)
 
@@ -197,7 +230,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             if total > 0:
                 dlg.setValue(int(recv / total * 100))
 
-        def _on_done(path) -> None:
+        def _on_done(path: Path) -> None:
             dlg.close()
             answer = QMessageBox.question(
                 self,
@@ -267,14 +300,6 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         quoted_new = shlex.quote(str(new_appimage))
         quoted_target = shlex.quote(str(target))
         quoted_args = " ".join(shlex.quote(arg) for arg in sys.argv[1:])
-        # Prefer APPIMAGE_EXTRACT_AND_RUN, but keep a plain AppImage fallback.
-        restart_cmd = (
-            f"env APPIMAGE_EXTRACT_AND_RUN=1 APPIMAGE={quoted_target} "
-            f"{quoted_target} {quoted_args}"
-        ).strip()
-        restart_cmd_fallback = (
-            f"env APPIMAGE={quoted_target} {quoted_target} {quoted_args}"
-        ).strip()
 
         log_dir = Path.home() / ".local" / "share" / "SoftEdIBO" / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
@@ -282,34 +307,21 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
         script_content = (
             "#!/bin/sh\n"
-            "set -u\n"
             f"while kill -0 {pid} 2>/dev/null; do sleep 0.2; done\n"
-            f"echo '[update] script v2 applying at '$(date '+%Y-%m-%dT%H:%M:%S%z') >> {update_log}\n"
+            f"echo '[update] applying at '$(date '+%Y-%m-%dT%H:%M:%S%z') >> {update_log}\n"
             f"if mv -f {quoted_new} {quoted_target}; then\n"
-            f"  echo '[update] replace via mv ok' >> {update_log}\n"
+            f"  echo '[update] mv ok' >> {update_log}\n"
             "else\n"
-            f"  echo '[update] mv failed, trying cp fallback' >> {update_log}\n"
-            f"  if cp -f {quoted_new} {quoted_target}; then\n"
-            f"    rm -f {quoted_new}\n"
-            f"    echo '[update] replace via cp ok' >> {update_log}\n"
-            "  else\n"
-            f"    echo '[update] cp fallback failed' >> {update_log}\n"
-            "  fi\n"
+            f"  echo '[update] mv failed, trying cp' >> {update_log}\n"
+            f"  cp -f {quoted_new} {quoted_target} && rm -f {quoted_new}\n"
             "fi\n"
-            f"if chmod +x {quoted_target}; then\n"
-            f"  echo '[update] chmod ok' >> {update_log}\n"
-            "else\n"
-            f"  echo '[update] chmod failed' >> {update_log}\n"
-            "fi\n"
-            f"echo '[update] relaunch attempt 1' >> {update_log}\n"
-            f"if {restart_cmd} >> {update_log} 2>&1; then\n"
-            "  exit 0\n"
-            "fi\n"
-            f"echo '[update] relaunch attempt 1 failed, trying fallback' >> {update_log}\n"
-            f"if {restart_cmd_fallback} >> {update_log} 2>&1; then\n"
-            "  exit 0\n"
-            "fi\n"
-            f"echo '[update] relaunch failed' >> {update_log}\n"
+            f"chmod +x {quoted_target}\n"
+            f"echo '[update] relaunching' >> {update_log}\n"
+            # setsid creates a new session so the new process is fully detached
+            # from this script. Do NOT redirect AppImage stdout/stderr — Qt needs
+            # an open stderr to connect to the display on some compositors.
+            f"setsid env APPIMAGE={quoted_target} {quoted_target} {quoted_args} &\n"
+            f"echo '[update] done PID=$!' >> {update_log}\n"
         )
 
         fd, script_path = tempfile.mkstemp(prefix="softedibo-update-", suffix=".sh")
@@ -353,7 +365,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
     # Lifecycle
     # ------------------------------------------------------------------
 
-    def closeEvent(self, event) -> None:
+    def closeEvent(self, event: QCloseEvent) -> None:
         """Disconnect hardware and close the database on exit."""
         if self._gateway.is_connected:
             self._gateway.disconnect()
