@@ -216,7 +216,7 @@ class AppUpdater(QObject):
         self._download_reply.finished.connect(self._on_download_finished)
 
     def _on_chunk(self) -> None:
-        if self._download_file:
+        if self._download_file and self._download_reply:
             self._download_file.write(bytes(self._download_reply.readAll()))
 
     def _on_download_finished(self) -> None:
@@ -227,6 +227,9 @@ class AppUpdater(QObject):
             self._download_file.close()
             self._download_file = None
 
+        if reply is None:
+            return
+
         reply.deleteLater()
 
         if reply.error() != reply.NetworkError.NoError:
@@ -236,32 +239,45 @@ class AppUpdater(QObject):
             self.error.emit(reply.errorString())
             return
 
+        tmp_path = self._tmp_path
+        if tmp_path is None:
+            return
+
         logger.info("Download complete: %s (%d bytes)",
-                     self._tmp_path, self._tmp_path.stat().st_size)
+                     tmp_path, tmp_path.stat().st_size)
 
         if not _is_frozen_windows():
             # Linux: make downloaded AppImage executable now.
             # The final replacement is deferred until the app exits to avoid
             # errno 26 (Text file busy) when replacing a running binary.
             try:
-                self._tmp_path.chmod(
-                    self._tmp_path.stat().st_mode
+                tmp_path.chmod(
+                    tmp_path.stat().st_mode
                     | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
                 )
             except OSError as exc:
                 logger.error("Failed to prepare update file: %s", exc)
-                self._tmp_path.unlink(missing_ok=True)
+                tmp_path.unlink(missing_ok=True)
                 self.error.emit(f"Failed to prepare update file: {exc}")
                 return
 
-        self.download_done.emit(self._tmp_path)
+        self.download_done.emit(tmp_path)
 
     def cancel(self) -> None:
-        """Abort an in-progress download."""
-        if self._download_reply:
-            self._download_reply.abort()
+        """Abort an in-progress download.
+
+        No-op once the download has completed — the temp file must not be
+        deleted after ``download_done`` has been emitted, because the apply
+        shell script still needs it.  (Qt destroys the QProgressDialog on
+        app shutdown and emits ``canceled``, which would otherwise delete the
+        file before the script can ``mv`` it.)
+        """
+        if not self._download_reply:
+            return  # download already finished or never started
+        self._download_reply.abort()
         if self._download_file:
             self._download_file.close()
             self._download_file = None
         if self._tmp_path:
             self._tmp_path.unlink(missing_ok=True)
+            self._tmp_path = None
