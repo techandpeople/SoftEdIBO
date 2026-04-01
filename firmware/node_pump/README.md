@@ -26,15 +26,31 @@ Pumps: DRV8833 H-bridge, single PWM pin per channel (other pin tied on PCB).
 
 ## Build & Flash
 
-Two build environments — **release** (production) and **debug** (development):
+Four build environments — two standard (own pumps) and two reservoir mode (no onboard pumps):
+
+| Environment | Pumps | Serial | When to use |
+|-------------|-------|--------|-------------|
+| `release`     | yes | no  | Production — standard node with own pumps |
+| `debug`       | yes | yes | Development — standard node with own pumps |
+| `release_res` | no  | no  | Production — fed by central reservoir node |
+| `debug_res`   | no  | yes | Development — fed by central reservoir node |
 
 ```bash
-# Production — no Serial output, no debug overhead
+# Production — standard node (own pumps)
 pio run -e release --target upload
 
-# Development — Serial logs, tx counters, "debug" command via ESP-NOW
+# Development — standard node (own pumps) + Serial logs
 pio run -e debug --target upload
+
+# Production — reservoir mode (no onboard pumps)
+pio run -e release_res --target upload
+
+# Development — reservoir mode + Serial logs
+pio run -e debug_res --target upload
 ```
+
+In **reservoir mode** (`-DRESERVOIR_MODE`), pump GPIO pins are not initialised and
+`recalcPumps()` is a no-op. Air is supplied and removed by the central reservoir node.
 
 The CI pipeline automatically selects the right environment:
 - **Nightly** (push to `master`) → `debug` build

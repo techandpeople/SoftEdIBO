@@ -1,16 +1,13 @@
-"""Turtle robot - large robot with multiple skins for group interaction.
-
-The Turtle has multiple skins, each with 1-3 air chambers. Skins can
-share an ESP32 node when they have fewer than 3 chambers.
-The entire group interacts with the Turtle simultaneously.
-"""
+"""Turtle robot — large robot with multiple skins for group interaction."""
 
 import logging
 from typing import Any
 
+from src.hardware.air_reservoir import AirReservoir
 from src.hardware.esp32_controller import ESP32Controller
 from src.hardware.espnow_gateway import ESPNowGateway
 from src.hardware.skin import Skin
+from src.robots._robot_builder import build_reservoirs, build_skins
 from src.robots.base_robot import BaseRobot, RobotStatus
 
 logger = logging.getLogger(__name__)
@@ -23,115 +20,113 @@ class TurtleRobot(BaseRobot):
         self,
         robot_id: str,
         gateway: ESPNowGateway,
+        node_configs: list[dict[str, Any]],
         skin_configs: list[dict[str, Any]],
+        reservoir_configs: dict[str, Any] | None = None,
     ):
         """Initialize the Turtle robot.
 
         Args:
-            robot_id: Unique identifier for this robot.
-            gateway: ESP-NOW gateway for communication.
-            skin_configs: Flat list of skin dicts from settings.yaml, each with
-                'skin_id', 'name' (optional), 'mac', and 'slots' keys.
-                Multiple skins may share the same MAC (up to 3 slots total per MAC).
+            robot_id:          Unique identifier.
+            gateway:           Shared ESP-NOW gateway.
+            node_configs:      List of node dicts, e.g.::
+
+                [{"mac": "AA:BB:...", "node_type": "standard", "max_slots": 3}]
+
+            skin_configs:      List of skin dicts, e.g.::
+
+                [{"skin_id": "belly", "name": "Belly",
+                  "chambers": [{"mac": "AA:BB:...", "slot": 0,
+                                "max_pressure": 8.0}]}]
+
+            reservoir_configs: Optional ``{"pressure": {...}, "vacuum": {...}}``.
         """
         super().__init__(robot_id, "Turtle")
         self._gateway = gateway
-        self._controllers: dict[str, ESP32Controller] = {}
-        self._skins: dict[str, Skin] = {}
+        self._controllers: dict[str, ESP32Controller] = {
+            n["mac"]: ESP32Controller(n["mac"], gateway)
+            for n in node_configs
+        }
+        if reservoir_configs:
+            for cfg in reservoir_configs.values():
+                mac = cfg.get("mac", "")
+                if mac and mac not in self._controllers:
+                    self._controllers[mac] = ESP32Controller(mac, gateway)
 
-        for skin_cfg in skin_configs:
-            mac = skin_cfg["mac"]
-            if mac not in self._controllers:
-                self._controllers[mac] = ESP32Controller(mac, gateway)
-            raw_max = skin_cfg.get("max_pressure", {})
-            max_pressure = {int(k): v for k, v in raw_max.items()} if raw_max else None
-            skin = Skin(
-                skin_id=skin_cfg["skin_id"],
-                controller=self._controllers[mac],
-                chamber_slots=skin_cfg["slots"],
-                name=skin_cfg.get("name"),
-                pressure_limits=max_pressure,
-            )
-            self._skins[skin.skin_id] = skin
+        self._skins: dict[str, Skin] = build_skins(skin_configs, self._controllers)
+        self._reservoirs: dict[str, AirReservoir] = build_reservoirs(
+            reservoir_configs, self._controllers
+        )
 
     @property
     def skins(self) -> dict[str, Skin]:
-        """Get all skins on this Turtle."""
         return self._skins
 
     @property
+    def pressure_reservoir(self) -> AirReservoir | None:
+        return self._reservoirs.get("pressure")
+
+    @property
+    def vacuum_reservoir(self) -> AirReservoir | None:
+        return self._reservoirs.get("vacuum")
+
+    @property
     def total_chambers(self) -> int:
-        """Get total number of air chambers across all skins."""
         return sum(s.chamber_count for s in self._skins.values())
 
     def connect(self) -> bool:
-        """Connect to the Turtle via the ESP-NOW gateway."""
         if not self._gateway.is_connected:
             logger.error("Gateway not connected")
             return False
         self._status = RobotStatus.CONNECTED
         logger.info(
-            "Turtle connected: %d skins, %d chambers",
-            len(self._skins), self.total_chambers,
+            "Turtle %s connected: %d skins, %d chambers",
+            self.robot_id, len(self._skins), self.total_chambers,
         )
         return True
 
     def disconnect(self) -> None:
-        """Disconnect the Turtle robot."""
         self._status = RobotStatus.DISCONNECTED
 
     def pause(self) -> None:
-        """Freeze all chambers — send hold to each chamber on the real hardware."""
         for skin in self._skins.values():
-            for slot in skin.chambers:
-                skin.hold(slot)
+            for local_idx in skin.chambers:
+                skin.hold(local_idx)
 
     def send_command(self, command: str, **kwargs: Any) -> bool:
-        """Send a command to a specific skin."""
-        skin_id = kwargs.get("skin")
-        skin = self._skins.get(skin_id)
+        skin = self._skins.get(kwargs.get("skin", ""))
         if skin is None:
-            logger.error("Invalid skin ID: %s", skin_id)
+            logger.error("Invalid skin ID: %s", kwargs.get("skin"))
             return False
-        slot = kwargs.get("slot")
+        idx = kwargs.get("slot")
         if command == "set_pressure":
-            return skin.set_pressure(slot, kwargs.get("value", 100))
+            return skin.set_pressure(idx, kwargs.get("value", 100))
         if command == "inflate":
-            return skin.inflate(slot, kwargs.get("delta", 10))
+            return skin.inflate(idx, kwargs.get("delta", 10))
         if command == "deflate":
-            return skin.deflate(slot, kwargs.get("delta", 10))
+            return skin.deflate(idx, kwargs.get("delta", 10))
         if command == "hold":
-            return skin.hold(slot)
+            return skin.hold(idx)
         return False
 
     def inflate_skin(self, skin_id: str, value: int = 100) -> bool:
-        """Set all chambers in a skin to an absolute target pressure (0-100 %)."""
         skin = self._skins.get(skin_id)
-        if skin is None:
-            return False
-        return skin.set_pressure(value=value)
+        return skin.set_pressure(value=value) if skin else False
 
     def deflate_skin(self, skin_id: str) -> bool:
-        """Deflate all chambers in a skin to zero."""
         skin = self._skins.get(skin_id)
-        if skin is None:
-            return False
-        return skin.set_pressure(value=0)
+        return skin.set_pressure(value=0) if skin else False
 
     def inflate_all(self, value: int = 100) -> bool:
-        """Set all skins to an absolute target pressure (0-100 %)."""
         return all(s.set_pressure(value=value) for s in self._skins.values())
 
     def deflate_all(self) -> bool:
-        """Deflate all skins to zero."""
         return all(s.set_pressure(value=0) for s in self._skins.values())
 
     def get_status_data(self) -> dict[str, Any]:
-        """Get status of all skins."""
         return {
-            "robot_id": self.robot_id,
-            "status": self._status.value,
-            "skins": {
-                sid: s.get_status() for sid, s in self._skins.items()
-            },
+            "robot_id":   self.robot_id,
+            "status":     self._status.value,
+            "skins":      {sid: s.get_status() for sid, s in self._skins.items()},
+            "reservoirs": {k: r.get_status() for k, r in self._reservoirs.items()},
         }

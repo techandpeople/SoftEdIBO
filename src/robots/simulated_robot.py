@@ -1,9 +1,4 @@
-"""SimulatedRobot — a robot backed by SimulatedController instead of ESP32Controller.
-
-Used by SimulationActivity to provide a fully-wired robot with mock hardware.
-The GUI receives a SimulatedRobot exactly as it would a real robot — no simulation
-awareness required outside this class and SimulationActivity.
-"""
+"""SimulatedRobot — a robot backed by SimulatedController instead of ESP32Controller."""
 
 from __future__ import annotations
 
@@ -11,6 +6,7 @@ from typing import Any
 
 from src.hardware.simulated_controller import SimulatedController
 from src.hardware.skin import Skin
+from src.robots._robot_builder import build_skins
 from src.robots.base_robot import BaseRobot, RobotStatus
 
 
@@ -26,29 +22,26 @@ class SimulatedRobot(BaseRobot):
         """Initialize a simulated robot.
 
         Args:
-            robot_id: Unique identifier (mirrors the original robot's id).
-            name: Display name.
-            skin_configs: List of skin dicts with 'skin_id', 'name', 'mac', 'slots'.
+            robot_id:     Mirrors the original robot's id.
+            name:         Display name.
+            skin_configs: List of skin dicts in the new format::
+
+                [{"skin_id": ..., "name": ...,
+                  "chambers": [{"mac": ..., "slot": int,
+                                "max_pressure": float}, ...]}, ...]
         """
         super().__init__(robot_id, name)
         self._controllers: dict[str, SimulatedController] = {}
-        self._skins: dict[str, Skin] = {}
         self._status = RobotStatus.CONNECTED
 
-        for cfg in skin_configs:
-            mac = cfg["mac"]
-            if mac not in self._controllers:
-                self._controllers[mac] = SimulatedController(mac)
-            raw_max = cfg.get("max_pressure", {})
-            max_pressure = {int(k): v for k, v in raw_max.items()} if raw_max else None
-            skin = Skin(
-                skin_id=cfg["skin_id"],
-                controller=self._controllers[mac],
-                chamber_slots=cfg["slots"],
-                name=cfg.get("name"),
-                pressure_limits=max_pressure,
-            )
-            self._skins[skin.skin_id] = skin
+        # Collect all unique MACs from all skin chambers and build controllers
+        for skin_cfg in skin_configs:
+            for ch in skin_cfg.get("chambers", []):
+                mac = ch["mac"]
+                if mac not in self._controllers:
+                    self._controllers[mac] = SimulatedController(mac)
+
+        self._skins: dict[str, Skin] = build_skins(skin_configs, self._controllers)
 
     @property
     def skins(self) -> dict[str, Skin]:
@@ -58,7 +51,6 @@ class SimulatedRobot(BaseRobot):
         return True
 
     def pause(self) -> None:
-        """Freeze everything: stop timers, align targets to current pressures, set IDLE."""
         for ctrl in self._controllers.values():
             ctrl.stop_all()
         for skin in self._skins.values():
@@ -67,33 +59,31 @@ class SimulatedRobot(BaseRobot):
             skin.pause()
 
     def resume(self) -> None:
-        """Allow new commands (next user action restarts timers)."""
+        pass
 
     def disconnect(self) -> None:
-        """Stop all simulated timers."""
         for ctrl in self._controllers.values():
             ctrl.stop_all()
         self._status = RobotStatus.DISCONNECTED
 
     def send_command(self, command: str, **kwargs: Any) -> bool:
-        skin_id = kwargs.get("skin")
-        skin = self._skins.get(skin_id)
+        skin = self._skins.get(kwargs.get("skin", ""))
         if skin is None:
             return False
-        slot = kwargs.get("slot")
+        idx = kwargs.get("slot")
         if command == "set_pressure":
-            return skin.set_pressure(slot, kwargs.get("value", 100))
+            return skin.set_pressure(idx, kwargs.get("value", 100))
         if command == "inflate":
-            return skin.inflate(slot, kwargs.get("delta", 10))
+            return skin.inflate(idx, kwargs.get("delta", 10))
         if command == "deflate":
-            return skin.deflate(slot, kwargs.get("delta", 10))
+            return skin.deflate(idx, kwargs.get("delta", 10))
         if command == "hold":
-            return skin.hold(slot)
+            return skin.hold(idx)
         return False
 
     def get_status_data(self) -> dict[str, Any]:
         return {
             "robot_id": self.robot_id,
-            "status": self._status.value,
-            "skins": {sid: s.get_status() for sid, s in self._skins.items()},
+            "status":   self._status.value,
+            "skins":    {sid: s.get_status() for sid, s in self._skins.items()},
         }

@@ -1,23 +1,6 @@
 gateway:
   serial_port: /dev/ttyUSB0
   baud_rate: 115200
-node_pinout:
-  chambers_per_node: 3
-  motor_pins:
-    inflate: 25
-    deflate: 26
-  valve_pins:
-  - inflate: 27
-    deflate: 14
-  - inflate: 12
-    deflate: 13
-  - inflate: 15
-    deflate: 4
-  sensor_pins:
-  - 32
-  - 33
-  - 34
-  sensor_type: capacitive_copper
 robots:
   turtles: []
   trees: []
