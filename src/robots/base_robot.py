@@ -1,16 +1,21 @@
 """Abstract base class for all SoftEdIBO robots."""
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from src.hardware.air_reservoir import AirReservoir
 
 
 class RobotStatus(Enum):
     """Possible states of a robot."""
     DISCONNECTED = "disconnected"
-    CONNECTING = "connecting"
-    CONNECTED = "connected"
-    ERROR = "error"
+    CONNECTING   = "connecting"
+    CONNECTED    = "connected"
+    ERROR        = "error"
 
 
 class BaseRobot(ABC):
@@ -23,8 +28,17 @@ class BaseRobot(ABC):
 
     @property
     def status(self) -> RobotStatus:
-        """Get the current robot status."""
         return self._status
+
+    @property
+    def pressure_reservoir(self) -> "AirReservoir | None":
+        """Shared pressurised-air reservoir, if this robot has one."""
+        return None
+
+    @property
+    def vacuum_reservoir(self) -> "AirReservoir | None":
+        """Shared vacuum reservoir, if this robot has one."""
+        return None
 
     @abstractmethod
     def connect(self) -> bool:
@@ -47,7 +61,7 @@ class BaseRobot(ABC):
         ...
 
     def pause(self) -> None:
-        """Freeze all chambers at current pressure. Override for hardware-specific behaviour."""
+        """Freeze all chambers at current pressure. Override for hardware robots."""
 
     def resume(self) -> None:
         """Allow new commands after a pause. Override if needed."""

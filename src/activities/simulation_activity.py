@@ -45,10 +45,9 @@ class SimulationActivity(BaseActivity):
             skins = getattr(robot, "skins", {})
             skin_configs = [
                 {
-                    "skin_id": skin.skin_id,
-                    "name": skin.name,
-                    "mac": skin.esp32_mac,
-                    "slots": list(skin.chambers.keys()),
+                    "skin_id":  skin.skin_id,
+                    "name":     skin.name,
+                    "chambers": skin.chamber_defs,
                 }
                 for skin in skins.values()
             ]

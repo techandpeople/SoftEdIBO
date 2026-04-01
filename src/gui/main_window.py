@@ -99,33 +99,39 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         robots: list[BaseRobot] = []
         robot_data = self._settings.data.get("robots", {})
 
-        # Turtles — one TurtleRobot per entry
+        # Turtles
         for turtle_cfg in robot_data.get("turtles", []):
-            skin_cfgs = turtle_cfg.get("skins", [])
-            if skin_cfgs:
-                robots.append(
-                    TurtleRobot(turtle_cfg.get("id", "turtle"), self._gateway, skin_cfgs)
-                )
-
-        # Trees — one TreeRobot per entry
-        for tree_cfg in robot_data.get("trees", []):
-            skin_cfgs = tree_cfg.get("skins", [])
-            if skin_cfgs:
-                robots.append(
-                    TreeRobot(tree_cfg.get("id", "tree"), self._gateway, skin_cfgs)
-                )
-
-        # Thymios — one ThymioRobot per entry, each with its own host/port
-        for thymio_cfg in robot_data.get("thymios", []):
-            robots.append(
-                ThymioRobot(
-                    thymio_cfg["thymio_id"],
-                    thymio_cfg.get("host", "localhost"),
-                    int(thymio_cfg.get("port", 8596)),
+            if turtle_cfg.get("skins"):
+                robots.append(TurtleRobot(
+                    robot_id=turtle_cfg.get("id", "turtle"),
                     gateway=self._gateway,
-                    skin_configs=thymio_cfg.get("skins", []),
-                )
-            )
+                    node_configs=turtle_cfg.get("nodes", []),
+                    skin_configs=turtle_cfg["skins"],
+                    reservoir_configs=turtle_cfg.get("reservoirs") or None,
+                ))
+
+        # Trees
+        for tree_cfg in robot_data.get("trees", []):
+            if tree_cfg.get("skins"):
+                robots.append(TreeRobot(
+                    robot_id=tree_cfg.get("id", "tree"),
+                    gateway=self._gateway,
+                    node_configs=tree_cfg.get("nodes", []),
+                    skin_configs=tree_cfg["skins"],
+                    reservoir_configs=tree_cfg.get("reservoirs") or None,
+                ))
+
+        # Thymios
+        for thymio_cfg in robot_data.get("thymios", []):
+            robots.append(ThymioRobot(
+                robot_id=thymio_cfg["thymio_id"],
+                tdm_host=thymio_cfg.get("host", "localhost"),
+                tdm_port=int(thymio_cfg.get("port", 8596)),
+                gateway=self._gateway,
+                node_configs=thymio_cfg.get("nodes", []),
+                skin_configs=thymio_cfg.get("skins", []),
+                reservoir_configs=thymio_cfg.get("reservoirs") or None,
+            ))
 
         return robots
 
