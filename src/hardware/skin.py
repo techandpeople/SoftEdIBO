@@ -1,14 +1,21 @@
-"""Skin module - a physical unit containing 1 to 3 air chambers.
+"""Skin module — a logical grouping of 1-3 air chambers from the same robot.
 
-A Skin is the basic tactile unit in SoftEdIBO. Each skin is a physical
-piece that can be touched and contains air chambers that inflate/deflate.
+A Skin is a physical tactile piece. Its chambers may live on one or more
+ESP32 nodes belonging to the same robot.  Internally, Skin maps local
+chamber indices (0, 1, 2) to (node_mac, node_slot) pairs so that callers
+— activities, monitor widgets, etc. — never need to know about node topology.
 
-Multiple skins can share the same ESP32 node as long as the total
-number of chambers does not exceed 3 (the node's capacity).
+Config expected by the constructor (``chamber_inputs``):
+    [
+        {"controller": <ESP32Controller|SimulatedController>,
+         "node_slot":  <int>,          # physical slot on that node
+         "max_pressure": <float>},     # kPa cap for this chamber
+        ...
+    ]
 """
 
 import logging
-from typing import Any
+from typing import Any, Callable
 
 from src.hardware.air_chamber import AirChamber, ChamberState
 
@@ -16,114 +23,165 @@ logger = logging.getLogger(__name__)
 
 
 class Skin:
-    """A physical skin unit with 1-3 air chambers on an ESP32 node."""
+    """A physical skin unit with 1-3 air chambers, potentially across multiple nodes."""
 
     def __init__(
         self,
         skin_id: str,
-        controller: Any,
-        chamber_slots: list[int],
+        chamber_inputs: list[dict[str, Any]],
         name: str | None = None,
-        pressure_limits: dict[int, float] | None = None,
     ):
         """Initialize a skin.
 
         Args:
-            skin_id: Unique identifier for this skin.
-            controller: ESP32 controller managing this skin's chambers.
-            chamber_slots: Which chamber slots (0-2) on the ESP32 this skin uses.
-                e.g. [0] for a 1-chamber skin, [0, 1, 2] for a full 3-chamber skin.
-            name: Human-readable display label. Defaults to skin_id if not given.
-            pressure_limits: Per-slot max pressure in kPa, e.g. {0: 6.5, 1: 8.0}.
+            skin_id:         Unique machine key for this skin.
+            chamber_inputs:  Ordered list of chamber descriptors.  Each entry:
+                             ``{"controller": ..., "node_slot": int,
+                                "max_pressure": float}``
+                             The list order defines the local chamber index
+                             (0 = first entry, 1 = second, …).
+            name:            Human-readable display label (defaults to skin_id).
         """
         self.skin_id = skin_id
         self.name = name or skin_id
-        self._controller = controller
-        limits = pressure_limits or {}
-        self._chambers: dict[int, AirChamber] = {
-            slot: AirChamber(
-                chamber_id=slot,
-                esp32_mac=controller.mac_address,
-                max_pressure=float(limits.get(slot, 8.0)),
-            )
-            for slot in chamber_slots
-        }
-        # Propagate limits to controller (used by SimulatedController touch ramps)
-        set_limit = getattr(controller, "set_max_pressure", None)
-        if set_limit is not None:
-            for slot, chamber in self._chambers.items():
-                set_limit(slot, chamber.max_pressure)
 
-        controller.on_pressure(self._on_pressure_update)
-        on_target = getattr(controller, "on_target", None)
-        if on_target is not None:
-            on_target(self._on_target_update)
+        # mac → controller
+        self._controllers: dict[str, Any] = {}
+        # local_idx → (mac, node_slot)
+        self._routing: dict[int, tuple[str, int]] = {}
+        # (mac, node_slot) → local_idx   (reverse lookup for callbacks)
+        self._reverse: dict[tuple[str, int], int] = {}
+        # local_idx → AirChamber
+        self._chambers: dict[int, AirChamber] = {}
+
+        for local_idx, inp in enumerate(chamber_inputs):
+            ctrl = inp["controller"]
+            node_slot = int(inp["node_slot"])
+            mac = ctrl.mac_address
+            max_pressure = float(inp.get("max_pressure", 8.0))
+
+            self._routing[local_idx] = (mac, node_slot)
+            self._reverse[(mac, node_slot)] = local_idx
+            self._chambers[local_idx] = AirChamber(
+                chamber_id=local_idx,
+                esp32_mac=mac,
+                max_pressure=max_pressure,
+            )
+
+            if mac not in self._controllers:
+                self._controllers[mac] = ctrl
+                ctrl.on_pressure(self._make_pressure_cb(mac))
+                on_target = getattr(ctrl, "on_target", None)
+                if on_target is not None:
+                    on_target(self._make_target_cb(mac))
+
+            set_limit = getattr(ctrl, "set_max_pressure", None)
+            if set_limit is not None:
+                set_limit(node_slot, max_pressure)
+
+    # ------------------------------------------------------------------
+    # Properties
+    # ------------------------------------------------------------------
 
     @property
     def chambers(self) -> dict[int, AirChamber]:
-        """Get the air chambers in this skin."""
+        """Local-index → AirChamber mapping."""
         return self._chambers
 
     @property
     def chamber_count(self) -> int:
-        """Get the number of chambers in this skin."""
         return len(self._chambers)
 
     @property
-    def is_connected(self) -> bool:
-        """True if the underlying ESP32 controller's gateway is connected."""
-        return self._controller.is_connected
+    def node_macs(self) -> list[str]:
+        """MACs of all nodes used by this skin."""
+        return list(self._controllers.keys())
 
     @property
-    def esp32_mac(self) -> str:
-        """Get the MAC address of the ESP32 controlling this skin."""
-        return self._controller.mac_address
+    def is_connected(self) -> bool:
+        """True only if every node used by this skin is connected."""
+        return all(c.is_connected for c in self._controllers.values())
 
-    def inflate(self, slot: int | None = None, delta: int = 10) -> bool:
-        """Inflate a chamber by delta % (relative), or all chambers if slot is None."""
-        if slot is not None:
-            return self._inflate_one(slot, delta)
-        return all(self._inflate_one(s, delta) for s in self._chambers)
+    @property
+    def chamber_defs(self) -> list[dict[str, Any]]:
+        """Return chamber descriptors in config format (for serialisation / simulation).
 
-    def deflate(self, slot: int | None = None, delta: int = 10) -> bool:
-        """Deflate a chamber by delta % (relative), or all chambers if slot is None."""
-        if slot is not None:
-            return self._deflate_one(slot, delta)
-        return all(self._deflate_one(s, delta) for s in self._chambers)
+        Returns a list ordered by local index::
 
-    def set_pressure(self, slot: int | None = None, value: int = 100) -> bool:
-        """Set absolute target pressure (0-100 % of max), or all chambers if slot is None."""
-        if slot is not None:
-            return self._set_pressure_one(slot, value)
-        return all(self._set_pressure_one(s, value) for s in self._chambers)
+            [{"mac": ..., "slot": ..., "max_pressure": ...}, ...]
+        """
+        result = []
+        for local_idx in sorted(self._routing):
+            mac, node_slot = self._routing[local_idx]
+            result.append({
+                "mac": mac,
+                "slot": node_slot,
+                "max_pressure": self._chambers[local_idx].max_pressure,
+            })
+        return result
 
-    def hold(self, slot: int) -> bool:
+    # ------------------------------------------------------------------
+    # Commands  (local_idx = 0-based position within this skin)
+    # ------------------------------------------------------------------
+
+    def inflate(self, local_idx: int | None = None, delta: int = 10) -> bool:
+        """Inflate by delta % (relative). Pass None to inflate all chambers."""
+        if local_idx is not None:
+            return self._inflate_one(local_idx, delta)
+        return all(self._inflate_one(i, delta) for i in self._chambers)
+
+    def deflate(self, local_idx: int | None = None, delta: int = 10) -> bool:
+        """Deflate by delta % (relative). Pass None to deflate all chambers."""
+        if local_idx is not None:
+            return self._deflate_one(local_idx, delta)
+        return all(self._deflate_one(i, delta) for i in self._chambers)
+
+    def set_pressure(self, local_idx: int | None = None, value: int = 100) -> bool:
+        """Set absolute target pressure (0-100 %). Pass None for all chambers."""
+        if local_idx is not None:
+            return self._set_pressure_one(local_idx, value)
+        return all(self._set_pressure_one(i, value) for i in self._chambers)
+
+    def hold(self, local_idx: int) -> bool:
         """Freeze a chamber at its current pressure."""
-        chamber = self._chambers.get(slot)
+        chamber = self._chambers.get(local_idx)
         if chamber is None:
-            logger.error("Skin %s has no chamber at slot %d", self.skin_id, slot)
+            logger.error("Skin %s has no chamber at local index %d", self.skin_id, local_idx)
             return False
+        mac, node_slot = self._routing[local_idx]
         chamber.target_pressure = chamber.pressure
         chamber.state = ChamberState.IDLE
-        return self._controller.hold(slot)
+        return self._controllers[mac].hold(node_slot)
 
-    def fire_touch(self, sensor_id: int, raw_value: int) -> None:
-        """Simulate a touch sensor event if the controller supports it."""
-        fire = getattr(self._controller, "fire_touch", None)
+    def fire_touch(self, local_idx: int, raw_value: int) -> None:
+        """Simulate a touch sensor event (routes to the correct node)."""
+        routing = self._routing.get(local_idx)
+        if routing is None:
+            return
+        mac, node_slot = routing
+        fire = getattr(self._controllers[mac], "fire_touch", None)
         if fire is not None:
-            fire(sensor_id, raw_value)
+            fire(node_slot, raw_value)
 
-    def touch_press(self, slot: int) -> None:
-        """Trigger a simulated touch press ramp-up if the controller supports it."""
-        sim_press = getattr(self._controller, "simulate_touch_press", None)
+    def touch_press(self, local_idx: int) -> None:
+        """Trigger a simulated touch press ramp-up on the correct node."""
+        routing = self._routing.get(local_idx)
+        if routing is None:
+            return
+        mac, node_slot = routing
+        sim_press = getattr(self._controllers[mac], "simulate_touch_press", None)
         if sim_press is not None:
-            sim_press(slot)
+            sim_press(node_slot)
 
-    def touch_release(self, slot: int, hold_ms: int) -> None:
-        """Trigger a simulated touch release ramp-down if the controller supports it."""
-        sim_release = getattr(self._controller, "simulate_touch_release", None)
+    def touch_release(self, local_idx: int, hold_ms: int) -> None:
+        """Trigger a simulated touch release ramp-down on the correct node."""
+        routing = self._routing.get(local_idx)
+        if routing is None:
+            return
+        mac, node_slot = routing
+        sim_release = getattr(self._controllers[mac], "simulate_touch_release", None)
         if sim_release is not None:
-            sim_release(slot, hold_ms)
+            sim_release(node_slot, hold_ms)
 
     def pause(self) -> None:
         """Set all chambers to IDLE (called when the session is paused)."""
@@ -131,67 +189,76 @@ class Skin:
             chamber.state = ChamberState.IDLE
 
     def get_status(self) -> dict[str, Any]:
-        """Get status of all chambers in this skin."""
         return {
             "skin_id": self.skin_id,
-            "esp32_mac": self.esp32_mac,
+            "node_macs": self.node_macs,
             "chambers": {
-                slot: {"state": c.state.value, "pressure": c.pressure}
-                for slot, c in self._chambers.items()
+                idx: {"state": c.state.value, "pressure": c.pressure}
+                for idx, c in self._chambers.items()
             },
         }
 
-    def _on_target_update(self, chamber_id: int, target: int) -> None:
-        """Update chamber target_pressure when the controller reports a target change."""
-        chamber = self._chambers.get(chamber_id)
-        if chamber is not None:
-            chamber.target_pressure = target
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
 
-    def _on_pressure_update(self, chamber_id: int, pressure: int) -> None:
-        """Update chamber pressure and infer state from pressure movement."""
-        chamber = self._chambers.get(chamber_id)
-        if chamber is None:
-            return
-        chamber.pressure = pressure
-        target = chamber.target_pressure
-        if pressure == target:
-            chamber.state = ChamberState.INFLATED if target > 0 else ChamberState.IDLE
-        elif pressure < target:
-            chamber.state = ChamberState.INFLATING
-        else:
-            chamber.state = ChamberState.DEFLATING
+    def _make_pressure_cb(self, mac: str) -> Callable[[int, int], None]:
+        def cb(node_slot: int, pressure: int) -> None:
+            local_idx = self._reverse.get((mac, node_slot))
+            if local_idx is None:
+                return
+            chamber = self._chambers[local_idx]
+            chamber.pressure = pressure
+            target = chamber.target_pressure
+            if pressure == target:
+                chamber.state = ChamberState.INFLATED if target > 0 else ChamberState.IDLE
+            elif pressure < target:
+                chamber.state = ChamberState.INFLATING
+            else:
+                chamber.state = ChamberState.DEFLATING
+        return cb
 
-    def _inflate_one(self, slot: int, delta: int) -> bool:
-        chamber = self._chambers.get(slot)
+    def _make_target_cb(self, mac: str) -> Callable[[int, int], None]:
+        def cb(node_slot: int, target: int) -> None:
+            local_idx = self._reverse.get((mac, node_slot))
+            if local_idx is not None:
+                self._chambers[local_idx].target_pressure = target
+        return cb
+
+    def _inflate_one(self, local_idx: int, delta: int) -> bool:
+        chamber = self._chambers.get(local_idx)
         if chamber is None:
-            logger.error("Skin %s has no chamber at slot %d", self.skin_id, slot)
+            logger.error("Skin %s: no chamber at local index %d", self.skin_id, local_idx)
             return False
+        mac, node_slot = self._routing[local_idx]
         new_target = min(100, chamber.target_pressure + delta)
         chamber.target_pressure = new_target
         if chamber.pressure < new_target:
             chamber.state = ChamberState.INFLATING
         elif new_target > 0:
             chamber.state = ChamberState.INFLATED
-        return self._controller.inflate(slot, delta)
+        return self._controllers[mac].inflate(node_slot, delta)
 
-    def _deflate_one(self, slot: int, delta: int) -> bool:
-        chamber = self._chambers.get(slot)
+    def _deflate_one(self, local_idx: int, delta: int) -> bool:
+        chamber = self._chambers.get(local_idx)
         if chamber is None:
-            logger.error("Skin %s has no chamber at slot %d", self.skin_id, slot)
+            logger.error("Skin %s: no chamber at local index %d", self.skin_id, local_idx)
             return False
+        mac, node_slot = self._routing[local_idx]
         new_target = max(0, chamber.target_pressure - delta)
         chamber.target_pressure = new_target
         if chamber.pressure > new_target:
             chamber.state = ChamberState.DEFLATING
         else:
             chamber.state = ChamberState.IDLE
-        return self._controller.deflate(slot, delta)
+        return self._controllers[mac].deflate(node_slot, delta)
 
-    def _set_pressure_one(self, slot: int, value: int) -> bool:
-        chamber = self._chambers.get(slot)
+    def _set_pressure_one(self, local_idx: int, value: int) -> bool:
+        chamber = self._chambers.get(local_idx)
         if chamber is None:
-            logger.error("Skin %s has no chamber at slot %d", self.skin_id, slot)
+            logger.error("Skin %s: no chamber at local index %d", self.skin_id, local_idx)
             return False
+        mac, node_slot = self._routing[local_idx]
         value = max(0, min(100, value))
         chamber.target_pressure = value
         if chamber.pressure < value:
@@ -202,8 +269,10 @@ class Skin:
             chamber.state = ChamberState.INFLATED
         else:
             chamber.state = ChamberState.IDLE
-        return self._controller.set_pressure(slot, value)
+        return self._controllers[mac].set_pressure(node_slot, value)
 
     def __repr__(self) -> str:
-        slots = list(self._chambers.keys())
-        return f"Skin(id={self.skin_id!r}, slots={slots}, esp32={self.esp32_mac!r})"
+        return (
+            f"Skin(id={self.skin_id!r}, chambers={self.chamber_count}, "
+            f"nodes={self.node_macs!r})"
+        )

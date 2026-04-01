@@ -67,6 +67,23 @@ jobs:
           key: ${{ runner.os }}-pio-${{ hashFiles('firmware/**/platformio.ini') }}
           restore-keys: ${{ runner.os }}-pio-
 
+      # ----------------------------------------------------------------
+      # Choose firmware build environment (release on tags, debug otherwise)
+      # ----------------------------------------------------------------
+
+      - name: Choose firmware build environment
+        id: fw-env
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            echo "env=release" >> "$GITHUB_OUTPUT"
+          else
+            echo "env=debug" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ----------------------------------------------------------------
+      # Gateway
+      # ----------------------------------------------------------------
+
       - name: Build gateway firmware
         run: |
           cd firmware/gateway
@@ -78,18 +95,13 @@ jobs:
             0x8000 .pio/build/esp32dev/partitions.bin \
             0x10000 .pio/build/esp32dev/firmware.bin
 
-      - name: Choose air_chamber_node firmware build environment
-        id: fw-env
-        run: |
-          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
-            echo "env=release" >> "$GITHUB_OUTPUT"
-          else
-            echo "env=debug" >> "$GITHUB_OUTPUT"
-          fi
+      # ----------------------------------------------------------------
+      # node_pump  (3 chambers, direct GPIO valves, onboard pumps)
+      # ----------------------------------------------------------------
 
-      - name: Build air_chamber_node firmware (${{ steps.fw-env.outputs.env }})
+      - name: Build node_pump firmware (${{ steps.fw-env.outputs.env }})
         run: |
-          cd firmware/air_chamber_node
+          cd firmware/node_pump
           python -m platformio run -e ${{ steps.fw-env.outputs.env }}
           python -m esptool --chip esp32 merge_bin \
             --flash_mode dio --flash_freq 40m --flash_size 4MB \
@@ -97,6 +109,75 @@ jobs:
             0x1000 .pio/build/${{ steps.fw-env.outputs.env }}/bootloader.bin \
             0x8000 .pio/build/${{ steps.fw-env.outputs.env }}/partitions.bin \
             0x10000 .pio/build/${{ steps.fw-env.outputs.env }}/firmware.bin
+
+      # ----------------------------------------------------------------
+      # node_multiplexed_pump  (N chambers, 74HC595 valves + 74HC4051 mux, onboard pumps)
+      # ----------------------------------------------------------------
+
+      - name: Build node_multiplexed_pump firmware (${{ steps.fw-env.outputs.env }})
+        run: |
+          cd firmware/node_multiplexed_pump
+          python -m platformio run -e ${{ steps.fw-env.outputs.env }}
+          python -m esptool --chip esp32 merge_bin \
+            --flash_mode dio --flash_freq 40m --flash_size 4MB \
+            -o firmware.bin \
+            0x1000 .pio/build/${{ steps.fw-env.outputs.env }}/bootloader.bin \
+            0x8000 .pio/build/${{ steps.fw-env.outputs.env }}/partitions.bin \
+            0x10000 .pio/build/${{ steps.fw-env.outputs.env }}/firmware.bin
+
+      # ----------------------------------------------------------------
+      # node_reservoir  (single tank, GPIO pumps, no per-chamber valves)
+      # ----------------------------------------------------------------
+
+      - name: Build node_reservoir firmware (${{ steps.fw-env.outputs.env }})
+        run: |
+          cd firmware/node_reservoir
+          python -m platformio run -e ${{ steps.fw-env.outputs.env }}
+          python -m esptool --chip esp32 merge_bin \
+            --flash_mode dio --flash_freq 40m --flash_size 4MB \
+            -o firmware.bin \
+            0x1000 .pio/build/${{ steps.fw-env.outputs.env }}/bootloader.bin \
+            0x8000 .pio/build/${{ steps.fw-env.outputs.env }}/partitions.bin \
+            0x10000 .pio/build/${{ steps.fw-env.outputs.env }}/firmware.bin
+
+      # ----------------------------------------------------------------
+      # node_multiplexed_reservoir  (N tanks, 74HC595 pump relays + 74HC4051 sensor mux)
+      # ----------------------------------------------------------------
+
+      - name: Build node_multiplexed_reservoir firmware (${{ steps.fw-env.outputs.env }})
+        run: |
+          cd firmware/node_multiplexed_reservoir
+          python -m platformio run -e ${{ steps.fw-env.outputs.env }}
+          python -m esptool --chip esp32 merge_bin \
+            --flash_mode dio --flash_freq 40m --flash_size 4MB \
+            -o firmware.bin \
+            0x1000 .pio/build/${{ steps.fw-env.outputs.env }}/bootloader.bin \
+            0x8000 .pio/build/${{ steps.fw-env.outputs.env }}/partitions.bin \
+            0x10000 .pio/build/${{ steps.fw-env.outputs.env }}/firmware.bin
+
+      # ----------------------------------------------------------------
+      # Collect all firmware binaries
+      # ----------------------------------------------------------------
+
+      - name: Collect firmware binaries
+        run: |
+          mkdir -p firmware-binaries
+          cp firmware/gateway/firmware.bin        firmware-binaries/gateway.bin
+          cp firmware/node_pump/firmware.bin                firmware-binaries/node_pump.bin
+          cp firmware/node_multiplexed_pump/firmware.bin    firmware-binaries/node_multiplexed_pump.bin
+          cp firmware/node_reservoir/firmware.bin           firmware-binaries/node_reservoir.bin
+          cp firmware/node_multiplexed_reservoir/firmware.bin firmware-binaries/node_multiplexed_reservoir.bin
+
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ steps.fw-env.outputs.env }}
+          path: firmware-binaries/
+          retention-days: 30
+
+      # ----------------------------------------------------------------
+      # Python desktop application
+      # ----------------------------------------------------------------
 
       - name: Build with PyInstaller
         run: pyinstaller softedibo.spec
@@ -215,6 +296,16 @@ jobs:
           key: ${{ runner.os }}-pio-${{ hashFiles('firmware/**/platformio.ini') }}
           restore-keys: ${{ runner.os }}-pio-
 
+      - name: Choose firmware build environment
+        id: fw-env
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            echo "env=release" >> "$GITHUB_OUTPUT"
+          else
+            echo "env=debug" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build gateway firmware
         shell: bash
         run: |
@@ -227,20 +318,10 @@ jobs:
             0x8000 .pio/build/esp32dev/partitions.bin \
             0x10000 .pio/build/esp32dev/firmware.bin
 
-      - name: Choose air_chamber_node firmware build environment
-        id: fw-env
+      - name: Build node_pump firmware (${{ steps.fw-env.outputs.env }})
         shell: bash
         run: |
-          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
-            echo "env=release" >> "$GITHUB_OUTPUT"
-          else
-            echo "env=debug" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Build air_chamber_node firmware (${{ steps.fw-env.outputs.env }})
-        shell: bash
-        run: |
-          cd firmware/air_chamber_node
+          cd firmware/node_pump
           python -m platformio run -e ${{ steps.fw-env.outputs.env }}
           python -m esptool --chip esp32 merge_bin \
             --flash_mode dio --flash_freq 40m --flash_size 4MB \
@@ -248,6 +329,59 @@ jobs:
             0x1000 .pio/build/${{ steps.fw-env.outputs.env }}/bootloader.bin \
             0x8000 .pio/build/${{ steps.fw-env.outputs.env }}/partitions.bin \
             0x10000 .pio/build/${{ steps.fw-env.outputs.env }}/firmware.bin
+
+      - name: Build node_multiplexed_pump firmware (${{ steps.fw-env.outputs.env }})
+        shell: bash
+        run: |
+          cd firmware/node_multiplexed_pump
+          python -m platformio run -e ${{ steps.fw-env.outputs.env }}
+          python -m esptool --chip esp32 merge_bin \
+            --flash_mode dio --flash_freq 40m --flash_size 4MB \
+            -o firmware.bin \
+            0x1000 .pio/build/${{ steps.fw-env.outputs.env }}/bootloader.bin \
+            0x8000 .pio/build/${{ steps.fw-env.outputs.env }}/partitions.bin \
+            0x10000 .pio/build/${{ steps.fw-env.outputs.env }}/firmware.bin
+
+      - name: Build node_reservoir firmware (${{ steps.fw-env.outputs.env }})
+        shell: bash
+        run: |
+          cd firmware/node_reservoir
+          python -m platformio run -e ${{ steps.fw-env.outputs.env }}
+          python -m esptool --chip esp32 merge_bin \
+            --flash_mode dio --flash_freq 40m --flash_size 4MB \
+            -o firmware.bin \
+            0x1000 .pio/build/${{ steps.fw-env.outputs.env }}/bootloader.bin \
+            0x8000 .pio/build/${{ steps.fw-env.outputs.env }}/partitions.bin \
+            0x10000 .pio/build/${{ steps.fw-env.outputs.env }}/firmware.bin
+
+      - name: Build node_multiplexed_reservoir firmware (${{ steps.fw-env.outputs.env }})
+        shell: bash
+        run: |
+          cd firmware/node_multiplexed_reservoir
+          python -m platformio run -e ${{ steps.fw-env.outputs.env }}
+          python -m esptool --chip esp32 merge_bin \
+            --flash_mode dio --flash_freq 40m --flash_size 4MB \
+            -o firmware.bin \
+            0x1000 .pio/build/${{ steps.fw-env.outputs.env }}/bootloader.bin \
+            0x8000 .pio/build/${{ steps.fw-env.outputs.env }}/partitions.bin \
+            0x10000 .pio/build/${{ steps.fw-env.outputs.env }}/firmware.bin
+
+      - name: Collect firmware binaries
+        shell: bash
+        run: |
+          mkdir -p firmware-binaries
+          cp firmware/gateway/firmware.bin                    firmware-binaries/gateway.bin
+          cp firmware/node_pump/firmware.bin                  firmware-binaries/node_pump.bin
+          cp firmware/node_multiplexed_pump/firmware.bin      firmware-binaries/node_multiplexed_pump.bin
+          cp firmware/node_reservoir/firmware.bin             firmware-binaries/node_reservoir.bin
+          cp firmware/node_multiplexed_reservoir/firmware.bin firmware-binaries/node_multiplexed_reservoir.bin
+
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ steps.fw-env.outputs.env }}-windows
+          path: firmware-binaries/
+          retention-days: 30
 
       - name: Build with PyInstaller
         run: pyinstaller softedibo.spec
@@ -285,6 +419,15 @@ jobs:
         with:
           name: SoftEdIBO-windows-x64
 
+      - name: Download firmware artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: firmware-debug
+          path: firmware-binaries/
+
+      - name: Zip firmware binaries
+        run: zip -j firmware-debug.zip firmware-binaries/*.bin
+
       - name: Create/update nightly pre-release
         uses: softprops/action-gh-release@v2
         with:
@@ -294,12 +437,16 @@ jobs:
           files: |
             SoftEdIBO-x86_64.AppImage
             SoftEdIBO-windows-x64.zip
+            firmware-debug.zip
           body: |
             <!-- commit: ${{ github.sha }} -->
             Automatic build from the latest commit on `master`. Not a stable release.
 
             **Linux:** `chmod +x SoftEdIBO-x86_64.AppImage && ./SoftEdIBO-x86_64.AppImage`
             **Windows:** extract `SoftEdIBO-windows-x64.zip` and run `SoftEdIBO.exe`
+
+            **Firmware** (`firmware-debug.zip`): debug builds for all node types.
+            Flash with `esptool.py --chip esp32 write_flash 0x0 <node_type>.bin`.
 
   # -----------------------------------------------------------------------
   # Tags v*: creates a stable GitHub release (available via OTA).
@@ -322,12 +469,22 @@ jobs:
         with:
           name: SoftEdIBO-windows-x64
 
+      - name: Download firmware artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: firmware-release
+          path: firmware-binaries/
+
+      - name: Zip firmware binaries
+        run: zip -j firmware.zip firmware-binaries/*.bin
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             SoftEdIBO-x86_64.AppImage
             SoftEdIBO-windows-x64.zip
+            firmware.zip
           generate_release_notes: true
           body: |
             ## Linux (x86-64)
@@ -352,3 +509,18 @@ jobs:
             > **Serial port (USB):** install the CH340 or CP210x driver if your device isn't detected.
 
             Application data is stored in `%APPDATA%\SoftEdIBO\`.
+
+            ## Firmware (`firmware.zip`)
+
+            Flash the appropriate binary for each node type using:
+            ```bash
+            esptool.py --chip esp32 write_flash 0x0 <node_type>.bin
+            ```
+
+            | File | Node type | Description |
+            |------|-----------|-------------|
+            | `gateway.bin` | Gateway | USB–ESP-NOW bridge |
+            | `node_pump.bin` | `node_pump` | 3-chamber node, direct GPIO valves, onboard pumps |
+            | `node_multiplexed_pump.bin` | `node_multiplexed_pump` | N-chamber node, 74HC595 valves + 74HC4051 mux, onboard pumps |
+            | `node_reservoir.bin` | `node_reservoir` | Single-tank reservoir, GPIO pumps |
+            | `node_multiplexed_reservoir.bin` | `node_multiplexed_reservoir` | Multi-tank reservoir, shift-register pump relays + sensor mux |
