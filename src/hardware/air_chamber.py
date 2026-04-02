@@ -1,5 +1,6 @@
 """Air chamber model representing a single inflatable chamber."""
 
+import threading
 from enum import Enum
 
 
@@ -27,6 +28,9 @@ class AirChamber:
         self._state = ChamberState.IDLE
         self._pressure: int = 0         # 0-100 (% of configured max), current measured value
         self._target_pressure: int = 0  # 0-100 (% of configured max), commanded target
+        # Protects compound read-compare-write between the hardware thread
+        # (update_pressure) and the main thread (target_pressure setter).
+        self._lock = threading.Lock()
 
     @property
     def state(self) -> ChamberState:
@@ -53,7 +57,25 @@ class AirChamber:
 
     @target_pressure.setter
     def target_pressure(self, value: int) -> None:
-        self._target_pressure = max(0, min(100, value))
+        with self._lock:
+            self._target_pressure = max(0, min(100, value))
+
+    def update_pressure(self, pressure: int) -> None:
+        """Update measured pressure and derive state atomically.
+
+        Called from the hardware (serial) thread. Acquires the lock so that
+        the read of target_pressure and the write of state are atomic with
+        respect to the main thread's target_pressure setter.
+        """
+        with self._lock:
+            self._pressure = max(0, min(100, pressure))
+            target = self._target_pressure
+            if self._pressure == target:
+                self._state = ChamberState.INFLATED if target > 0 else ChamberState.IDLE
+            elif self._pressure < target:
+                self._state = ChamberState.INFLATING
+            else:
+                self._state = ChamberState.DEFLATING
 
     def __repr__(self) -> str:
         return (

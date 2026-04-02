@@ -5,7 +5,9 @@ Backend is selected via settings.yaml => database.backend.
 """
 
 import logging
+import queue
 import re
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -89,6 +91,14 @@ class Database:
     def __init__(self, url: str):
         self._url = self._normalize_url(url)
         self._engine: Engine | None = None
+        self._event_queue: queue.Queue[InteractionEvent | None] = queue.Queue()
+        self._event_thread: threading.Thread | None = None
+
+    @property
+    def _db_engine(self) -> Engine:
+        if self._engine is None:
+            raise RuntimeError("Database not connected — call connect() first")
+        return self._engine
 
     @staticmethod
     def _normalize_url(url: str) -> str:
@@ -140,17 +150,25 @@ class Database:
         self._engine = create_engine(self._url)
         _metadata.create_all(self._engine)
         self._init_counters()
+        self._event_thread = threading.Thread(
+            target=self._event_worker, daemon=True, name="db-event-writer"
+        )
+        self._event_thread.start()
         logger.info("Database connected: %s", self._url)
 
     def close(self) -> None:
-        """Dispose the engine."""
+        """Flush pending events, then dispose the engine."""
+        self._event_queue.put(None)  # sentinel — tells the worker to stop
+        if self._event_thread is not None:
+            self._event_thread.join(timeout=5)
+            self._event_thread = None
         if self._engine:
             self._engine.dispose()
             self._engine = None
 
     def _init_counters(self) -> None:
         """Seed counters from existing data on first run."""
-        with self._engine.begin() as conn:
+        with self._db_engine.begin() as conn:
             for counter_name, table_name, col in [
                 ("participant", "participants", "participant_id"),
                 ("session", "sessions", "session_id"),
@@ -191,7 +209,7 @@ class Database:
             end_time=session.end_time.isoformat() if session.end_time else None,
             notes=session.notes,
         )
-        with self._engine.begin() as conn:
+        with self._db_engine.begin() as conn:
             result = conn.execute(
                 _sessions.update()
                 .where(_sessions.c.session_id == session.session_id)
@@ -205,7 +223,7 @@ class Database:
 
     def get_all_sessions(self) -> list[SessionRecord]:
         """Return all session records ordered by start time."""
-        with self._engine.connect() as conn:
+        with self._db_engine.connect() as conn:
             rows = conn.execute(
                 select(_sessions).order_by(_sessions.c.start_time)
             ).fetchall()
@@ -222,7 +240,7 @@ class Database:
 
     def next_session_id(self) -> str:
         """Return the next auto-generated session ID (S001, S002, …)."""
-        with self._engine.connect() as conn:
+        with self._db_engine.connect() as conn:
             n = conn.execute(
                 select(_counters.c.value).where(_counters.c.name == "session")
             ).scalar()
@@ -230,7 +248,7 @@ class Database:
 
     def get_active_sessions(self) -> list[SessionRecord]:
         """Return sessions that have no end_time (interrupted/crash), ordered by start time."""
-        with self._engine.connect() as conn:
+        with self._db_engine.connect() as conn:
             rows = conn.execute(
                 select(_sessions)
                 .where(_sessions.c.end_time.is_(None))
@@ -249,7 +267,7 @@ class Database:
 
     def get_session_participants(self, session_id: str) -> list[ParticipantRecord]:
         """Return participants linked to a session."""
-        with self._engine.connect() as conn:
+        with self._db_engine.connect() as conn:
             rows = conn.execute(
                 select(_participants)
                 .join(
@@ -279,7 +297,7 @@ class Database:
             alias=participant.alias,
             age=participant.age,
         )
-        with self._engine.begin() as conn:
+        with self._db_engine.begin() as conn:
             result = conn.execute(
                 _participants.update()
                 .where(_participants.c.participant_id == participant.participant_id)
@@ -293,7 +311,7 @@ class Database:
 
     def get_all_participants(self) -> list[ParticipantRecord]:
         """Return all participant records ordered by ID."""
-        with self._engine.connect() as conn:
+        with self._db_engine.connect() as conn:
             rows = conn.execute(
                 select(_participants).order_by(_participants.c.participant_id)
             ).fetchall()
@@ -304,7 +322,7 @@ class Database:
 
     def next_participant_id(self) -> str:
         """Return the next auto-generated participant ID (P001, P002, …)."""
-        with self._engine.connect() as conn:
+        with self._db_engine.connect() as conn:
             n = conn.execute(
                 select(_counters.c.value).where(_counters.c.name == "participant")
             ).scalar()
@@ -312,7 +330,7 @@ class Database:
 
     def delete_participant(self, participant_id: str) -> None:
         """Delete a participant record."""
-        with self._engine.begin() as conn:
+        with self._db_engine.begin() as conn:
             conn.execute(
                 _participants.delete()
                 .where(_participants.c.participant_id == participant_id)
@@ -324,7 +342,7 @@ class Database:
 
     def link_participant_to_session(self, session_id: str, participant_id: str) -> None:
         """Link a participant to a session (no-op if already linked)."""
-        with self._engine.begin() as conn:
+        with self._db_engine.begin() as conn:
             existing = conn.execute(
                 select(_session_participants).where(
                     (_session_participants.c.session_id == session_id)
@@ -354,7 +372,7 @@ class Database:
             & (_session_assignments.c.robot_id == assignment.robot_id)
             & (_session_assignments.c.participant_id == assignment.participant_id)
         )
-        with self._engine.begin() as conn:
+        with self._db_engine.begin() as conn:
             existing = conn.execute(
                 select(_session_assignments.c.unit_ids).where(key_filter)
             ).scalar()
@@ -375,7 +393,7 @@ class Database:
     def get_session_assignments(self, session_id: str) -> list[SessionAssignment]:
         """Return all robot-unit=>participant assignments for a session."""
         import json
-        with self._engine.connect() as conn:
+        with self._db_engine.connect() as conn:
             rows = conn.execute(
                 select(_session_assignments)
                 .where(_session_assignments.c.session_id == session_id)
@@ -395,23 +413,34 @@ class Database:
     # ------------------------------------------------------------------
 
     def log_event(self, event: InteractionEvent) -> None:
-        """Append an interaction event."""
-        with self._engine.begin() as conn:
-            conn.execute(
-                _events.insert().values(
-                    session_id=event.session_id,
-                    participant_id=event.participant_id,
-                    type=event.type,
-                    action=event.action,
-                    target=event.target,
-                    timestamp=event.timestamp.isoformat(),
-                    metadata=event.metadata,
-                )
-            )
+        """Enqueue an interaction event for async writing (non-blocking)."""
+        self._event_queue.put(event)
+
+    def _event_worker(self) -> None:
+        """Background thread: drains the event queue and writes to the DB."""
+        while True:
+            event = self._event_queue.get()
+            if event is None:  # sentinel
+                break
+            try:
+                with self._db_engine.begin() as conn:
+                    conn.execute(
+                        _events.insert().values(
+                            session_id=event.session_id,
+                            participant_id=event.participant_id,
+                            type=event.type,
+                            action=event.action,
+                            target=event.target,
+                            timestamp=event.timestamp.isoformat(),
+                            metadata=event.metadata,
+                        )
+                    )
+            except Exception:
+                logger.exception("Failed to write event to database: %s", event)
 
     def get_session_events(self, session_id: str) -> list[InteractionEvent]:
         """Return all events for a session ordered by timestamp."""
-        with self._engine.connect() as conn:
+        with self._db_engine.connect() as conn:
             rows = conn.execute(
                 select(_events)
                 .where(_events.c.session_id == session_id)
