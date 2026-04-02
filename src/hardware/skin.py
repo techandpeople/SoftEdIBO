@@ -207,15 +207,7 @@ class Skin:
             local_idx = self._reverse.get((mac, node_slot))
             if local_idx is None:
                 return
-            chamber = self._chambers[local_idx]
-            chamber.pressure = pressure
-            target = chamber.target_pressure
-            if pressure == target:
-                chamber.state = ChamberState.INFLATED if target > 0 else ChamberState.IDLE
-            elif pressure < target:
-                chamber.state = ChamberState.INFLATING
-            else:
-                chamber.state = ChamberState.DEFLATING
+            self._chambers[local_idx].update_pressure(pressure)
         return cb
 
     def _make_target_cb(self, mac: str) -> Callable[[int, int], None]:
