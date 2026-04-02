@@ -11,6 +11,7 @@ Protocol format (JSON over serial):
 import json
 import logging
 import threading
+import weakref
 from typing import Any, Callable
 
 import serial
@@ -27,7 +28,8 @@ class ESPNowGateway:
         self._serial: serial.Serial | None = None
         self._running = False
         self._read_thread: threading.Thread | None = None
-        self._callbacks: list[Callable[[dict[str, Any]], None]] = []
+        # WeakMethod refs so old controllers are GC'd after robot reconfiguration.
+        self._callbacks: list[weakref.ref] = []
         self._logged_disconnected = False
         self._known_macs: set[str] = set()
 
@@ -96,7 +98,7 @@ class ESPNowGateway:
 
     def on_message(self, callback: Callable[[dict[str, Any]], None]) -> None:
         """Register a callback for incoming messages from ESP32 nodes."""
-        self._callbacks.append(callback)
+        self._callbacks.append(weakref.WeakMethod(callback))
 
     def _read_loop(self) -> None:
         """Background thread that reads incoming serial data."""
@@ -108,10 +110,21 @@ class ESPNowGateway:
                 data = json.loads(line.decode("utf-8").strip())
                 if "source" in data:
                     self._known_macs.add(data["source"])
-                for callback in self._callbacks:
-                    callback(data)
+                dead: list[weakref.ref] = []
+                for wr in self._callbacks:
+                    cb = wr()
+                    if cb is None:
+                        dead.append(wr)
+                    else:
+                        cb(data)
+                for d in dead:
+                    self._callbacks.remove(d)
             except json.JSONDecodeError:
                 logger.warning("Invalid JSON from gateway: %s", line)
             except serial.SerialException:
-                logger.exception("Serial read error")
+                logger.exception("Serial read error — gateway disconnected")
+                if self._serial is not None:
+                    self._serial.close()
+                    self._serial = None
+                self._running = False
                 break
