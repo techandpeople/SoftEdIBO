@@ -14,32 +14,28 @@ The system supports multiple robot types (Turtle, Tree, Thymio) and activity mod
 | Component | Quantity | Notes |
 |-----------|----------|-------|
 | ESP32-WROOM-32 (gateway) | 1 | Connected to PC via USB |
-| ESP32-WROOM-32 (standard node) | 1 per node | Up to 3 chambers; direct GPIO valves |
-| ESP32-WROOM-32 (mux node) | 1 per node | Up to 8+ chambers via 74HC595 + 74HC4051 |
-| ESP32-WROOM-32 (reservoir node) | 0–2 per robot | Optional shared pressure/vacuum reservoir |
-| DRV8833 motor driver | 1 per node (non-reservoir) | Drives inflate + deflate pumps |
-| Air pump | 1–N per reservoir / 2 per standard node | Inflate and deflate |
+| ESP32-WROOM-32 (`node_direct`) | 1 per direct board | 3 chambers, direct ADC sensors, onboard pumps |
+| ESP32-WROOM-32 (`node_reservoir`) | 1 per reservoir board | Up to 12 chambers + shared pressure/vacuum tanks |
+| DRV3297 motor driver | 1 (`node_direct`) / 3 (`node_reservoir`) | Drives pumps with PWM |
+| Air pump | 2 (`node_direct`) / 6 (`node_reservoir`) | Inflate/deflate supply |
 | XGZP6847A pressure sensor | 1 per chamber | Analog output (0-3.3 V) |
-| Solenoid valves | 2 per chamber | Inflate + deflate |
+| Solenoid valves | 2 per chamber | Inflate + deflate via ULN2803A |
 
 Flash the [gateway firmware](firmware/gateway/) to the USB-connected ESP32.
-For each node, choose the matching firmware variant:
+For each node, choose one of the two firmware targets:
 
 | Firmware | Path | When to use |
 |----------|------|-------------|
-| `air_chamber_node` — `release` | [firmware/air_chamber_node/](firmware/air_chamber_node/) | Standard node, own pumps |
-| `air_chamber_node` — `release_res` | [firmware/air_chamber_node/](firmware/air_chamber_node/) | Standard node, fed by central reservoir |
-| `mux_chamber_node` — `release` | [firmware/mux_chamber_node/](firmware/mux_chamber_node/) | Mux node (N chambers), own pumps |
-| `mux_chamber_node` — `release_res` | [firmware/mux_chamber_node/](firmware/mux_chamber_node/) | Mux node (N chambers), fed by reservoir |
+| `node_direct` (`release` / `debug`) | [firmware/node_direct/](firmware/node_direct/) | Direct board (fixed 3 chambers) |
+| `node_reservoir` (`release` / `debug`) | [firmware/node_reservoir/](firmware/node_reservoir/) | Reservoir board (default 12 chambers, runtime configurable) |
 
 ---
 
 ## Architecture
 
 ```
-PC --USB--> Gateway (ESP32) --ESP-NOW--> Standard node(s)  (3 chambers, own pumps)
-                                     ├-> Mux node(s)       (N chambers, own pumps or reservoir)
-                                     └-> Reservoir node(s) (pressure/vacuum tank + N pumps)
+PC --USB--> Gateway (ESP32) --ESP-NOW--> node_direct    (3 chambers, direct GPIO valves + own pumps)
+                                     └-> node_reservoir (12 chambers + shared pressure/vacuum tanks)
 ```
 
 **Software layers:**
@@ -49,17 +45,17 @@ SessionPanel
   +-- Activity (GroupTouch, Simulation, ...)
         +-- Robot (Turtle / Tree / Thymio / Simulated)
               +-- Node(s)  (ESP32, identified by MAC + node_type + max_slots)
-              +-- Reservoir(s)  (optional — pressure and/or vacuum)
+                +-- Reservoir(s)  (auto-derived from node_reservoir using slots N and N+1)
               +-- Skin(s)  (logical grouping of 1-3 chambers from any node of this robot)
                     +-- AirChamber  (local index 0-2, pressure 0-100 %)
 ```
 
-- **Node** is a physical ESP32. Its `node_type` (`standard`, `mux`, `reservoir`) determines which firmware to flash. Pin assignments are hardcoded per type — no runtime pin config needed.
+          - **Node** is a physical ESP32. Its `node_type` (`node_direct` or `node_reservoir`) determines which firmware to flash.
 - **Skin** groups 1-3 chambers. Chambers can come from different nodes of the same robot. Activities address chambers by local skin index (0, 1, 2) — no knowledge of node topology required.
-- **Reservoir** is an optional per-robot shared air tank (pressure or vacuum). The firmware manages pump scheduling and inter-chamber air transfers autonomously.
+          - **Reservoir** is an optional per-robot shared air tank (pressure or vacuum). For `node_reservoir`, pressure and vacuum reservoirs are internal to the same MAC.
 - **Pressure** is expressed as **0-100 %** of the maximum pressure configured on each node.
 - **Per-chamber max pressure** is set in `settings.yaml` and enforced both in the app and on the ESP32 (hardware safety — survives app crashes).
-- **Pressure sensing** uses the XGZP6847A datasheet transfer function (see [pressure.h](firmware/air_chamber_node/src/pressure.h)).
+          - **Pressure sensing** uses the XGZP6847A datasheet transfer function (see [pressure.h](firmware/node_direct/src/pressure.h)).
 
 ---
 
@@ -161,11 +157,11 @@ levels are always written to `data/softedibo.log` (rotating, 2 MB x 3 backups).
 # Gateway
 cd firmware/gateway && pio run --target upload
 
-# Air chamber node — release (production)
-cd firmware/air_chamber_node && pio run -e release --target upload
+# Direct node
+cd firmware/node_direct && pio run -e release --target upload
 
-# Air chamber node — debug (Serial logs + debug command)
-cd firmware/air_chamber_node && pio run -e debug --target upload
+# Reservoir node
+cd firmware/node_reservoir && pio run -e release --target upload
 ```
 
 Requires [PlatformIO](https://platformio.org/).
@@ -196,6 +192,7 @@ The CI pipeline automatically selects the firmware environment:
 | `src/log.py` | Centralized logging setup (console + rotating file) |
 | `config/settings.yaml` | Robot and hardware configuration |
 | `firmware/gateway/` | Gateway ESP32 firmware |
-| `firmware/air_chamber_node/` | Air chamber node ESP32 firmware |
-| `firmware/air_chamber_node/src/pins.h` | Node pin definitions |
-| `firmware/air_chamber_node/src/pressure.h` | XGZP6847A pressure conversion |
+| `firmware/node_direct/` | node_direct firmware (3 chambers, GPIO valves + own pumps) |
+| `firmware/node_reservoir/` | node_reservoir firmware (shared tanks + runtime sizing) |
+| `firmware/node_direct/src/pins.h` | node_direct pin definitions |
+| `firmware/node_reservoir/src/pins.h` | node_reservoir pin definitions |

@@ -40,9 +40,12 @@ class AirReservoir:
         self._controller = controller
         self._node_slot = node_slot
         self._pressure: int = 0
+        self._target_kpa: float = 0.0
         self._is_active: bool = False
 
         controller.on_pressure(self._on_pressure_update)
+        if hasattr(controller, "on_tank_pressure"):
+            controller.on_tank_pressure(self._on_tank_status)
 
     # ------------------------------------------------------------------
     # Properties
@@ -63,6 +66,18 @@ class AirReservoir:
         """True if the reservoir node is reachable via the gateway."""
         return self._controller.is_connected
 
+    @property
+    def target_kpa(self) -> float:
+        """Configured target pressure for this tank in kPa."""
+        return self._target_kpa
+
+    @target_kpa.setter
+    def target_kpa(self, value: float) -> None:
+        target = max(0.0, float(value))
+        if hasattr(self._controller, "set_tank_pressure"):
+            if self._controller.set_tank_pressure(self.kind, target):
+                self._target_kpa = target
+
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
@@ -73,6 +88,11 @@ class AirReservoir:
             logger.debug(
                 "Reservoir %s (%s) pressure: %d%%", self.kind, self.mac, pressure
             )
+
+    def _on_tank_status(self, kind: str, pressure: int) -> None:
+        if kind != self.kind:
+            return
+        self._pressure = max(0, min(100, int(pressure)))
 
     def get_status(self) -> dict[str, Any]:
         return {

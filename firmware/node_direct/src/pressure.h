@@ -18,26 +18,21 @@ constexpr float P_MAX    = 100.0f;   // kPa — sensor full-scale
 constexpr int   ADC_RESOLUTION = 4095;   // 12-bit ESP32 ADC
 constexpr int   ADC_SAMPLES    = 4;      // multi-sample averaging
 
-// Read averaged raw ADC from a sensor pin.
 inline int readRawAdc(int pin) {
     int sum = 0;
     for (int i = 0; i < ADC_SAMPLES; i++) sum += analogRead(pin);
     return sum / ADC_SAMPLES;
 }
 
-// Convert raw 12-bit ADC value to voltage.
 inline float adcToVoltage(int adc) {
     return static_cast<float>(adc) / ADC_RESOLUTION * V_SUPPLY;
 }
 
-// Convert voltage to pressure in kPa using the XGZP6847A transfer function.
-// Returns 0 if the computed value is negative (sensor noise near vacuum).
 inline float voltageToPressure(float voltage) {
     float p = ((voltage / V_SUPPLY) - 0.05f) * (P_MAX - P_MIN) / 0.9f + P_MIN;
     return (p < 0.0f) ? 0.0f : p;
 }
 
-// Convenience: read a sensor pin and return pressure in kPa.
 inline float readKpa(int pin) {
     return voltageToPressure(adcToVoltage(readRawAdc(pin)));
 }

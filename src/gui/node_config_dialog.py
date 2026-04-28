@@ -4,9 +4,8 @@ Adds or edits a single ESP32 node entry under a robot.
 A node has three attributes: MAC address, node_type, and max_slots.
 
 Node types and their default slot counts:
-    standard   — 3   (direct GPIO valves, onboard pumps)
-    mux        — 8   (74HC595 shift register + 74HC4051 sensor mux)
-    reservoir  — 0   (dedicated reservoir node, no user-addressable slots)
+    node_direct     — 3   (fixed: 3 chambers, GPIO valves, onboard pumps)
+    node_reservoir  — 12  (default; up to 16 chambers + shared pressure/vacuum tanks)
 """
 
 from PySide6.QtWidgets import (
@@ -28,10 +27,8 @@ from src.config.settings import Settings
 _YAML_KEY = {"turtle": "turtles", "tree": "trees", "thymio": "thymios"}
 
 NODE_TYPES: dict[str, int] = {
-    "node_pump":                  3,
-    "node_multiplexed_pump":      8,
-    "node_reservoir":             0,
-    "node_multiplexed_reservoir": 0,
+    "node_direct": 3,
+    "node_reservoir": 12,
 }
 
 
@@ -109,12 +106,14 @@ class NodeConfigDialog(QDialog):
         # Populate from existing config
         node_cfg = self._load_node_cfg()
         self._mac_edit.setText(node_cfg.get("mac", "") or prefill_mac)
-        stored_type = node_cfg.get("node_type", "standard")
+        stored_type = node_cfg.get("node_type", "node_direct")
         idx = self._type_combo.findText(stored_type)
         if idx >= 0:
             self._type_combo.setCurrentIndex(idx)
         stored_slots = node_cfg.get("max_slots", NODE_TYPES.get(stored_type, 3))
-        self._slots_spin.setValue(int(stored_slots))
+        self._on_type_changed(self._type_combo.currentText())
+        if self._slots_spin.isEnabled():
+            self._slots_spin.setValue(int(stored_slots))
         self._update_note()
 
         self._save_btn.clicked.connect(self._on_save)
@@ -137,17 +136,21 @@ class NodeConfigDialog(QDialog):
         return {}
 
     def _on_type_changed(self, node_type: str) -> None:
-        default_slots = NODE_TYPES.get(node_type, 3)
-        self._slots_spin.setValue(default_slots)
+        if node_type == "node_direct":
+            self._slots_spin.setRange(3, 3)
+            self._slots_spin.setValue(3)
+            self._slots_spin.setEnabled(False)
+        else:
+            self._slots_spin.setRange(1, 16)
+            self._slots_spin.setEnabled(True)
+            self._slots_spin.setValue(NODE_TYPES.get(node_type, 12))
         self._update_note()
 
     def _update_note(self) -> None:
         nt = self._type_combo.currentText()
         notes = {
-            "node_pump":                  "Direct GPIO valves, onboard inflate + deflate pumps.",
-            "node_multiplexed_pump":      "74HC595 shift-register valves + 74HC4051 sensor mux.",
-            "node_reservoir":             "Dedicated reservoir node — GPIO pumps, single tank.",
-            "node_multiplexed_reservoir": "Dedicated reservoir node — shift-register pumps + sensor mux, multi-tank.",
+            "node_direct": "3 chambers, direct ADC sensors, onboard pumps.",
+            "node_reservoir": "Default 12 chambers, shared pressure/vacuum tanks, runtime configurable.",
         }
         self._note_lbl.setText(notes.get(nt, ""))
 
@@ -158,7 +161,7 @@ class NodeConfigDialog(QDialog):
     def _on_save(self) -> None:
         mac       = self._mac_edit.text().strip()
         node_type = self._type_combo.currentText()
-        max_slots = self._slots_spin.value()
+        max_slots = 3 if node_type == "node_direct" else self._slots_spin.value()
 
         if not mac:
             QMessageBox.warning(self, "Missing Field", "Node MAC cannot be empty.")
