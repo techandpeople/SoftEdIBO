@@ -21,19 +21,17 @@ from src.config.settings import Settings
 from src.hardware.serial_ports import list_esp32_ports
 
 SENTINEL_PATH: Path = Settings.ROOT / "data" / ".setup_done"
+FIRMWARE_BIN_NAME = "firmware.bin"
+SKIP_STEP_LABEL = "Skip this step"
 # Read-only bundled assets live in BUNDLE (_internal/ when frozen, repo root in dev)
-GATEWAY_BIN: Path = Settings.BUNDLE / "firmware" / "gateway" / "firmware.bin"
+GATEWAY_BIN: Path = Settings.BUNDLE / "firmware" / "gateway" / FIRMWARE_BIN_NAME
 
 # Available node firmware binaries, keyed by display label
 NODE_FIRMWARES: dict[str, Path] = {
-    "node_pump  (3 chambers, GPIO valves, own pumps)":
-        Settings.BUNDLE / "firmware" / "node_pump" / "firmware.bin",
-    "node_multiplexed_pump  (N chambers, 74HC595 + 74HC4051, own pumps)":
-        Settings.BUNDLE / "firmware" / "node_multiplexed_pump" / "firmware.bin",
-    "node_reservoir  (single tank, GPIO pumps)":
-        Settings.BUNDLE / "firmware" / "node_reservoir" / "firmware.bin",
-    "node_multiplexed_reservoir  (multi-tank, shift-register relays + sensor mux)":
-        Settings.BUNDLE / "firmware" / "node_multiplexed_reservoir" / "firmware.bin",
+    "node_direct  (3 chambers, GPIO valves, onboard pumps)":
+        Settings.BUNDLE / "firmware" / "node_direct" / FIRMWARE_BIN_NAME,
+    "node_reservoir  (up to 12 chambers + shared pressure/vacuum tanks)":
+        Settings.BUNDLE / "firmware" / "node_reservoir" / FIRMWARE_BIN_NAME,
 }
 
 
@@ -76,7 +74,7 @@ class WelcomePage(QWizardPage):
             "<p>This wizard will flash the firmware to:</p>"
             "<ul>"
             "<li>The <b>ESP-NOW gateway</b></li>"
-            "<li>Each <b>node</b> (pump, multiplexed pump, reservoir, or multiplexed reservoir)</li>"
+            "<li>Each <b>node</b> (<code>node_direct</code> or <code>node_reservoir</code>)</li>"
             "</ul>"
             "<p>Connect each device via USB before the corresponding step.</p>"
             "<p>You can re-run this wizard at any time from <b>Tools => Flash Firmware…</b></p>"
@@ -115,7 +113,7 @@ class _FlashPage(QWizardPage):
         self._flash_btn = QPushButton("Flash Firmware")
         self._flash_btn.clicked.connect(self._start_flash)
         btn_row.addWidget(self._flash_btn)
-        self._skip_btn = QPushButton("Skip this step")
+        self._skip_btn = QPushButton(SKIP_STEP_LABEL)
         self._skip_btn.clicked.connect(self._toggle_skip)
         btn_row.addWidget(self._skip_btn)
         layout.addLayout(btn_row)
@@ -150,7 +148,7 @@ class _FlashPage(QWizardPage):
 
     def _toggle_skip(self) -> None:
         self._skipped = not self._skipped
-        self._skip_btn.setText("Don't skip" if self._skipped else "Skip this step")
+        self._skip_btn.setText("Don't skip" if self._skipped else SKIP_STEP_LABEL)
         self._flash_btn.setEnabled(not self._skipped)
         self.completeChanged.emit()
 
@@ -169,7 +167,7 @@ class _FlashPage(QWizardPage):
 
         self._flash_btn.setEnabled(False)
         self._skipped = False
-        self._skip_btn.setText("Skip this step")
+        self._skip_btn.setText(SKIP_STEP_LABEL)
         self._progress.setValue(0)
         self._log.clear()
         self._done = False

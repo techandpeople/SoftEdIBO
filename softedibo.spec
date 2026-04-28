@@ -14,10 +14,8 @@
 #       settings.yaml
 #     firmware/
 #       gateway/firmware.bin
-#       node_pump/firmware.bin
-#       node_multiplexed_pump/firmware.bin
+#       node_direct/firmware.bin
 #       node_reservoir/firmware.bin
-#       node_multiplexed_reservoir/firmware.bin
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
@@ -50,11 +48,9 @@ main_a = Analysis(
     binaries=[],
     datas=[
         ("config/", "config/"),
-        ("firmware/gateway/firmware.bin",                    "firmware/gateway"),
-        ("firmware/node_pump/firmware.bin",                  "firmware/node_pump"),
-        ("firmware/node_multiplexed_pump/firmware.bin",      "firmware/node_multiplexed_pump"),
-        ("firmware/node_reservoir/firmware.bin",             "firmware/node_reservoir"),
-        ("firmware/node_multiplexed_reservoir/firmware.bin", "firmware/node_multiplexed_reservoir"),
+        ("firmware/gateway/firmware.bin",        "firmware/gateway"),
+        ("firmware/node_direct/firmware.bin",    "firmware/node_direct"),
+        ("firmware/node_reservoir/firmware.bin", "firmware/node_reservoir"),
     ],
     hiddenimports=[
         *collect_submodules("src"),
