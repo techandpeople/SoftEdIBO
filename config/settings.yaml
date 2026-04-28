@@ -5,6 +5,18 @@ robots:
   turtles: []
   trees: []
   thymios: []
+# Example node_reservoir entry (optional fields):
+# robots:
+#   turtles:
+#     - id: turtle_1
+#       nodes:
+#         - mac: "AA:BB:CC:DD:EE:01"
+#           node_type: "node_reservoir"
+#           max_slots: 12
+#           pump_inflate_count: 3
+#           pump_deflate_count: 3
+#           tank_pressure_max_kpa: 50.0
+#           tank_vacuum_max_kpa: 50.0
 database:
   backend: sqlite
   path: data/softedibo.db

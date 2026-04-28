@@ -95,13 +95,9 @@ jobs:
             0x8000 .pio/build/esp32dev/partitions.bin \
             0x10000 .pio/build/esp32dev/firmware.bin
 
-      # ----------------------------------------------------------------
-      # node_pump  (3 chambers, direct GPIO valves, onboard pumps)
-      # ----------------------------------------------------------------
-
-      - name: Build node_pump firmware (${{ steps.fw-env.outputs.env }})
+      - name: Build node_direct firmware (${{ steps.fw-env.outputs.env }})
         run: |
-          cd firmware/node_pump
+          cd firmware/node_direct
           python -m platformio run -e ${{ steps.fw-env.outputs.env }}
           python -m esptool --chip esp32 merge_bin \
             --flash_mode dio --flash_freq 40m --flash_size 4MB \
@@ -109,44 +105,10 @@ jobs:
             0x1000 .pio/build/${{ steps.fw-env.outputs.env }}/bootloader.bin \
             0x8000 .pio/build/${{ steps.fw-env.outputs.env }}/partitions.bin \
             0x10000 .pio/build/${{ steps.fw-env.outputs.env }}/firmware.bin
-
-      # ----------------------------------------------------------------
-      # node_multiplexed_pump  (N chambers, 74HC595 valves + 74HC4051 mux, onboard pumps)
-      # ----------------------------------------------------------------
-
-      - name: Build node_multiplexed_pump firmware (${{ steps.fw-env.outputs.env }})
-        run: |
-          cd firmware/node_multiplexed_pump
-          python -m platformio run -e ${{ steps.fw-env.outputs.env }}
-          python -m esptool --chip esp32 merge_bin \
-            --flash_mode dio --flash_freq 40m --flash_size 4MB \
-            -o firmware.bin \
-            0x1000 .pio/build/${{ steps.fw-env.outputs.env }}/bootloader.bin \
-            0x8000 .pio/build/${{ steps.fw-env.outputs.env }}/partitions.bin \
-            0x10000 .pio/build/${{ steps.fw-env.outputs.env }}/firmware.bin
-
-      # ----------------------------------------------------------------
-      # node_reservoir  (single tank, GPIO pumps, no per-chamber valves)
-      # ----------------------------------------------------------------
 
       - name: Build node_reservoir firmware (${{ steps.fw-env.outputs.env }})
         run: |
           cd firmware/node_reservoir
-          python -m platformio run -e ${{ steps.fw-env.outputs.env }}
-          python -m esptool --chip esp32 merge_bin \
-            --flash_mode dio --flash_freq 40m --flash_size 4MB \
-            -o firmware.bin \
-            0x1000 .pio/build/${{ steps.fw-env.outputs.env }}/bootloader.bin \
-            0x8000 .pio/build/${{ steps.fw-env.outputs.env }}/partitions.bin \
-            0x10000 .pio/build/${{ steps.fw-env.outputs.env }}/firmware.bin
-
-      # ----------------------------------------------------------------
-      # node_multiplexed_reservoir  (N tanks, 74HC595 pump relays + 74HC4051 sensor mux)
-      # ----------------------------------------------------------------
-
-      - name: Build node_multiplexed_reservoir firmware (${{ steps.fw-env.outputs.env }})
-        run: |
-          cd firmware/node_multiplexed_reservoir
           python -m platformio run -e ${{ steps.fw-env.outputs.env }}
           python -m esptool --chip esp32 merge_bin \
             --flash_mode dio --flash_freq 40m --flash_size 4MB \
@@ -163,10 +125,8 @@ jobs:
         run: |
           mkdir -p firmware-binaries
           cp firmware/gateway/firmware.bin        firmware-binaries/gateway.bin
-          cp firmware/node_pump/firmware.bin                firmware-binaries/node_pump.bin
-          cp firmware/node_multiplexed_pump/firmware.bin    firmware-binaries/node_multiplexed_pump.bin
+          cp firmware/node_direct/firmware.bin     firmware-binaries/node_direct.bin
           cp firmware/node_reservoir/firmware.bin           firmware-binaries/node_reservoir.bin
-          cp firmware/node_multiplexed_reservoir/firmware.bin firmware-binaries/node_multiplexed_reservoir.bin
 
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v4
@@ -318,22 +278,10 @@ jobs:
             0x8000 .pio/build/esp32dev/partitions.bin \
             0x10000 .pio/build/esp32dev/firmware.bin
 
-      - name: Build node_pump firmware (${{ steps.fw-env.outputs.env }})
+      - name: Build node_direct firmware (${{ steps.fw-env.outputs.env }})
         shell: bash
         run: |
-          cd firmware/node_pump
-          python -m platformio run -e ${{ steps.fw-env.outputs.env }}
-          python -m esptool --chip esp32 merge_bin \
-            --flash_mode dio --flash_freq 40m --flash_size 4MB \
-            -o firmware.bin \
-            0x1000 .pio/build/${{ steps.fw-env.outputs.env }}/bootloader.bin \
-            0x8000 .pio/build/${{ steps.fw-env.outputs.env }}/partitions.bin \
-            0x10000 .pio/build/${{ steps.fw-env.outputs.env }}/firmware.bin
-
-      - name: Build node_multiplexed_pump firmware (${{ steps.fw-env.outputs.env }})
-        shell: bash
-        run: |
-          cd firmware/node_multiplexed_pump
+          cd firmware/node_direct
           python -m platformio run -e ${{ steps.fw-env.outputs.env }}
           python -m esptool --chip esp32 merge_bin \
             --flash_mode dio --flash_freq 40m --flash_size 4MB \
@@ -354,27 +302,13 @@ jobs:
             0x8000 .pio/build/${{ steps.fw-env.outputs.env }}/partitions.bin \
             0x10000 .pio/build/${{ steps.fw-env.outputs.env }}/firmware.bin
 
-      - name: Build node_multiplexed_reservoir firmware (${{ steps.fw-env.outputs.env }})
-        shell: bash
-        run: |
-          cd firmware/node_multiplexed_reservoir
-          python -m platformio run -e ${{ steps.fw-env.outputs.env }}
-          python -m esptool --chip esp32 merge_bin \
-            --flash_mode dio --flash_freq 40m --flash_size 4MB \
-            -o firmware.bin \
-            0x1000 .pio/build/${{ steps.fw-env.outputs.env }}/bootloader.bin \
-            0x8000 .pio/build/${{ steps.fw-env.outputs.env }}/partitions.bin \
-            0x10000 .pio/build/${{ steps.fw-env.outputs.env }}/firmware.bin
-
       - name: Collect firmware binaries
         shell: bash
         run: |
           mkdir -p firmware-binaries
           cp firmware/gateway/firmware.bin                    firmware-binaries/gateway.bin
-          cp firmware/node_pump/firmware.bin                  firmware-binaries/node_pump.bin
-          cp firmware/node_multiplexed_pump/firmware.bin      firmware-binaries/node_multiplexed_pump.bin
+          cp firmware/node_direct/firmware.bin                firmware-binaries/node_direct.bin
           cp firmware/node_reservoir/firmware.bin             firmware-binaries/node_reservoir.bin
-          cp firmware/node_multiplexed_reservoir/firmware.bin firmware-binaries/node_multiplexed_reservoir.bin
 
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v4
@@ -445,7 +379,7 @@ jobs:
             **Linux:** `chmod +x SoftEdIBO-x86_64.AppImage && ./SoftEdIBO-x86_64.AppImage`
             **Windows:** extract `SoftEdIBO-windows-x64.zip` and run `SoftEdIBO.exe`
 
-            **Firmware** (`firmware-debug.zip`): debug builds for all node types.
+            **Firmware** (`firmware-debug.zip`): debug builds for gateway + 2 node types.
             Flash with `esptool.py --chip esp32 write_flash 0x0 <node_type>.bin`.
 
   # -----------------------------------------------------------------------
@@ -520,7 +454,5 @@ jobs:
             | File | Node type | Description |
             |------|-----------|-------------|
             | `gateway.bin` | Gateway | USB–ESP-NOW bridge |
-            | `node_pump.bin` | `node_pump` | 3-chamber node, direct GPIO valves, onboard pumps |
-            | `node_multiplexed_pump.bin` | `node_multiplexed_pump` | N-chamber node, 74HC595 valves + 74HC4051 mux, onboard pumps |
-            | `node_reservoir.bin` | `node_reservoir` | Single-tank reservoir, GPIO pumps |
-            | `node_multiplexed_reservoir.bin` | `node_multiplexed_reservoir` | Multi-tank reservoir, shift-register pump relays + sensor mux |
+            | `node_direct.bin` | `node_direct` | 3 chambers, direct sensors/valves, onboard pumps |
+            | `node_reservoir.bin` | `node_reservoir` | Up to 12 chambers, shared pressure/vacuum tanks, runtime-sized |
