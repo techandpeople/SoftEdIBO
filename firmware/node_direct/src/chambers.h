@@ -8,7 +8,9 @@
 namespace chambers {
 
 constexpr float DEFAULT_MAX_KPA = 8.0f;
+constexpr float DEFAULT_MIN_KPA = 0.0f;
 constexpr float HARD_MAX_KPA    = 12.0f;
+constexpr float HARD_MIN_KPA    = -12.0f;   // limit for vacuum-fed chambers
 constexpr uint8_t  DEFAULT_INFLATE_DUTY = 255;
 constexpr uint32_t VALVE_SETTLE_MS      =  20;
 
@@ -25,6 +27,7 @@ struct Chamber {
     State    state      = IDLE;
     uint8_t  duty       = 0;
     float    target_kpa = 0.0f;
+    float    min_kpa    = DEFAULT_MIN_KPA;
     float    max_kpa    = DEFAULT_MAX_KPA;
     uint32_t settle_ts  = 0;
 };
@@ -56,9 +59,11 @@ inline void recalcPumps() {
 inline void stop(int n) {
     setValve(n, 0, false);
     setValve(n, 1, false);
-    float saved = state[n].max_kpa;
+    float saved_max = state[n].max_kpa;
+    float saved_min = state[n].min_kpa;
     state[n] = Chamber{};
-    state[n].max_kpa = saved;
+    state[n].max_kpa = saved_max;
+    state[n].min_kpa = saved_min;
 }
 
 // ---------------------------------------------------------------------------
@@ -66,7 +71,7 @@ inline void stop(int n) {
 // ---------------------------------------------------------------------------
 
 inline void beginInflate(int n, uint8_t duty, float target_kpa) {
-    target_kpa = max(0.0f, min(target_kpa, state[n].max_kpa));
+    target_kpa = max(state[n].min_kpa, min(target_kpa, state[n].max_kpa));
     if (state[n].state == INFLATING && state[n].target_kpa == target_kpa) return;
     if (state[n].state == DEFLATING || state[n].state == PRE_DEFLATE) {
         setValve(n, 1, false);
@@ -85,7 +90,7 @@ inline void beginInflate(int n, uint8_t duty, float target_kpa) {
 }
 
 inline void beginDeflate(int n, float target_kpa) {
-    target_kpa = max(0.0f, min(target_kpa, state[n].max_kpa));
+    target_kpa = max(state[n].min_kpa, min(target_kpa, state[n].max_kpa));
     if (state[n].state == DEFLATING && state[n].target_kpa == target_kpa) return;
     if (state[n].state == INFLATING || state[n].state == PRE_INFLATE) {
         setValve(n, 0, false);

@@ -8,9 +8,9 @@ namespace cmd_queue {
 enum CmdType : uint8_t {
     CMD_NONE = 0,
     // Per-chamber commands (chamber field is the chamber index).
-    CMD_INFLATE, CMD_DEFLATE, CMD_SET_PRESSURE, CMD_SET_MAX, CMD_HOLD,
+    CMD_INFLATE, CMD_DEFLATE, CMD_SET_PRESSURE, CMD_SET_MAX, CMD_SET_MIN, CMD_HOLD,
     // Tank commands (kind: 0 = pressure, 1 = vacuum; encoded in `chamber`).
-    CMD_SET_TANK_PRESSURE, CMD_SET_TANK_MAX,
+    CMD_SET_TANK_PRESSURE, CMD_SET_TANK_MAX, CMD_SET_TANK_MIN,
     // Configuration / status.
     CMD_CONFIGURE, CMD_PING
 #ifdef DEBUG_BUILD
@@ -22,9 +22,11 @@ struct Cmd {
     CmdType  type;
     int8_t   chamber;       // chamber index OR tank kind (0=pressure, 1=vacuum)
     int16_t  param;         // delta or value (percent)
-    float    param_kpa;     // tank/chamber max in kPa
+    float    param_kpa;     // tank/chamber min or max in kPa (depends on type)
     int16_t  cfg_chambers;  // configure: num_chambers
+    float    cfg_p_min;     // configure: tank_pressure_min_kpa
     float    cfg_p_max;     // configure: tank_pressure_max_kpa
+    float    cfg_v_min;     // configure: tank_vacuum_min_kpa
     float    cfg_v_max;     // configure: tank_vacuum_max_kpa
     uint8_t  cfg_pressure_mask; // configure: bit i -> pump (i+1) in pressure group
     uint8_t  cfg_vacuum_mask;   // configure: bit i -> pump (i+1) in vacuum group
