@@ -15,8 +15,19 @@ robots:
 #           max_slots: 12
 #           pump_inflate_count: 3
 #           pump_deflate_count: 3
-#           tank_pressure_max_kpa: 50.0
-#           tank_vacuum_max_kpa: 50.0
+#           # Tank operating envelope (kPa, gauge):
+#           tank_pressure_min_kpa: 0.0    # never below ambient
+#           tank_pressure_max_kpa: 50.0   # hard upper cap
+#           tank_vacuum_min_kpa:  -50.0   # deepest vacuum the firmware will pull to
+#           tank_vacuum_max_kpa:   0.0    # never above ambient (broken seal otherwise)
+#       skins:
+#         - skin_id: belly
+#           name: Belly
+#           chambers:
+#             # Chambers fed only by the pressure tank: keep min_pressure at 0.
+#             - {mac: "AA:BB:CC:DD:EE:01", slot: 0, max_pressure: 8.0}
+#             # Chambers also pulled by the vacuum tank: set min_pressure < 0.
+#             - {mac: "AA:BB:CC:DD:EE:01", slot: 1, max_pressure: 8.0, min_pressure: -3.0}
 database:
   backend: sqlite
   path: data/softedibo.db

@@ -36,8 +36,10 @@ def configure_reservoir_nodes(
         max_slots = max(1, min(int(node_cfg.get("max_slots", 12)), 16))
         pump_inflate_count = max(0, min(int(node_cfg.get("pump_inflate_count", 3)), 6))
         pump_deflate_count = max(0, min(int(node_cfg.get("pump_deflate_count", 3)), 6))
+        tank_pressure_min_kpa = float(node_cfg.get("tank_pressure_min_kpa", 0.0))
         tank_pressure_max_kpa = float(node_cfg.get("tank_pressure_max_kpa", 50.0))
-        tank_vacuum_max_kpa = float(node_cfg.get("tank_vacuum_max_kpa", 50.0))
+        tank_vacuum_min_kpa   = float(node_cfg.get("tank_vacuum_min_kpa", -50.0))
+        tank_vacuum_max_kpa   = float(node_cfg.get("tank_vacuum_max_kpa", 0.0))
 
         pressure_group = list(range(1, pump_inflate_count + 1))
         vacuum_start = pump_inflate_count + 1
@@ -48,7 +50,9 @@ def configure_reservoir_nodes(
             num_chambers=max_slots,
             pump_inflate_count=pump_inflate_count,
             pump_deflate_count=pump_deflate_count,
+            tank_pressure_min_kpa=tank_pressure_min_kpa,
             tank_pressure_max_kpa=tank_pressure_max_kpa,
+            tank_vacuum_min_kpa=tank_vacuum_min_kpa,
             tank_vacuum_max_kpa=tank_vacuum_max_kpa,
             pump_groups={"pressure": pressure_group, "vacuum": vacuum_group},
         )
@@ -96,7 +100,8 @@ def build_skins(
         chamber_inputs = [
             {"controller":   ctrl,
              "node_slot":    int(ch["slot"]),
-             "max_pressure": float(ch.get("max_pressure", 8.0))}
+             "max_pressure": float(ch.get("max_pressure", 8.0)),
+             "min_pressure": float(ch.get("min_pressure", 0.0))}
             for ch in chambers
         ]
         skins[skin_id] = Skin(

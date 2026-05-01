@@ -9,7 +9,8 @@ Config expected by the constructor (``chamber_inputs``):
     [
         {"controller":   <ESP32Controller|SimulatedController>,
          "node_slot":    <int>,            # physical slot on the node
-         "max_pressure": <float>},         # kPa cap for this chamber
+         "max_pressure": <float>,          # kPa upper cap for this chamber
+         "min_pressure": <float>},         # kPa lower cap (default 0; negative for vacuum-fed chambers)
         ...
     ]
 
@@ -60,6 +61,7 @@ class Skin:
 
             node_slot    = int(inp["node_slot"])
             max_pressure = float(inp.get("max_pressure", 8.0))
+            min_pressure = float(inp.get("min_pressure", 0.0))
 
             self._slots.append(node_slot)
             self._reverse[node_slot] = local_idx
@@ -68,6 +70,8 @@ class Skin:
                 esp32_mac=self.mac,
                 max_pressure=max_pressure,
             )
+            # Stash min_pressure on the AirChamber for serialisation (chamber_defs).
+            self._chambers[local_idx].min_pressure = min_pressure  # type: ignore[attr-defined]
 
         # One callback registration for the whole skin.
         self._ctrl.on_pressure(self._on_pressure)
@@ -75,11 +79,15 @@ class Skin:
         if on_target is not None:
             on_target(self._on_target)
 
-        # Push per-chamber max pressure to the firmware so it survives PC crashes.
-        set_limit = getattr(self._ctrl, "set_max_pressure", None)
-        if set_limit is not None:
-            for local_idx, slot in enumerate(self._slots):
-                set_limit(slot, self._chambers[local_idx].max_pressure)
+        # Push per-chamber max + min pressure to the firmware so they survive PC crashes.
+        set_max = getattr(self._ctrl, "set_max_pressure", None)
+        set_min = getattr(self._ctrl, "set_min_pressure", None)
+        for local_idx, slot in enumerate(self._slots):
+            ch = self._chambers[local_idx]
+            if set_max is not None:
+                set_max(slot, ch.max_pressure)
+            if set_min is not None:
+                set_min(slot, getattr(ch, "min_pressure", 0.0))
 
     # ------------------------------------------------------------------
     # Properties
@@ -106,11 +114,18 @@ class Skin:
     @property
     def chamber_defs(self) -> list[dict[str, Any]]:
         """Chamber descriptors in config format (for serialisation / simulation)."""
-        return [
-            {"mac": self.mac, "slot": slot,
-             "max_pressure": self._chambers[idx].max_pressure}
-            for idx, slot in enumerate(self._slots)
-        ]
+        defs = []
+        for idx, slot in enumerate(self._slots):
+            ch = self._chambers[idx]
+            d: dict[str, Any] = {
+                "mac": self.mac, "slot": slot,
+                "max_pressure": ch.max_pressure,
+            }
+            min_p = getattr(ch, "min_pressure", 0.0)
+            if abs(min_p) > 1e-3:   # only persist explicit non-zero defaults
+                d["min_pressure"] = min_p
+            defs.append(d)
+        return defs
 
     # ------------------------------------------------------------------
     # Commands  (local_idx = 0-based position within this skin)

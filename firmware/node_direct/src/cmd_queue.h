@@ -8,7 +8,7 @@ namespace cmd_queue {
 
 enum CmdType : uint8_t {
     CMD_NONE = 0, CMD_INFLATE, CMD_DEFLATE, CMD_SET_PRESSURE,
-    CMD_SET_MAX, CMD_HOLD, CMD_PING
+    CMD_SET_MAX, CMD_SET_MIN, CMD_HOLD, CMD_PING
 #ifdef DEBUG_BUILD
     , CMD_DEBUG
 #endif

@@ -19,6 +19,7 @@ enum State : uint8_t {
 struct Chamber {
     State    state      = IDLE;
     float    target_kpa = 0.0f;
+    float    min_kpa    = config::DEFAULT_CHAMBER_MIN_KPA;
     float    max_kpa    = config::DEFAULT_CHAMBER_MAX_KPA;
     uint32_t settle_ts  = 0;
 };
@@ -28,13 +29,15 @@ inline float   cachedKpa[MAX_CHAMBERS] = {};
 
 inline void stop(int n) {
     pca_valves::setChamberValve(n, false, false);
-    float saved = state[n].max_kpa;
+    float saved_max = state[n].max_kpa;
+    float saved_min = state[n].min_kpa;
     state[n] = Chamber{};
-    state[n].max_kpa = saved;
+    state[n].max_kpa = saved_max;
+    state[n].min_kpa = saved_min;
 }
 
 inline void beginInflate(int n, float target_kpa) {
-    target_kpa = max(0.0f, min(target_kpa, state[n].max_kpa));
+    target_kpa = max(state[n].min_kpa, min(target_kpa, state[n].max_kpa));
     if (state[n].state == INFLATING && state[n].target_kpa == target_kpa) return;
     if (state[n].state == DEFLATING || state[n].state == PRE_DEFLATE) {
         pca_valves::setChamberValve(n, false, false);
@@ -49,7 +52,7 @@ inline void beginInflate(int n, float target_kpa) {
 }
 
 inline void beginDeflate(int n, float target_kpa) {
-    target_kpa = max(0.0f, min(target_kpa, state[n].max_kpa));
+    target_kpa = max(state[n].min_kpa, min(target_kpa, state[n].max_kpa));
     if (state[n].state == DEFLATING && state[n].target_kpa == target_kpa) return;
     if (state[n].state == INFLATING || state[n].state == PRE_INFLATE) {
         pca_valves::setChamberValve(n, false, false);

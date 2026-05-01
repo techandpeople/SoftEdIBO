@@ -24,6 +24,7 @@ class RobotMonitorWidget(QGroupBox):
     def __init__(self, robot: BaseRobot) -> None:
         super().__init__(robot.robot_id)
         self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+        self._robot = robot
         self._skin_widgets: list[SkinWidget] = []
         self._tank_widgets: list[TankWidget] = []
 
@@ -46,6 +47,11 @@ class RobotMonitorWidget(QGroupBox):
 
         if not skins and not self._tank_widgets:
             layout.addWidget(QLabel(f"{robot.robot_id} — nothing configured"))
+
+    def tick(self) -> None:
+        fn = getattr(self._robot, "tick", None)
+        if fn is not None:
+            fn()
 
     def set_paused(self, paused: bool) -> None:
         for sw in self._skin_widgets:

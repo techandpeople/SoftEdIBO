@@ -51,9 +51,19 @@ class SimulationActivity(BaseActivity):
                 }
                 for skin in skins.values()
             ]
-            sim = SimulatedRobot(robot.robot_id, robot.name, skin_configs)
+            tank_kinds: list[str] = []
+            if getattr(robot, "pressure_reservoir", None) is not None:
+                tank_kinds.append("pressure")
+            if getattr(robot, "vacuum_reservoir", None) is not None:
+                tank_kinds.append("vacuum")
+
+            sim = SimulatedRobot(
+                robot.robot_id, robot.name, skin_configs,
+                tank_kinds=tank_kinds,
+            )
             self._simulated_robots.append(sim)
-            logger.debug("Created SimulatedRobot for %s", robot.robot_id)
+            logger.debug("Created SimulatedRobot for %s (tanks=%s)",
+                         robot.robot_id, tank_kinds)
 
         return self._simulated_robots  # type: ignore[return-value]
 

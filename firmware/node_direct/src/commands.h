@@ -20,7 +20,7 @@ inline uint32_t sendOk = 0, sendFail = 0, cmdDropped = 0;
 
 inline void sendStatus(int ch, float kpa) {
     if (!gatewayKnown) return;
-    int  pct = units::kpaToPctOf(kpa, chambers::state[ch].max_kpa);
+    int  pct = units::kpaToPct(kpa, chambers::state[ch].min_kpa, chambers::state[ch].max_kpa);
     char buf[48];
     int  len = snprintf(buf, sizeof(buf),
                         "{\"type\":\"status\",\"chamber\":%d,\"pressure\":%d}", ch, pct);
@@ -36,16 +36,18 @@ inline void sendPong() {
 #ifdef DEBUG_BUILD
 inline void sendDebug() {
     if (!gatewayKnown) return;
-    char buf[64 + NUM_CHAMBERS * 80];
+    char buf[64 + NUM_CHAMBERS * 96];
     int  pos = 0;
     pos += snprintf(buf + pos, sizeof(buf) - pos,
         "{\"type\":\"debug\",\"num_chambers\":%d,\"ch\":[", NUM_CHAMBERS);
     for (int i = 0; i < NUM_CHAMBERS; i++) {
         if (i > 0) buf[pos++] = ',';
         pos += snprintf(buf + pos, sizeof(buf) - pos,
-            "{\"s\":%d,\"kpa\":%.2f,\"tgt\":%.2f,\"max\":%.2f}",
+            "{\"s\":%d,\"kpa\":%.2f,\"tgt\":%.2f,\"min\":%.2f,\"max\":%.2f}",
             chambers::state[i].state, chambers::cachedKpa[i],
-            chambers::state[i].target_kpa, chambers::state[i].max_kpa);
+            chambers::state[i].target_kpa,
+            chambers::state[i].min_kpa,
+            chambers::state[i].max_kpa);
     }
     pos += snprintf(buf + pos, sizeof(buf) - pos,
         "],\"tx_ok\":%lu,\"tx_fail\":%lu,\"drop\":%lu,\"up\":%lu}",
@@ -64,25 +66,24 @@ inline void process(const cmd_queue::Cmd& c) {
     int n = c.chamber;
     if (n < 0 || n >= NUM_CHAMBERS) return;
 
+    auto& ch = chambers::state[n];
+
     switch (c.type) {
     case CMD_INFLATE: {
-        float delta  = units::pctToKpaOf(constrain(c.param, 0, 100),
-                                         chambers::state[n].max_kpa);
-        float target = min(chambers::cachedKpa[n] + delta,
-                           chambers::state[n].max_kpa);
+        float delta  = (ch.max_kpa - ch.min_kpa) * constrain(c.param, 0, 100) / 100.0f;
+        float target = min(chambers::cachedKpa[n] + delta, ch.max_kpa);
         chambers::beginInflate(n, chambers::DEFAULT_INFLATE_DUTY, target);
         break;
     }
     case CMD_DEFLATE: {
-        float delta  = units::pctToKpaOf(constrain(c.param, 0, 100),
-                                         chambers::state[n].max_kpa);
-        float target = max(chambers::cachedKpa[n] - delta, 0.0f);
+        float delta  = (ch.max_kpa - ch.min_kpa) * constrain(c.param, 0, 100) / 100.0f;
+        float target = max(chambers::cachedKpa[n] - delta, ch.min_kpa);
         chambers::beginDeflate(n, target);
         break;
     }
     case CMD_SET_PRESSURE: {
-        float target = units::pctToKpaOf(constrain(c.param, 0, 100),
-                                         chambers::state[n].max_kpa);
+        float target = units::pctToKpa(constrain(c.param, 0, 100),
+                                       ch.min_kpa, ch.max_kpa);
         if      (chambers::cachedKpa[n] < target)
             chambers::beginInflate(n, chambers::DEFAULT_INFLATE_DUTY, target);
         else if (chambers::cachedKpa[n] > target)
@@ -91,10 +92,18 @@ inline void process(const cmd_queue::Cmd& c) {
         break;
     }
     case CMD_SET_MAX: {
-        float new_max = constrain(c.param_kpa, 0.1f, chambers::HARD_MAX_KPA);
-        chambers::state[n].max_kpa = new_max;
-        if (chambers::state[n].state == chambers::INFLATING &&
-            chambers::cachedKpa[n] >= chambers::state[n].max_kpa) {
+        float new_max = constrain(c.param_kpa, ch.min_kpa + 0.1f, chambers::HARD_MAX_KPA);
+        ch.max_kpa = new_max;
+        if (ch.state == chambers::INFLATING && chambers::cachedKpa[n] >= ch.max_kpa) {
+            chambers::stop(n);
+            chambers::recalcPumps();
+        }
+        break;
+    }
+    case CMD_SET_MIN: {
+        float new_min = constrain(c.param_kpa, chambers::HARD_MIN_KPA, ch.max_kpa - 0.1f);
+        ch.min_kpa = new_min;
+        if (ch.state == chambers::DEFLATING && chambers::cachedKpa[n] <= ch.min_kpa) {
             chambers::stop(n);
             chambers::recalcPumps();
         }
@@ -122,6 +131,7 @@ inline void parseAndQueue(const uint8_t* data, int len) {
     else if (strcmp(cmd, "deflate") == 0)           { c.type = CMD_DEFLATE;      c.chamber = doc["chamber"] | -1; c.param = doc["delta"] | 10; }
     else if (strcmp(cmd, "set_pressure") == 0)      { c.type = CMD_SET_PRESSURE; c.chamber = doc["chamber"] | -1; c.param = doc["value"] | 0; }
     else if (strcmp(cmd, "set_max_pressure") == 0)  { c.type = CMD_SET_MAX;      c.chamber = doc["chamber"] | -1; c.param_kpa = doc["value"] | chambers::DEFAULT_MAX_KPA; }
+    else if (strcmp(cmd, "set_min_pressure") == 0)  { c.type = CMD_SET_MIN;      c.chamber = doc["chamber"] | -1; c.param_kpa = doc["value"] | chambers::DEFAULT_MIN_KPA; }
     else if (strcmp(cmd, "hold") == 0)              { c.type = CMD_HOLD;         c.chamber = doc["chamber"] | -1; }
 #ifdef DEBUG_BUILD
     else if (strcmp(cmd, "debug") == 0)             { c.type = CMD_DEBUG;        c.chamber = -1; }

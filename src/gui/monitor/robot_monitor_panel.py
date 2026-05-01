@@ -78,4 +78,5 @@ class RobotMonitorPanel(QWidget):
 
     def _refresh(self) -> None:
         for rw in self._robot_widgets:
+            rw.tick()
             rw.refresh()

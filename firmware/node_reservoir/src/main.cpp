@@ -45,21 +45,12 @@ void sendPong() {
 
 void sendStatus(int chamber, float kpa) {
     if (!gatewayKnown) return;
-    int pct = units::kpaToPctOf(kpa, chambers::state[chamber].max_kpa);
+    auto& ch = chambers::state[chamber];
+    int pct = units::kpaToPct(kpa, ch.min_kpa, ch.max_kpa);
     char buf[56];
     int len = snprintf(buf, sizeof(buf),
                        "{\"type\":\"status\",\"chamber\":%d,\"pressure\":%d}",
                        chamber, pct);
-    esp_now_send(gatewayMac, reinterpret_cast<const uint8_t*>(buf), len);
-}
-
-void sendTankStatus(const char* kind, float kpa, float ref_kpa) {
-    if (!gatewayKnown) return;
-    int pct = units::kpaToPctOf(kpa, ref_kpa);
-    char buf[72];
-    int len = snprintf(buf, sizeof(buf),
-                       "{\"type\":\"tank_status\",\"kind\":\"%s\",\"pressure\":%d}",
-                       kind, pct);
     esp_now_send(gatewayMac, reinterpret_cast<const uint8_t*>(buf), len);
 }
 
@@ -222,6 +213,10 @@ void parseAndQueue(const uint8_t* data, int len) {
         c.type = cmd_queue::CMD_SET_MAX;
         c.chamber = doc["chamber"] | -1;
         c.param_kpa = doc["value"] | config::DEFAULT_CHAMBER_MAX_KPA;
+    } else if (strcmp(cmd, "set_min_pressure") == 0) {
+        c.type = cmd_queue::CMD_SET_MIN;
+        c.chamber = doc["chamber"] | -1;
+        c.param_kpa = doc["value"] | config::DEFAULT_CHAMBER_MIN_KPA;
     } else if (strcmp(cmd, "hold") == 0) {
         c.type = cmd_queue::CMD_HOLD;
         c.chamber = doc["chamber"] | -1;
@@ -233,8 +228,10 @@ void parseAndQueue(const uint8_t* data, int len) {
     } else if (strcmp(cmd, "configure") == 0) {
         c.type = cmd_queue::CMD_CONFIGURE;
         c.cfg_chambers = doc["num_chambers"] | config::state.num_chambers;
+        c.cfg_p_min = doc["tank_pressure_min_kpa"] | config::state.tank_pressure_min_kpa;
         c.cfg_p_max = doc["tank_pressure_max_kpa"] | config::state.tank_pressure_max_kpa;
-        c.cfg_v_max = doc["tank_vacuum_max_kpa"] | config::state.tank_vacuum_max_kpa;
+        c.cfg_v_min = doc["tank_vacuum_min_kpa"]   | config::state.tank_vacuum_min_kpa;
+        c.cfg_v_max = doc["tank_vacuum_max_kpa"]   | config::state.tank_vacuum_max_kpa;
 
         int inflate_count = constrain((int)(doc["pump_inflate_count"] | 0), 0, NUM_PUMPS);
         int deflate_count = constrain((int)(doc["pump_deflate_count"] | 0), 0, NUM_PUMPS);
@@ -304,9 +301,11 @@ void processCommand(const cmd_queue::Cmd& c) {
     }
 
     if (c.type == CMD_CONFIGURE) {
-        config::state.num_chambers = max(1, min((int)c.cfg_chambers, MAX_CHAMBERS));
-        config::state.tank_pressure_max_kpa = constrain(c.cfg_p_max, 1.0f, config::HARD_TANK_MAX_KPA);
-        config::state.tank_vacuum_max_kpa = constrain(c.cfg_v_max, 1.0f, config::HARD_TANK_MAX_KPA);
+        config::state.num_chambers          = max(1, min((int)c.cfg_chambers, MAX_CHAMBERS));
+        config::state.tank_pressure_min_kpa = constrain(c.cfg_p_min, config::HARD_TANK_MIN_KPA, config::HARD_TANK_MAX_KPA);
+        config::state.tank_pressure_max_kpa = constrain(c.cfg_p_max, config::state.tank_pressure_min_kpa + 0.1f, config::HARD_TANK_MAX_KPA);
+        config::state.tank_vacuum_min_kpa   = constrain(c.cfg_v_min, config::HARD_TANK_MIN_KPA, config::HARD_TANK_MAX_KPA);
+        config::state.tank_vacuum_max_kpa   = constrain(c.cfg_v_max, config::state.tank_vacuum_min_kpa + 0.1f, config::HARD_TANK_MAX_KPA);
         if (c.cfg_pressure_mask || c.cfg_vacuum_mask) {
             applyPumpGroups(c.cfg_pressure_mask, c.cfg_vacuum_mask);
         }
@@ -321,9 +320,15 @@ void processCommand(const cmd_queue::Cmd& c) {
 
     if (c.type == CMD_SET_TANK_PRESSURE) {
         if (c.chamber == 0) {
-            config::state.tank_pressure_target_kpa = constrain(c.param_kpa, 0.0f, config::state.tank_pressure_max_kpa);
+            config::state.tank_pressure_target_kpa = constrain(
+                c.param_kpa,
+                config::state.tank_pressure_min_kpa,
+                config::state.tank_pressure_max_kpa);
         } else {
-            config::state.tank_vacuum_target_kpa = constrain(c.param_kpa, 0.0f, config::state.tank_vacuum_max_kpa);
+            config::state.tank_vacuum_target_kpa = constrain(
+                c.param_kpa,
+                config::state.tank_vacuum_min_kpa,
+                config::state.tank_vacuum_max_kpa);
         }
         return;
     }
@@ -333,21 +338,23 @@ void processCommand(const cmd_queue::Cmd& c) {
         return;
     }
 
+    auto& ch = chambers::state[n];
+
     switch (c.type) {
     case CMD_INFLATE: {
-        float delta = units::pctToKpaOf(constrain(c.param, 0, 100), chambers::state[n].max_kpa);
-        float target = min(chambers::cachedKpa[n] + delta, chambers::state[n].max_kpa);
+        float delta  = (ch.max_kpa - ch.min_kpa) * constrain(c.param, 0, 100) / 100.0f;
+        float target = min(chambers::cachedKpa[n] + delta, ch.max_kpa);
         chambers::beginInflate(n, target);
         break;
     }
     case CMD_DEFLATE: {
-        float delta = units::pctToKpaOf(constrain(c.param, 0, 100), chambers::state[n].max_kpa);
-        float target = max(chambers::cachedKpa[n] - delta, 0.0f);
+        float delta  = (ch.max_kpa - ch.min_kpa) * constrain(c.param, 0, 100) / 100.0f;
+        float target = max(chambers::cachedKpa[n] - delta, ch.min_kpa);
         chambers::beginDeflate(n, target);
         break;
     }
     case CMD_SET_PRESSURE: {
-        float target = units::pctToKpaOf(constrain(c.param, 0, 100), chambers::state[n].max_kpa);
+        float target = units::pctToKpa(constrain(c.param, 0, 100), ch.min_kpa, ch.max_kpa);
         if (chambers::cachedKpa[n] < target) {
             chambers::beginInflate(n, target);
         } else if (chambers::cachedKpa[n] > target) {
@@ -358,9 +365,15 @@ void processCommand(const cmd_queue::Cmd& c) {
         break;
     }
     case CMD_SET_MAX: {
-        chambers::state[n].max_kpa = constrain(c.param_kpa, 0.1f, config::HARD_CHAMBER_MAX_KPA);
-        if (chambers::state[n].state == chambers::INFLATING &&
-            chambers::cachedKpa[n] >= chambers::state[n].max_kpa) {
+        ch.max_kpa = constrain(c.param_kpa, ch.min_kpa + 0.1f, config::HARD_CHAMBER_MAX_KPA);
+        if (ch.state == chambers::INFLATING && chambers::cachedKpa[n] >= ch.max_kpa) {
+            chambers::stop(n);
+        }
+        break;
+    }
+    case CMD_SET_MIN: {
+        ch.min_kpa = constrain(c.param_kpa, config::HARD_CHAMBER_MIN_KPA, ch.max_kpa - 0.1f);
+        if (ch.state == chambers::DEFLATING && chambers::cachedKpa[n] <= ch.min_kpa) {
             chambers::stop(n);
         }
         break;
@@ -380,24 +393,45 @@ float readTankKpa(int mux_ch) {
 
 void tankControlStep() {
     float pressure_kpa = readTankKpa(config::state.pressure_tank_mux_ch);
-    float vacuum_kpa = readTankKpa(config::state.vacuum_tank_mux_ch);
+    float vacuum_kpa   = readTankKpa(config::state.vacuum_tank_mux_ch);
 
-    if (pressure_kpa >= config::state.tank_pressure_max_kpa) {
+    // Pressure tank — pump fills it when below target. Stop at hard max.
+    // Also stop if reading drops below min (sensor or seal failure).
+    if (pressure_kpa >= config::state.tank_pressure_max_kpa ||
+        pressure_kpa <  config::state.tank_pressure_min_kpa) {
         pumps::setRoleDuty(pumps::ROLE_PRESSURE, 0);
     } else {
         bool need_pressure = pressure_kpa < config::state.tank_pressure_target_kpa;
         pumps::setRoleDuty(pumps::ROLE_PRESSURE, need_pressure ? pumps::PUMP_DEFAULT_DUTY : 0);
     }
 
-    if (vacuum_kpa >= config::state.tank_vacuum_max_kpa) {
+    // Vacuum tank — pump evacuates (pulls pressure DOWN) when above target.
+    // Stop at hard min (deepest vacuum). Also stop if above max (broken seal).
+    if (vacuum_kpa <= config::state.tank_vacuum_min_kpa ||
+        vacuum_kpa >  config::state.tank_vacuum_max_kpa) {
         pumps::setRoleDuty(pumps::ROLE_VACUUM, 0);
     } else {
         bool need_vacuum = vacuum_kpa > config::state.tank_vacuum_target_kpa;
         pumps::setRoleDuty(pumps::ROLE_VACUUM, need_vacuum ? pumps::PUMP_DEFAULT_DUTY : 0);
     }
 
-    sendTankStatus("pressure", pressure_kpa, config::state.tank_pressure_max_kpa);
-    sendTankStatus("vacuum", vacuum_kpa, config::state.tank_vacuum_max_kpa);
+    // Status broadcasts: report percent over each tank's [min, max] range so the
+    // UI can show 0-100 even when limits are negative (vacuum tank).
+    if (gatewayKnown) {
+        char buf[80];
+        int p_pct = units::kpaToPct(pressure_kpa,
+                                    config::state.tank_pressure_min_kpa,
+                                    config::state.tank_pressure_max_kpa);
+        int v_pct = units::kpaToPct(vacuum_kpa,
+                                    config::state.tank_vacuum_min_kpa,
+                                    config::state.tank_vacuum_max_kpa);
+        int len = snprintf(buf, sizeof(buf),
+                           "{\"type\":\"tank_status\",\"kind\":\"pressure\",\"pressure\":%d}", p_pct);
+        esp_now_send(gatewayMac, reinterpret_cast<uint8_t*>(buf), len);
+        len = snprintf(buf, sizeof(buf),
+                       "{\"type\":\"tank_status\",\"kind\":\"vacuum\",\"pressure\":%d}", v_pct);
+        esp_now_send(gatewayMac, reinterpret_cast<uint8_t*>(buf), len);
+    }
 }
 
 void chamberControlStep(uint32_t now) {
@@ -421,7 +455,8 @@ void chamberControlStep(uint32_t now) {
             (chambers::cachedKpa[i] >= ch.target_kpa || chambers::cachedKpa[i] >= ch.max_kpa)) {
             chambers::stop(i);
         }
-        if (ch.state == chambers::DEFLATING && chambers::cachedKpa[i] <= ch.target_kpa) {
+        if (ch.state == chambers::DEFLATING &&
+            (chambers::cachedKpa[i] <= ch.target_kpa || chambers::cachedKpa[i] <= ch.min_kpa)) {
             chambers::stop(i);
         }
     }

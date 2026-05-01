@@ -104,7 +104,7 @@ On first launch, a setup wizard guides you through flashing the firmware to the 
 
 ### Configuration (`config/settings.yaml`)
 
-Robots are configured as a flat list of skins per type. Each skin maps to an ESP32 node (by MAC address) and specifies which chamber slots it uses. An optional `max_pressure` field sets per-chamber safety limits (in % of the hardware maximum).
+Robots are configured as a flat list of skins per type. Each skin maps to an ESP32 node (by MAC address) and specifies which chamber slots it uses. An optional `max_pressure` field sets per-chamber safety limits in kPa.
 
 ```yaml
 robots:
@@ -115,16 +115,16 @@ robots:
           name: Shell Top
           mac: "AA:BB:CC:DD:EE:01"
           slots: [0, 1, 2]
-          max_pressure:       # optional — defaults to 100%
-            0: 80             # chamber 0 capped at 80%
-            1: 60             # chamber 1 capped at 60%
+          max_pressure:       # optional — defaults to 8.0 kPa
+            0: 8.0            # chamber 0 capped at 8.0 kPa
+            1: 6.0            # chamber 1 capped at 6.0 kPa
   trees: []
   thymios: []
 ```
 
 - Multiple skins can share the same MAC (up to 3 slots total per node).
-- `max_pressure` is sent to the ESP32 node on startup. The node enforces it independently — even if the app crashes, chambers will not exceed their configured limit.
-- If `max_pressure` is omitted, all chambers default to 100% (the full hardware range).
+- `max_pressure` is sent to the ESP32 node on startup as kPa. The gateway forwards it unchanged; the node enforces it independently — even if the app crashes, chambers will not exceed their configured limit.
+- If `max_pressure` is omitted, all chambers default to 8.0 kPa.
 
 ---
 
