@@ -1,0 +1,32 @@
+* Hospital for Robots: Resonant AFE
+.param f_carrier=13.56meg
+.param c_coupling=50f
+.param c_in_opa=7p
+.param l_tune=19.67u  ; The tuning inductor
+
+Vexc 1 0 SINE(0 5V {f_carrier})
+Cx 1 2 {c_coupling}
+
+* --- THE RESONANT TANK ---
+L1 2 0 {l_tune}
+Cpara 2 0 {c_in_opa}
+R_loss 2 0 100k ; Real-world inductor parasitic resistance
+* -------------------------
+
+Xamp 2 3 4 opa_200m
+Rf 4 3 10k
+Rg 3 0 1k ; Reduced gain to 11 to stay well within GBW
+
+.subckt opa_200m nip in out
+    Ein 1 0 nip in 100k
+    R1 1 2 1k
+    C1 2 0 79.6n
+    Eout out 0 2 0 1
+.ends
+
+.tran 1n 2u
+.control
+    run
+    plot v(2) v(4) ; Check the massive boost at node 2
+.endc
+.end

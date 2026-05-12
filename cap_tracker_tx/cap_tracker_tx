@@ -1,0 +1,50 @@
+*
+
+.subckt cap_tracker
+
+
+C2 +3.3V GND 100n
+U4 __U4
+R4 Net-_Q1-S_ Batt_Level 100k
+R15 GND Batt_Level 100k
+R5 GND USB_5V 100k
+C5 Net-_Q1-S_ Net-_U2-TEMP_ 10u
+R17 Net-_Q1-S_ Net-_U2-TEMP_ HNTC-103F3950FB
+Battery1 __Battery1
+Q1 __Q1
+USB1 __USB1
+R1 Net-_USB1-CC1_ GND 5.1k
+C6 EN GND 1u
+R10 +3.3V EN 10k
+EN1 __EN1
+R9 Net-_U2-_STDBY_ Net-_LEDG1--_ 470
+R8 Net-_U2-_CHRG_ Net-_LEDR1--_ 1k
+JP2 __JP2
+R3 GND Net-_U2-TEMP_ 100k
+R16 GND Net-_JP2-A_ 1.2k
+JP1 __JP1
+U2 __U2
+R13 GND Net-_JP1-A_ 2.4k
+LEDG1 +5V Net-_LEDG1--_ YLED0603G
+C3 +5V GND 10u
+LEDR1 +5V Net-_LEDR1--_ YLED0603R
+CN1 __CN1
+C7 Net-_U1-Y_ /ENIG_Surface 100n
+U1 __U1
+C4 GND USB_5V 100n
+X2 __X2
+U3 __U3
+Q3 __Q3
+R14 Net-_Q3-G_ USB_5V 100k
+Q2 __Q2
+R6 Net-_Q2-Pad1_ USB_5V 10k
+Boot1 __Boot1
+R11 +3.3V SDA 2.2k
+R12 +3.3V SCL 2.2k
+R2 GND Net-_USB1-CC2_ 5.1k
+U6 __U6
+C8 GND Net-_U5-C1_ 220n
+U5 __U5
+C1 GND +3.3V 100n
+
+.ends

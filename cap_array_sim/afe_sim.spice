@@ -1,0 +1,43 @@
+* Hospital for Robots: AFE Schematic Verification (Corrected)
+.param f_carrier=13.56meg
+.param c_coupling=50f  ; Placeholder: Use the value from your OpenEMS run
+.param c_in_opa=7p     ; OPA2356 input capacitance + board parasitic
+
+* 1. Signal Source (Excitation Grid)
+Vexc 1 0 SINE(0 5V {f_carrier})
+
+* 2. Capacitive Coupling (The "Hand" interface)
+Cx 1 2 {c_coupling}
+
+* 3. Parasitic Loading at Op-Amp Pin
+Cpara 2 0 {c_in_opa}
+Rbias 2 0 1Meg  ; Pull-down to prevent floating node
+
+* 4. OPA2356 Non-Inverting Stage
+* Pins: nip in out
+Xamp 2 3 4 opa_200m
+
+* Feedback Network (Gain = 1 + Rf/Rg = 101)
+Rf 4 3 10k
+Rg 3 0 100
+
+* 200MHz GBW Op-Amp Model
+* f_pole = GBW / Avol = 200MHz / 100k = 2kHz
+.subckt opa_200m nip in out
+    * Input stage with high open-loop gain
+    Ein 1 0 nip in 100k
+    * Dominant pole stage (RC)
+    * R=1k, C=79.6nF -> 2kHz pole
+    R1 1 2 1k
+    C1 2 0 79.6n
+    * Output buffer
+    Eout out 0 2 0 1
+.ends
+
+* 5. Simulation Settings
+.tran 1n 1u
+.control
+    run
+    plot v(1) v(4) ; Input vs Output
+.endc
+.end

@@ -1,0 +1,44 @@
+* Hospital for Robots: Thick-Core AFE Validation
+.param f_carrier=13.56meg
+.param c_coupling=35f     ; Boosted from 10f to 35f for thicker copper
+.param c_mux_load=40p     ; ADG708/GT4852 Parasitic Load
+.param c_in_opa=7p       ; OPA2356 Input Cap
+
+Vexc 1 0 SINE(0 5V {f_carrier})
+Cx 1 2 {c_coupling}
+
+* Divider: 35f / (35f + 47p) 
+Ctotal 2 0 {c_mux_load + c_in_opa}
+Rbias 2 0 1Meg
+
+* Stage 1 & 2 (OPA2356AIDGKR) 
+Xamp1 2 3 4 opa_200m
+Rf1 4 3 1k
+Rg1 3 0 100
+
+Xamp2 4 5 6 opa_200m
+Rf2 6 5 1k
+Rg2 5 0 100
+
+.subckt opa_200m nip in out
+    Ein 1 0 nip in 100k
+    R1 1 2 1k
+    C1 2 0 79.6n
+    Eout out 0 2 0 1
+.ends
+
+.tran 1n 1u
+
+.control
+    run
+    * Plot 1: The Raw Divider (Excitation vs. Op-Amp Input Pin)
+    plot v(1) v(2) 
+    
+    * Plot 2: The Signal Chain (Pin -> Stage 1 -> Stage 2)
+    * This allows you to verify the Gain-Bandwidth limit of each OPA2356
+    plot v(2) v(4) v(6)
+    
+    * Plot 3: Zoomed Final Result (For ADC/Comparator check)
+    plot v(6) xlabel 'Time (s)' ylabel 'Voltage (V)' title 'Final AFE Output'
+.endc
+.end
