@@ -1,10 +1,11 @@
-# Python-generated files
-__pycache__/
-*.py[oc]
-build/
-dist/
-wheels/
-*.egg-info
+# KiCad temp and backup files
+*.bak
+*.kicad_prl
+*-backups/
+_autosave-*
+*.pyc
+python-float-config.json
 
-# Virtual environments
-.venv
+# Simulation results
+*.raw
+*.log

@@ -52,9 +52,12 @@ E_buf out 0 VALUE={ MIN( MAX(V(out_int)+V(in+), V(vee)), V(vcc) ) }
 
 *** SIMULATION CONTROL ***
 .control
+  set hcopypscolor=1
+  set hcopyscale=2
+
   .ic V(v_half_ref)=2.5
   tran 1n 10u
-  plot v(out_tia) v(out_b) xlimit 9.5u 10u
-  plot v(adc_pa1) xlimit 0 10u
+  hardcopy plot.ps v(out_tia) v(out_b) xlimit 9.5u 10u
+  hardcopy plot1.ps v(adc_pa1) xlimit 0 10u
 .endc
 .end
