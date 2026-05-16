@@ -4364,6 +4364,30 @@
 			)
 		)
 	)
+	(global_label "SCL"
+		(shape input)
+		(at 170.18 41.91 0)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "9ad52d05-b245-4f30-ac64-7f5b8c46c01a")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 176.6728 41.91 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+	)
 	(global_label "PC7"
 		(shape input)
 		(at 165.1 143.51 0)
@@ -4457,6 +4481,30 @@
 					(size 1.27 1.27)
 				)
 				(justify right)
+			)
+		)
+	)
+	(global_label "SDA"
+		(shape input)
+		(at 170.18 36.83 0)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left)
+		)
+		(uuid "c6b295f7-0ddd-45e3-bdcf-7f4d5984561b")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 176.7333 36.83 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
 			)
 		)
 	)
@@ -4582,7 +4630,7 @@
 	)
 	(global_label "SDA"
 		(shape input)
-		(at 29.21 33.02 0)
+		(at 30.48 33.02 0)
 		(fields_autoplaced yes)
 		(effects
 			(font
@@ -4592,7 +4640,7 @@
 		)
 		(uuid "e2e43512-c5d3-46c4-98a1-2561e442cfb4")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 35.7633 33.02 0)
+			(at 37.0333 33.02 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -4654,7 +4702,7 @@
 	)
 	(global_label "SCL"
 		(shape input)
-		(at 29.21 38.1 0)
+		(at 30.48 38.1 0)
 		(fields_autoplaced yes)
 		(effects
 			(font
@@ -4664,7 +4712,7 @@
 		)
 		(uuid "eb233ff3-e653-4bb2-85a0-71f609e37488")
 		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 35.7028 38.1 0)
+			(at 36.9728 38.1 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5046,7 +5094,7 @@
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
-		(in_bom yes)
+		(in_bom no)
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
@@ -5128,7 +5176,7 @@
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
-		(in_bom yes)
+		(in_bom no)
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
@@ -5194,6 +5242,84 @@
 			(project "cap_array_rx"
 				(path "/5b710e96-a17f-4a3e-83ad-f65c116df319"
 					(reference "J8")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "power:+5V")
+		(at 170.18 26.67 0)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(uuid "12dcd24a-fc7f-457f-ab86-d53a6b072733")
+		(property "Reference" "#PWR03"
+			(at 170.18 30.48 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "+5V"
+			(at 170.18 21.59 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" ""
+			(at 170.18 26.67 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 170.18 26.67 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" "Power symbol creates a global label with name \"+5V\""
+			(at 170.18 26.67 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "1"
+			(uuid "1d38ed93-a7ad-4a6b-aebf-9dab86c22ef7")
+		)
+		(instances
+			(project "cap_array_rx"
+				(path "/5b710e96-a17f-4a3e-83ad-f65c116df319"
+					(reference "#PWR03")
 					(unit 1)
 				)
 			)
@@ -5284,7 +5410,7 @@
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
-		(in_bom yes)
+		(in_bom no)
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
@@ -5522,7 +5648,7 @@
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
-		(in_bom yes)
+		(in_bom no)
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
@@ -5599,7 +5725,7 @@
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
-		(in_bom yes)
+		(in_bom no)
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
@@ -5754,7 +5880,7 @@
 	)
 	(symbol
 		(lib_id "power:GND")
-		(at 29.21 27.94 0)
+		(at 30.48 27.94 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -5765,7 +5891,7 @@
 		(fields_autoplaced yes)
 		(uuid "29b07c7a-9a90-45f4-8402-66f9c615e2fb")
 		(property "Reference" "#PWR02"
-			(at 29.21 34.29 0)
+			(at 30.48 34.29 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5776,7 +5902,7 @@
 			)
 		)
 		(property "Value" "GND"
-			(at 29.21 33.02 0)
+			(at 30.48 33.02 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5787,7 +5913,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 29.21 27.94 0)
+			(at 30.48 27.94 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5798,7 +5924,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 29.21 27.94 0)
+			(at 30.48 27.94 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5809,7 +5935,7 @@
 			)
 		)
 		(property "Description" "Power symbol creates a global label with name \"GND\" , ground"
-			(at 29.21 27.94 0)
+			(at 30.48 27.94 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -5916,7 +6042,7 @@
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
-		(in_bom yes)
+		(in_bom no)
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
@@ -6067,7 +6193,7 @@
 	)
 	(symbol
 		(lib_id "EasyEDA:B4B-PH-K-S")
-		(at 22.86 30.48 0)
+		(at 24.13 30.48 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -6078,7 +6204,7 @@
 		(fields_autoplaced yes)
 		(uuid "35e263c5-2684-4ca8-8330-aa117d91fe4f")
 		(property "Reference" "CN1"
-			(at 20.32 15.24 0)
+			(at 21.59 15.24 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -6088,7 +6214,7 @@
 			)
 		)
 		(property "Value" "B4B-PH-K-S"
-			(at 20.32 17.78 0)
+			(at 21.59 17.78 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -6098,7 +6224,7 @@
 			)
 		)
 		(property "Footprint" "EasyEDA:CONN-TH_B4B-PH-K-S"
-			(at 22.86 45.72 0)
+			(at 24.13 45.72 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6109,7 +6235,7 @@
 			)
 		)
 		(property "Datasheet" "https://lcsc.com/product-detail/PH-Connectors_JST_B4B-PH-K-S-LF-SN_B4B-PH-K-S-LF-SN_C131334.html"
-			(at 22.86 48.26 0)
+			(at 24.13 48.26 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6120,7 +6246,7 @@
 			)
 		)
 		(property "Description" ""
-			(at 22.86 30.48 0)
+			(at 24.13 30.48 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6131,7 +6257,7 @@
 			)
 		)
 		(property "Manufacturer" "JST"
-			(at 22.86 50.8 0)
+			(at 24.13 50.8 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6142,7 +6268,7 @@
 			)
 		)
 		(property "MPN" "B4B-PH-K-S(LF)(SN)"
-			(at 22.86 53.34 0)
+			(at 24.13 53.34 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6153,7 +6279,7 @@
 			)
 		)
 		(property "LCSC Part" "C131334"
-			(at 22.86 55.88 0)
+			(at 24.13 55.88 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -6343,6 +6469,204 @@
 		)
 	)
 	(symbol
+		(lib_id "EasyEDA:B4B-PH-K-S")
+		(at 163.83 34.29 0)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(uuid "3cc0ad92-45e4-4eda-959c-361e90b08daa")
+		(property "Reference" "CN2"
+			(at 161.29 19.05 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "B4B-PH-K-S"
+			(at 161.29 21.59 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" "EasyEDA:CONN-TH_B4B-PH-K-S"
+			(at 163.83 49.53 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" "https://lcsc.com/product-detail/PH-Connectors_JST_B4B-PH-K-S-LF-SN_B4B-PH-K-S-LF-SN_C131334.html"
+			(at 163.83 52.07 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" ""
+			(at 163.83 34.29 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Manufacturer" "JST"
+			(at 163.83 54.61 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "MPN" "B4B-PH-K-S(LF)(SN)"
+			(at 163.83 57.15 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "LCSC Part" "C131334"
+			(at 163.83 59.69 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "4"
+			(uuid "bb169375-9de4-4f75-946b-9306979ff5ba")
+		)
+		(pin "3"
+			(uuid "08945c36-2d51-4273-8ef2-588e3a984fa1")
+		)
+		(pin "2"
+			(uuid "26d7c887-e76b-40c2-be5f-8126edbe21ab")
+		)
+		(pin "1"
+			(uuid "21cfa957-a189-40ab-8ad3-ac20348af3ff")
+		)
+		(instances
+			(project "cap_array_rx"
+				(path "/5b710e96-a17f-4a3e-83ad-f65c116df319"
+					(reference "CN2")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "power:GND")
+		(at 170.18 31.75 0)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(uuid "3e12ffc1-e0ea-46ad-8289-6e582fcf6bfe")
+		(property "Reference" "#PWR021"
+			(at 170.18 38.1 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "GND"
+			(at 170.18 36.83 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" ""
+			(at 170.18 31.75 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 170.18 31.75 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" "Power symbol creates a global label with name \"GND\" , ground"
+			(at 170.18 31.75 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "1"
+			(uuid "baafbf73-b537-4ffc-960d-a77b08dd2437")
+		)
+		(instances
+			(project "cap_array_rx"
+				(path "/5b710e96-a17f-4a3e-83ad-f65c116df319"
+					(reference "#PWR021")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
 		(lib_id "Device:C")
 		(at 31.75 66.04 0)
 		(unit 1)
@@ -6430,7 +6754,7 @@
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
-		(in_bom yes)
+		(in_bom no)
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
@@ -6507,7 +6831,7 @@
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
-		(in_bom yes)
+		(in_bom no)
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
@@ -7063,7 +7387,7 @@
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
-		(in_bom yes)
+		(in_bom no)
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
@@ -7140,7 +7464,7 @@
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
-		(in_bom yes)
+		(in_bom no)
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
@@ -7217,7 +7541,7 @@
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
-		(in_bom yes)
+		(in_bom no)
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
@@ -7290,7 +7614,7 @@
 	)
 	(symbol
 		(lib_id "power:+5V")
-		(at 29.21 22.86 0)
+		(at 30.48 22.86 0)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -7301,7 +7625,7 @@
 		(fields_autoplaced yes)
 		(uuid "758cf3e7-5ebf-462b-8053-25d2167a0fa2")
 		(property "Reference" "#PWR01"
-			(at 29.21 26.67 0)
+			(at 30.48 26.67 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7312,7 +7636,7 @@
 			)
 		)
 		(property "Value" "+5V"
-			(at 29.21 17.78 0)
+			(at 30.48 17.78 0)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -7322,7 +7646,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 29.21 22.86 0)
+			(at 30.48 22.86 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7333,7 +7657,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 29.21 22.86 0)
+			(at 30.48 22.86 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7344,7 +7668,7 @@
 			)
 		)
 		(property "Description" "Power symbol creates a global label with name \"+5V\""
-			(at 29.21 22.86 0)
+			(at 30.48 22.86 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -7651,7 +7975,7 @@
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
-		(in_bom yes)
+		(in_bom no)
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
@@ -8172,7 +8496,7 @@
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
-		(in_bom yes)
+		(in_bom no)
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
@@ -8492,7 +8816,7 @@
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
-		(in_bom yes)
+		(in_bom no)
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
@@ -8894,7 +9218,7 @@
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
-		(in_bom yes)
+		(in_bom no)
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
@@ -9049,7 +9373,7 @@
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
-		(in_bom yes)
+		(in_bom no)
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
@@ -9128,7 +9452,7 @@
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
-		(in_bom yes)
+		(in_bom no)
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
@@ -9292,7 +9616,6 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(fields_autoplaced yes)
 		(uuid "d05574dc-fa3c-4969-a413-61737cd99b27")
 		(property "Reference" "#PWR011"
 			(at 49.53 27.94 0)
@@ -9306,7 +9629,7 @@
 			)
 		)
 		(property "Value" "+5V"
-			(at 41.91 27.9399 90)
+			(at 42.164 27.94 90)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -9650,7 +9973,7 @@
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
-		(in_bom yes)
+		(in_bom no)
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
@@ -9806,7 +10129,7 @@
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
-		(in_bom yes)
+		(in_bom no)
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
@@ -9883,7 +10206,7 @@
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
-		(in_bom yes)
+		(in_bom no)
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
@@ -10322,7 +10645,7 @@
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
-		(in_bom yes)
+		(in_bom no)
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
@@ -10643,6 +10966,50 @@
 		)
 		(property "LCSC Part" "C2057371"
 			(at 67.31 77.47 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Sim.Library" "/mnt/hdd_internal/Research/HospitalForRobots/capacitance/cap_array_sim/resonant_afe.spice"
+			(at 67.31 55.88 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Sim.Name" "opa_200m"
+			(at 67.31 55.88 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Sim.Device" "SUBCKT"
+			(at 67.31 55.88 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Sim.Pins" "1=nip 2=in 3=out"
+			(at 67.31 55.88 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)

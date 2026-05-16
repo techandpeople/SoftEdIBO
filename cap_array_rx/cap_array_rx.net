@@ -1,8 +1,8 @@
 (export
 	(version "E")
 	(design
-		(source "/mnt/hdd_internal/Research/HospitalForRobots/cap_array_rx/cap_array_rx.kicad_sch")
-		(date "2026-05-12T01:56:56")
+		(source "/mnt/hdd_internal/Research/HospitalForRobots/capacitance/cap_array_rx/cap_array_rx.kicad_sch")
+		(date "2026-05-15T13:23:02")
 		(tool "Eeschema 10.0.2")
 		(sheet
 			(number "1")
@@ -2109,7 +2109,7 @@
 		)
 		(comp
 			(ref "R3")
-			(value "10 K")
+			(value "1.2 k")
 			(footprint "Resistor_SMD:R_0805_2012Metric_Pad1.20x1.40mm_HandSolder")
 			(description "Resistor")
 			(fields
@@ -2585,6 +2585,14 @@
 				(field
 					(name "LCSC Part") "C2057371")
 				(field
+					(name "Sim.Library") "/mnt/hdd_internal/Research/HospitalForRobots/capacitance/cap_array_sim/resonant_afe.spice")
+				(field
+					(name "Sim.Name") "opa_200m")
+				(field
+					(name "Sim.Device") "SUBCKT")
+				(field
+					(name "Sim.Pins") "1=nip 2=in 3=out")
+				(field
 					(name "Footprint") "EasyEDA:VSSOP-8_L3.0-W3.0-P0.65-LS5.0-BL")
 				(field
 					(name "Datasheet") "https://www.lcsc.com/datasheet/C2057371.pdf")
@@ -2608,6 +2616,22 @@
 			(property
 				(name "LCSC Part")
 				(value "C2057371")
+			)
+			(property
+				(name "Sim.Library")
+				(value "/mnt/hdd_internal/Research/HospitalForRobots/capacitance/cap_array_sim/resonant_afe.spice")
+			)
+			(property
+				(name "Sim.Name")
+				(value "opa_200m")
+			)
+			(property
+				(name "Sim.Device")
+				(value "SUBCKT")
+			)
+			(property
+				(name "Sim.Pins")
+				(value "1=nip 2=in 3=out")
 			)
 			(property
 				(name "Sheetname")
