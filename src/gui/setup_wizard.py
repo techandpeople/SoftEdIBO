@@ -30,8 +30,8 @@ GATEWAY_BIN: Path = Settings.BUNDLE / "firmware" / "gateway" / FIRMWARE_BIN_NAME
 NODE_FIRMWARES: dict[str, Path] = {
     "node_direct  (3 chambers, GPIO valves, onboard pumps)":
         Settings.BUNDLE / "firmware" / "node_direct" / FIRMWARE_BIN_NAME,
-    "node_reservoir  (up to 12 chambers + shared pressure/vacuum tanks)":
-        Settings.BUNDLE / "firmware" / "node_reservoir" / FIRMWARE_BIN_NAME,
+    "node_multiplexed  (up to 12 chambers, optional pressure/vacuum tanks)":
+        Settings.BUNDLE / "firmware" / "node_multiplexed" / FIRMWARE_BIN_NAME,
 }
 
 
@@ -74,7 +74,7 @@ class WelcomePage(QWizardPage):
             "<p>This wizard will flash the firmware to:</p>"
             "<ul>"
             "<li>The <b>ESP-NOW gateway</b></li>"
-            "<li>Each <b>node</b> (<code>node_direct</code> or <code>node_reservoir</code>)</li>"
+            "<li>Each <b>node</b> (<code>node_direct</code> or <code>node_multiplexed</code>)</li>"
             "</ul>"
             "<p>Connect each device via USB before the corresponding step.</p>"
             "<p>You can re-run this wizard at any time from <b>Tools => Flash Firmware…</b></p>"

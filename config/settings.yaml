@@ -5,14 +5,15 @@ robots:
   turtles: []
   trees: []
   thymios: []
-# Example node_reservoir entry (optional fields):
+# Example node_multiplexed entry WITH reservoirs (optional fields):
 # robots:
 #   turtles:
 #     - id: turtle_1
 #       nodes:
 #         - mac: "AA:BB:CC:DD:EE:01"
-#           node_type: "node_reservoir"
+#           node_type: "node_multiplexed"
 #           max_slots: 12
+#           has_reservoirs: true
 #           pump_inflate_count: 3
 #           pump_deflate_count: 3
 #           # Tank operating envelope (kPa, gauge):
@@ -28,6 +29,21 @@ robots:
 #             - {mac: "AA:BB:CC:DD:EE:01", slot: 0, max_pressure: 8.0}
 #             # Chambers also pulled by the vacuum tank: set min_pressure < 0.
 #             - {mac: "AA:BB:CC:DD:EE:01", slot: 1, max_pressure: 8.0, min_pressure: -3.0}
+#
+# Example node_multiplexed entry WITHOUT reservoirs (chambers only):
+# robots:
+#   trees:
+#     - id: tree_1
+#       nodes:
+#         - mac: "AA:BB:CC:DD:EE:02"
+#           node_type: "node_multiplexed"
+#           max_slots: 8
+#           has_reservoirs: false
+#       skins:
+#         - skin_id: trunk
+#           name: Trunk
+#           chambers:
+#             - {mac: "AA:BB:CC:DD:EE:02", slot: 0, max_pressure: 8.0}
 database:
   backend: sqlite
   path: data/softedibo.db

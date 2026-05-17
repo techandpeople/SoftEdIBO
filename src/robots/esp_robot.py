@@ -2,9 +2,10 @@
 
 Houses everything that's identical across TurtleRobot, TreeRobot, ThymioRobot:
   * Controller dictionary built from ``node_configs``
-  * ``configure`` push for ``node_reservoir`` nodes
+  * ``configure`` push for ``node_multiplexed`` nodes
   * Skin dictionary built from ``skin_configs``
-  * Optional pressure / vacuum reservoirs auto-derived from reservoir nodes
+  * Optional pressure / vacuum reservoirs auto-derived from multiplexed nodes
+    with ``has_reservoirs: true``
   * ``pause()`` (calls ``hold`` on every chamber)
   * ``send_command()`` dispatching to skins (inflate / deflate / set_pressure / hold)
   * ``get_status_data()`` skeleton
@@ -26,7 +27,7 @@ from src.hardware.skin import Skin
 from src.robots._robot_builder import (
     build_reservoirs,
     build_skins,
-    configure_reservoir_nodes,
+    configure_multiplexed_nodes,
 )
 from src.robots.base_robot import BaseRobot, RobotStatus
 
@@ -45,7 +46,8 @@ class EspRobot(BaseRobot):
         node_configs:      List of ``{"mac": ..., "node_type": ...}`` dicts.
         skin_configs:      List of skin dicts (see ``build_skins``).
         reservoir_configs: Optional explicit reservoir block. Auto-derived from
-                           any ``node_reservoir`` node when omitted.
+                           any ``node_multiplexed`` node with
+                           ``has_reservoirs: true`` when omitted.
     """
 
     def __init__(
@@ -67,7 +69,7 @@ class EspRobot(BaseRobot):
             self._controllers: dict[str, ESP32Controller] = {
                 n["mac"]: ESP32Controller(n["mac"], gateway) for n in nodes
             }
-            configure_reservoir_nodes(nodes, self._controllers)
+            configure_multiplexed_nodes(nodes, self._controllers)
             self._skins: dict[str, Skin] = build_skins(skins, self._controllers)
             self._reservoirs: dict[str, AirReservoir] = build_reservoirs(
                 nodes, reservoir_configs, self._controllers,

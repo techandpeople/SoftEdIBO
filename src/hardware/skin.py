@@ -1,7 +1,7 @@
 """Skin module — a logical grouping of 1-3 air chambers from a single ESP32 node.
 
 A Skin is a physical tactile piece. With the current hardware (`node_direct`
-3 chambers, `node_reservoir` up to 12 chambers) every chamber of a skin lives
+3 chambers, `node_multiplexed` up to 12 chambers) every chamber of a skin lives
 on the same ESP32 — multi-node skins are no longer a use case. The class is
 correspondingly simple: one controller, one slot list.
 
@@ -55,7 +55,7 @@ class Skin:
                 raise ValueError(
                     f"Skin {skin_id!r}: all chambers must share one controller "
                     f"(got {inp['controller'].mac_address!r} vs {self.mac!r}). "
-                    "With node_direct (3 chambers) and node_reservoir (12 chambers) "
+                    "With node_direct (3 chambers) and node_multiplexed (12 chambers) "
                     "a single skin always fits inside one node."
                 )
 

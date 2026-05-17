@@ -65,39 +65,47 @@ class ESP32Controller:
     def configure(
         self,
         num_chambers: int,
-        pump_inflate_count: int,
-        pump_deflate_count: int,
-        tank_pressure_max_kpa: float,
-        tank_vacuum_max_kpa: float,
         *,
-        tank_pressure_min_kpa: float = 0.0,
-        tank_vacuum_min_kpa: float = -50.0,
+        pump_inflate_count: int | None = None,
+        pump_deflate_count: int | None = None,
+        tank_pressure_min_kpa: float | None = None,
+        tank_pressure_max_kpa: float | None = None,
+        tank_vacuum_min_kpa: float | None = None,
+        tank_vacuum_max_kpa: float | None = None,
         pump_groups: dict[str, list[int]] | None = None,
     ) -> bool:
-        """Configure a reservoir-style node at runtime.
+        """Configure a multiplexed node at runtime.
+
+        Tank- and pump-related kwargs are optional and only included in the
+        outgoing payload when not None. A multiplexed node without reservoirs
+        only needs ``num_chambers``.
 
         Args:
             num_chambers: Active chamber count for this node.
             pump_inflate_count: Number of pumps assigned to pressure tank fill.
             pump_deflate_count: Number of pumps assigned to vacuum generation.
+            tank_pressure_min_kpa: Lowest acceptable pressure-tank reading.
             tank_pressure_max_kpa: Hard upper safety cap for pressure tank.
-            tank_vacuum_max_kpa: Highest acceptable vacuum-tank reading
-                (typically near 0 kPa or slightly above; pump turns off above).
-            tank_pressure_min_kpa: Lowest acceptable pressure-tank reading
-                (defaults to 0; below this the firmware suspects a sensor / seal fault).
             tank_vacuum_min_kpa: Hard lower safety cap for the vacuum tank
-                (typically negative — the deepest vacuum the firmware will pump to).
-            pump_groups: Optional explicit mapping, e.g. {"pressure":[1,3], "vacuum":[2,4]}.
+                (typically negative — deepest vacuum the firmware will pump to).
+            tank_vacuum_max_kpa: Highest acceptable vacuum-tank reading
+                (typically near 0; pump turns off above).
+            pump_groups: Optional explicit mapping, e.g.
+                ``{"pressure":[1,3], "vacuum":[2,4]}``.
         """
-        payload: dict[str, Any] = {
-            "num_chambers": int(num_chambers),
-            "pump_inflate_count": int(pump_inflate_count),
-            "pump_deflate_count": int(pump_deflate_count),
-            "tank_pressure_min_kpa": float(tank_pressure_min_kpa),
-            "tank_pressure_max_kpa": float(tank_pressure_max_kpa),
-            "tank_vacuum_min_kpa":   float(tank_vacuum_min_kpa),
-            "tank_vacuum_max_kpa":   float(tank_vacuum_max_kpa),
-        }
+        payload: dict[str, Any] = {"num_chambers": int(num_chambers)}
+        if pump_inflate_count is not None:
+            payload["pump_inflate_count"] = int(pump_inflate_count)
+        if pump_deflate_count is not None:
+            payload["pump_deflate_count"] = int(pump_deflate_count)
+        if tank_pressure_min_kpa is not None:
+            payload["tank_pressure_min_kpa"] = float(tank_pressure_min_kpa)
+        if tank_pressure_max_kpa is not None:
+            payload["tank_pressure_max_kpa"] = float(tank_pressure_max_kpa)
+        if tank_vacuum_min_kpa is not None:
+            payload["tank_vacuum_min_kpa"] = float(tank_vacuum_min_kpa)
+        if tank_vacuum_max_kpa is not None:
+            payload["tank_vacuum_max_kpa"] = float(tank_vacuum_max_kpa)
         if pump_groups:
             payload["pump_groups"] = pump_groups
         return self.send_command("configure", **payload)

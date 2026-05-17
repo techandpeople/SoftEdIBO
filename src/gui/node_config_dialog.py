@@ -4,11 +4,13 @@ Adds or edits a single ESP32 node entry under a robot.
 A node has three attributes: MAC address, node_type, and max_slots.
 
 Node types and their default slot counts:
-    node_direct     — 3   (fixed: 3 chambers, GPIO valves, onboard pumps)
-    node_reservoir  — 12  (default; up to 16 chambers + shared pressure/vacuum tanks)
+    node_direct       — 3   (fixed: 3 chambers, GPIO valves, onboard pumps)
+    node_multiplexed  — 12  (default; up to 16 chambers, optional shared
+                              pressure/vacuum tanks via has_reservoirs)
 """
 
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -28,7 +30,7 @@ _YAML_KEY = {"turtle": "turtles", "tree": "trees", "thymio": "thymios"}
 
 NODE_TYPES: dict[str, int] = {
     "node_direct": 3,
-    "node_reservoir": 12,
+    "node_multiplexed": 12,
 }
 
 
@@ -84,7 +86,13 @@ class NodeConfigDialog(QDialog):
         self._slots_spin = QSpinBox()
         self._slots_spin.setRange(0, 64)
         self._slots_spin.setSuffix(" slots")
-        form.addRow("Max slots:", self._slots_spin)
+        self._slots_label = QLabel("Max slots:")
+        form.addRow(self._slots_label, self._slots_spin)
+
+        # has_reservoirs checkbox (only meaningful for node_multiplexed)
+        self._reservoirs_chk = QCheckBox("Has shared pressure / vacuum reservoirs")
+        self._reservoirs_label = QLabel("Reservoirs:")
+        form.addRow(self._reservoirs_label, self._reservoirs_chk)
 
         # Note label
         self._note_lbl = QLabel()
@@ -111,6 +119,7 @@ class NodeConfigDialog(QDialog):
         if idx >= 0:
             self._type_combo.setCurrentIndex(idx)
         stored_slots = node_cfg.get("max_slots", NODE_TYPES.get(stored_type, 3))
+        self._reservoirs_chk.setChecked(bool(node_cfg.get("has_reservoirs", False)))
         self._on_type_changed(self._type_combo.currentText())
         if self._slots_spin.isEnabled():
             self._slots_spin.setValue(int(stored_slots))
@@ -140,17 +149,26 @@ class NodeConfigDialog(QDialog):
             self._slots_spin.setRange(3, 3)
             self._slots_spin.setValue(3)
             self._slots_spin.setEnabled(False)
+            self._reservoirs_chk.setChecked(False)
+            self._reservoirs_chk.setVisible(False)
+            self._reservoirs_label.setVisible(False)
         else:
             self._slots_spin.setRange(1, 16)
             self._slots_spin.setEnabled(True)
             self._slots_spin.setValue(NODE_TYPES.get(node_type, 12))
+            self._reservoirs_chk.setVisible(True)
+            self._reservoirs_label.setVisible(True)
         self._update_note()
 
     def _update_note(self) -> None:
         nt = self._type_combo.currentText()
         notes = {
             "node_direct": "3 chambers, direct ADC sensors, onboard pumps.",
-            "node_reservoir": "Default 12 chambers, shared pressure/vacuum tanks, runtime configurable.",
+            "node_multiplexed": (
+                "Up to 16 chambers (default 12). Multiplexed valves/sensors. "
+                "Optional shared pressure/vacuum tanks — enable 'Reservoirs' "
+                "and set tank limits in settings.yaml."
+            ),
         }
         self._note_lbl.setText(notes.get(nt, ""))
 
@@ -182,7 +200,16 @@ class NodeConfigDialog(QDialog):
                     )
                     return
 
-        node_entry: dict = {"mac": mac, "node_type": node_type, "max_slots": max_slots}
+        # Preserve any extra fields (tank kpa, pump counts, ...) from the
+        # existing entry so YAML-only edits aren't lost when saving from the UI.
+        node_entry: dict = dict(self._load_node_cfg())
+        node_entry.update(
+            {"mac": mac, "node_type": node_type, "max_slots": max_slots}
+        )
+        if node_type == "node_multiplexed":
+            node_entry["has_reservoirs"] = bool(self._reservoirs_chk.isChecked())
+        else:
+            node_entry.pop("has_reservoirs", None)
 
         data = self._settings.data
         robots_list = (
