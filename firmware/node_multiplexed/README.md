@@ -1,11 +1,13 @@
-# node_reservoir firmware
+# node_multiplexed firmware
 
-ESP32-WROOM-32 firmware for the multi-chamber reservoir node:
+ESP32-WROOM-32 firmware for the multiplexed multi-chamber node:
 
 - Up to 12 chambers (inflate/deflate valves via 2x PCA9685 + 3x ULN2803A)
-- Shared pressure and vacuum tanks
-- 6 pumps (3x DRV3297)
 - 16-channel sensor mux (74HC4067)
+- Optional shared pressure and vacuum tanks (enabled via the gateway's
+  `configure` command with `has_reservoirs: true`; otherwise the node runs
+  as a chambers-only multiplexed valve driver)
+- Up to 6 pumps (3x DRV3297)
 
 ## Build
 

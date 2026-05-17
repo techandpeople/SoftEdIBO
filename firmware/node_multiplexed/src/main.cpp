@@ -514,7 +514,7 @@ void setup() {
     autodetect();
     pca_valves::closeAllValves();
     pumps::stopAll();
-    LOG("{\"status\":\"node_reservoir_ready\"}\n");
+    LOG("{\"status\":\"node_multiplexed_ready\"}\n");
 }
 
 void loop() {

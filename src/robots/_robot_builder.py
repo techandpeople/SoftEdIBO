@@ -15,18 +15,22 @@ from src.hardware.skin import Skin
 logger = logging.getLogger(__name__)
 
 
-def configure_reservoir_nodes(
+def configure_multiplexed_nodes(
     node_configs: list[dict[str, Any]],
     controllers: dict[str, Any],
 ) -> None:
-    """Send runtime `configure` to every node_reservoir controller.
+    """Send runtime `configure` to every node_multiplexed controller.
 
-    The reservoir firmware is runtime-sized by gateway config. This helper keeps
-    chamber sizing and tank safety limits in one place and ensures safe defaults
-    are pushed at connect time.
+    The multiplexed firmware is runtime-sized by gateway config. This helper
+    keeps chamber sizing and tank safety limits in one place and ensures safe
+    defaults are pushed at connect time.
+
+    Tank limits and pump groups are only included when the node config has
+    ``has_reservoirs: true`` — multiplexed nodes without reservoirs only
+    receive ``num_chambers``.
     """
     for node_cfg in node_configs:
-        if node_cfg.get("node_type") != "node_reservoir":
+        if node_cfg.get("node_type") != "node_multiplexed":
             continue
         mac = node_cfg.get("mac", "")
         ctrl = controllers.get(mac)
@@ -34,6 +38,11 @@ def configure_reservoir_nodes(
             continue
 
         max_slots = max(1, min(int(node_cfg.get("max_slots", 12)), 16))
+
+        if not node_cfg.get("has_reservoirs", False):
+            ctrl.configure(num_chambers=max_slots)
+            continue
+
         pump_inflate_count = max(0, min(int(node_cfg.get("pump_inflate_count", 3)), 6))
         pump_deflate_count = max(0, min(int(node_cfg.get("pump_deflate_count", 3)), 6))
         tank_pressure_min_kpa = float(node_cfg.get("tank_pressure_min_kpa", 0.0))
@@ -149,9 +158,12 @@ def build_reservoirs(
                 pump_count=int(cfg.get("pump_count", 1)),
             )
 
-    # Auto-derive internal shared reservoirs from node_reservoir nodes.
+    # Auto-derive internal shared reservoirs from node_multiplexed nodes that
+    # have has_reservoirs: true.
     for node_cfg in node_configs:
-        if node_cfg.get("node_type") != "node_reservoir":
+        if node_cfg.get("node_type") != "node_multiplexed":
+            continue
+        if not node_cfg.get("has_reservoirs", False):
             continue
         mac = node_cfg.get("mac", "")
         ctrl = controllers.get(mac)

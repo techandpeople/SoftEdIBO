@@ -106,9 +106,9 @@ jobs:
             0x8000 .pio/build/${{ steps.fw-env.outputs.env }}/partitions.bin \
             0x10000 .pio/build/${{ steps.fw-env.outputs.env }}/firmware.bin
 
-      - name: Build node_reservoir firmware (${{ steps.fw-env.outputs.env }})
+      - name: Build node_multiplexed firmware (${{ steps.fw-env.outputs.env }})
         run: |
-          cd firmware/node_reservoir
+          cd firmware/node_multiplexed
           python -m platformio run -e ${{ steps.fw-env.outputs.env }}
           python -m esptool --chip esp32 merge_bin \
             --flash_mode dio --flash_freq 40m --flash_size 4MB \
@@ -126,7 +126,7 @@ jobs:
           mkdir -p firmware-binaries
           cp firmware/gateway/firmware.bin        firmware-binaries/gateway.bin
           cp firmware/node_direct/firmware.bin     firmware-binaries/node_direct.bin
-          cp firmware/node_reservoir/firmware.bin           firmware-binaries/node_reservoir.bin
+          cp firmware/node_multiplexed/firmware.bin           firmware-binaries/node_multiplexed.bin
 
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v4
@@ -290,10 +290,10 @@ jobs:
             0x8000 .pio/build/${{ steps.fw-env.outputs.env }}/partitions.bin \
             0x10000 .pio/build/${{ steps.fw-env.outputs.env }}/firmware.bin
 
-      - name: Build node_reservoir firmware (${{ steps.fw-env.outputs.env }})
+      - name: Build node_multiplexed firmware (${{ steps.fw-env.outputs.env }})
         shell: bash
         run: |
-          cd firmware/node_reservoir
+          cd firmware/node_multiplexed
           python -m platformio run -e ${{ steps.fw-env.outputs.env }}
           python -m esptool --chip esp32 merge_bin \
             --flash_mode dio --flash_freq 40m --flash_size 4MB \
@@ -308,7 +308,7 @@ jobs:
           mkdir -p firmware-binaries
           cp firmware/gateway/firmware.bin                    firmware-binaries/gateway.bin
           cp firmware/node_direct/firmware.bin                firmware-binaries/node_direct.bin
-          cp firmware/node_reservoir/firmware.bin             firmware-binaries/node_reservoir.bin
+          cp firmware/node_multiplexed/firmware.bin             firmware-binaries/node_multiplexed.bin
 
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v4
@@ -455,4 +455,4 @@ jobs:
             |------|-----------|-------------|
             | `gateway.bin` | Gateway | USB–ESP-NOW bridge |
             | `node_direct.bin` | `node_direct` | 3 chambers, direct sensors/valves, onboard pumps |
-            | `node_reservoir.bin` | `node_reservoir` | Up to 12 chambers, shared pressure/vacuum tanks, runtime-sized |
+            | `node_multiplexed.bin` | `node_multiplexed` | Up to 12 chambers, multiplexed valves/sensors, optional shared pressure/vacuum tanks, runtime-sized |

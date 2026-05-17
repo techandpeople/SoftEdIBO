@@ -1,9 +1,10 @@
 #pragma once
 
 // ---------------------------------------------------------------------------
-// SoftEdIBO node_reservoir — Pin definitions
+// SoftEdIBO node_multiplexed — Pin definitions
 //
-// Up to 12 chambers + shared positive/vacuum reservoir tanks. Sensor reading
+// Up to 12 chambers, with optional shared positive/vacuum reservoir tanks.
+// Sensor reading
 // goes through a 74HC4067 16-channel analog mux. Valves are driven by 2×
 // PCA9685 I²C PWM expanders feeding 3× ULN2803A Darlington arrays (24 outputs
 // total, labelled UNL1..UNL24 on the schematic). Pumps (6×) go through 3×

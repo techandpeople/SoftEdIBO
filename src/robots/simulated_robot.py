@@ -131,7 +131,7 @@ class SimulatedRobot(BaseRobot):
         skin = self._skins.get(kwargs.get("skin", ""))
         if skin is None:
             return False
-        idx = kwargs.get("slot")
+        idx: int = kwargs.get("slot", 0)
         if command == "set_pressure":
             return skin.set_pressure(idx, kwargs.get("value", 100))
         if command == "inflate":
