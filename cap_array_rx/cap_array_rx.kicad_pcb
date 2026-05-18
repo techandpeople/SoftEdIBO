@@ -1011,13 +1011,13 @@
 		(embedded_fonts no)
 		(model "${KIPRJMOD}/EasyEDA.3dshapes/PH2.0-LI-4P.wrl"
 			(offset
-				(xyz 0 0 0)
+				(xyz 0 1.25 0)
 			)
 			(scale
 				(xyz 1 1 1)
 			)
 			(rotate
-				(xyz 0 0 180)
+				(xyz -0 -0 180)
 			)
 		)
 	)
@@ -6964,6 +6964,7 @@
 			(effects
 				(font
 					(size 1.27 1.27)
+					(thickness 0.15)
 				)
 			)
 		)
@@ -7208,13 +7209,13 @@
 		(embedded_fonts no)
 		(model "${KIPRJMOD}/EasyEDA.3dshapes/PH2.0-LI-4P.wrl"
 			(offset
-				(xyz 0 0 0)
+				(xyz 0 1.25 0)
 			)
 			(scale
 				(xyz 1 1 1)
 			)
 			(rotate
-				(xyz 0 0 180)
+				(xyz -0 -0 180)
 			)
 		)
 	)
