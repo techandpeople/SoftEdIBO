@@ -52,6 +52,12 @@ static void onSent(const uint8_t*, esp_now_send_status_t status) {
 #endif
 
 static void onReceived(const uint8_t* mac_addr, const uint8_t* data, int len) {
+    DBG_PRINT("RX %02X:%02X:%02X:%02X:%02X:%02X (%d) ",
+              mac_addr[0], mac_addr[1], mac_addr[2],
+              mac_addr[3], mac_addr[4], mac_addr[5], len);
+    for (int i = 0; i < len; i++) DBG_PRINT("%c", (char)data[i]);
+    DBG_PRINTLN("");
+
     if (!commands::gatewayKnown) {
         memcpy(commands::gatewayMac, mac_addr, 6);
         commands::gatewayKnown = true;
@@ -69,16 +75,14 @@ static void onReceived(const uint8_t* mac_addr, const uint8_t* data, int len) {
 // ---------------------------------------------------------------------------
 
 void setup() {
-#ifdef DEBUG_BUILD
     Serial.begin(115200);
-#endif
 
     chambers::hardware_init();
 
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
     if (esp_now_init() != ESP_OK) {
-        DBG_PRINTLN(F("{\"error\":\"esp_now_init_failed\"}"));
+        LOG("{\"error\":\"esp_now_init_failed\"}\n");
         return;
     }
 #ifdef DEBUG_BUILD
@@ -89,7 +93,21 @@ void setup() {
     for (int i = 0; i < NUM_CHAMBERS; i++)
         chambers::cachedKpa[i] = pressure::readKpa(PSENSOR_PINS[i]);
 
-    DBG_PRINTLN(F("{\"status\":\"node_direct_ready\"}"));
+    // Broadcast the ready message so the gateway can forward it to the PC
+    // even before the node has received its first command (and therefore
+    // doesn't yet know the gateway's MAC).
+    static const uint8_t broadcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    esp_now_peer_info_t bcast_peer{};
+    memcpy(bcast_peer.peer_addr, broadcast, 6);
+    bcast_peer.channel = 0;
+    bcast_peer.encrypt = false;
+    esp_now_add_peer(&bcast_peer);
+
+    static const char ready_msg[] = "{\"status\":\"node_direct_ready\"}";
+    esp_now_send(broadcast, reinterpret_cast<const uint8_t*>(ready_msg),
+                 sizeof(ready_msg) - 1);
+
+    LOG("%s\n", ready_msg);
 }
 
 void loop() {

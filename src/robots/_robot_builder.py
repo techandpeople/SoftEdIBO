@@ -50,6 +50,15 @@ def configure_multiplexed_nodes(
         tank_vacuum_min_kpa   = float(node_cfg.get("tank_vacuum_min_kpa", -50.0))
         tank_vacuum_max_kpa   = float(node_cfg.get("tank_vacuum_max_kpa", 0.0))
 
+        # Operational set-point: take from YAML if present, otherwise default
+        # to the midpoint of [min, max] so the bombas têm para onde trabalhar.
+        tank_pressure_target_kpa = float(node_cfg.get(
+            "tank_pressure_target_kpa",
+            (tank_pressure_min_kpa + tank_pressure_max_kpa) / 2.0))
+        tank_vacuum_target_kpa = float(node_cfg.get(
+            "tank_vacuum_target_kpa",
+            (tank_vacuum_min_kpa + tank_vacuum_max_kpa) / 2.0))
+
         pressure_group = list(range(1, pump_inflate_count + 1))
         vacuum_start = pump_inflate_count + 1
         vacuum_end = min(vacuum_start + pump_deflate_count - 1, 6)
@@ -61,8 +70,10 @@ def configure_multiplexed_nodes(
             pump_deflate_count=pump_deflate_count,
             tank_pressure_min_kpa=tank_pressure_min_kpa,
             tank_pressure_max_kpa=tank_pressure_max_kpa,
+            tank_pressure_target_kpa=tank_pressure_target_kpa,
             tank_vacuum_min_kpa=tank_vacuum_min_kpa,
             tank_vacuum_max_kpa=tank_vacuum_max_kpa,
+            tank_vacuum_target_kpa=tank_vacuum_target_kpa,
             pump_groups={"pressure": pressure_group, "vacuum": vacuum_group},
         )
 

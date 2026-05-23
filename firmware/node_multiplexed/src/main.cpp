@@ -220,18 +220,15 @@ void parseAndQueue(const uint8_t* data, int len) {
     } else if (strcmp(cmd, "hold") == 0) {
         c.type = cmd_queue::CMD_HOLD;
         c.chamber = doc["chamber"] | -1;
-    } else if (strcmp(cmd, "set_tank_pressure") == 0) {
-        c.type = cmd_queue::CMD_SET_TANK_PRESSURE;
-        const char* kind = doc["kind"] | "pressure";
-        c.chamber = (strcmp(kind, "vacuum") == 0) ? 1 : 0;
-        c.param_kpa = doc["value"] | 0.0f;
     } else if (strcmp(cmd, "configure") == 0) {
         c.type = cmd_queue::CMD_CONFIGURE;
         c.cfg_chambers = doc["num_chambers"] | config::state.num_chambers;
-        c.cfg_p_min = doc["tank_pressure_min_kpa"] | config::state.tank_pressure_min_kpa;
-        c.cfg_p_max = doc["tank_pressure_max_kpa"] | config::state.tank_pressure_max_kpa;
-        c.cfg_v_min = doc["tank_vacuum_min_kpa"]   | config::state.tank_vacuum_min_kpa;
-        c.cfg_v_max = doc["tank_vacuum_max_kpa"]   | config::state.tank_vacuum_max_kpa;
+        c.cfg_p_min    = doc["tank_pressure_min_kpa"]    | config::state.tank_pressure_min_kpa;
+        c.cfg_p_max    = doc["tank_pressure_max_kpa"]    | config::state.tank_pressure_max_kpa;
+        c.cfg_v_min    = doc["tank_vacuum_min_kpa"]      | config::state.tank_vacuum_min_kpa;
+        c.cfg_v_max    = doc["tank_vacuum_max_kpa"]      | config::state.tank_vacuum_max_kpa;
+        c.cfg_p_target = doc["tank_pressure_target_kpa"] | config::state.tank_pressure_target_kpa;
+        c.cfg_v_target = doc["tank_vacuum_target_kpa"]   | config::state.tank_vacuum_target_kpa;
 
         int inflate_count = constrain((int)(doc["pump_inflate_count"] | 0), 0, NUM_PUMPS);
         int deflate_count = constrain((int)(doc["pump_deflate_count"] | 0), 0, NUM_PUMPS);
@@ -306,6 +303,10 @@ void processCommand(const cmd_queue::Cmd& c) {
         config::state.tank_pressure_max_kpa = constrain(c.cfg_p_max, config::state.tank_pressure_min_kpa + 0.1f, config::HARD_TANK_MAX_KPA);
         config::state.tank_vacuum_min_kpa   = constrain(c.cfg_v_min, config::HARD_TANK_MIN_KPA, config::HARD_TANK_MAX_KPA);
         config::state.tank_vacuum_max_kpa   = constrain(c.cfg_v_max, config::state.tank_vacuum_min_kpa + 0.1f, config::HARD_TANK_MAX_KPA);
+        config::state.tank_pressure_target_kpa = constrain(c.cfg_p_target,
+            config::state.tank_pressure_min_kpa, config::state.tank_pressure_max_kpa);
+        config::state.tank_vacuum_target_kpa   = constrain(c.cfg_v_target,
+            config::state.tank_vacuum_min_kpa,   config::state.tank_vacuum_max_kpa);
         if (c.cfg_pressure_mask || c.cfg_vacuum_mask) {
             applyPumpGroups(c.cfg_pressure_mask, c.cfg_vacuum_mask);
         }
@@ -315,21 +316,6 @@ void processCommand(const cmd_queue::Cmd& c) {
 
     if (!configured) {
         sendError("not_configured");
-        return;
-    }
-
-    if (c.type == CMD_SET_TANK_PRESSURE) {
-        if (c.chamber == 0) {
-            config::state.tank_pressure_target_kpa = constrain(
-                c.param_kpa,
-                config::state.tank_pressure_min_kpa,
-                config::state.tank_pressure_max_kpa);
-        } else {
-            config::state.tank_vacuum_target_kpa = constrain(
-                c.param_kpa,
-                config::state.tank_vacuum_min_kpa,
-                config::state.tank_vacuum_max_kpa);
-        }
         return;
     }
 
@@ -463,6 +449,12 @@ void chamberControlStep(uint32_t now) {
 }
 
 void onReceived(const uint8_t* mac_addr, const uint8_t* data, int len) {
+    DBG_PRINT("RX %02X:%02X:%02X:%02X:%02X:%02X (%d) ",
+              mac_addr[0], mac_addr[1], mac_addr[2],
+              mac_addr[3], mac_addr[4], mac_addr[5], len);
+    for (int i = 0; i < len; i++) DBG_PRINT("%c", (char)data[i]);
+    DBG_PRINTLN("");
+
     if (!gatewayKnown) {
         memcpy(gatewayMac, mac_addr, 6);
         gatewayKnown = true;
@@ -499,7 +491,7 @@ void setup() {
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
     if (esp_now_init() != ESP_OK) {
-        LOG("ERROR: esp_now_init_failed\n");
+        LOG("{\"error\":\"esp_now_init_failed\"}\n");
         config::state.error = true;
         return;
     }
@@ -514,7 +506,22 @@ void setup() {
     autodetect();
     pca_valves::closeAllValves();
     pumps::stopAll();
-    LOG("{\"status\":\"node_multiplexed_ready\"}\n");
+
+    // Broadcast the ready message so the gateway can forward it to the PC
+    // even before the node has received its first command (and therefore
+    // doesn't yet know the gateway's MAC).
+    static const uint8_t broadcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    esp_now_peer_info_t bcast_peer{};
+    memcpy(bcast_peer.peer_addr, broadcast, 6);
+    bcast_peer.channel = 0;
+    bcast_peer.encrypt = false;
+    esp_now_add_peer(&bcast_peer);
+
+    static const char ready_msg[] = "{\"status\":\"node_multiplexed_ready\"}";
+    esp_now_send(broadcast, reinterpret_cast<const uint8_t*>(ready_msg),
+                 sizeof(ready_msg) - 1);
+
+    LOG("%s\n", ready_msg);
 }
 
 void loop() {
