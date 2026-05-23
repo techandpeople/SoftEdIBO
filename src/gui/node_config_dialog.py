@@ -14,7 +14,9 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QDoubleSpinBox,
     QFormLayout,
+    QGroupBox,
     QLabel,
     QLineEdit,
     QMessageBox,
@@ -93,6 +95,11 @@ class NodeConfigDialog(QDialog):
         self._reservoirs_chk = QCheckBox("Has shared pressure / vacuum reservoirs")
         self._reservoirs_label = QLabel("Reservoirs:")
         form.addRow(self._reservoirs_label, self._reservoirs_chk)
+        self._reservoirs_chk.toggled.connect(self._update_tank_visibility)
+
+        # Tank group — visible only when node_multiplexed + has_reservoirs
+        self._tank_group = self._build_tank_group()
+        layout.addWidget(self._tank_group)
 
         # Note label
         self._note_lbl = QLabel()
@@ -120,6 +127,9 @@ class NodeConfigDialog(QDialog):
             self._type_combo.setCurrentIndex(idx)
         stored_slots = node_cfg.get("max_slots", NODE_TYPES.get(stored_type, 3))
         self._reservoirs_chk.setChecked(bool(node_cfg.get("has_reservoirs", False)))
+        for key, spin in self._tank_spins.items():
+            if key in node_cfg:
+                spin.setValue(float(node_cfg[key]))
         self._on_type_changed(self._type_combo.currentText())
         if self._slots_spin.isEnabled():
             self._slots_spin.setValue(int(stored_slots))
@@ -128,6 +138,81 @@ class NodeConfigDialog(QDialog):
         self._save_btn.clicked.connect(self._on_save)
         self._cancel_btn.clicked.connect(self.reject)
         self._delete_btn.clicked.connect(self._on_delete)
+
+    # ------------------------------------------------------------------
+    # Tank limit / target widgets
+    # ------------------------------------------------------------------
+
+    # (name, attribute, default, kPa range)
+    # Hard caps mirror firmware's config::HARD_TANK_{MIN,MAX}_KPA (±80 kPa).
+    _TANK_FIELDS = (
+        ("Pressure tank min (kPa)",    "tank_pressure_min_kpa",      0.0, (-80.0, 80.0)),
+        ("Pressure tank max (kPa)",    "tank_pressure_max_kpa",     50.0, (-80.0, 80.0)),
+        ("Pressure tank target (kPa)", "tank_pressure_target_kpa",  25.0, (-80.0, 80.0)),
+        ("Vacuum tank min (kPa)",      "tank_vacuum_min_kpa",      -50.0, (-80.0, 80.0)),
+        ("Vacuum tank max (kPa)",      "tank_vacuum_max_kpa",        0.0, (-80.0, 80.0)),
+        ("Vacuum tank target (kPa)",   "tank_vacuum_target_kpa",   -25.0, (-80.0, 80.0)),
+    )
+
+    def _build_tank_group(self) -> QGroupBox:
+        group = QGroupBox("Reservoir limits (kPa)")
+        form = QFormLayout(group)
+        self._tank_spins: dict[str, QDoubleSpinBox] = {}
+        for label, key, default, (lo, hi) in self._TANK_FIELDS:
+            spin = QDoubleSpinBox()
+            spin.setRange(lo, hi)
+            spin.setDecimals(1)
+            spin.setSingleStep(0.5)
+            spin.setSuffix(" kPa")
+            spin.setValue(default)
+            form.addRow(label + ":", spin)
+            self._tank_spins[key] = spin
+        return group
+
+    def _update_tank_visibility(self) -> None:
+        is_multiplexed = self._type_combo.currentText() == "node_multiplexed"
+        has_reservoirs = self._reservoirs_chk.isChecked()
+        self._tank_group.setVisible(is_multiplexed and has_reservoirs)
+
+    def _apply_tank_fields(self, node_entry: dict, node_type: str) -> bool:
+        """Validate + write the tank fields into ``node_entry``.
+
+        Returns False if validation fails (caller should abort the save).
+        """
+        if node_type != "node_multiplexed":
+            node_entry.pop("has_reservoirs", None)
+            for key in self._tank_spins:
+                node_entry.pop(key, None)
+            return True
+
+        has_reservoirs = bool(self._reservoirs_chk.isChecked())
+        node_entry["has_reservoirs"] = has_reservoirs
+
+        if not has_reservoirs:
+            for key in self._tank_spins:
+                node_entry.pop(key, None)
+            return True
+
+        p_min = self._tank_spins["tank_pressure_min_kpa"].value()
+        p_max = self._tank_spins["tank_pressure_max_kpa"].value()
+        v_min = self._tank_spins["tank_vacuum_min_kpa"].value()
+        v_max = self._tank_spins["tank_vacuum_max_kpa"].value()
+        if p_min >= p_max:
+            QMessageBox.warning(
+                self, "Invalid pressure tank range",
+                "Pressure tank min must be less than max.",
+            )
+            return False
+        if v_min >= v_max:
+            QMessageBox.warning(
+                self, "Invalid vacuum tank range",
+                "Vacuum tank min must be less than max.",
+            )
+            return False
+
+        for key, spin in self._tank_spins.items():
+            node_entry[key] = float(spin.value())
+        return True
 
     # ------------------------------------------------------------------
     # Helpers
@@ -158,6 +243,7 @@ class NodeConfigDialog(QDialog):
             self._slots_spin.setValue(NODE_TYPES.get(node_type, 12))
             self._reservoirs_chk.setVisible(True)
             self._reservoirs_label.setVisible(True)
+        self._update_tank_visibility()
         self._update_note()
 
     def _update_note(self) -> None:
@@ -206,10 +292,8 @@ class NodeConfigDialog(QDialog):
         node_entry.update(
             {"mac": mac, "node_type": node_type, "max_slots": max_slots}
         )
-        if node_type == "node_multiplexed":
-            node_entry["has_reservoirs"] = bool(self._reservoirs_chk.isChecked())
-        else:
-            node_entry.pop("has_reservoirs", None)
+        if not self._apply_tank_fields(node_entry, node_type):
+            return
 
         data = self._settings.data
         robots_list = (
