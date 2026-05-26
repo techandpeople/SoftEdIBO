@@ -16,11 +16,13 @@ robots:
 #           has_reservoirs: true
 #           pump_inflate_count: 3
 #           pump_deflate_count: 3
-#           # Tank operating envelope (kPa, gauge):
-#           tank_pressure_min_kpa: 0.0    # never below ambient
-#           tank_pressure_max_kpa: 50.0   # hard upper cap
-#           tank_vacuum_min_kpa:  -50.0   # deepest vacuum the firmware will pull to
-#           tank_vacuum_max_kpa:   0.0    # never above ambient (broken seal otherwise)
+#           # Tank operating envelope (kPa, gauge). All optional.
+#           tank_pressure_min_kpa:    0.0  # never below ambient
+#           tank_pressure_max_kpa:   50.0  # hard upper cap
+#           tank_pressure_target_kpa: 25.0 # operational set-point (defaults to (min+max)/2)
+#           tank_vacuum_min_kpa:    -50.0  # deepest vacuum the firmware will pull to
+#           tank_vacuum_max_kpa:      0.0  # never above ambient (broken seal otherwise)
+#           tank_vacuum_target_kpa: -25.0  # operational set-point (defaults to (min+max)/2)
 #       skins:
 #         - skin_id: belly
 #           name: Belly

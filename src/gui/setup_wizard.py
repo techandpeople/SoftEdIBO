@@ -6,6 +6,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QProcess, QProcessEnvironment
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QHBoxLayout,
     QLabel,
@@ -21,17 +22,22 @@ from src.config.settings import Settings
 from src.hardware.serial_ports import list_esp32_ports
 
 SENTINEL_PATH: Path = Settings.ROOT / "data" / ".setup_done"
-FIRMWARE_BIN_NAME = "firmware.bin"
 SKIP_STEP_LABEL = "Skip this step"
 # Read-only bundled assets live in BUNDLE (_internal/ when frozen, repo root in dev)
-GATEWAY_BIN: Path = Settings.BUNDLE / "firmware" / "gateway" / FIRMWARE_BIN_NAME
+GATEWAY_BIN: Path = Settings.BUNDLE / "firmware" / "gateway" / "firmware.bin"
 
-# Available node firmware binaries, keyed by display label
-NODE_FIRMWARES: dict[str, Path] = {
-    "node_direct  (3 chambers, GPIO valves, onboard pumps)":
-        Settings.BUNDLE / "firmware" / "node_direct" / FIRMWARE_BIN_NAME,
-    "node_multiplexed  (up to 12 chambers, optional pressure/vacuum tanks)":
-        Settings.BUNDLE / "firmware" / "node_multiplexed" / FIRMWARE_BIN_NAME,
+# Available node firmware binaries, keyed by display label.
+# Each entry holds release + debug variants; the wizard exposes a checkbox to
+# pick the debug build (verbose Serial output, see firmware/.../dbg.h).
+NODE_FIRMWARES: dict[str, dict[str, Path]] = {
+    "node_direct  (3 chambers, GPIO valves, onboard pumps)": {
+        "release": Settings.BUNDLE / "firmware" / "node_direct" / "firmware-release.bin",
+        "debug":   Settings.BUNDLE / "firmware" / "node_direct" / "firmware-debug.bin",
+    },
+    "node_multiplexed  (up to 12 chambers, optional pressure/vacuum tanks)": {
+        "release": Settings.BUNDLE / "firmware" / "node_multiplexed" / "firmware-release.bin",
+        "debug":   Settings.BUNDLE / "firmware" / "node_multiplexed" / "firmware-debug.bin",
+    },
 }
 
 
@@ -43,7 +49,7 @@ def _esptool_cmd(port: str, firmware: Path) -> tuple[str, list[str]]:
     the current Python interpreter.
     """
     flash_args = ["--chip", "esp32", "--port", port, "--baud", "921600",
-                  "write-flash", "0x0", str(firmware)]
+                  "write_flash", "0x0", str(firmware)]
     if getattr(sys, "frozen", False):
         suffix = ".exe" if sys.platform == "win32" else ""
         esptool_bin = Path(sys.executable).parent / f"esptool{suffix}"
@@ -161,7 +167,7 @@ class _FlashPage(QWizardPage):
         if not self._firmware.exists():
             self._log.appendPlainText(
                 f"Firmware binary not found:\n  {self._firmware}\n\n"
-                "Place the compiled firmware.bin file there and try again."
+                f"Place the compiled {self._firmware.name} file there and try again."
             )
             return
 
@@ -233,11 +239,11 @@ class FlashNodePage(_FlashPage):
     """Flash page for nodes; lets the user pick node type and flash multiple units."""
 
     def __init__(self):
-        first_bin = next(iter(NODE_FIRMWARES.values()))
+        first_label = next(iter(NODE_FIRMWARES))
         super().__init__(
             "Flash Node Firmware",
             "Select the node type, connect it via USB, then click Flash.",
-            first_bin,
+            NODE_FIRMWARES[first_label]["release"],
         )
 
         layout: QVBoxLayout = self.layout()  # type: ignore[assignment]
@@ -254,6 +260,11 @@ class FlashNodePage(_FlashPage):
         type_row.addStretch()
         layout.insertLayout(0, type_row)
 
+        # Debug-build checkbox — switches to the firmware-debug.bin variant.
+        self._debug_check = QCheckBox("Debug build (verbose Serial output)")
+        self._debug_check.toggled.connect(self._update_firmware_path)
+        layout.insertWidget(1, self._debug_check)
+
         # "Flash another node" button — enabled after each successful flash
         self._another_btn = QPushButton("Flash Another Node")
         self._another_btn.clicked.connect(self._reset_for_another)
@@ -261,8 +272,12 @@ class FlashNodePage(_FlashPage):
         # Insert before the log (last widget)
         layout.insertWidget(layout.count() - 1, self._another_btn)
 
-    def _on_type_changed(self, label: str) -> None:
-        self._firmware = NODE_FIRMWARES[label]
+    def _on_type_changed(self, _label: str) -> None:
+        self._update_firmware_path()
+
+    def _update_firmware_path(self) -> None:
+        variant = "debug" if self._debug_check.isChecked() else "release"
+        self._firmware = NODE_FIRMWARES[self._type_combo.currentText()][variant]
 
     def _on_finished(self, exit_code: int, exit_status) -> None:
         super()._on_finished(exit_code, exit_status)

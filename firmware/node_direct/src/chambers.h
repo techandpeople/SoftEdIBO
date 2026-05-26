@@ -1,6 +1,7 @@
 #pragma once
 #include <Arduino.h>
 #include "pins.h"
+#include "dbg.h"
 
 // Per-chamber state machine + valve/pump coordination for node_direct.
 // Pumps are shared: any chamber inflating runs PUMP1, any deflating runs PUMP2.
@@ -40,6 +41,8 @@ inline float   cachedKpa[NUM_CHAMBERS] = {};
 // ---------------------------------------------------------------------------
 
 inline void setValve(int ch, int side, bool open) {
+    DBG_PRINT("VALVE ch=%d %s %s\n",
+              ch, side == 0 ? "inflate" : "deflate", open ? "OPEN" : "close");
     digitalWrite(VALVE_PINS[ch * 2 + side], open ? HIGH : LOW);
 }
 
@@ -51,6 +54,14 @@ inline void recalcPumps() {
             maxDuty = max(maxDuty, state[i].duty);
         if (state[i].state == DEFLATING)
             anyDeflate = true;
+    }
+    static uint8_t lastInflateDuty = 0xFF;
+    static bool    lastDeflateOn   = true;
+    if (maxDuty != lastInflateDuty || anyDeflate != lastDeflateOn) {
+        DBG_PRINT("PUMPS inflate_duty=%u deflate=%s\n",
+                  maxDuty, anyDeflate ? "ON" : "off");
+        lastInflateDuty = maxDuty;
+        lastDeflateOn   = anyDeflate;
     }
     ledcWrite(PUMP1_LEDC_CH, maxDuty);
     ledcWrite(PUMP2_LEDC_CH, anyDeflate ? 255 : 0);

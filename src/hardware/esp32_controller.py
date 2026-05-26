@@ -70,8 +70,10 @@ class ESP32Controller:
         pump_deflate_count: int | None = None,
         tank_pressure_min_kpa: float | None = None,
         tank_pressure_max_kpa: float | None = None,
+        tank_pressure_target_kpa: float | None = None,
         tank_vacuum_min_kpa: float | None = None,
         tank_vacuum_max_kpa: float | None = None,
+        tank_vacuum_target_kpa: float | None = None,
         pump_groups: dict[str, list[int]] | None = None,
     ) -> bool:
         """Configure a multiplexed node at runtime.
@@ -86,10 +88,14 @@ class ESP32Controller:
             pump_deflate_count: Number of pumps assigned to vacuum generation.
             tank_pressure_min_kpa: Lowest acceptable pressure-tank reading.
             tank_pressure_max_kpa: Hard upper safety cap for pressure tank.
+            tank_pressure_target_kpa: Operational set-point for the pressure
+                tank (kPa). Firmware clamps it inside [min, max].
             tank_vacuum_min_kpa: Hard lower safety cap for the vacuum tank
                 (typically negative — deepest vacuum the firmware will pump to).
             tank_vacuum_max_kpa: Highest acceptable vacuum-tank reading
                 (typically near 0; pump turns off above).
+            tank_vacuum_target_kpa: Operational set-point for the vacuum tank
+                (kPa, typically negative). Firmware clamps it inside [min, max].
             pump_groups: Optional explicit mapping, e.g.
                 ``{"pressure":[1,3], "vacuum":[2,4]}``.
         """
@@ -102,17 +108,17 @@ class ESP32Controller:
             payload["tank_pressure_min_kpa"] = float(tank_pressure_min_kpa)
         if tank_pressure_max_kpa is not None:
             payload["tank_pressure_max_kpa"] = float(tank_pressure_max_kpa)
+        if tank_pressure_target_kpa is not None:
+            payload["tank_pressure_target_kpa"] = float(tank_pressure_target_kpa)
         if tank_vacuum_min_kpa is not None:
             payload["tank_vacuum_min_kpa"] = float(tank_vacuum_min_kpa)
         if tank_vacuum_max_kpa is not None:
             payload["tank_vacuum_max_kpa"] = float(tank_vacuum_max_kpa)
+        if tank_vacuum_target_kpa is not None:
+            payload["tank_vacuum_target_kpa"] = float(tank_vacuum_target_kpa)
         if pump_groups:
             payload["pump_groups"] = pump_groups
         return self.send_command("configure", **payload)
-
-    def set_tank_pressure(self, kind: str, kpa: float) -> bool:
-        """Set pressure or vacuum tank target pressure in kPa."""
-        return self.send_command("set_tank_pressure", kind=kind, value=float(kpa))
 
     def debug(self) -> bool:
         """Request a debug snapshot from the node (debug firmware only)."""

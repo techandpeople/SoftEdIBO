@@ -68,15 +68,13 @@ class AirReservoir:
 
     @property
     def target_kpa(self) -> float:
-        """Configured target pressure for this tank in kPa."""
-        return self._target_kpa
+        """Configured target pressure for this tank in kPa.
 
-    @target_kpa.setter
-    def target_kpa(self, value: float) -> None:
-        target = max(0.0, float(value))
-        if hasattr(self._controller, "set_tank_pressure"):
-            if self._controller.set_tank_pressure(self.kind, target):
-                self._target_kpa = target
+        Read-only — the target is set once at session start via the node's
+        ``configure`` command (see ESP32Controller.configure). To change it,
+        update the YAML and reconfigure the robot.
+        """
+        return self._target_kpa
 
     # ------------------------------------------------------------------
     # Internal

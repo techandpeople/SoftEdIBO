@@ -10,3 +10,6 @@
   #define DBG_PRINT(...)  ((void)0)
   #define DBG_PRINTLN(s)  ((void)0)
 #endif
+
+// Always-on Serial output (critical boot messages, errors, ready announce).
+#define LOG(...)   do { Serial.printf(__VA_ARGS__); } while (0)
