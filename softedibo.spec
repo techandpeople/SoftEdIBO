@@ -14,8 +14,10 @@
 #       settings.yaml
 #     firmware/
 #       gateway/firmware.bin
-#       node_direct/firmware.bin
-#       node_multiplexed/firmware.bin
+#       node_direct/firmware-release.bin
+#       node_direct/firmware-debug.bin
+#       node_multiplexed/firmware-release.bin
+#       node_multiplexed/firmware-debug.bin
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
@@ -48,9 +50,11 @@ main_a = Analysis(
     binaries=[],
     datas=[
         ("config/", "config/"),
-        ("firmware/gateway/firmware.bin",        "firmware/gateway"),
-        ("firmware/node_direct/firmware.bin",    "firmware/node_direct"),
-        ("firmware/node_multiplexed/firmware.bin", "firmware/node_multiplexed"),
+        ("firmware/gateway/firmware.bin",                 "firmware/gateway"),
+        ("firmware/node_direct/firmware-release.bin",     "firmware/node_direct"),
+        ("firmware/node_direct/firmware-debug.bin",       "firmware/node_direct"),
+        ("firmware/node_multiplexed/firmware-release.bin", "firmware/node_multiplexed"),
+        ("firmware/node_multiplexed/firmware-debug.bin",   "firmware/node_multiplexed"),
     ],
     hiddenimports=[
         *collect_submodules("src"),

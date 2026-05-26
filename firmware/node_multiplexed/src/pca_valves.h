@@ -91,6 +91,9 @@ inline void setBinary(Adafruit_PWMServoDriver& chip, int ch, bool on) {
 // changes — caller is responsible for the settle delay between close-then-open.
 inline void setChamberValve(int chamber, bool inflate_open, bool deflate_open) {
     if (!initialized) return;
+    DBG_PRINT("VALVE ch=%d inflate=%s deflate=%s\n",
+              chamber, inflate_open ? "OPEN" : "close",
+              deflate_open ? "OPEN" : "close");
     if (chamber < 8) {
         setBinary(pca1, chamber * 2,     inflate_open);
         setBinary(pca1, chamber * 2 + 1, deflate_open);
