@@ -30,11 +30,12 @@ from src.robots.base_robot import BaseRobot
 
 _YAML_KEY = {"turtle": "turtles", "tree": "trees", "thymio": "thymios"}
 
-# Known node types and their default slot counts.
+# Known node types and their default slot counts (fallback only — each node
+# stores its own ``max_slots`` in settings.yaml).
 NODE_TYPES: dict[str, int] = {
-    "standard":  3,
-    "mux":       8,
-    "reservoir": 0,   # reservoir nodes have no user-addressable slots
+    "node_direct":      3,
+    "node_multiplexed": 12,
+    "node_imu":         4,
 }
 
 

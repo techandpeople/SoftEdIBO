@@ -33,6 +33,7 @@ _YAML_KEY = {"turtle": "turtles", "tree": "trees", "thymio": "thymios"}
 NODE_TYPES: dict[str, int] = {
     "node_direct": 3,
     "node_multiplexed": 12,
+    "node_imu": 4,
 }
 
 
@@ -237,6 +238,14 @@ class NodeConfigDialog(QDialog):
             self._reservoirs_chk.setChecked(False)
             self._reservoirs_chk.setVisible(False)
             self._reservoirs_label.setVisible(False)
+        elif node_type == "node_imu":
+            # IMU node: 4 fixed sensors, no chambers/reservoirs.
+            self._slots_spin.setRange(4, 4)
+            self._slots_spin.setValue(4)
+            self._slots_spin.setEnabled(False)
+            self._reservoirs_chk.setChecked(False)
+            self._reservoirs_chk.setVisible(False)
+            self._reservoirs_label.setVisible(False)
         else:
             self._slots_spin.setRange(1, 16)
             self._slots_spin.setEnabled(True)
@@ -254,6 +263,11 @@ class NodeConfigDialog(QDialog):
                 "Up to 16 chambers (default 12). Multiplexed valves/sensors. "
                 "Optional shared pressure/vacuum tanks — enable 'Reservoirs' "
                 "and set tank limits in settings.yaml."
+            ),
+            "node_imu": (
+                "4-sensor IMU. Sends raw / magnitudes / baseline-adjusted / "
+                "active-quadrant data via the standard `imu` message. No "
+                "chambers, no pumps."
             ),
         }
         self._note_lbl.setText(notes.get(nt, ""))

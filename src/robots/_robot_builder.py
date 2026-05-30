@@ -128,6 +128,9 @@ def build_skins(
             skin_id=skin_id,
             chamber_inputs=chamber_inputs,
             name=skin_cfg.get("name"),
+            grid=skin_cfg.get("grid"),
+            chamber_grid=skin_cfg.get("chamber_grid"),
+            touch=skin_cfg.get("touch"),
         )
     return skins
 

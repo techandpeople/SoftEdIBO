@@ -31,6 +31,22 @@ robots:
 #             - {mac: "AA:BB:CC:DD:EE:01", slot: 0, max_pressure: 8.0}
 #             # Chambers also pulled by the vacuum tank: set min_pressure < 0.
 #             - {mac: "AA:BB:CC:DD:EE:01", slot: 1, max_pressure: 8.0, min_pressure: -3.0}
+#           # Optional 2D layout (edited from the skin dialog grid editor):
+#           grid: {cols: 8, rows: 4}
+#           chamber_grid:    # rows × cols, cell = chamber index in `chambers` (-1 = empty)
+#             - [-1, -1,  0,  0,  0,  0, -1, -1]
+#             - [-1,  0,  0,  0,  0,  0,  0, -1]
+#             - [-1, -1,  1,  1,  1,  1, -1, -1]
+#             - [-1, -1, -1, -1, -1, -1, -1, -1]
+#           # Optional touch sensing on top of the same skin:
+#           touch:
+#             node_mac: "BB:CC:DD:EE:FF:00"   # MAC of a node_imu in the same robot
+#             sensor_count: 4
+#             sensor_grid:                    # rows × cols, cell = sensor index (-1 = none)
+#               - [0, 0, 1, 1, 1, 1, 2, 2]
+#               - [0, 0, 1, 1, 1, 1, 2, 2]
+#               - [0, 0, 1, 1, 1, 1, 2, 2]
+#               - [0, 0, 1, 1, 1, 1, 2, 2]
 #
 # Example node_multiplexed entry WITHOUT reservoirs (chambers only):
 # robots:
