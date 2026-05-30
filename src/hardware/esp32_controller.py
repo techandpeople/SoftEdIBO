@@ -18,6 +18,10 @@ class ESP32Controller:
         self._touch_callbacks:    list[Callable[[int, int], None]] = []
         self._pressure_callbacks: list[Callable[[int, int], None]] = []
         self._tank_pressure_callbacks: list[Callable[[str, int], None]] = []
+        self._imu_callbacks: list[Callable[[dict[str, Any]], None]] = []
+        # Latest IMU geometry, captured from a `node_imu_ready` boot announce.
+        # Shape: {"sensors": N, "magnets": M, "variant": str|None, "geometry": {...}}.
+        self._imu_geometry: dict[str, Any] | None = None
 
         self._gateway.on_message(self._handle_message)
 
@@ -152,6 +156,26 @@ class ESP32Controller:
         """
         self._tank_pressure_callbacks.append(callback)
 
+    @property
+    def imu_geometry(self) -> dict[str, Any] | None:
+        """Last IMU geometry captured from `node_imu_ready` (None if never seen).
+
+        Contains the fields the firmware announced at boot: ``sensors``,
+        ``magnets``, ``variant``, and ``geometry`` (with ``sensors`` /
+        ``magnets`` coordinate arrays).
+        """
+        return self._imu_geometry
+
+    def on_imu(self, callback: Callable[[dict[str, Any]], None]) -> None:
+        """Register a callback for IMU (`type:"imu"`) messages from this node.
+
+        Args:
+            callback: Called with the full message dict (raw, mag, adj, act, …)
+                as sent by the firmware. The ``source`` MAC added by the gateway
+                is preserved.
+        """
+        self._imu_callbacks.append(callback)
+
     def get_last_status(self) -> dict[str, Any]:
         """Get the last known status of this ESP32 node."""
         return self._last_status.copy()
@@ -174,6 +198,10 @@ class ESP32Controller:
         for callback in self._tank_pressure_callbacks:
             callback(kind, pressure)
 
+    def _dispatch_imu(self, data: dict[str, Any]) -> None:
+        for callback in self._imu_callbacks:
+            callback(data)
+
     def _handle_message(self, data: dict[str, Any]) -> None:
         """Process incoming messages, filtering for this node's MAC."""
         if data.get("source") == self.mac_address:
@@ -183,6 +211,15 @@ class ESP32Controller:
             if data.get("type") == "debug":
                 logger.info("Debug from %s: %s", self.mac_address, data)
 
+            elif data.get("status") == "node_imu_ready":
+                # Cache the IMU board's self-described geometry so subscribers
+                # (skin grid panels, calibration UI, …) can read it later.
+                self._imu_geometry = {
+                    k: data[k] for k in ("sensors", "magnets", "variant", "geometry")
+                    if k in data
+                }
+                logger.info("IMU ready from %s: %s", self.mac_address, self._imu_geometry)
+
             elif data.get("type") == "touch":
                 self._dispatch_touch(data)
 
@@ -191,6 +228,9 @@ class ESP32Controller:
 
             elif data.get("type") == "tank_status" and "kind" in data and "pressure" in data:
                 self._dispatch_tank_pressure(data)
+
+            elif data.get("type") == "imu":
+                self._dispatch_imu(data)
 
     def __repr__(self) -> str:
         return f"ESP32Controller(mac={self.mac_address!r})"

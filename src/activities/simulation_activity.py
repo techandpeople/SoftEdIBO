@@ -48,6 +48,11 @@ class SimulationActivity(BaseActivity):
                     "skin_id":  skin.skin_id,
                     "name":     skin.name,
                     "chambers": skin.chamber_defs,
+                    # Forward layout so SkinGridView renders the same chamber
+                    # zones in simulation as in the real-hardware view.
+                    "grid":         skin.grid,
+                    "chamber_grid": skin.chamber_grid,
+                    "touch":        skin.touch,
                 }
                 for skin in skins.values()
             ]

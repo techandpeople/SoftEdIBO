@@ -33,12 +33,24 @@ class Skin:
         skin_id: str,
         chamber_inputs: list[dict[str, Any]],
         name: str | None = None,
+        *,
+        grid: dict[str, int] | None = None,
+        chamber_grid: list[list[int]] | None = None,
+        touch: dict[str, Any] | None = None,
     ):
         if not chamber_inputs:
             raise ValueError(f"Skin {skin_id!r} has no chambers")
 
         self.skin_id = skin_id
         self.name = name or skin_id
+
+        # Layout descriptors — see SkinGridEditor for the grid format.
+        # ``grid``: {"cols": int, "rows": int}. ``chamber_grid``: rows × cols
+        # of chamber-index-or-(-1). ``touch``: {"node_mac": str,
+        # "sensor_count": int, "sensor_grid": rows × cols of sensor-index-or-(-1)}.
+        self.grid = grid
+        self.chamber_grid = chamber_grid
+        self.touch = touch
 
         self._ctrl = chamber_inputs[0]["controller"]
         self.mac: str = self._ctrl.mac_address

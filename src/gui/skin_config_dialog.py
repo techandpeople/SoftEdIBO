@@ -17,15 +17,18 @@ Layout:
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QComboBox,
     QDialog,
     QDoubleSpinBox,
     QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QRadioButton,
     QScrollArea,
     QSpinBox,
     QVBoxLayout,
@@ -33,6 +36,7 @@ from PySide6.QtWidgets import (
 )
 
 from src.config.settings import Settings
+from src.gui.skin_grid_editor import SkinGridEditor
 from src.hardware.espnow_gateway import ESPNowGateway
 
 _YAML_KEY = {"turtle": "turtles", "tree": "trees", "thymio": "thymios"}
@@ -180,6 +184,10 @@ class SkinConfigDialog(QDialog):
         self._add_chamber_btn.clicked.connect(self._on_add_chamber)
         outer.addWidget(self._add_chamber_btn)
 
+        # Touch / layout section ---------------------------------------
+        outer.addWidget(self._build_touch_group())
+        outer.addWidget(self._build_layout_group())
+
         # Action buttons
         btn_row = QHBoxLayout()
         self._test_btn   = QPushButton("Test Actuators")
@@ -207,6 +215,24 @@ class SkinConfigDialog(QDialog):
             )
         if not self._rows:
             self._add_row()  # start with one empty row
+
+        # Touch + layout pre-fill ---------------------------------------
+        touch_cfg = skin_cfg.get("touch") or {}
+        touch_mac = touch_cfg.get("node_mac", "")
+        idx = self._touch_mac_combo.findData(touch_mac)
+        if idx >= 0:
+            self._touch_mac_combo.setCurrentIndex(idx)
+        self._sensor_count_spin.setValue(int(touch_cfg.get("sensor_count", 4)))
+
+        grid_cfg = skin_cfg.get("grid") or {}
+        cols = int(grid_cfg.get("cols", 8))
+        rows = int(grid_cfg.get("rows", 4))
+        self._cols_spin.setValue(cols)
+        self._rows_spin.setValue(rows)
+        self._grid.set_dimensions(cols, rows)
+        self._grid.set_chamber_grid(skin_cfg.get("chamber_grid"))
+        self._grid.set_sensor_grid(touch_cfg.get("sensor_grid"))
+        self._rebuild_palette()
 
         self._test_btn.clicked.connect(self._on_test)
         self._delete_btn.clicked.connect(self._on_delete)
@@ -278,6 +304,156 @@ class SkinConfigDialog(QDialog):
 
     def _on_add_chamber(self) -> None:
         self._add_row()
+        self._rebuild_palette()
+
+    # ------------------------------------------------------------------
+    # Touch + grid widgets
+    # ------------------------------------------------------------------
+
+    def _imu_macs(self) -> list[str]:
+        return [n["mac"] for n in self._robot_nodes()
+                if n.get("node_type") == "node_imu" and n.get("mac")]
+
+    def _build_touch_group(self) -> QGroupBox:
+        group = QGroupBox("Touch sensors (optional)")
+        form = QFormLayout(group)
+
+        self._touch_mac_combo = QComboBox()
+        self._touch_mac_combo.addItem("(none)", userData="")
+        for mac in self._imu_macs():
+            self._touch_mac_combo.addItem(mac, userData=mac)
+        self._touch_mac_combo.currentTextChanged.connect(
+            lambda _t: self._rebuild_palette()
+        )
+        form.addRow("Touch node:", self._touch_mac_combo)
+
+        self._sensor_count_spin = QSpinBox()
+        self._sensor_count_spin.setRange(1, 16)
+        self._sensor_count_spin.setValue(4)
+        self._sensor_count_spin.valueChanged.connect(lambda _v: self._rebuild_palette())
+        form.addRow("Sensors:", self._sensor_count_spin)
+
+        return group
+
+    def _build_layout_group(self) -> QGroupBox:
+        group = QGroupBox("Skin layout (chambers + zones)")
+        v = QVBoxLayout(group)
+
+        size_row = QHBoxLayout()
+        size_row.addWidget(QLabel("Grid:"))
+        self._cols_spin = QSpinBox()
+        self._cols_spin.setRange(1, 32)
+        self._cols_spin.setValue(8)
+        self._cols_spin.setSuffix(" cols")
+        self._rows_spin = QSpinBox()
+        self._rows_spin.setRange(1, 16)
+        self._rows_spin.setValue(4)
+        self._rows_spin.setSuffix(" rows")
+        size_row.addWidget(self._cols_spin)
+        size_row.addWidget(QLabel("×"))
+        size_row.addWidget(self._rows_spin)
+        size_row.addStretch()
+
+        self._mode_chamber = QRadioButton("Chambers")
+        self._mode_sensor  = QRadioButton("Touch zones")
+        self._mode_chamber.setChecked(True)
+        size_row.addWidget(QLabel("Mode:"))
+        size_row.addWidget(self._mode_chamber)
+        size_row.addWidget(self._mode_sensor)
+        v.addLayout(size_row)
+
+        self._palette_row = QHBoxLayout()
+        self._palette_row.addWidget(QLabel("Paint:"))
+        self._palette_group = QButtonGroup(self)
+        self._palette_group.setExclusive(True)
+        v.addLayout(self._palette_row)
+
+        hint = QLabel(
+            "<i>Left-click (or drag) to paint with the selected colour. "
+            "Right-click (or drag) to erase.</i>"
+        )
+        hint.setStyleSheet("color: #566573; font-size: 10px;")
+        v.addWidget(hint)
+
+        self._grid = SkinGridEditor(cols=8, rows=4)
+        v.addWidget(self._grid, stretch=1)
+
+        # Hook up
+        self._cols_spin.valueChanged.connect(
+            lambda _v: self._grid.set_dimensions(self._cols_spin.value(),
+                                                 self._rows_spin.value())
+        )
+        self._rows_spin.valueChanged.connect(
+            lambda _v: self._grid.set_dimensions(self._cols_spin.value(),
+                                                 self._rows_spin.value())
+        )
+        self._mode_chamber.toggled.connect(self._on_mode_changed)
+        self._mode_sensor.toggled.connect(self._on_mode_changed)
+        return group
+
+    def _on_mode_changed(self, _checked: bool) -> None:
+        layer = "chamber" if self._mode_chamber.isChecked() else "sensor"
+        self._grid.set_layer(layer)
+        self._rebuild_palette()
+
+    def _apply_layout_and_touch(self, skin_entry: dict) -> None:
+        """Persist grid + touch fields onto ``skin_entry`` (only when used)."""
+        chamber_grid = self._grid.chamber_grid()
+        sensor_grid  = self._grid.sensor_grid()
+        chambers_painted = any(v >= 0 for row in chamber_grid for v in row)
+        sensors_painted  = any(v >= 0 for row in sensor_grid for v in row)
+
+        if chambers_painted or sensors_painted:
+            skin_entry["grid"] = {"cols": self._grid.cols(),
+                                  "rows": self._grid.rows()}
+        if chambers_painted:
+            skin_entry["chamber_grid"] = chamber_grid
+
+        touch_mac = self._touch_mac_combo.currentData() or ""
+        if not touch_mac:
+            return
+        touch_entry: dict = {"node_mac": touch_mac,
+                             "sensor_count": int(self._sensor_count_spin.value())}
+        if sensors_painted:
+            touch_entry["sensor_grid"] = sensor_grid
+        skin_entry["touch"] = touch_entry
+
+    def _rebuild_palette(self) -> None:
+        """Refresh the paint-target buttons for the active layer."""
+        # Clear current buttons
+        for btn in self._palette_group.buttons():
+            self._palette_group.removeButton(btn)
+            btn.deleteLater()
+        # Drop everything except the leading "Paint:" label (index 0)
+        while self._palette_row.count() > 1:
+            item = self._palette_row.takeAt(1)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+
+        def add_btn(label: str, value: int) -> None:
+            btn = QPushButton(label)
+            btn.setCheckable(True)
+            btn.setFixedWidth(60)
+            self._palette_group.addButton(btn, id=value)
+            btn.clicked.connect(lambda _c, v=value: self._grid.set_paint_target(v))
+            self._palette_row.addWidget(btn)
+
+        prefix = "C" if self._mode_chamber.isChecked() else "S"
+        count = (len(self._rows) if self._mode_chamber.isChecked()
+                 else self._sensor_count_spin.value())
+        for idx in range(count):
+            add_btn(f"{prefix}{idx}", idx)
+        self._palette_row.addStretch()
+
+        # Auto-select the first palette button so a click on the grid always
+        # paints something. Use setChecked + set_paint_target directly — calling
+        # btn.click() on a checkable button toggles its state and would undo
+        # the setChecked.
+        first_btn = self._palette_group.button(0)
+        if first_btn is not None:
+            first_btn.setChecked(True)
+            self._grid.set_paint_target(0)
 
     # ------------------------------------------------------------------
     # Actions
@@ -376,6 +552,7 @@ class SkinConfigDialog(QDialog):
                 del ch["max_pressure"]
 
         skin_entry: dict = {"skin_id": skin_id, "name": name, "chambers": chambers}
+        self._apply_layout_and_touch(skin_entry)
 
         data = self._settings.data
         robots_list = (
