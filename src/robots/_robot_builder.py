@@ -81,6 +81,7 @@ def configure_multiplexed_nodes(
 def build_skins(
     skin_configs: list[dict[str, Any]],
     controllers: dict[str, Any],
+    touch_controllers: dict[str, Any] | None = None,
 ) -> dict[str, Skin]:
     """Construct Skin objects from the config format.
 
@@ -96,43 +97,71 @@ def build_skins(
              ...]
 
         controllers:   Pre-built ``{mac: controller}`` dict for all nodes of this robot.
+        touch_controllers:  Optional ``{skin_id: touch_controller}`` overriding the
+            per-skin touch device. Used in simulation to give each skin its own
+            ``SimulatedIMU`` so its T-buttons drive only that skin, even when
+            several skins share a touch ``node_mac``. When absent, the touch
+            controller is resolved from ``controllers`` by ``touch.node_mac``.
     """
     skins: dict[str, Skin] = {}
     for skin_cfg in skin_configs:
-        skin_id = skin_cfg.get("skin_id", "?")
-        chambers = skin_cfg.get("chambers", [])
-        if not chambers:
-            continue
-
-        macs = {ch["mac"] for ch in chambers}
-        if len(macs) > 1:
-            logger.error(
-                "Skin %s spans multiple MACs (%s) — skipping. "
-                "A skin must belong to a single node.", skin_id, sorted(macs))
-            continue
-
-        mac = next(iter(macs))
-        ctrl = controllers.get(mac)
-        if ctrl is None:
-            logger.error("Skin %s references unknown MAC %s — skipping.", skin_id, mac)
-            continue
-
-        chamber_inputs = [
-            {"controller":   ctrl,
-             "node_slot":    int(ch["slot"]),
-             "max_pressure": float(ch.get("max_pressure", 8.0)),
-             "min_pressure": float(ch.get("min_pressure", 0.0))}
-            for ch in chambers
-        ]
-        skins[skin_id] = Skin(
-            skin_id=skin_id,
-            chamber_inputs=chamber_inputs,
-            name=skin_cfg.get("name"),
-            grid=skin_cfg.get("grid"),
-            chamber_grid=skin_cfg.get("chamber_grid"),
-            touch=skin_cfg.get("touch"),
-        )
+        skin = _build_one_skin(skin_cfg, controllers, touch_controllers)
+        if skin is not None:
+            skins[skin.skin_id] = skin
     return skins
+
+
+def _build_one_skin(skin_cfg: dict[str, Any],
+                    controllers: dict[str, Any],
+                    touch_controllers: dict[str, Any] | None = None) -> Skin | None:
+    """Build a single Skin from its config dict, or return None if the
+    config is invalid (logs the reason)."""
+    skin_id = skin_cfg.get("skin_id", "?")
+    chambers = skin_cfg.get("chambers", [])
+    if not chambers:
+        return None
+
+    macs = {ch["mac"] for ch in chambers}
+    if len(macs) > 1:
+        logger.error(
+            "Skin %s spans multiple MACs (%s) — skipping. "
+            "A skin must belong to a single node.", skin_id, sorted(macs))
+        return None
+
+    mac = next(iter(macs))
+    ctrl = controllers.get(mac)
+    if ctrl is None:
+        logger.error("Skin %s references unknown MAC %s — skipping.",
+                     skin_id, mac)
+        return None
+
+    chamber_inputs = [
+        {"controller":   ctrl,
+         "node_slot":    int(ch["slot"]),
+         "max_pressure": float(ch.get("max_pressure", 8.0)),
+         "min_pressure": float(ch.get("min_pressure", 0.0))}
+        for ch in chambers
+    ]
+    touch_ctrl = (touch_controllers or {}).get(skin_id)
+    if touch_ctrl is None:
+        touch_ctrl = _resolve_touch_ctrl(skin_cfg, controllers)
+    return Skin(
+        skin_id=skin_id,
+        chamber_inputs=chamber_inputs,
+        name=skin_cfg.get("name"),
+        grid=skin_cfg.get("grid"),
+        chamber_grid=skin_cfg.get("chamber_grid"),
+        touch=skin_cfg.get("touch"),
+        touch_controller=touch_ctrl,
+        shape=skin_cfg.get("shape", "rect"),
+    )
+
+
+def _resolve_touch_ctrl(skin_cfg: dict[str, Any],
+                        controllers: dict[str, Any]) -> Any:
+    """Return the controller for the IMU referenced by ``skin_cfg.touch``."""
+    touch_cfg = skin_cfg.get("touch") or {}
+    return controllers.get(touch_cfg.get("node_mac")) if touch_cfg else None
 
 
 def build_reservoirs(

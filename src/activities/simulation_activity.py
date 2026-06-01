@@ -1,7 +1,10 @@
-"""Simulation activity — mock touch interaction with pressure animation.
+"""Simulation activity — runs in simulation mode by default.
 
-Works with any robot type. Substitutes real robots with SimulatedRobot instances
-backed by SimulatedController so the GUI layer is completely hardware-agnostic.
+Kept as a thin convenience entry so users can pick "Simulation" from the
+SessionPanel and get the simulated experience without touching the
+simulation_mode flag. The actual robot wrapping lives in BaseActivity now,
+so any other activity can also run in simulation by setting
+``simulation_mode = True`` on the instance.
 """
 
 from __future__ import annotations
@@ -14,19 +17,20 @@ from src.robots.base_robot import BaseRobot
 
 if TYPE_CHECKING:
     from src.core.session import Session
-    from src.robots.simulated_robot import SimulatedRobot
 
 logger = logging.getLogger(__name__)
 
 
 class SimulationActivity(BaseActivity):
-    """Activity that replaces real robots with simulated ones backed by mock hardware.
+    """Generic "test in simulation" activity.
 
-    The monitor receives SimulatedRobot instances — no simulation awareness needed
-    in any GUI widget. Touch press/release drives inflate/deflate via SimulatedController.
+    Always runs with ``simulation_mode = True`` — picks up whatever robots
+    are configured, swaps them for SimulatedRobot equivalents, and lets the
+    operator interact via the normal monitor widgets.
     """
 
     robot_type = BaseRobot
+    simulation_mode = True
 
     def __init__(self) -> None:
         super().__init__(
@@ -34,45 +38,10 @@ class SimulationActivity(BaseActivity):
             description="Mock touch interactions with animated pressure response.",
         )
         self._is_running = False
-        self._simulated_robots: list[SimulatedRobot] = []
-
-    def prepare_robots(self, robots: list[BaseRobot]) -> list[BaseRobot]:
-        """Return SimulatedRobot instances mirroring each robot's skin configuration."""
-        from src.robots.simulated_robot import SimulatedRobot
-
-        self._simulated_robots = []
-        for robot in robots:
-            skins = getattr(robot, "skins", {})
-            skin_configs = [
-                {
-                    "skin_id":  skin.skin_id,
-                    "name":     skin.name,
-                    "chambers": skin.chamber_defs,
-                    # Forward layout so SkinGridView renders the same chamber
-                    # zones in simulation as in the real-hardware view.
-                    "grid":         skin.grid,
-                    "chamber_grid": skin.chamber_grid,
-                    "touch":        skin.touch,
-                }
-                for skin in skins.values()
-            ]
-            tank_kinds: list[str] = []
-            if getattr(robot, "pressure_reservoir", None) is not None:
-                tank_kinds.append("pressure")
-            if getattr(robot, "vacuum_reservoir", None) is not None:
-                tank_kinds.append("vacuum")
-
-            sim = SimulatedRobot(
-                robot.robot_id, robot.name, skin_configs,
-                tank_kinds=tank_kinds,
-            )
-            self._simulated_robots.append(sim)
-            logger.debug("Created SimulatedRobot for %s (tanks=%s)",
-                         robot.robot_id, tank_kinds)
-
-        return self._simulated_robots  # type: ignore[return-value]
+        self._robots: list[BaseRobot] = []
 
     def _setup(self, session: "Session", robots: list[BaseRobot]) -> None:
+        self._robots = robots
         logger.info("Simulation activity set up with %d robots", len(robots))
 
     def start(self) -> None:
@@ -80,20 +49,20 @@ class SimulationActivity(BaseActivity):
         logger.info("Simulation activity started")
 
     def pause(self) -> None:
-        for robot in self._simulated_robots:
+        for robot in self._robots:
             robot.pause()
         logger.info("Simulation activity paused")
 
     def resume(self) -> None:
-        for robot in self._simulated_robots:
+        for robot in self._robots:
             robot.resume()
         logger.info("Simulation activity resumed")
 
     def stop(self) -> None:
         self._is_running = False
-        for robot in self._simulated_robots:
+        for robot in self._robots:
             robot.disconnect()
-        self._simulated_robots = []
+        self._robots = []
         logger.info("Simulation activity stopped")
 
     def get_state(self) -> dict[str, Any]:

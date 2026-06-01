@@ -10,7 +10,7 @@ sees where each chamber sits on the physical surface and how full it is.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QGroupBox, QHBoxLayout, QSizePolicy, QVBoxLayout
 
 from src.gui.monitor.chamber_widget import ChamberWidget
@@ -25,7 +25,7 @@ class SkinWidget(QGroupBox):
 
     def __init__(self, skin: Skin) -> None:
         super().__init__(skin.name)
-        self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         self._chamber_widgets: list[ChamberWidget] = []
         self._grid_view: SkinGridView | None = None
 
@@ -36,7 +36,14 @@ class SkinWidget(QGroupBox):
         # Spatial view (only when the skin has a configured chamber_grid).
         if skin.chamber_grid:
             self._grid_view = SkinGridView(skin)
-            outer.addWidget(self._grid_view)
+            outer.addWidget(self._grid_view, alignment=Qt.AlignmentFlag.AlignCenter)
+            # Mirror real-hardware touch events as yellow pulses on the grid.
+            touch_ctrl = getattr(skin, "touch_controller", None)
+            if touch_ctrl is not None:
+                on_touch = getattr(touch_ctrl, "on_touch", None)
+                if on_touch is not None:
+                    on_touch(lambda sensor_id, _raw, gv=self._grid_view:
+                             gv.pulse_sensor(sensor_id))
 
         # Chamber controls row (one ChamberWidget per AirChamber).
         cols = QHBoxLayout()
@@ -45,9 +52,16 @@ class SkinWidget(QGroupBox):
         for chamber in sorted(skin.chambers.values(), key=lambda c: c.chamber_id):
             cw = ChamberWidget(chamber, skin)
             cw.touch_event.connect(self.touch_event)
+            cw.touch_event.connect(self._relay_to_grid)
             self._chamber_widgets.append(cw)
             cols.addWidget(cw)
         outer.addLayout(cols)
+
+    def _relay_to_grid(self, _skin_id: str, chamber_id: int, action: str) -> None:
+        """Mirror chamber touches onto the SkinGridView as a blue pulse on
+        the chamber's cells (simulation T-button, or hardware tap)."""
+        if action == "press" and self._grid_view is not None:
+            self._grid_view.pulse_chamber(chamber_id)
 
     def set_paused(self, paused: bool) -> None:
         for cw in self._chamber_widgets:

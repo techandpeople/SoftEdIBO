@@ -1,0 +1,180 @@
+# Example configuration for Touch Position Tracking
+# This demonstrates how to configure touch position tracking on soft robot skins
+
+gateway:
+  serial_port: /dev/ttyUSB0
+  baud_rate: 115200
+
+robots:
+  turtles:
+    - id: turtle_with_touch
+      nodes:
+        # Main pneumatic control node
+        - mac: "AA:BB:CC:DD:EE:01"
+          node_type: "node_multiplexed"
+          max_slots: 12
+          has_reservoirs: true
+          pump_inflate_count: 3
+          pump_deflate_count: 3
+          tank_pressure_target_kpa: 25.0
+          tank_vacuum_target_kpa: -25.0
+
+        # IMU node for touch sensing
+        - mac: "BB:CC:DD:EE:FF:00"
+          node_type: "node_imu"
+          max_slots: 4  # 4 touch sensors
+
+      skins:
+        - skin_id: belly
+          name: "Belly Skin with Touch Tracking"
+          shape: rect
+
+          # Chamber configuration
+          chambers:
+            - {mac: "AA:BB:CC:DD:EE:01", slot: 0, max_pressure: 8.0, min_pressure: 0.0}
+            - {mac: "AA:BB:CC:DD:EE:01", slot: 1, max_pressure: 8.0, min_pressure: 0.0}
+            - {mac: "AA:BB:CC:DD:EE:01", slot: 2, max_pressure: 8.0, min_pressure: 0.0}
+
+          # Grid layout for visualization
+          grid: {cols: 8, rows: 4}
+          chamber_grid:
+            - [-1, -1,  0,  0,  0,  0, -1, -1]
+            - [-1,  0,  0,  0,  0,  0,  0, -1]
+            - [-1, -1,  1,  1,  1,  1, -1, -1]
+            - [-1, -1, -1, -1, -1, -1, -1, -1]
+
+          # Touch position tracking configuration
+          touch:
+            node_mac: "BB:CC:DD:EE:FF:00"  # IMU node for touch sensing
+            sensor_count: 4  # 4 sensors for quadrant detection
+            magnet_strength: "weak"  # "weak" or "strong"
+
+            # Quadrant detection thresholds (Q1, Q2, Q3, Q4)
+            # Adjust based on your magnet strength and sensor sensitivity
+            quadrant_thresholds: [0.3, 0.3, 0.3, 0.3]
+
+            # Hysteresis to prevent flickering (0.0-0.2)
+            # Increase if touch detection flickers between zones
+            hysteresis: 0.05
+
+            # Position smoothing (0.0-1.0)
+            # Higher values = less smoothing (more responsive)
+            # Lower values = more smoothing (more stable)
+            position_smoothing: 0.3
+
+            # Minimum touch duration for valid touch (milliseconds)
+            # Short touches below this duration are filtered out
+            min_touch_duration_ms: 100
+
+            # Sensor grid layout (independent of chamber grid)
+            grid: {cols: 8, rows: 4}
+
+            # Sensor grid: maps physical position to sensor index
+            # 0-3 are the 4 quadrant sensors, -1 means no sensor
+            sensor_grid:
+              - [0, 0, 0, 0, 1, 1, 1, 1]
+              - [0, 0, 0, 0, 1, 1, 1, 1]
+              - [2, 2, 2, 2, 3, 3, 3, 3]
+              - [2, 2, 2, 2, 3, 3, 3, 3]
+
+            # Sensor to chamber mapping for activities
+            # Maps sensor index to chamber index for direct reactions
+            sensor_to_chamber: {"0": 0, "1": 0, "2": 1, "3": 2}
+
+  # Example with multiple touch-enabled skins
+  trees:
+    - id: tree_multi_touch
+      nodes:
+        - mac: "CC:DD:EE:FF:00:01"
+          node_type: "node_multiplexed"
+          max_slots: 8
+        - mac: "DD:EE:FF:00:01:02"
+          node_type: "node_imu"
+          max_slots: 4
+
+      skins:
+        - skin_id: trunk
+          name: "Trunk with Strong Magnets"
+          shape: round
+          chambers:
+            - {mac: "CC:DD:EE:FF:00:01", slot: 0, max_pressure: 8.0}
+            - {mac: "CC:DD:EE:FF:00:01", slot: 1, max_pressure: 8.0}
+
+          touch:
+            node_mac: "DD:EE:FF:00:01:02"
+            sensor_count: 4
+            magnet_strength: "strong"  # Strong magnets = lower thresholds
+            quadrant_thresholds: [0.2, 0.2, 0.2, 0.2]  # Lower for strong magnets
+            hysteresis: 0.08  # Higher hysteresis for strong magnets
+            position_smoothing: 0.2  # Less smoothing for faster response
+            min_touch_duration_ms: 50  # Shorter minimum for quick taps
+
+            # Circular sensor layout
+            grid: {cols: 6, rows: 6}
+            sensor_grid:
+              - [-1, -1,  0,  1, -1, -1]
+              - [-1,  0,  0,  1,  1, -1]
+              - [ 0,  0, -1, -1,  1,  1]
+              - [ 2,  2, -1, -1,  3,  3]
+              - [-1,  2,  2,  3,  3, -1]
+              - [-1, -1,  2,  3, -1, -1]
+
+            sensor_to_chamber: {"0": 0, "1": 0, "2": 1, "3": 1}
+
+        - skin_id: branches
+          name: "Branches with Custom Thresholds"
+          chambers:
+            - {mac: "CC:DD:EE:FF:00:01", slot: 2, max_pressure: 6.0}
+
+          touch:
+            node_mac: "DD:EE:FF:00:01:02"
+            sensor_count: 4
+            magnet_strength: "weak"
+
+            # Custom thresholds per quadrant
+            # Useful when sensors have different sensitivities
+            quadrant_thresholds: [0.25, 0.35, 0.30, 0.28]  # [Q1, Q2, Q3, Q4]
+
+            hysteresis: 0.06
+            position_smoothing: 0.4
+            min_touch_duration_ms: 150
+
+            # Simple sensor layout
+            grid: {cols: 4, rows: 4}
+            sensor_grid:
+              - [ 0,  0,  1,  1]
+              - [ 0,  0,  1,  1]
+              - [ 2,  2,  3,  3]
+              - [ 2,  2,  3,  3]
+
+            sensor_to_chamber: {"0": 0, "1": 0, "2": 0, "3": 0}
+
+# Activity presets can reference the touch tracking configuration
+# (Stored in database, not in this YAML file)
+
+# Example activity that uses touch position tracking:
+#
+# class TouchReactionActivity(BaseActivity):
+#     def _setup(self, session, robots):
+#         self._robots = robots
+#
+#     def on_touch_event(self, robot, skin_name, touch_state):
+#         """React to touch based on position."""
+#         zone = touch_state["zone"]
+#         confidence = touch_state["confidence"]
+#
+#         if confidence > 0.7:  # Only react to high-confidence touches
+#             if zone == "top_left":
+#                 # Inflate chamber 0
+#                 robot.skins[skin_name].inflate(0, delta=20)
+#             elif zone == "center":
+#                 # Breathe all chambers
+#                 robot.skins[skin_name].set_pressure(0, 50)
+#             elif zone == "bottom_right":
+#                 # Deflate chamber 1
+#                 robot.skins[skin_name].deflate(1, delta=15)
+#
+# For more details, see:
+# - docs/TOUCH_POSITION_TRACKING.md
+# - src/hardware/quadrant_detector.py
+# - src/hardware/skin.py

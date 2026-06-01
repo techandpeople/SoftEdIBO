@@ -4,7 +4,6 @@ Reads pressure and state directly from the AirChamber object.
 Inflate/deflate commands go through the parent Skin (hardware logic lives there).
 
 Layout (top to bottom):
-  [Touch]     press => skin.touch_press; release => skin.touch_release
   ┌──────┐
   │ bar  │    Custom painted widget:
   │      │      filled bar   = current pressure  (blue-green)
@@ -14,11 +13,14 @@ Layout (top to bottom):
   75/90
   INFLATING
   [-]  [+]    deflate left, inflate right
+
+Touch simulation lives on the SkinGridView (one T button per sensor, laid
+out on the grid). The ``touch_event`` signal is kept so future hardware
+chamber-touch sources can still drive the grid-view pulse without touching
+this widget.
 """
 
 from __future__ import annotations
-
-import time
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen
@@ -90,39 +92,20 @@ class _PressureBar(QWidget):
 class ChamberWidget(QWidget):
     """Widget for a single AirChamber."""
 
-    touch_event = Signal(str, int, str)  # (skin_id, chamber_id, action: "press"|"release")
+    # Kept for future hardware chamber-touch sources so the SkinGridView
+    # blue-pulse path stays wired up. No longer emitted from this widget —
+    # sensor T-buttons on the grid simulate touches now.
+    touch_event = Signal(str, int, str)  # (skin_id, chamber_id, action)
 
     def __init__(self, chamber: AirChamber, skin: Skin) -> None:
         super().__init__()
         self._chamber = chamber
         self._skin = skin
-        self._press_time: float = 0.0
         self.setFixedWidth(50)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(2, 2, 2, 2)
         layout.setSpacing(1)
-
-        # Touch — delegates inflate/deflate timing entirely to the controller
-        self._touch_btn = QPushButton("T")
-        self._touch_btn.setFixedWidth(33)
-        self._touch_btn.setFixedHeight(20)
-
-        def _on_press() -> None:
-            self._press_time = time.monotonic()
-            skin.touch_press(chamber.chamber_id)
-            skin.fire_touch(chamber.chamber_id, 1023)
-            self.touch_event.emit(skin.skin_id, chamber.chamber_id, "press")
-
-        def _on_release() -> None:
-            hold_ms = max(50, int((time.monotonic() - self._press_time) * 1000))
-            skin.touch_release(chamber.chamber_id, hold_ms)
-            skin.fire_touch(chamber.chamber_id, 0)
-            self.touch_event.emit(skin.skin_id, chamber.chamber_id, "release")
-
-        self._touch_btn.pressed.connect(_on_press)
-        self._touch_btn.released.connect(_on_release)
-        layout.addWidget(self._touch_btn, alignment=Qt.AlignmentFlag.AlignHCenter)
 
         # Pressure bar (current fill + target line), all in percent scale.
         self._bar = _PressureBar()
@@ -171,7 +154,6 @@ class ChamberWidget(QWidget):
 
     def set_paused(self, paused: bool) -> None:
         """Enable or disable all interactive buttons."""
-        self._touch_btn.setEnabled(not paused)
         self._inflate_btn.setEnabled(not paused)
         self._deflate_btn.setEnabled(not paused)
 

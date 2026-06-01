@@ -54,10 +54,11 @@ class RobotPanel(QWidget, Ui_RobotPanel):
     robot_configured = Signal()
     gateway_changed  = Signal(bool)
 
-    def __init__(self, gateway: ESPNowGateway, settings: Settings):
+    def __init__(self, gateway: ESPNowGateway, settings: Settings, db=None):
         super().__init__()
         self._gateway  = gateway
         self._settings = settings
+        self._db       = db
         self._robots: list[BaseRobot] = []
 
         self.setupUi(self)
@@ -414,6 +415,7 @@ class RobotPanel(QWidget, Ui_RobotPanel):
             skin_index=skin_index,
             settings=self._settings,
             gateway=self._gateway,
+            db=self._db,
             parent=self,
         )
         if dlg.exec() == QDialog.DialogCode.Accepted:

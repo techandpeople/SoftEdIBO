@@ -18,7 +18,9 @@ All entries must share the same ``controller`` (single-MAC invariant).
 """
 
 import logging
-from typing import Any
+import math
+import time
+from typing import Any, Optional
 
 from src.hardware.air_chamber import AirChamber, ChamberState
 
@@ -37,6 +39,8 @@ class Skin:
         grid: dict[str, int] | None = None,
         chamber_grid: list[list[int]] | None = None,
         touch: dict[str, Any] | None = None,
+        touch_controller: Any = None,
+        shape: str = "rect",
     ):
         if not chamber_inputs:
             raise ValueError(f"Skin {skin_id!r} has no chambers")
@@ -45,12 +49,21 @@ class Skin:
         self.name = name or skin_id
 
         # Layout descriptors — see SkinGridEditor for the grid format.
-        # ``grid``: {"cols": int, "rows": int}. ``chamber_grid``: rows × cols
-        # of chamber-index-or-(-1). ``touch``: {"node_mac": str,
-        # "sensor_count": int, "sensor_grid": rows × cols of sensor-index-or-(-1)}.
+        # ``shape``: "rect" or "round" (round skins mask off-circle cells).
+        # ``grid``: {"cols": int, "rows": int} — chamber grid dimensions.
+        # ``chamber_grid``: rows × cols of chamber-index-or-(-1).
+        # ``touch``: {"node_mac": str, "sensor_count": int,
+        #   "grid": {cols, rows}?,            # optional, defaults to ``grid``
+        #   "sensor_grid": rows × cols of sensor-index-or-(-1),
+        #   "sensor_to_chamber": {str_idx: chamber_idx}?}.
+        # ``touch_controller``: optional ESP32Controller (or sim) for the IMU
+        # node referenced by ``touch.node_mac`` — bound in build_skins so the
+        # UI can subscribe to `on_imu` directly via ``skin.touch_controller``.
+        self.shape = shape if shape in ("rect", "round") else "rect"
         self.grid = grid
         self.chamber_grid = chamber_grid
         self.touch = touch
+        self.touch_controller = touch_controller
 
         self._ctrl = chamber_inputs[0]["controller"]
         self.mac: str = self._ctrl.mac_address
@@ -100,6 +113,12 @@ class Skin:
                 set_max(slot, ch.max_pressure)
             if set_min is not None:
                 set_min(slot, getattr(ch, "min_pressure", 0.0))
+
+        # Touch position tracking (if touch sensing is configured)
+        self._touch_position_tracker = None
+        self._touch_detector = None
+        if touch and touch_controller:
+            self._setup_touch_tracking(touch, touch_controller)
 
     # ------------------------------------------------------------------
     # Properties
@@ -170,24 +189,6 @@ class Skin:
         chamber.state = ChamberState.IDLE
         return self._ctrl.hold(self._slots[local_idx])
 
-    def fire_touch(self, local_idx: int, raw_value: int) -> None:
-        slot = self._slot_or_none(local_idx)
-        fire = getattr(self._ctrl, "fire_touch", None)
-        if slot is not None and fire is not None:
-            fire(slot, raw_value)
-
-    def touch_press(self, local_idx: int) -> None:
-        slot = self._slot_or_none(local_idx)
-        sim_press = getattr(self._ctrl, "simulate_touch_press", None)
-        if slot is not None and sim_press is not None:
-            sim_press(slot)
-
-    def touch_release(self, local_idx: int, hold_ms: int) -> None:
-        slot = self._slot_or_none(local_idx)
-        sim_release = getattr(self._ctrl, "simulate_touch_release", None)
-        if slot is not None and sim_release is not None:
-            sim_release(slot, hold_ms)
-
     def pause(self) -> None:
         for chamber in self._chambers.values():
             chamber.state = ChamberState.IDLE
@@ -205,11 +206,6 @@ class Skin:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
-
-    def _slot_or_none(self, local_idx: int) -> int | None:
-        if 0 <= local_idx < len(self._slots):
-            return self._slots[local_idx]
-        return None
 
     def _on_pressure(self, node_slot: int, pressure: int) -> None:
         local_idx = self._reverse.get(node_slot)
@@ -258,6 +254,170 @@ class Skin:
         else:
             chamber.state = ChamberState.IDLE
         return self._ctrl.set_pressure(slot, v)
+
+    # ------------------------------------------------------------------
+    # Touch position tracking
+    # ------------------------------------------------------------------
+
+    def _setup_touch_tracking(self, touch: dict[str, Any], touch_controller: Any) -> None:
+        """Initialize touch position tracking with quadrant detection.
+
+        The quadrant detector resolves *where* on the skin a touch lands from a
+        4-sensor magnet board, so it only engages when the touch node actually
+        exposes 4 sensors. Other layouts (e.g. the simulated T-button skins)
+        skip it — they still get touch *reactions* via the activity's on_imu
+        handler; only spatial position tracking is unavailable."""
+        if int(touch.get("sensor_count", 0)) != 4:
+            return
+        try:
+            from src.hardware.quadrant_detector import QuadrantDetector, TouchPositionTracker
+
+            # Get magnet strength from touch config or default to weak
+            magnet_strength = touch.get("magnet_strength", "weak")
+
+            # Get custom thresholds if provided
+            thresholds = touch.get("quadrant_thresholds", None)
+            hysteresis = touch.get("hysteresis", 0.05)
+
+            # Create quadrant detector
+            self._touch_detector = QuadrantDetector(
+                thresholds=thresholds,
+                hysteresis=hysteresis,
+                magnet_strength=magnet_strength,
+            )
+
+            # Create position tracker
+            smoothing = touch.get("position_smoothing", 0.3)
+            min_duration = touch.get("min_touch_duration_ms", 100)
+            self._touch_position_tracker = TouchPositionTracker(
+                detector=self._touch_detector,
+                smoothing_alpha=smoothing,
+                min_touch_duration_ms=min_duration,
+            )
+
+            # Register IMU callback for touch data
+            if hasattr(touch_controller, "on_imu"):
+                touch_controller.on_imu(self._on_imu_touch_data)
+
+            logger.info(f"Touch position tracking enabled for skin {self.skin_id}")
+
+        except ImportError:
+            logger.warning("Quadrant detector not available - touch position tracking disabled")
+        except Exception:
+            logger.exception(f"Failed to setup touch tracking for skin {self.skin_id}")
+
+    def _on_imu_touch_data(self, data: dict[str, Any]) -> None:
+        """Process IMU touch data for position tracking.
+
+        The node_imu sends: {"type":"imu", "raw":[...], "mag":[...], "adj":[...], "act":[...]}
+        - adj: adjusted/calibrated per-sensor values (preferred, list of 4 floats 0.0-1.0)
+        - mag: raw magnitudes (list of 4 floats, in mT — needs normalisation)
+        - act: list of active sensor indices (binary fallback)
+        """
+        if self._touch_position_tracker is None:
+            return
+
+        try:
+            sensor_count = self.touch.get("sensor_count", 4) if self.touch else 4
+            values = self._extract_sensor_magnitudes(data, sensor_count)
+            if values is None:
+                return
+
+            current_time_ms = int(time.time() * 1000)
+            state = self._touch_position_tracker.update(values, current_time_ms)
+
+            if state["events"]["position_changed"]:
+                logger.debug("Touch position on skin %s: %s", self.skin_id, state["position"])
+            if state["events"]["touch_started"]:
+                logger.info("Touch started on skin %s: zone=%s", self.skin_id, state["zone"])
+            if state["events"]["touch_ended"] and state["is_valid_touch"]:
+                logger.info("Touch ended on skin %s: zone=%s duration=%dms",
+                            self.skin_id, state["zone"], state["touch_duration_ms"])
+
+        except Exception:
+            logger.exception("Error processing touch data for skin %s", self.skin_id)
+
+    @staticmethod
+    def _extract_sensor_magnitudes(data: dict[str, Any], count: int) -> list[float] | None:
+        """Extract per-sensor 0.0–1.0 magnitudes from a node_imu message.
+
+        Tries adj → mag → act (binary) in order. Returns None if no usable
+        data is found.
+        """
+        return (Skin._try_adj(data, count)
+                or Skin._try_mag(data, count)
+                or Skin._try_act(data, count))
+
+    @staticmethod
+    def _try_adj(data: dict[str, Any], count: int) -> list[float] | None:
+        """Extract from the pre-normalised 'adj' field (list of floats 0.0–1.0)."""
+        raw = data.get("adj")
+        if not isinstance(raw, (list, tuple)) or len(raw) < count:
+            return None
+        try:
+            vals = [float(v) for v in raw[:count]]
+        except (TypeError, ValueError):
+            return None
+        if not all(math.isfinite(v) for v in vals):
+            return None
+        return [min(max(v, 0.0), 1.0) for v in vals]
+
+    @staticmethod
+    def _try_mag(data: dict[str, Any], count: int) -> list[float] | None:
+        """Extract from 'mag' (raw mT magnitudes), normalised against peak."""
+        raw = data.get("mag")
+        if not isinstance(raw, (list, tuple)) or len(raw) < count:
+            return None
+        try:
+            vals = [float(v) for v in raw[:count]]
+            peak = max(vals)
+            return [min(max(v / peak, 0.0), 1.0) for v in vals] if peak > 0 else None
+        except (TypeError, ValueError, ZeroDivisionError):
+            return None
+
+    @staticmethod
+    def _try_act(data: dict[str, Any], count: int) -> list[float] | None:
+        """Extract from 'act' (list of active sensor indices) as binary 0/1."""
+        raw = data.get("act")
+        if not isinstance(raw, (list, tuple)):
+            return None
+        try:
+            active = {int(i) for i in raw}
+            return [1.0 if i in active else 0.0 for i in range(count)]
+        except (TypeError, ValueError):
+            return None
+
+    @property
+    def has_touch_tracking(self) -> bool:
+        """Check if this skin has touch position tracking enabled."""
+        return self._touch_position_tracker is not None
+
+    def get_touch_position(self) -> dict[str, Any]:
+        """Get current touch position tracking state."""
+        if self._touch_position_tracker is None:
+            return {
+                "enabled": False,
+                "position": "NONE",
+                "zone": "none",
+                "confidence": 0.0,
+            }
+
+        tracker_state = self._touch_position_tracker.to_dict()
+        return {
+            "enabled": True,
+            "position": tracker_state["current_position"],
+            "zone": tracker_state["current_zone"],
+            "confidence": tracker_state["confidence"],
+            "is_touching": tracker_state["is_touching"],
+            "is_valid_touch": tracker_state["is_valid_touch"],
+            "touch_duration_ms": tracker_state["touch_duration_ms"],
+        }
+
+    def reset_touch_tracking(self) -> None:
+        """Reset touch position tracking state."""
+        if self._touch_position_tracker:
+            self._touch_position_tracker.reset()
+            logger.debug(f"Touch tracking reset for skin {self.skin_id}")
 
     def __repr__(self) -> str:
         return (
