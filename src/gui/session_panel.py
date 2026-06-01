@@ -1,5 +1,6 @@
 """Session control panel for managing study sessions."""
 
+import logging
 from datetime import datetime
 
 from PySide6.QtCore import QTimer, Signal
@@ -17,6 +18,10 @@ from src.gui.monitor import RobotMonitorPanel
 from src.gui.touch_assignment_panel import TouchAssignmentPanel
 from src.gui.ui_session_panel import Ui_SessionPanel
 from src.robots.base_robot import BaseRobot
+
+logger = logging.getLogger(__name__)
+
+_LAST_ASSIGNMENTS_FILE = "last_assignments.json"
 
 
 class SessionPanel(QWidget, Ui_SessionPanel):
@@ -119,7 +124,7 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         ))
         self.session_started.emit(record.session_id)
 
-        last_path = Settings.ROOT / "data" / "last_assignments.json"
+        last_path = Settings.ROOT / "data" / _LAST_ASSIGNMENTS_FILE
         last_data = last_asgn.load(last_path)
         if last_data and last_data.get("session_id") == record.session_id:
             ids = set(last_data.get("robot_ids", []))
@@ -128,8 +133,12 @@ class SessionPanel(QWidget, Ui_SessionPanel):
             session_robots = []
         self._current_activity = get_activity(record.activity_name)
         if self._current_activity is not None:
+            if last_data:
+                self._current_activity.simulation_mode = last_data.get("simulation_mode", False)
             session_robots = self._current_activity.prepare_robots(session_robots)
         self._monitor.set_robots(session_robots)
+        if self._current_activity is not None:
+            self._start_activity(self._current_activity, record.session_id, session_robots)
         self._build_skin_participant_map(record.session_id)
         self._session_participants = list(participants)
         self._open_assignment_panel(session_robots)
@@ -148,8 +157,19 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         if not session_id or activity is None:
             return
 
+        # Per-session simulation toggle from the setup dialog. Set BEFORE
+        # ``prepare_robots`` so the default in BaseActivity sees it.
+        activity.simulation_mode = dialog.simulation_mode
+
+        # Apply the chosen ActivityPreset (if any) so the activity's
+        # tunable params reflect the user's selection. With no preset,
+        # ``param_values`` stays at the PARAMS / SIM_PARAMS defaults.
+        preset = dialog.selected_preset
+        if preset is not None:
+            activity.apply_preset(preset.params)
+
         # Open assignment dialog if there are robots and participants to assign
-        last_path = Settings.ROOT / "data" / "last_assignments.json"
+        last_path = Settings.ROOT / "data" / _LAST_ASSIGNMENTS_FILE
         assignments = []
         if robots and participants:
             last_data = last_asgn.load(last_path)
@@ -177,12 +197,13 @@ class SessionPanel(QWidget, Ui_SessionPanel):
             [p.participant_id for p in participants],
             assignments,
             session_id=session_id,
+            simulation_mode=activity.simulation_mode,
         )
 
         start_time = datetime.now()
         self._current_record = SessionRecord(
             session_id=session_id,
-            activity_name=activity.name,
+            activity_name=activity.display_name,
             start_time=start_time,
         )
         self._db.save_session(self._current_record)
@@ -207,7 +228,7 @@ class SessionPanel(QWidget, Ui_SessionPanel):
             if participants else "none"
         )
         self.session_id_label.setText(session_id)
-        self.activity_label.setText(activity.name)
+        self.activity_label.setText(activity.display_name)
         self.robots_label.setText(robot_names)
         self.participants_label.setText(participant_names)
         self.status_label.setText("Status: Running")
@@ -220,8 +241,22 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         self._session_participants = list(participants)
         self.session_started.emit(session_id)
         self._monitor.set_robots(robots)
+        self._start_activity(activity, session_id, robots)
         self._build_skin_participant_map(session_id)
         self._open_assignment_panel(robots)
+
+    def _start_activity(self, activity: BaseActivity, session_id: str,
+                        robots: list[BaseRobot]) -> None:
+        """Set up and start the activity so it subscribes to controller events
+        (e.g. ``on_imu``) and drives its state machine. Without this the
+        activity never reacts to touches — real or simulated."""
+        from src.core.session import Session
+        try:
+            session = Session(session_id, activity)
+            activity.setup(session, robots)
+            activity.start()
+        except Exception:   # noqa: BLE001 — surface but don't crash the GUI
+            logger.exception("Failed to start activity %s", activity.name)
 
     def _build_skin_participant_map(self, session_id: str) -> None:
         """Build a skin_id → participant_id lookup from session assignments."""
@@ -384,7 +419,7 @@ class SessionPanel(QWidget, Ui_SessionPanel):
             self._skin_robot[s] for s in self._skin_participant if s in self._skin_robot
         })
         participant_ids = [p.participant_id for p in self._session_participants]
-        last_path = Settings.ROOT / "data" / "last_assignments.json"
+        last_path = Settings.ROOT / "data" / _LAST_ASSIGNMENTS_FILE
         last_asgn.save(last_path, robot_ids, participant_ids, final_assignments, session_id)
 
     def _on_stop(self) -> None:

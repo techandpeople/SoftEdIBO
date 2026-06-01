@@ -10,6 +10,7 @@ TANK_REFILL_RATE: int = 1         # % per 300 ms tick (0→100 in 30 s)
 
 from src.hardware.air_reservoir import AirReservoir
 from src.hardware.simulated_controller import SimulatedController
+from src.hardware.simulated_imu import SimulatedIMU
 from src.hardware.skin import Skin
 from src.robots._robot_builder import build_skins
 from src.robots.base_robot import BaseRobot, RobotStatus
@@ -30,6 +31,7 @@ class SimulatedRobot(BaseRobot):
         skin_configs: list[dict[str, Any]],
         *,
         tank_kinds: list[str] | None = None,
+        sim_params: dict[str, Any] | None = None,
     ) -> None:
         """Initialize a simulated robot.
 
@@ -41,18 +43,40 @@ class SimulatedRobot(BaseRobot):
                           ``"pressure"``, ``"vacuum"``). Used by the monitor in
                           simulation mode to show tank widgets when the original
                           robot had reservoirs.
+            sim_params:   Optional dict of simulation knobs (sim_inflate_speed,
+                          sim_deflate_speed, sim_touch_release_delay_ms, …).
+                          Forwarded to each SimulatedController so the operator-
+                          tunable inflate/deflate rates take effect.
         """
         super().__init__(robot_id, name)
         self._controllers: dict[str, SimulatedController] = {}
         self._status = RobotStatus.CONNECTED
+        self._sim_params = sim_params or {}
 
         for skin_cfg in skin_configs:
             for ch in skin_cfg.get("chambers", []):
                 mac = ch["mac"]
                 if mac not in self._controllers:
-                    self._controllers[mac] = SimulatedController(mac)
+                    self._controllers[mac] = SimulatedController(
+                        mac, sim_params=self._sim_params,
+                    )
 
-        self._skins: dict[str, Skin] = build_skins(skin_configs, self._controllers)
+        # One SimulatedIMU **per skin** — the simulated "sensor board" the
+        # T-buttons feed. Keyed by skin_id (not node_mac) so each skin's
+        # T-buttons drive only that skin, even if several skins share a touch
+        # node_mac. Keeps touch input separate from chamber actuation,
+        # mirroring the real node_imu vs chamber-node split.
+        self._imus: dict[str, SimulatedIMU] = {}
+        for skin_cfg in skin_configs:
+            touch = skin_cfg.get("touch") or {}
+            if touch:
+                skin_id = skin_cfg.get("skin_id", "")
+                mac = touch.get("node_mac", skin_id)
+                self._imus[skin_id] = SimulatedIMU(mac)
+
+        self._skins: dict[str, Skin] = build_skins(
+            skin_configs, self._controllers, touch_controllers=self._imus,
+        )
         self._reservoirs: dict[str, AirReservoir] = self._build_simulated_reservoirs(
             tank_kinds or []
         )
@@ -160,7 +184,7 @@ class SimulatedRobot(BaseRobot):
             if kind not in ("pressure", "vacuum"):
                 continue
             sim_mac = f"SIM:TANK:{self.robot_id}:{kind}"
-            ctrl = SimulatedController(sim_mac)
+            ctrl = SimulatedController(sim_mac, sim_params=self._sim_params)
             self._controllers[sim_mac] = ctrl
             res = AirReservoir(kind=kind, controller=ctrl)  # type: ignore[arg-type]
             res._pressure = 100  # noqa: SLF001  — full tank on sim start

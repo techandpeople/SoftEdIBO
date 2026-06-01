@@ -13,6 +13,7 @@ from pathlib import Path
 
 from sqlalchemy import (
     Column,
+    Float,
     Integer,
     MetaData,
     String,
@@ -23,7 +24,14 @@ from sqlalchemy import (
 )
 from sqlalchemy.engine import Engine
 
-from src.data.models import InteractionEvent, ParticipantRecord, SessionAssignment, SessionRecord
+from src.data.models import (
+    ActivityPreset,
+    InteractionEvent,
+    ParticipantRecord,
+    SessionAssignment,
+    SessionRecord,
+    SkinTemplate,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +87,35 @@ _counters = Table(
     "counters", _metadata,
     Column("name", String, primary_key=True),
     Column("value", Integer, nullable=False, default=0),
+)
+
+# Activity presets — named bundles of tunable parameters for an Activity.
+# ``params`` is JSON-encoded. Multiple presets per activity are supported.
+_activity_presets = Table(
+    "activity_presets", _metadata,
+    Column("preset_id",     String, primary_key=True),
+    Column("activity_name", String, nullable=False),
+    Column("name",          String, nullable=False),
+    Column("description",   String, default=""),
+    Column("params",        String, nullable=False, default="{}"),
+    Column("created_at",    String, nullable=False),
+    Column("updated_at",    String, nullable=False),
+)
+
+# Skin templates — reusable layouts shared across skins. ``grid``,
+# ``chamber_grid`` and ``sensor_grid`` are JSON-encoded.
+_skin_templates = Table(
+    "skin_templates", _metadata,
+    Column("template_id",          String, primary_key=True),
+    Column("name",                 String, nullable=False),
+    Column("description",          String, default=""),
+    Column("chamber_count",        Integer, nullable=False, default=1),
+    Column("default_max_pressure", Float, nullable=False, default=8.0),
+    Column("default_min_pressure", Float, nullable=False, default=0.0),
+    Column("grid",                 String, nullable=False, default="{}"),
+    Column("chamber_grid",         String, nullable=False, default="[]"),
+    Column("sensor_count",         Integer, nullable=False, default=0),
+    Column("sensor_grid",          String, nullable=False, default="[]"),
 )
 
 
@@ -170,8 +207,10 @@ class Database:
         """Seed counters from existing data on first run."""
         with self._db_engine.begin() as conn:
             for counter_name, table_name, col in [
-                ("participant", "participants", "participant_id"),
-                ("session", "sessions", "session_id"),
+                ("participant",     "participants",      "participant_id"),
+                ("session",         "sessions",          "session_id"),
+                ("skin_template",   "skin_templates",    "template_id"),
+                ("activity_preset", "activity_presets",  "preset_id"),
             ]:
                 row = conn.execute(
                     select(_counters).where(_counters.c.name == counter_name)
@@ -202,13 +241,13 @@ class Database:
 
     def save_session(self, session: SessionRecord) -> None:
         """Insert or update a session record."""
-        values = dict(
-            session_id=session.session_id,
-            activity_name=session.activity_name,
-            start_time=session.start_time.isoformat(),
-            end_time=session.end_time.isoformat() if session.end_time else None,
-            notes=session.notes,
-        )
+        values = {
+            "session_id":    session.session_id,
+            "activity_name": session.activity_name,
+            "start_time":    session.start_time.isoformat(),
+            "end_time":      session.end_time.isoformat() if session.end_time else None,
+            "notes":         session.notes,
+        }
         with self._db_engine.begin() as conn:
             result = conn.execute(
                 _sessions.update()
@@ -292,11 +331,11 @@ class Database:
 
     def save_participant(self, participant: ParticipantRecord) -> None:
         """Insert or update a participant record."""
-        values = dict(
-            participant_id=participant.participant_id,
-            alias=participant.alias,
-            age=participant.age,
-        )
+        values = {
+            "participant_id": participant.participant_id,
+            "alias":          participant.alias,
+            "age":            participant.age,
+        }
         with self._db_engine.begin() as conn:
             result = conn.execute(
                 _participants.update()
@@ -459,3 +498,159 @@ class Database:
             )
             for row in rows
         ]
+
+    # ------------------------------------------------------------------
+    # Skin templates
+    # ------------------------------------------------------------------
+
+    def save_skin_template(self, template: SkinTemplate) -> None:
+        """Insert or update a skin template. ``template.template_id`` must be set."""
+        import json
+        values = {
+            "template_id":          template.template_id,
+            "name":                 template.name,
+            "description":          template.description,
+            "chamber_count":        int(template.chamber_count),
+            "default_max_pressure": float(template.default_max_pressure),
+            "default_min_pressure": float(template.default_min_pressure),
+            "grid":                 json.dumps(template.grid),
+            "chamber_grid":         json.dumps(template.chamber_grid),
+            "sensor_count":         int(template.sensor_count),
+            "sensor_grid":          json.dumps(template.sensor_grid),
+        }
+        with self._db_engine.begin() as conn:
+            result = conn.execute(
+                _skin_templates.update()
+                .where(_skin_templates.c.template_id == template.template_id)
+                .values(**values)
+            )
+            if result.rowcount == 0:
+                conn.execute(_skin_templates.insert().values(**values))
+            n = self._extract_counter_num(template.template_id)
+            if n is not None:
+                self._bump_counter(conn, "skin_template", n)
+
+    def get_all_skin_templates(self) -> list[SkinTemplate]:
+        """Return all skin templates ordered by template ID."""
+        with self._db_engine.connect() as conn:
+            rows = conn.execute(
+                select(_skin_templates).order_by(_skin_templates.c.template_id)
+            ).fetchall()
+        return [self._row_to_template(row) for row in rows]
+
+    def get_skin_template(self, template_id: str) -> SkinTemplate | None:
+        """Fetch one template by ID, or ``None`` if not found."""
+        with self._db_engine.connect() as conn:
+            row = conn.execute(
+                select(_skin_templates)
+                .where(_skin_templates.c.template_id == template_id)
+            ).fetchone()
+        return self._row_to_template(row) if row is not None else None
+
+    def delete_skin_template(self, template_id: str) -> None:
+        with self._db_engine.begin() as conn:
+            conn.execute(
+                _skin_templates.delete()
+                .where(_skin_templates.c.template_id == template_id)
+            )
+
+    def next_skin_template_id(self) -> str:
+        """Return the next auto-generated template ID (T001, T002, …)."""
+        with self._db_engine.connect() as conn:
+            n = conn.execute(
+                select(_counters.c.value)
+                .where(_counters.c.name == "skin_template")
+            ).scalar()
+        return f"T{(n or 0) + 1:03d}"
+
+    # ------------------------------------------------------------------
+    # Activity presets
+    # ------------------------------------------------------------------
+
+    def save_activity_preset(self, preset: ActivityPreset) -> None:
+        """Insert or update an activity preset. ``preset.preset_id`` must be set."""
+        import json
+        now_iso = datetime.now().isoformat()
+        values = {
+            "preset_id":     preset.preset_id,
+            "activity_name": preset.activity_name,
+            "name":          preset.name,
+            "description":   preset.description,
+            "params":        json.dumps(preset.params),
+            "created_at":    (preset.created_at or datetime.now()).isoformat(),
+            "updated_at":    now_iso,
+        }
+        with self._db_engine.begin() as conn:
+            result = conn.execute(
+                _activity_presets.update()
+                .where(_activity_presets.c.preset_id == preset.preset_id)
+                .values(**values)
+            )
+            if result.rowcount == 0:
+                conn.execute(_activity_presets.insert().values(**values))
+            n = self._extract_counter_num(preset.preset_id)
+            if n is not None:
+                self._bump_counter(conn, "activity_preset", n)
+
+    def get_activity_presets(self, activity_name: str | None = None
+                             ) -> list[ActivityPreset]:
+        """Return all presets, optionally filtered by activity name."""
+        with self._db_engine.connect() as conn:
+            stmt = select(_activity_presets).order_by(_activity_presets.c.preset_id)
+            if activity_name:
+                stmt = stmt.where(_activity_presets.c.activity_name == activity_name)
+            rows = conn.execute(stmt).fetchall()
+        return [self._row_to_preset(row) for row in rows]
+
+    def get_activity_preset(self, preset_id: str) -> ActivityPreset | None:
+        with self._db_engine.connect() as conn:
+            row = conn.execute(
+                select(_activity_presets)
+                .where(_activity_presets.c.preset_id == preset_id)
+            ).fetchone()
+        return self._row_to_preset(row) if row is not None else None
+
+    def delete_activity_preset(self, preset_id: str) -> None:
+        with self._db_engine.begin() as conn:
+            conn.execute(
+                _activity_presets.delete()
+                .where(_activity_presets.c.preset_id == preset_id)
+            )
+
+    def next_activity_preset_id(self) -> str:
+        """Return the next auto-generated preset ID (AP001, AP002, …)."""
+        with self._db_engine.connect() as conn:
+            n = conn.execute(
+                select(_counters.c.value)
+                .where(_counters.c.name == "activity_preset")
+            ).scalar()
+        return f"AP{(n or 0) + 1:03d}"
+
+    @staticmethod
+    def _row_to_preset(row) -> ActivityPreset:
+        import json
+        return ActivityPreset(
+            preset_id=row.preset_id,
+            activity_name=row.activity_name,
+            name=row.name,
+            description=row.description or "",
+            params=json.loads(row.params or "{}"),
+            created_at=datetime.fromisoformat(row.created_at),
+            updated_at=datetime.fromisoformat(row.updated_at),
+        )
+
+    @staticmethod
+    def _row_to_template(row) -> SkinTemplate:
+        import json
+        return SkinTemplate(
+            template_id=row.template_id,
+            name=row.name,
+            description=row.description or "",
+            chamber_count=int(row.chamber_count),
+            default_max_pressure=float(row.default_max_pressure),
+            default_min_pressure=float(row.default_min_pressure),
+            grid=json.loads(row.grid or "{}"),
+            chamber_grid=json.loads(row.chamber_grid or "[]"),
+            sensor_count=int(row.sensor_count),
+            sensor_grid=json.loads(row.sensor_grid or "[]"),
+        )

@@ -57,6 +57,10 @@ SessionPanel
 - **Per-chamber max pressure** is set in `settings.yaml` and enforced both in the app and on the ESP32 (hardware safety — survives app crashes).
           - **Pressure sensing** uses the XGZP6847A datasheet transfer function (see [pressure.h](firmware/node_direct/src/pressure.h)).
 
+**Touch sensing (optional).** A skin may reference a `node_imu` (4-sensor IMU/touch board) via its `touch:` block — see [firmware/PROTOCOL.md](firmware/PROTOCOL.md). The activity-time view (`SkinGridView`) overlays a pulsing yellow outline on the active sensor cells so the operator sees where each touch lands relative to the chamber regions.
+
+**Skin layout editor.** The skin config dialog exposes a paint-grid editor (left-click paints, right-click erases, drag to multi-select) where chambers and touch zones are placed on a 2-D matrix. Layouts can be saved as reusable **Skin Templates** (DB-backed) so the same shape can be applied to many skins with one click — see [docs/ACTIVITIES.md](docs/ACTIVITIES.md) for the broader behavior-framework plan.
+
 ---
 
 ## Installation

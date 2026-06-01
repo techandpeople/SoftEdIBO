@@ -8,6 +8,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
     QLabel,
     QMainWindow,
     QMessageBox,
@@ -54,7 +55,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self._home_panel = HomePanel()
         self._participant_panel = ParticipantPanel(self._db)
         self._session_panel = SessionPanel(self._db)
-        self._robot_panel = RobotPanel(self._gateway, self._settings)
+        self._robot_panel = RobotPanel(self._gateway, self._settings, self._db)
         self._data_panel = DataPanel(self._db)
 
         self.tabs.addTab(self._home_panel, "Home")
@@ -80,6 +81,14 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.actionFlashFirmware.triggered.connect(self._open_flash_wizard)
         self.actionCheckForUpdates.triggered.connect(self._check_updates_manual)
         self.actionAbout.triggered.connect(self._show_about)
+
+        # Tools => Activity Presets… — added programmatically so we don't have
+        # to regenerate the .ui every time we ship a new managed entity. The
+        # menuTools handle comes from ui_main_window.py.
+        from PySide6.QtGui import QAction
+        self.actionActivityPresets = QAction("Activity Presets…", self)
+        self.actionActivityPresets.triggered.connect(self._open_activity_presets)
+        self.menuTools.addAction(self.actionActivityPresets)
 
         # OTA updater — silent background check 5 s after startup
         self._updater = AppUpdater(self)
@@ -177,6 +186,18 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         dlg = SettingsDialog(self._settings, parent=self)
         dlg.settings_saved.connect(self._on_settings_saved)
         dlg.exec()
+
+    def _open_activity_presets(self) -> None:
+        """Tools => Activity Presets… — manage tunable preset bundles per
+        activity. See ``ActivityPresetDialog`` for the layout / behaviour."""
+        from src.gui.activity_preset_dialog import ActivityPresetDialog
+        dlg = ActivityPresetDialog(self._db, parent=self, apply_on_close=True)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            # Apply the selected preset to the current activity if one is running
+            current_preset = dlg.selected_preset()
+            if current_preset and self._session_panel._current_activity:
+                self._session_panel._current_activity.apply_preset(current_preset.params)
+                logger.info(f"Applied preset {current_preset.preset_id} to {self._session_panel._current_activity.name}")
 
     def _on_settings_saved(self) -> None:
         """Apply settings changes that don't require a restart."""

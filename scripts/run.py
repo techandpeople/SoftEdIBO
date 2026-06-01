@@ -1,9 +1,12 @@
 """Main entry point for the SoftEdIBO application."""
 
 import logging
+import os
 import sys
 import traceback
 from pathlib import Path
+
+os.environ.setdefault("QT_LOGGING_RULES", "qt.qpa.wayland.textinput=false")
 
 # Add project root to path
 project_root = Path(__file__).resolve().parent.parent
