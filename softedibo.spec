@@ -13,13 +13,13 @@
 #     config/
 #       settings.yaml
 #     firmware/
-#       gateway/firmware.bin               (ESP32-C6, ESP-IDF)
-#       gateway/firmware-esp32.bin         (ESP32-WROOM, Arduino)
-#       node_direct/firmware-release.bin
-#       node_direct/firmware-debug.bin
-#       node_multiplexed/firmware-release.bin
-#       node_multiplexed/firmware-debug.bin
-#       node_sensor/firmware-release.bin   (MLX90393 touch board)
+#       gateway/firmware.bin                         (ESP32-C6, ESP-IDF)
+#       gateway/firmware-esp32.bin                   (ESP32-WROOM, Arduino)
+#       node_actuator/firmware-direct-release.bin
+#       node_actuator/firmware-direct-debug.bin
+#       node_actuator/firmware-multiplexed-release.bin
+#       node_actuator/firmware-multiplexed-debug.bin
+#       node_sensor/firmware-release.bin             (MLX90393 touch board)
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
@@ -54,11 +54,11 @@ main_a = Analysis(
         ("config/", "config/"),
         ("firmware/gateway/firmware.bin",                 "firmware/gateway"),
         ("firmware/gateway/firmware-esp32.bin",           "firmware/gateway"),
-        ("firmware/node_direct/firmware-release.bin",     "firmware/node_direct"),
-        ("firmware/node_direct/firmware-debug.bin",       "firmware/node_direct"),
-        ("firmware/node_multiplexed/firmware-release.bin", "firmware/node_multiplexed"),
-        ("firmware/node_multiplexed/firmware-debug.bin",   "firmware/node_multiplexed"),
-        ("firmware/node_sensor/firmware-release.bin",      "firmware/node_sensor"),
+        ("firmware/node_actuator/firmware-direct-release.bin",      "firmware/node_actuator"),
+        ("firmware/node_actuator/firmware-direct-debug.bin",        "firmware/node_actuator"),
+        ("firmware/node_actuator/firmware-multiplexed-release.bin", "firmware/node_actuator"),
+        ("firmware/node_actuator/firmware-multiplexed-debug.bin",   "firmware/node_actuator"),
+        ("firmware/node_sensor/firmware-release.bin",               "firmware/node_sensor"),
     ],
     hiddenimports=[
         *collect_submodules("src"),

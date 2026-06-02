@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from src.gui.led_ring_tester import LedRingTester
 from src.gui.ui_test_actuators_dialog import Ui_TestActuatorsDialog
 from src.hardware.espnow_gateway import ESPNowGateway
 
@@ -37,6 +38,7 @@ class TestActuatorsDialog(QDialog, Ui_TestActuatorsDialog):
         mac: str,
         skin_cfgs: list[dict],
         gateway: ESPNowGateway,
+        led_count: int = 24,
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
@@ -56,6 +58,13 @@ class TestActuatorsDialog(QDialog, Ui_TestActuatorsDialog):
             for skin_cfg in skin_cfgs:
                 self.chambers_vbox.addWidget(self._build_chamber_group(skin_cfg))
             self.chambers_vbox.addStretch()
+
+        # WS2812 LED ring tester (node_direct boards). Insert before the
+        # Close button (the last widget in the dialog's vertical layout).
+        if led_count > 0:
+            self._led_tester = LedRingTester(led_count, self._send_led)
+            self.verticalLayout.insertWidget(
+                self.verticalLayout.count() - 1, self._led_tester)
 
         self._pressure_received.connect(self._update_pressure)
         self._gateway.on_message(self._on_gateway_message)
@@ -129,6 +138,17 @@ class TestActuatorsDialog(QDialog, Ui_TestActuatorsDialog):
     # ------------------------------------------------------------------
     # Commands
     # ------------------------------------------------------------------
+
+    def _send_led(self, index: int | None, color_hex: str | None) -> None:
+        """Forward an LED change to the node. color_hex None => turn off;
+        index None => whole ring; otherwise a single pixel."""
+        if color_hex is None:
+            self._gateway.send(self._mac, "set_led", pattern="off")
+        elif index is None:
+            self._gateway.send(self._mac, "set_led", color=color_hex, pattern="solid")
+        else:
+            self._gateway.send(self._mac, "set_led", color=color_hex,
+                               index=index, pattern="solid")
 
     def _inflate_slot(self, slot: int) -> None:
         self._gateway.send(self._mac, "inflate", chamber=slot, value=255)

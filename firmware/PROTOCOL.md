@@ -43,10 +43,18 @@ Each command is sent on the serial line as
 Tank targets are part of `configure` (multiplexed only) — there is no separate
 runtime `set_tank_pressure` command; re-send `configure` to change them.
 
-### IMU-node only
+### Direct-node only
 
-Beyond `ping` and `debug`, the IMU node accepts no commands — it is a
-read-only sensor that streams data periodically.
+| `cmd` | Fields | Notes |
+|---|---|---|
+| `set_led` | `color` ("#RRGGBB"), `pattern` ("off"/"solid"/"blink"/"pulse"), `period_ms`, `count`, `index` | WS2812 ring. `index` sets a single pixel (solid); omit it for the whole ring. `period_ms`/`count` apply to blink/pulse (count ≤ 0 = forever). |
+
+### Sensor / IMU-node only
+
+| `cmd` | Fields | Notes |
+|---|---|---|
+| `rebaseline` | — | Re-zero (recapture the baseline of) all magnetic sensors |
+| `configure` | `fullscale_mt`, `act_threshold` | Tune `adj` normalisation scale + activation level (both optional) |
 
 ### Multiplexed-node only
 

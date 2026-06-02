@@ -72,10 +72,10 @@ jobs:
           path: |
             firmware/gateway/firmware.bin
             firmware/gateway/firmware-esp32.bin
-            firmware/node_direct/firmware-release.bin
-            firmware/node_direct/firmware-debug.bin
-            firmware/node_multiplexed/firmware-release.bin
-            firmware/node_multiplexed/firmware-debug.bin
+            firmware/node_actuator/firmware-direct-release.bin
+            firmware/node_actuator/firmware-direct-debug.bin
+            firmware/node_actuator/firmware-multiplexed-release.bin
+            firmware/node_actuator/firmware-multiplexed-debug.bin
             firmware/node_sensor/firmware-release.bin
           key: fwbins-${{ hashFiles('firmware/common/**', 'firmware/gateway/src/**', 'firmware/gateway/platformio.ini', 'firmware/gateway/CMakeLists.txt', 'firmware/gateway/sdkconfig.defaults', 'firmware/node_actuator/src/**', 'firmware/node_actuator/platformio.ini', 'firmware/node_sensor/src/**', 'firmware/node_sensor/platformio.ini') }}
 
@@ -130,10 +130,10 @@ jobs:
               0x8000 ".pio/build/$1/partitions.bin" \
               0x10000 ".pio/build/$1/firmware.bin"
           }
-          mergebin direct            node_direct/firmware-release.bin
-          mergebin direct_debug      node_direct/firmware-debug.bin
-          mergebin multiplexed       node_multiplexed/firmware-release.bin
-          mergebin multiplexed_debug node_multiplexed/firmware-debug.bin
+          mergebin direct            node_actuator/firmware-direct-release.bin
+          mergebin direct_debug      node_actuator/firmware-direct-debug.bin
+          mergebin multiplexed       node_actuator/firmware-multiplexed-release.bin
+          mergebin multiplexed_debug node_actuator/firmware-multiplexed-debug.bin
           cd ../node_sensor
           python -m platformio run -e esp32dev
           python -m esptool --chip esp32 merge_bin \
@@ -152,10 +152,10 @@ jobs:
           mkdir -p firmware-binaries
           cp firmware/gateway/firmware.bin                       firmware-binaries/gateway-c6.bin
           cp firmware/gateway/firmware-esp32.bin                 firmware-binaries/gateway-esp32.bin
-          cp firmware/node_direct/firmware-release.bin           firmware-binaries/node_direct-release.bin
-          cp firmware/node_direct/firmware-debug.bin             firmware-binaries/node_direct-debug.bin
-          cp firmware/node_multiplexed/firmware-release.bin      firmware-binaries/node_multiplexed-release.bin
-          cp firmware/node_multiplexed/firmware-debug.bin        firmware-binaries/node_multiplexed-debug.bin
+          cp firmware/node_actuator/firmware-direct-release.bin       firmware-binaries/node_direct-release.bin
+          cp firmware/node_actuator/firmware-direct-debug.bin         firmware-binaries/node_direct-debug.bin
+          cp firmware/node_actuator/firmware-multiplexed-release.bin  firmware-binaries/node_multiplexed-release.bin
+          cp firmware/node_actuator/firmware-multiplexed-debug.bin    firmware-binaries/node_multiplexed-debug.bin
           cp firmware/node_sensor/firmware-release.bin           firmware-binaries/node_sensor.bin
 
       - name: Upload firmware artifact (flat, for releases)
@@ -174,10 +174,10 @@ jobs:
           path: |
             firmware/gateway/firmware.bin
             firmware/gateway/firmware-esp32.bin
-            firmware/node_direct/firmware-release.bin
-            firmware/node_direct/firmware-debug.bin
-            firmware/node_multiplexed/firmware-release.bin
-            firmware/node_multiplexed/firmware-debug.bin
+            firmware/node_actuator/firmware-direct-release.bin
+            firmware/node_actuator/firmware-direct-debug.bin
+            firmware/node_actuator/firmware-multiplexed-release.bin
+            firmware/node_actuator/firmware-multiplexed-debug.bin
             firmware/node_sensor/firmware-release.bin
           retention-days: 30
 

@@ -132,6 +132,24 @@ class ESP32Controller:
         """Request sensor calibration on the ESP32."""
         return self.send_command("calibrate_sensor", sensor=sensor_id)
 
+    def set_led(self, color: str, pattern: str = "solid",
+                period_ms: int = 0, count: int | None = None,
+                index: int | None = None) -> bool:
+        """Drive the node's WS2812 LED ring.
+
+        color:   "#RRGGBB". pattern: "off" | "solid" | "blink" | "pulse".
+        period_ms/count: animation timing (whole-ring patterns only).
+        index:   when given, set just that pixel (solid); otherwise the whole
+                 ring. Per-pixel is used by the LED test panel.
+        """
+        kwargs: dict[str, Any] = {"color": color, "pattern": pattern,
+                                  "period_ms": int(period_ms)}
+        if count is not None:
+            kwargs["count"] = int(count)
+        if index is not None:
+            kwargs["index"] = int(index)
+        return self.send_command("set_led", **kwargs)
+
     def on_touch(self, callback: Callable[[int, int], None]) -> None:
         """Register a callback for touch sensor events.
 

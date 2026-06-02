@@ -33,3 +33,7 @@ constexpr int VALVE_PINS[6] = {25, 4, 16, 17, 18, 19};
 // VALVE7 (IO26) and VALVE8 (IO27) are spare on the PCB and unused by firmware.
 
 constexpr int NUM_CHAMBERS = 3;
+
+// WS2812 / NeoPixel ring on a single data line (IO23 is otherwise unused).
+constexpr int LED_PIN  = 23;
+constexpr int NUM_LEDS = 24;
