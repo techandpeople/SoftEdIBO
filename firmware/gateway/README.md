@@ -1,31 +1,42 @@
 # ESP-NOW Gateway Firmware
 
-**ESP-IDF** firmware for the **Seeed XIAO ESP32-C6** that bridges USB/serial
-(PC) <-> ESP-NOW (nodes). The ESP-NOW / MAC / radio plumbing is shared with the
-Arduino node firmwares via `firmware/common/se_espnow.h`.
+Bridges USB/serial (PC) <-> ESP-NOW (nodes). The ESP-NOW / MAC / radio plumbing
+is shared with the node firmwares via `firmware/common/se_espnow.h`.
 
-## Hardware
+## Two board variants
 
-- **Board:** Seeed XIAO ESP32-C6 (RISC-V)
-- **Connection to PC:** native USB-Serial/JTAG (the USB-C port)
-- **Baud rate:** 115200
+Both speak the **identical** serial protocol below; pick the one matching your
+hardware. Each compiles only its own entry point (see `platformio.ini`).
+
+| Variant | Board | Framework | Source | PlatformIO env | Output bin |
+|---------|-------|-----------|--------|----------------|-----------|
+| New | **Seeed XIAO ESP32-C6** (RISC-V), native USB-Serial/JTAG | ESP-IDF | `src/main.cpp` (cJSON, usb_serial_jtag) | `seeed_xiao_esp32c6` | `firmware.bin` |
+| Old | **ESP32-WROOM-32** DevKit, USB-UART bridge (CH340/CP2102) | Arduino | `src/main_arduino.cpp` (ArduinoJson, Serial) | `esp32dev` | `firmware-esp32.bin` |
+
+Baud rate: 115200 either way.
 
 ## Build & Flash
 
 ```bash
 cd firmware/gateway
-pio run -e seeed_xiao_esp32c6 --target upload
+pio run -e seeed_xiao_esp32c6 --target upload   # new: XIAO ESP32-C6
+pio run -e esp32dev          --target upload    # old: ESP32-WROOM-32
 ```
 
-Requires [PlatformIO](https://platformio.org/). The C6 needs ESP-IDF 5.1+
-(Arduino core 2.x does not support it). If the official `espressif32` platform
-does not yet recognise the C6 with the `espidf` framework on your install, build
-with native ESP-IDF instead — the `CMakeLists.txt` are shared:
+Requires [PlatformIO](https://platformio.org/). The C6 (RISC-V) needs ESP-IDF
+5.x — the official `espressif32` 6.x ships Arduino core 2.x and does NOT support
+it, so the C6 env pins the **pioarduino** platform fork (verified: IDF 5.5.4).
+Native ESP-IDF also works (the `CMakeLists.txt` are shared):
 
 ```bash
 cd firmware/gateway
 idf.py set-target esp32c6 && idf.py build flash
 ```
+
+> Flashing offsets differ: the C6 merged image has its bootloader at `0x0`,
+> the WROOM at `0x1000` — but both merged `.bin` files are written at `0x0`
+> (`esptool --chip esp32c6 …` vs `--chip esp32 …`). The setup wizard handles
+> this automatically.
 
 ## Serial Protocol (newline-terminated JSON)
 

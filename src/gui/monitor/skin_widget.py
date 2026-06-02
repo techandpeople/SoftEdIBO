@@ -15,6 +15,7 @@ from PySide6.QtWidgets import QGroupBox, QHBoxLayout, QSizePolicy, QVBoxLayout
 
 from src.gui.monitor.chamber_widget import ChamberWidget
 from src.gui.monitor.skin_grid_view import SkinGridView
+from src.gui.monitor.touch_tuning_panel import TouchTuningPanel
 from src.hardware.skin import Skin
 
 
@@ -44,6 +45,10 @@ class SkinWidget(QGroupBox):
                 if on_touch is not None:
                     on_touch(lambda sensor_id, _raw, gv=self._grid_view:
                              gv.pulse_sensor(sensor_id))
+
+        # Live tuning panel for skins with 4-sensor quadrant touch detection.
+        if skin.has_touch_tracking:
+            outer.addWidget(TouchTuningPanel(skin))
 
         # Chamber controls row (one ChamberWidget per AirChamber).
         cols = QHBoxLayout()

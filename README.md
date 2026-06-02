@@ -21,8 +21,9 @@ The system supports multiple robot types (Turtle, Tree, Thymio) and activity mod
 | XGZP6847A pressure sensor | 1 per chamber | Analog output (0-3.3 V) |
 | Solenoid valves | 2 per chamber | Inflate + deflate via ULN2803A |
 
-Flash the [gateway firmware](firmware/gateway/) (ESP-IDF, Seeed XIAO ESP32-C6)
-to the USB-connected board. For each node, choose the matching firmware target:
+Flash the [gateway firmware](firmware/gateway/) to the USB-connected board —
+two variants are built: **Seeed XIAO ESP32-C6** (ESP-IDF) and the classic
+**ESP32-WROOM-32** (Arduino). For each node, choose the matching firmware target:
 
 | Firmware | Path | When to use |
 |----------|------|-------------|
@@ -159,8 +160,9 @@ levels are always written to `data/softedibo.log` (rotating, 2 MB x 3 backups).
 ### Firmware
 
 ```bash
-# Gateway (ESP-IDF, Seeed XIAO ESP32-C6)
-cd firmware/gateway && pio run -e seeed_xiao_esp32c6 --target upload
+# Gateway — pick your board (both speak the same protocol)
+cd firmware/gateway && pio run -e seeed_xiao_esp32c6 --target upload   # XIAO ESP32-C6 (ESP-IDF)
+cd firmware/gateway && pio run -e esp32dev           --target upload   # ESP32-WROOM-32 (Arduino)
 
 # Actuator nodes (one project, env per variant)
 cd firmware/node_actuator && pio run -e direct      --target upload

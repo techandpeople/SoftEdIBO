@@ -57,21 +57,45 @@ jobs:
           printf '__version__ = "%s"\nGITHUB_REPO = "%s"\n__build_time__ = "%s"\n__commit__ = "%s"\n' \
             "$VERSION" "$REPO" "$BUILD_TIME" "${GITHUB_SHA}" > src/_version.py
 
+      # ----------------------------------------------------------------
+      # Firmware — built ONCE here (Linux) and reused by the Windows job
+      # (ESP .bin files are identical regardless of the host OS, and the
+      # ESP-IDF gateway build does not work on Windows runners). Cached by a
+      # hash of the firmware sources, so an unchanged firmware tree is not
+      # recompiled.
+      # ----------------------------------------------------------------
+
+      - name: Cache built firmware binaries
+        id: fwcache
+        uses: actions/cache@v4
+        with:
+          path: |
+            firmware/gateway/firmware.bin
+            firmware/gateway/firmware-esp32.bin
+            firmware/node_direct/firmware-release.bin
+            firmware/node_direct/firmware-debug.bin
+            firmware/node_multiplexed/firmware-release.bin
+            firmware/node_multiplexed/firmware-debug.bin
+            firmware/node_sensor/firmware-release.bin
+          key: fwbins-${{ hashFiles('firmware/common/**', 'firmware/gateway/src/**', 'firmware/gateway/platformio.ini', 'firmware/gateway/CMakeLists.txt', 'firmware/gateway/sdkconfig.defaults', 'firmware/node_actuator/src/**', 'firmware/node_actuator/platformio.ini', 'firmware/node_sensor/src/**', 'firmware/node_sensor/platformio.ini') }}
+
       - name: Install PlatformIO
+        if: steps.fwcache.outputs.cache-hit != 'true'
         run: pip install platformio esptool
 
       - name: Cache PlatformIO toolchain
+        if: steps.fwcache.outputs.cache-hit != 'true'
         uses: actions/cache@v4
         with:
           path: ~/.platformio
           key: ${{ runner.os }}-pio-${{ hashFiles('firmware/**/platformio.ini') }}
           restore-keys: ${{ runner.os }}-pio-
 
-      # ----------------------------------------------------------------
-      # Gateway (single build env)
-      # ----------------------------------------------------------------
-
-      - name: Build gateway firmware (ESP-IDF, XIAO ESP32-C6)
+      # Gateway — two board variants (see firmware/gateway/README.md):
+      #   firmware.bin       -> Seeed XIAO ESP32-C6 (ESP-IDF, bootloader @ 0x0)
+      #   firmware-esp32.bin -> classic ESP32-WROOM  (Arduino, bootloader @ 0x1000)
+      - name: Build gateway firmware (XIAO ESP32-C6 + ESP32-WROOM)
+        if: steps.fwcache.outputs.cache-hit != 'true'
         run: |
           cd firmware/gateway
           python -m platformio run -e seeed_xiao_esp32c6
@@ -81,14 +105,19 @@ jobs:
             0x0 .pio/build/seeed_xiao_esp32c6/bootloader.bin \
             0x8000 .pio/build/seeed_xiao_esp32c6/partitions.bin \
             0x10000 .pio/build/seeed_xiao_esp32c6/firmware.bin
+          python -m platformio run -e esp32dev
+          python -m esptool --chip esp32 merge_bin \
+            --flash_mode dio --flash_freq 40m --flash_size 4MB \
+            -o firmware-esp32.bin \
+            0x1000 .pio/build/esp32dev/bootloader.bin \
+            0x8000 .pio/build/esp32dev/partitions.bin \
+            0x10000 .pio/build/esp32dev/firmware.bin
 
-      # ----------------------------------------------------------------
-      # Actuator nodes: one project, two variants x release/debug.
-      # Bins are emitted into per-node-type dirs so the .spec/wizard layout
-      # stays keyed by node type.
-      # ----------------------------------------------------------------
-
-      - name: Build actuator node firmware (direct + multiplexed, release + debug)
+      # Nodes: actuator (direct + multiplexed x release/debug) + sensor.
+      # Bins land in per-node-type dirs so the .spec/wizard layout stays
+      # keyed by node type.
+      - name: Build node firmware (actuator + sensor)
+        if: steps.fwcache.outputs.cache-hit != 'true'
         run: |
           cd firmware/node_actuator
           mergebin() {  # $1 = pio env, $2 = output path (relative to firmware/)
@@ -105,10 +134,7 @@ jobs:
           mergebin direct_debug      node_direct/firmware-debug.bin
           mergebin multiplexed       node_multiplexed/firmware-release.bin
           mergebin multiplexed_debug node_multiplexed/firmware-debug.bin
-
-      - name: Build node_sensor firmware
-        run: |
-          cd firmware/node_sensor
+          cd ../node_sensor
           python -m platformio run -e esp32dev
           python -m esptool --chip esp32 merge_bin \
             --flash_mode dio --flash_freq 40m --flash_size 4MB \
@@ -118,24 +144,41 @@ jobs:
             0x10000 .pio/build/esp32dev/firmware.bin
 
       # ----------------------------------------------------------------
-      # Collect all firmware binaries
+      # Collect all firmware binaries (flat names, for the release zip)
       # ----------------------------------------------------------------
 
       - name: Collect firmware binaries
         run: |
           mkdir -p firmware-binaries
-          cp firmware/gateway/firmware.bin                       firmware-binaries/gateway.bin
+          cp firmware/gateway/firmware.bin                       firmware-binaries/gateway-c6.bin
+          cp firmware/gateway/firmware-esp32.bin                 firmware-binaries/gateway-esp32.bin
           cp firmware/node_direct/firmware-release.bin           firmware-binaries/node_direct-release.bin
           cp firmware/node_direct/firmware-debug.bin             firmware-binaries/node_direct-debug.bin
           cp firmware/node_multiplexed/firmware-release.bin      firmware-binaries/node_multiplexed-release.bin
           cp firmware/node_multiplexed/firmware-debug.bin        firmware-binaries/node_multiplexed-debug.bin
           cp firmware/node_sensor/firmware-release.bin           firmware-binaries/node_sensor.bin
 
-      - name: Upload firmware artifact
+      - name: Upload firmware artifact (flat, for releases)
         uses: actions/upload-artifact@v4
         with:
           name: firmware
           path: firmware-binaries/
+          retention-days: 30
+
+      # Tree-layout copy the Windows job drops straight into the workspace so
+      # PyInstaller bundles them without rebuilding any firmware.
+      - name: Upload firmware binaries (tree layout, for the app bundle)
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-tree
+          path: |
+            firmware/gateway/firmware.bin
+            firmware/gateway/firmware-esp32.bin
+            firmware/node_direct/firmware-release.bin
+            firmware/node_direct/firmware-debug.bin
+            firmware/node_multiplexed/firmware-release.bin
+            firmware/node_multiplexed/firmware-debug.bin
+            firmware/node_sensor/firmware-release.bin
           retention-days: 30
 
       # ----------------------------------------------------------------
@@ -210,6 +253,7 @@ jobs:
   # Windows build — produces a portable zip
   # -----------------------------------------------------------------------
   build-windows:
+    needs: build          # reuse the firmware built on Linux; never rebuild it here
     runs-on: windows-latest
 
     steps:
@@ -249,76 +293,14 @@ jobs:
           printf '__version__ = "%s"\nGITHUB_REPO = "%s"\n__build_time__ = "%s"\n__commit__ = "%s"\n' \
             "$VERSION" "$REPO" "$BUILD_TIME" "${GITHUB_SHA}" > src/_version.py
 
-      - name: Install PlatformIO
-        run: pip install platformio esptool
-
-      - name: Cache PlatformIO toolchain
-        uses: actions/cache@v4
+      # Firmware is built once on Linux (the ESP-IDF gateway build does not work
+      # on Windows runners, and ESP .bin files are host-OS-independent). Drop the
+      # tree-layout bins into the workspace so PyInstaller bundles them.
+      - name: Download firmware binaries (built on Linux)
+        uses: actions/download-artifact@v4
         with:
-          path: ~/.platformio
-          key: ${{ runner.os }}-pio-${{ hashFiles('firmware/**/platformio.ini') }}
-          restore-keys: ${{ runner.os }}-pio-
-
-      - name: Build gateway firmware (ESP-IDF, XIAO ESP32-C6)
-        shell: bash
-        run: |
-          cd firmware/gateway
-          python -m platformio run -e seeed_xiao_esp32c6
-          python -m esptool --chip esp32c6 merge_bin \
-            --flash_mode dio --flash_freq 80m --flash_size 4MB \
-            -o firmware.bin \
-            0x0 .pio/build/seeed_xiao_esp32c6/bootloader.bin \
-            0x8000 .pio/build/seeed_xiao_esp32c6/partitions.bin \
-            0x10000 .pio/build/seeed_xiao_esp32c6/firmware.bin
-
-      - name: Build actuator node firmware (direct + multiplexed, release + debug)
-        shell: bash
-        run: |
-          cd firmware/node_actuator
-          mergebin() {  # $1 = pio env, $2 = output path (relative to firmware/)
-            python -m platformio run -e "$1"
-            mkdir -p "$(dirname "../$2")"
-            python -m esptool --chip esp32 merge_bin \
-              --flash_mode dio --flash_freq 40m --flash_size 4MB \
-              -o "../$2" \
-              0x1000 ".pio/build/$1/bootloader.bin" \
-              0x8000 ".pio/build/$1/partitions.bin" \
-              0x10000 ".pio/build/$1/firmware.bin"
-          }
-          mergebin direct            node_direct/firmware-release.bin
-          mergebin direct_debug      node_direct/firmware-debug.bin
-          mergebin multiplexed       node_multiplexed/firmware-release.bin
-          mergebin multiplexed_debug node_multiplexed/firmware-debug.bin
-
-      - name: Build node_sensor firmware
-        shell: bash
-        run: |
-          cd firmware/node_sensor
-          python -m platformio run -e esp32dev
-          python -m esptool --chip esp32 merge_bin \
-            --flash_mode dio --flash_freq 40m --flash_size 4MB \
-            -o firmware-release.bin \
-            0x1000 .pio/build/esp32dev/bootloader.bin \
-            0x8000 .pio/build/esp32dev/partitions.bin \
-            0x10000 .pio/build/esp32dev/firmware.bin
-
-      - name: Collect firmware binaries
-        shell: bash
-        run: |
-          mkdir -p firmware-binaries
-          cp firmware/gateway/firmware.bin                       firmware-binaries/gateway.bin
-          cp firmware/node_direct/firmware-release.bin           firmware-binaries/node_direct-release.bin
-          cp firmware/node_direct/firmware-debug.bin             firmware-binaries/node_direct-debug.bin
-          cp firmware/node_multiplexed/firmware-release.bin      firmware-binaries/node_multiplexed-release.bin
-          cp firmware/node_multiplexed/firmware-debug.bin        firmware-binaries/node_multiplexed-debug.bin
-          cp firmware/node_sensor/firmware-release.bin           firmware-binaries/node_sensor.bin
-
-      - name: Upload firmware artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: firmware-windows
-          path: firmware-binaries/
-          retention-days: 30
+          name: firmware-tree
+          path: firmware
 
       - name: Build with PyInstaller
         run: pyinstaller softedibo.spec
@@ -382,7 +364,7 @@ jobs:
             **Linux:** `chmod +x SoftEdIBO-x86_64.AppImage && ./SoftEdIBO-x86_64.AppImage`
             **Windows:** extract `SoftEdIBO-windows-x64.zip` and run `SoftEdIBO.exe`
 
-            **Firmware** (`firmware.zip`): gateway + release/debug builds for both node types.
+            **Firmware** (`firmware.zip`): two gateway variants (C6 + WROOM), release/debug for both actuator node types, and the sensor node.
             Flash with `esptool.py --chip esp32 write_flash 0x0 <bin>`.
 
   # -----------------------------------------------------------------------
@@ -457,13 +439,14 @@ jobs:
 
             | File | Node type | Description |
             |------|-----------|-------------|
-            | `gateway.bin` | Gateway | USB–ESP-NOW bridge (ESP-IDF, Seeed XIAO ESP32-C6) |
+            | `gateway-c6.bin` | Gateway | USB–ESP-NOW bridge, **Seeed XIAO ESP32-C6** (ESP-IDF) |
+            | `gateway-esp32.bin` | Gateway | USB–ESP-NOW bridge, **classic ESP32-WROOM** (Arduino) |
             | `node_direct-release.bin` | `node_direct` | 3 chambers, direct sensors/valves, onboard pumps |
             | `node_direct-debug.bin` | `node_direct` | Same as above with Serial logs (`DEBUG_BUILD`) |
             | `node_multiplexed-release.bin` | `node_multiplexed` | Up to 12 chambers, multiplexed valves/sensors, optional shared pressure/vacuum tanks, runtime-sized |
             | `node_multiplexed-debug.bin` | `node_multiplexed` | Same as above with Serial logs (`DEBUG_BUILD`) |
             | `node_sensor.bin` | `node_imu` | 4× MLX90393 magnetic touch board (node_imu protocol) |
 
-            > **Note:** `gateway.bin` is for the **ESP32-C6** (flash at `0x0`):
-            > `esptool.py --chip esp32c6 write_flash 0x0 gateway.bin`. The node
-            > bins are for classic ESP32 (`--chip esp32`).
+            > **Note:** pick the gateway bin for your board. The C6 flashes at
+            > `0x0` (`esptool.py --chip esp32c6 write_flash 0x0 gateway-c6.bin`);
+            > the WROOM and all node bins flash with `--chip esp32` at `0x0`.

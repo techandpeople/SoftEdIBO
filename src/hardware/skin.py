@@ -419,6 +419,49 @@ class Skin:
             self._touch_position_tracker.reset()
             logger.debug(f"Touch tracking reset for skin {self.skin_id}")
 
+    # ------------------------------------------------------------------
+    # Touch tuning (used by the live tuning panel in the GUI)
+    # ------------------------------------------------------------------
+
+    @property
+    def touch_thresholds(self) -> list[float] | None:
+        """Current per-quadrant detection thresholds, or None if no detector."""
+        if self._touch_detector is None:
+            return None
+        return list(self._touch_detector.thresholds)
+
+    @property
+    def touch_hysteresis(self) -> float | None:
+        """Current detection hysteresis, or None if no detector."""
+        if self._touch_detector is None:
+            return None
+        return float(self._touch_detector.hysteresis)
+
+    def set_touch_thresholds(self, thresholds: list[float]) -> None:
+        """Live-update the per-quadrant detection thresholds."""
+        if self._touch_detector is not None:
+            self._touch_detector.set_thresholds([float(t) for t in thresholds])
+            logger.debug("Touch thresholds set for skin %s: %s",
+                         self.skin_id, thresholds)
+
+    def set_touch_hysteresis(self, hysteresis: float) -> None:
+        """Live-update the detection hysteresis."""
+        if self._touch_detector is not None:
+            self._touch_detector.set_hysteresis(float(hysteresis))
+
+    def rebaseline_touch(self) -> bool:
+        """Ask the touch node to re-zero its sensors (ESP-NOW `rebaseline`).
+
+        Returns False when the controller can't take raw commands (e.g. the
+        simulated touch source). Also resets local tracking so the next reading
+        starts clean.
+        """
+        self.reset_touch_tracking()
+        ctrl = self.touch_controller
+        if ctrl is not None and hasattr(ctrl, "send_command"):
+            return bool(ctrl.send_command("rebaseline"))
+        return False
+
     def __repr__(self) -> str:
         return (
             f"Skin(id={self.skin_id!r}, chambers={self.chamber_count}, "
