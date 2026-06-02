@@ -18,8 +18,8 @@ constexpr int PSENSOR_PINS[3] = {39, 34, 35};
 //                              PSENSOR3=IO35 (J2_6)
 
 // Pumps via DRV3297 PWM inputs
-constexpr int PUMP_PINS[2] = {32, 33};
-//                           PUMP1=IO32 (J2_7), PUMP2=IO33 (J2_8)
+constexpr int PUMP_PINS[2] = {33, 32};
+//                           PUMP1=IO33 (J2_8), PUMP2=IO32 (J2_7)
 
 // 8 valves wired through ULN2803A (U5). Only 6 are used (3 chambers × 2 valves).
 // Mapping: chamber i → inflate=VALVE_PINS[i*2], deflate=VALVE_PINS[i*2+1]
