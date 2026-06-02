@@ -3,6 +3,7 @@
 import re
 import sys
 from pathlib import Path
+from typing import Any
 
 from PySide6.QtCore import QProcess, QProcessEnvironment
 from PySide6.QtWidgets import (
@@ -24,7 +25,19 @@ from src.hardware.serial_ports import list_esp32_ports
 SENTINEL_PATH: Path = Settings.ROOT / "data" / ".setup_done"
 SKIP_STEP_LABEL = "Skip this step"
 # Read-only bundled assets live in BUNDLE (_internal/ when frozen, repo root in dev)
-GATEWAY_BIN: Path = Settings.BUNDLE / "firmware" / "gateway" / "firmware.bin"
+#
+# Gateway firmware — two board variants; each needs the matching esptool --chip.
+# Both merged images flash at 0x0.
+GATEWAY_FIRMWARES: dict[str, dict[str, Any]] = {
+    "Seeed XIAO ESP32-C6  (new, USB-C)": {
+        "path": Settings.BUNDLE / "firmware" / "gateway" / "firmware.bin",
+        "chip": "esp32c6",
+    },
+    "ESP32-WROOM-32  (classic DevKit)": {
+        "path": Settings.BUNDLE / "firmware" / "gateway" / "firmware-esp32.bin",
+        "chip": "esp32",
+    },
+}
 
 # Available node firmware binaries, keyed by display label.
 # Each entry holds release + debug variants; the wizard exposes a checkbox to
@@ -47,14 +60,15 @@ NODE_FIRMWARES: dict[str, dict[str, Path]] = {
 }
 
 
-def _esptool_cmd(port: str, firmware: Path) -> tuple[str, list[str]]:
+def _esptool_cmd(port: str, firmware: Path, chip: str = "esp32") -> tuple[str, list[str]]:
     """Return (program, args) to invoke esptool, handling frozen mode.
 
     In a PyInstaller bundle, the standalone ``esptool`` binary sits next to
     the main executable.  In development, esptool is called as a module via
-    the current Python interpreter.
+    the current Python interpreter. ``chip`` is "esp32" for the WROOM gateway
+    and all nodes, "esp32c6" for the XIAO C6 gateway.
     """
-    flash_args = ["--chip", "esp32", "--port", port, "--baud", "921600",
+    flash_args = ["--chip", chip, "--port", port, "--baud", "921600",
                   "write_flash", "0x0", str(firmware)]
     if getattr(sys, "frozen", False):
         suffix = ".exe" if sys.platform == "win32" else ""
@@ -97,11 +111,13 @@ class WelcomePage(QWizardPage):
 class _FlashPage(QWizardPage):
     """Base page for flashing a single firmware binary via esptool."""
 
-    def __init__(self, title: str, subtitle: str, firmware_path: Path):
+    def __init__(self, title: str, subtitle: str, firmware_path: Path,
+                 chip: str = "esp32"):
         super().__init__()
         self.setTitle(title)
         self.setSubTitle(subtitle)
         self._firmware = firmware_path
+        self._chip = chip
         self._proc: QProcess | None = None
         self._done = False
         self._skipped = False
@@ -187,7 +203,7 @@ class _FlashPage(QWizardPage):
 
         self._log.appendPlainText(f"Flashing {self._firmware.name} to {port}…\n")
 
-        prog, args = _esptool_cmd(port, self._firmware)
+        prog, args = _esptool_cmd(port, self._firmware, self._chip)
         self._proc = QProcess(self)
         env = QProcessEnvironment.systemEnvironment()
         env.insert("PYTHONUNBUFFERED", "1")
@@ -233,12 +249,36 @@ class _FlashPage(QWizardPage):
 
 
 class FlashGatewayPage(_FlashPage):
+    """Flash page for the gateway; lets the user pick the board variant."""
+
     def __init__(self):
+        first_label = next(iter(GATEWAY_FIRMWARES))
+        first = GATEWAY_FIRMWARES[first_label]
         super().__init__(
             "Flash Gateway Firmware",
-            "Connect the ESP-NOW gateway via USB, select the port, then click Flash.",
-            GATEWAY_BIN,
+            "Select your gateway board, connect it via USB, then click Flash.",
+            first["path"],
+            chip=first["chip"],
         )
+
+        layout: QVBoxLayout = self.layout()  # type: ignore[assignment]
+
+        # Gateway board selector — inserted above the port row.
+        board_row = QHBoxLayout()
+        board_row.addWidget(QLabel("Gateway board:"))
+        self._board_combo = QComboBox()
+        self._board_combo.setMinimumWidth(320)
+        for label in GATEWAY_FIRMWARES:
+            self._board_combo.addItem(label)
+        self._board_combo.currentTextChanged.connect(self._on_board_changed)
+        board_row.addWidget(self._board_combo)
+        board_row.addStretch()
+        layout.insertLayout(0, board_row)
+
+    def _on_board_changed(self, label: str) -> None:
+        variant = GATEWAY_FIRMWARES[label]
+        self._firmware = variant["path"]
+        self._chip = variant["chip"]
 
 
 class FlashNodePage(_FlashPage):
