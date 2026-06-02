@@ -5,16 +5,18 @@
 Each skin that has touch sensing is built as a layered stack:
 
 ```
-[ user / therapist ]
+[ user ]
 ───────────────────────────────
   silicone skin with chambers     ← pneumatic layer, inflates toward user
 ───────────────────────────────
   silicone layer
 ───────────────────────────────
-  magnets (one per chamber,        ← fixed position; each aligned with
-  encapsulated in silicone)          its own MLX90393 sensor below
+  magnets in  grid;
+  encapsulated in silicone   
 ───────────────────────────────
   silicone layer
+───────────────────────────────
+  MLX90393 sensors
 ───────────────────────────────
 [ rigid plastic / PCB (node_imu) ]
 ```

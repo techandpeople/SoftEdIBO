@@ -21,13 +21,14 @@ The system supports multiple robot types (Turtle, Tree, Thymio) and activity mod
 | XGZP6847A pressure sensor | 1 per chamber | Analog output (0-3.3 V) |
 | Solenoid valves | 2 per chamber | Inflate + deflate via ULN2803A |
 
-Flash the [gateway firmware](firmware/gateway/) to the USB-connected ESP32.
-For each node, choose one of the two firmware targets:
+Flash the [gateway firmware](firmware/gateway/) (ESP-IDF, Seeed XIAO ESP32-C6)
+to the USB-connected board. For each node, choose the matching firmware target:
 
 | Firmware | Path | When to use |
 |----------|------|-------------|
-| `node_direct` (`release` / `debug`) | [firmware/node_direct/](firmware/node_direct/) | Direct board (fixed 3 chambers) |
-| `node_multiplexed` (`release` / `debug`) | [firmware/node_multiplexed/](firmware/node_multiplexed/) | Multiplexed board (default 12 chambers, runtime configurable; tanks optional) |
+| `node_actuator` env `direct` / `direct_debug` | [firmware/node_actuator/](firmware/node_actuator/) | Direct board (fixed 3 chambers) |
+| `node_actuator` env `multiplexed` / `multiplexed_debug` | [firmware/node_actuator/](firmware/node_actuator/) | Multiplexed board (default 12 chambers, runtime configurable; tanks optional) |
+| `node_sensor` | [firmware/node_sensor/](firmware/node_sensor/) | 4× MLX90393 magnetic touch board (`node_imu` protocol) |
 
 ---
 
@@ -55,7 +56,7 @@ SessionPanel
           - **Reservoir** is an optional per-robot shared air tank (pressure or vacuum). For `node_multiplexed` with `has_reservoirs: true`, pressure and vacuum reservoirs are internal to the same MAC.
 - **Pressure** is expressed as **0-100 %** of the maximum pressure configured on each node.
 - **Per-chamber max pressure** is set in `settings.yaml` and enforced both in the app and on the ESP32 (hardware safety — survives app crashes).
-          - **Pressure sensing** uses the XGZP6847A datasheet transfer function (see [pressure.h](firmware/node_direct/src/pressure.h)).
+          - **Pressure sensing** uses the XGZP6847A datasheet transfer function (see [pressure.h](firmware/common/pressure.h)).
 
 **Touch sensing (optional).** A skin may reference a `node_imu` (4-sensor IMU/touch board) via its `touch:` block — see [firmware/PROTOCOL.md](firmware/PROTOCOL.md). The activity-time view (`SkinGridView`) overlays a pulsing yellow outline on the active sensor cells so the operator sees where each touch lands relative to the chamber regions.
 
@@ -158,14 +159,15 @@ levels are always written to `data/softedibo.log` (rotating, 2 MB x 3 backups).
 ### Firmware
 
 ```bash
-# Gateway
-cd firmware/gateway && pio run --target upload
+# Gateway (ESP-IDF, Seeed XIAO ESP32-C6)
+cd firmware/gateway && pio run -e seeed_xiao_esp32c6 --target upload
 
-# Direct node
-cd firmware/node_direct && pio run -e release --target upload
+# Actuator nodes (one project, env per variant)
+cd firmware/node_actuator && pio run -e direct      --target upload
+cd firmware/node_actuator && pio run -e multiplexed --target upload
 
-# Multiplexed node
-cd firmware/node_multiplexed && pio run -e release --target upload
+# Sensor node (4x MLX90393 touch board)
+cd firmware/node_sensor && pio run --target upload
 ```
 
 Requires [PlatformIO](https://platformio.org/).
@@ -195,8 +197,9 @@ The CI pipeline automatically selects the firmware environment:
 | `src/gui/monitor/` | Live pressure monitor widgets |
 | `src/log.py` | Centralized logging setup (console + rotating file) |
 | `config/settings.yaml` | Robot and hardware configuration |
-| `firmware/gateway/` | Gateway ESP32 firmware |
-| `firmware/node_direct/` | node_direct firmware (3 chambers, GPIO valves + own pumps) |
-| `firmware/node_multiplexed/` | node_multiplexed firmware (multiplexed valves + runtime sizing, optional tanks) |
-| `firmware/node_direct/src/pins.h` | node_direct pin definitions |
-| `firmware/node_multiplexed/src/pins.h` | node_multiplexed pin definitions |
+| `firmware/gateway/` | Gateway firmware (ESP-IDF, Seeed XIAO ESP32-C6) |
+| `firmware/common/` | Shared firmware headers (`se_espnow.h`, units/pressure/dbg/cmd_queue) |
+| `firmware/node_actuator/` | Actuator nodes — `direct` + `multiplexed` variants (build-flag envs) |
+| `firmware/node_sensor/` | Sensor node — 4× MLX90393 touch board (`node_imu` protocol) |
+| `firmware/node_actuator/src/direct/pins.h` | node_direct pin definitions |
+| `firmware/node_actuator/src/multiplexed/pins.h` | node_multiplexed pin definitions |

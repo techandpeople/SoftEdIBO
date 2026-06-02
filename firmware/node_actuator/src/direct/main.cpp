@@ -24,9 +24,8 @@
  */
 
 #include <Arduino.h>
-#include <WiFi.h>
-#include <esp_now.h>
 
+#include "se_espnow.h"
 #include "pins.h"
 #include "pressure.h"
 #include "chambers.h"
@@ -44,13 +43,6 @@ static uint32_t lastStatusMs   = 0;
 // ESP-NOW callbacks
 // ---------------------------------------------------------------------------
 
-#ifdef DEBUG_BUILD
-static void onSent(const uint8_t*, esp_now_send_status_t status) {
-    if (status == ESP_NOW_SEND_SUCCESS) commands::sendOk++;
-    else                                commands::sendFail++;
-}
-#endif
-
 static void onReceived(const uint8_t* mac_addr, const uint8_t* data, int len) {
     DBG_PRINT("RX %02X:%02X:%02X:%02X:%02X:%02X (%d) ",
               mac_addr[0], mac_addr[1], mac_addr[2],
@@ -58,15 +50,7 @@ static void onReceived(const uint8_t* mac_addr, const uint8_t* data, int len) {
     for (int i = 0; i < len; i++) DBG_PRINT("%c", (char)data[i]);
     DBG_PRINTLN("");
 
-    if (!commands::gatewayKnown) {
-        memcpy(commands::gatewayMac, mac_addr, 6);
-        commands::gatewayKnown = true;
-        esp_now_peer_info_t peer{};
-        memcpy(peer.peer_addr, commands::gatewayMac, 6);
-        peer.channel = 0;
-        peer.encrypt = false;
-        esp_now_add_peer(&peer);
-    }
+    se::node::learnGateway(mac_addr);   // remember gateway + add peer on first msg
     commands::parseAndQueue(data, len);
 }
 
@@ -79,16 +63,10 @@ void setup() {
 
     chambers::hardware_init();
 
-    WiFi.mode(WIFI_STA);
-    WiFi.disconnect();
-    if (esp_now_init() != ESP_OK) {
+    if (!se::begin(onReceived)) {
         LOG("{\"error\":\"esp_now_init_failed\"}\n");
         return;
     }
-#ifdef DEBUG_BUILD
-    esp_now_register_send_cb(onSent);
-#endif
-    esp_now_register_recv_cb(onReceived);
 
     for (int i = 0; i < NUM_CHAMBERS; i++)
         chambers::cachedKpa[i] = pressure::readKpa(PSENSOR_PINS[i]);
@@ -96,16 +74,8 @@ void setup() {
     // Broadcast the ready message so the gateway can forward it to the PC
     // even before the node has received its first command (and therefore
     // doesn't yet know the gateway's MAC).
-    static const uint8_t broadcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-    esp_now_peer_info_t bcast_peer{};
-    memcpy(bcast_peer.peer_addr, broadcast, 6);
-    bcast_peer.channel = 0;
-    bcast_peer.encrypt = false;
-    esp_now_add_peer(&bcast_peer);
-
     static const char ready_msg[] = "{\"status\":\"node_direct_ready\"}";
-    esp_now_send(broadcast, reinterpret_cast<const uint8_t*>(ready_msg),
-                 sizeof(ready_msg) - 1);
+    se::broadcast(ready_msg);
 
     LOG("%s\n", ready_msg);
 }

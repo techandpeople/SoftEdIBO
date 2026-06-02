@@ -71,46 +71,51 @@ jobs:
       # Gateway (single build env)
       # ----------------------------------------------------------------
 
-      - name: Build gateway firmware
+      - name: Build gateway firmware (ESP-IDF, XIAO ESP32-C6)
         run: |
           cd firmware/gateway
-          python -m platformio run
+          python -m platformio run -e seeed_xiao_esp32c6
+          python -m esptool --chip esp32c6 merge_bin \
+            --flash_mode dio --flash_freq 80m --flash_size 4MB \
+            -o firmware.bin \
+            0x0 .pio/build/seeed_xiao_esp32c6/bootloader.bin \
+            0x8000 .pio/build/seeed_xiao_esp32c6/partitions.bin \
+            0x10000 .pio/build/seeed_xiao_esp32c6/firmware.bin
+
+      # ----------------------------------------------------------------
+      # Actuator nodes: one project, two variants x release/debug.
+      # Bins are emitted into per-node-type dirs so the .spec/wizard layout
+      # stays keyed by node type.
+      # ----------------------------------------------------------------
+
+      - name: Build actuator node firmware (direct + multiplexed, release + debug)
+        run: |
+          cd firmware/node_actuator
+          mergebin() {  # $1 = pio env, $2 = output path (relative to firmware/)
+            python -m platformio run -e "$1"
+            mkdir -p "$(dirname "../$2")"
+            python -m esptool --chip esp32 merge_bin \
+              --flash_mode dio --flash_freq 40m --flash_size 4MB \
+              -o "../$2" \
+              0x1000 ".pio/build/$1/bootloader.bin" \
+              0x8000 ".pio/build/$1/partitions.bin" \
+              0x10000 ".pio/build/$1/firmware.bin"
+          }
+          mergebin direct            node_direct/firmware-release.bin
+          mergebin direct_debug      node_direct/firmware-debug.bin
+          mergebin multiplexed       node_multiplexed/firmware-release.bin
+          mergebin multiplexed_debug node_multiplexed/firmware-debug.bin
+
+      - name: Build node_sensor firmware
+        run: |
+          cd firmware/node_sensor
+          python -m platformio run -e esp32dev
           python -m esptool --chip esp32 merge_bin \
             --flash_mode dio --flash_freq 40m --flash_size 4MB \
-            -o firmware.bin \
+            -o firmware-release.bin \
             0x1000 .pio/build/esp32dev/bootloader.bin \
             0x8000 .pio/build/esp32dev/partitions.bin \
             0x10000 .pio/build/esp32dev/firmware.bin
-
-      # ----------------------------------------------------------------
-      # Node firmware: build BOTH release and debug variants
-      # ----------------------------------------------------------------
-
-      - name: Build node_direct firmware (release + debug)
-        run: |
-          cd firmware/node_direct
-          for env in release debug; do
-            python -m platformio run -e "$env"
-            python -m esptool --chip esp32 merge_bin \
-              --flash_mode dio --flash_freq 40m --flash_size 4MB \
-              -o "firmware-${env}.bin" \
-              0x1000 ".pio/build/${env}/bootloader.bin" \
-              0x8000 ".pio/build/${env}/partitions.bin" \
-              0x10000 ".pio/build/${env}/firmware.bin"
-          done
-
-      - name: Build node_multiplexed firmware (release + debug)
-        run: |
-          cd firmware/node_multiplexed
-          for env in release debug; do
-            python -m platformio run -e "$env"
-            python -m esptool --chip esp32 merge_bin \
-              --flash_mode dio --flash_freq 40m --flash_size 4MB \
-              -o "firmware-${env}.bin" \
-              0x1000 ".pio/build/${env}/bootloader.bin" \
-              0x8000 ".pio/build/${env}/partitions.bin" \
-              0x10000 ".pio/build/${env}/firmware.bin"
-          done
 
       # ----------------------------------------------------------------
       # Collect all firmware binaries
@@ -124,6 +129,7 @@ jobs:
           cp firmware/node_direct/firmware-debug.bin             firmware-binaries/node_direct-debug.bin
           cp firmware/node_multiplexed/firmware-release.bin      firmware-binaries/node_multiplexed-release.bin
           cp firmware/node_multiplexed/firmware-debug.bin        firmware-binaries/node_multiplexed-debug.bin
+          cp firmware/node_sensor/firmware-release.bin           firmware-binaries/node_sensor.bin
 
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v4
@@ -253,45 +259,48 @@ jobs:
           key: ${{ runner.os }}-pio-${{ hashFiles('firmware/**/platformio.ini') }}
           restore-keys: ${{ runner.os }}-pio-
 
-      - name: Build gateway firmware
+      - name: Build gateway firmware (ESP-IDF, XIAO ESP32-C6)
         shell: bash
         run: |
           cd firmware/gateway
-          python -m platformio run
+          python -m platformio run -e seeed_xiao_esp32c6
+          python -m esptool --chip esp32c6 merge_bin \
+            --flash_mode dio --flash_freq 80m --flash_size 4MB \
+            -o firmware.bin \
+            0x0 .pio/build/seeed_xiao_esp32c6/bootloader.bin \
+            0x8000 .pio/build/seeed_xiao_esp32c6/partitions.bin \
+            0x10000 .pio/build/seeed_xiao_esp32c6/firmware.bin
+
+      - name: Build actuator node firmware (direct + multiplexed, release + debug)
+        shell: bash
+        run: |
+          cd firmware/node_actuator
+          mergebin() {  # $1 = pio env, $2 = output path (relative to firmware/)
+            python -m platformio run -e "$1"
+            mkdir -p "$(dirname "../$2")"
+            python -m esptool --chip esp32 merge_bin \
+              --flash_mode dio --flash_freq 40m --flash_size 4MB \
+              -o "../$2" \
+              0x1000 ".pio/build/$1/bootloader.bin" \
+              0x8000 ".pio/build/$1/partitions.bin" \
+              0x10000 ".pio/build/$1/firmware.bin"
+          }
+          mergebin direct            node_direct/firmware-release.bin
+          mergebin direct_debug      node_direct/firmware-debug.bin
+          mergebin multiplexed       node_multiplexed/firmware-release.bin
+          mergebin multiplexed_debug node_multiplexed/firmware-debug.bin
+
+      - name: Build node_sensor firmware
+        shell: bash
+        run: |
+          cd firmware/node_sensor
+          python -m platformio run -e esp32dev
           python -m esptool --chip esp32 merge_bin \
             --flash_mode dio --flash_freq 40m --flash_size 4MB \
-            -o firmware.bin \
+            -o firmware-release.bin \
             0x1000 .pio/build/esp32dev/bootloader.bin \
             0x8000 .pio/build/esp32dev/partitions.bin \
             0x10000 .pio/build/esp32dev/firmware.bin
-
-      - name: Build node_direct firmware (release + debug)
-        shell: bash
-        run: |
-          cd firmware/node_direct
-          for env in release debug; do
-            python -m platformio run -e "$env"
-            python -m esptool --chip esp32 merge_bin \
-              --flash_mode dio --flash_freq 40m --flash_size 4MB \
-              -o "firmware-${env}.bin" \
-              0x1000 ".pio/build/${env}/bootloader.bin" \
-              0x8000 ".pio/build/${env}/partitions.bin" \
-              0x10000 ".pio/build/${env}/firmware.bin"
-          done
-
-      - name: Build node_multiplexed firmware (release + debug)
-        shell: bash
-        run: |
-          cd firmware/node_multiplexed
-          for env in release debug; do
-            python -m platformio run -e "$env"
-            python -m esptool --chip esp32 merge_bin \
-              --flash_mode dio --flash_freq 40m --flash_size 4MB \
-              -o "firmware-${env}.bin" \
-              0x1000 ".pio/build/${env}/bootloader.bin" \
-              0x8000 ".pio/build/${env}/partitions.bin" \
-              0x10000 ".pio/build/${env}/firmware.bin"
-          done
 
       - name: Collect firmware binaries
         shell: bash
@@ -302,6 +311,7 @@ jobs:
           cp firmware/node_direct/firmware-debug.bin             firmware-binaries/node_direct-debug.bin
           cp firmware/node_multiplexed/firmware-release.bin      firmware-binaries/node_multiplexed-release.bin
           cp firmware/node_multiplexed/firmware-debug.bin        firmware-binaries/node_multiplexed-debug.bin
+          cp firmware/node_sensor/firmware-release.bin           firmware-binaries/node_sensor.bin
 
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v4
@@ -447,8 +457,13 @@ jobs:
 
             | File | Node type | Description |
             |------|-----------|-------------|
-            | `gateway.bin` | Gateway | USB–ESP-NOW bridge |
+            | `gateway.bin` | Gateway | USB–ESP-NOW bridge (ESP-IDF, Seeed XIAO ESP32-C6) |
             | `node_direct-release.bin` | `node_direct` | 3 chambers, direct sensors/valves, onboard pumps |
             | `node_direct-debug.bin` | `node_direct` | Same as above with Serial logs (`DEBUG_BUILD`) |
             | `node_multiplexed-release.bin` | `node_multiplexed` | Up to 12 chambers, multiplexed valves/sensors, optional shared pressure/vacuum tanks, runtime-sized |
             | `node_multiplexed-debug.bin` | `node_multiplexed` | Same as above with Serial logs (`DEBUG_BUILD`) |
+            | `node_sensor.bin` | `node_imu` | 4× MLX90393 magnetic touch board (node_imu protocol) |
+
+            > **Note:** `gateway.bin` is for the **ESP32-C6** (flash at `0x0`):
+            > `esptool.py --chip esp32c6 write_flash 0x0 gateway.bin`. The node
+            > bins are for classic ESP32 (`--chip esp32`).

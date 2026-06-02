@@ -1,8 +1,8 @@
 #pragma once
 #include <Arduino.h>
-#include <esp_now.h>
 #include <ArduinoJson.h>
 
+#include "se_espnow.h"
 #include "cmd_queue.h"
 #include "chambers.h"
 #include "pins.h"
@@ -11,11 +11,12 @@
 
 namespace commands {
 
-inline uint8_t  gatewayMac[6] = {};
-inline bool     gatewayKnown  = false;
+// Gateway MAC tracking + tx counters live in the shared ESP-NOW layer.
+using se::node::gatewayMac;
+using se::node::gatewayKnown;
 
 #ifdef DEBUG_BUILD
-inline uint32_t sendOk = 0, sendFail = 0, cmdDropped = 0;
+inline uint32_t cmdDropped = 0;
 #endif
 
 inline void sendStatus(int ch, float kpa) {
@@ -51,7 +52,7 @@ inline void sendDebug() {
     }
     pos += snprintf(buf + pos, sizeof(buf) - pos,
         "],\"tx_ok\":%lu,\"tx_fail\":%lu,\"drop\":%lu,\"up\":%lu}",
-        sendOk, sendFail, cmdDropped, millis() / 1000);
+        se::txOk, se::txFail, cmdDropped, millis() / 1000);
     esp_now_send(gatewayMac, reinterpret_cast<uint8_t*>(buf), pos);
 }
 #endif

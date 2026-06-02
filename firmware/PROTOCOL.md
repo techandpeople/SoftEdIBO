@@ -210,6 +210,8 @@ Emitted on the serial line by the gateway itself, no `source` field.
 
 ## Source files
 
+- Shared ESP-NOW/MAC/radio layer — [`firmware/common/se_espnow.h`](common/se_espnow.h)
 - Gateway dispatch — [`firmware/gateway/src/main.cpp`](gateway/src/main.cpp)
-- node_direct command parser/handler — [`firmware/node_direct/src/commands.h`](node_direct/src/commands.h)
-- node_multiplexed command parser — [`firmware/node_multiplexed/src/main.cpp`](node_multiplexed/src/main.cpp) (`parseAndQueue`, `processCommand`)
+- node_direct command parser/handler — [`firmware/node_actuator/src/direct/commands.h`](node_actuator/src/direct/commands.h)
+- node_multiplexed command parser — [`firmware/node_actuator/src/multiplexed/main.cpp`](node_actuator/src/multiplexed/main.cpp) (`parseAndQueue`, `processCommand`)
+- node_imu / touch board (MLX90393) — [`firmware/node_sensor/src/main.cpp`](node_sensor/src/main.cpp)

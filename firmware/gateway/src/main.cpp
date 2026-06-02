@@ -1,153 +1,170 @@
 /**
- * SoftEdIBO — ESP-NOW Gateway Firmware
- * Target: ESP32-WROOM-32 (esp32dev)
+ * SoftEdIBO — ESP-NOW Gateway Firmware (ESP-IDF)
+ * Target: Seeed XIAO ESP32-C6 (RISC-V), USB-Serial/JTAG to the PC.
  *
- * Bridges JSON commands from the PC (USB/serial) to remote ESP32 nodes via
+ * Bridges JSON commands from the PC (USB serial) to remote ESP32 nodes via
  * ESP-NOW, and forwards replies from nodes back to the PC.
  *
+ * The ESP-NOW / MAC / radio plumbing lives in the shared se_espnow.h, which
+ * also backs the Arduino node firmwares — change ESP-NOW behaviour there once.
+ *
  * PC => Gateway (serial, newline-terminated JSON):
- *   {"target":"AA:BB:CC:DD:EE:01","cmd":"inflate","chamber":0,"value":255}
- *   {"target":"FF:FF:FF:FF:FF:FF","cmd":"ping"}   ← broadcast scan
+ *   {"target":"AA:BB:CC:DD:EE:01","cmd":"inflate","chamber":0,"delta":20}
+ *   {"target":"FF:FF:FF:FF:FF:FF","cmd":"ping"}   <- broadcast scan
  *
  * Gateway => PC (serial, newline-terminated JSON):
- *   {"source":"AA:BB:CC:DD:EE:01","type":"status","chamber":0,"pressure":128}
+ *   {"source":"AA:BB:CC:DD:EE:01","type":"status","chamber":0,"pressure":75}
  *   {"status":"gateway_ready","mac":"AA:BB:CC:DD:EE:00"}
  */
 
-#include <Arduino.h>
-#include <WiFi.h>
-#include <esp_now.h>
-#include <ArduinoJson.h>
+#include <cstring>
+
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/queue.h"
+#include "driver/usb_serial_jtag.h"
+#include "cJSON.h"
+
+#include "se_espnow.h"
 
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
 
-static constexpr uint32_t SERIAL_BAUD    = 115200;
-static constexpr size_t   SERIAL_BUF_LEN = 256;    // max bytes per JSON line from PC
+static constexpr size_t SERIAL_BUF_LEN = 256;   // max bytes per JSON line from PC
+static constexpr int    ESPNOW_MAXLEN  = 250;   // max ESP-NOW payload
+
+// Received ESP-NOW messages are handed from the WiFi task (recv callback) to a
+// dedicated task via this queue, so serialization + USB writes never block the
+// WiFi stack.
+struct RxMsg {
+    uint8_t mac[6];
+    int     len;
+    uint8_t data[ESPNOW_MAXLEN + 1];
+};
+static QueueHandle_t s_rxQueue;
 
 // ---------------------------------------------------------------------------
-// Helpers
+// USB-Serial/JTAG I/O
 // ---------------------------------------------------------------------------
 
-static bool parseMac(const char* str, uint8_t* out) {
-    return sscanf(str,
-        "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx",
-        &out[0], &out[1], &out[2], &out[3], &out[4], &out[5]) == 6;
+static void usbWrite(const char* s, size_t len) {
+    usb_serial_jtag_write_bytes(reinterpret_cast<const uint8_t*>(s), len, portMAX_DELAY);
 }
 
-static void formatMac(const uint8_t* mac, char* buf /* ≥18 */) {
-    snprintf(buf, 18, "%02X:%02X:%02X:%02X:%02X:%02X",
-             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-}
-
-static bool ensurePeer(const uint8_t* mac) {
-    if (esp_now_is_peer_exist(mac)) return true;
-    esp_now_peer_info_t peer{};
-    memcpy(peer.peer_addr, mac, 6);
-    peer.channel = 0;       // follow current WiFi channel
-    peer.encrypt = false;
-    return esp_now_add_peer(&peer) == ESP_OK;
+static void usbWriteLine(const char* s) {
+    usbWrite(s, strlen(s));
+    usbWrite("\n", 1);
 }
 
 // ---------------------------------------------------------------------------
-// ESP-NOW callbacks
+// ESP-NOW receive: WiFi-task callback enqueues, rxTask serializes to USB
 // ---------------------------------------------------------------------------
 
-static void onSent(const uint8_t* /*mac*/, esp_now_send_status_t /*status*/) {
-    // Nothing to do — fire-and-forget for now.
+static void onRecv(const uint8_t mac[6], const uint8_t* data, int len) {
+    if (len <= 0 || len > ESPNOW_MAXLEN) return;
+    RxMsg m;
+    memcpy(m.mac, mac, 6);
+    m.len = len;
+    memcpy(m.data, data, len);
+    m.data[len] = '\0';            // so non-JSON payloads can be wrapped as "raw"
+    xQueueSend(s_rxQueue, &m, 0);  // drop if full rather than stall the WiFi task
 }
 
-static void onReceived(const uint8_t* mac_addr,
-                       const uint8_t* data, int len) {
-    char mac[18];
-    formatMac(mac_addr, mac);
+static void rxTask(void*) {
+    RxMsg m;
+    char  mac[18];
+    for (;;) {
+        if (xQueueReceive(s_rxQueue, &m, portMAX_DELAY) != pdTRUE) continue;
+        se::formatMac(m.mac, mac);
 
-    // Nodes send JSON payloads; forward them to PC with a "source" field added.
-    JsonDocument doc;
-    DeserializationError err = deserializeJson(doc, data, len);
-    if (err) {
-        // Non-JSON payload — wrap it in a generic envelope.
-        doc.clear();
-        doc["source"] = mac;
-        doc["raw"]    = (const char*)data;
-    } else {
-        doc["source"] = mac;
+        // Nodes send JSON; forward with a "source" field added.
+        cJSON* doc = cJSON_ParseWithLength(reinterpret_cast<const char*>(m.data), m.len);
+        if (!doc) {
+            // Non-JSON payload — wrap it in a generic envelope.
+            doc = cJSON_CreateObject();
+            cJSON_AddStringToObject(doc, "source", mac);
+            cJSON_AddStringToObject(doc, "raw", reinterpret_cast<const char*>(m.data));
+        } else {
+            cJSON_AddStringToObject(doc, "source", mac);
+        }
+
+        char* out = cJSON_PrintUnformatted(doc);
+        if (out) {
+            usbWriteLine(out);
+            cJSON_free(out);
+        }
+        cJSON_Delete(doc);
     }
-
-    serializeJson(doc, Serial);
-    Serial.println();
 }
 
 // ---------------------------------------------------------------------------
-// Command processing
+// Serial command processing: PC line -> ESP-NOW
 // ---------------------------------------------------------------------------
 
 static void processLine(const char* line, size_t len) {
-    JsonDocument doc;
-    if (deserializeJson(doc, line, len) != DeserializationError::Ok) return;
+    cJSON* doc = cJSON_ParseWithLength(line, len);
+    if (!doc) return;
 
-    const char* targetStr = doc["target"] | "";
-    uint8_t targetMac[6];
-    if (!parseMac(targetStr, targetMac)) return;
-
-    if (!ensurePeer(targetMac)) return;
-
-    // Strip "target" from the payload so nodes don't need to handle it.
-    doc.remove("target");
-
-    char payload[SERIAL_BUF_LEN];
-    size_t plen = serializeJson(doc, payload, sizeof(payload));
-
-    esp_now_send(targetMac, reinterpret_cast<uint8_t*>(payload), plen);
+    cJSON* target = cJSON_GetObjectItemCaseSensitive(doc, "target");
+    uint8_t mac[6];
+    if (cJSON_IsString(target) && se::parseMac(target->valuestring, mac) &&
+        se::ensurePeer(mac)) {
+        // Strip "target" so nodes receive only the command fields.
+        cJSON_DeleteItemFromObjectCaseSensitive(doc, "target");
+        char* payload = cJSON_PrintUnformatted(doc);
+        if (payload) {
+            size_t plen = strlen(payload);
+            if (plen <= ESPNOW_MAXLEN)
+                se::send(mac, reinterpret_cast<const uint8_t*>(payload), plen);
+            cJSON_free(payload);
+        }
+    }
+    cJSON_Delete(doc);
 }
 
 // ---------------------------------------------------------------------------
-// Arduino entry points
+// Entry point
 // ---------------------------------------------------------------------------
 
-void setup() {
-    Serial.begin(SERIAL_BAUD);
+extern "C" void app_main(void) {
+    usb_serial_jtag_driver_config_t ucfg = {
+        .tx_buffer_size = 1024,
+        .rx_buffer_size = 1024,
+    };
+    usb_serial_jtag_driver_install(&ucfg);
 
-    // ESP-NOW works in STA mode without being connected to an AP.
-    WiFi.mode(WIFI_STA);
-    WiFi.disconnect();
+    s_rxQueue = xQueueCreate(16, sizeof(RxMsg));
 
-    if (esp_now_init() != ESP_OK) {
-        Serial.println(F("{\"error\":\"esp_now_init_failed\"}"));
+    if (!se::begin(onRecv)) {
+        usbWriteLine("{\"error\":\"esp_now_init_failed\"}");
         return;
     }
 
-    esp_now_register_send_cb(onSent);
-    esp_now_register_recv_cb(onReceived);
-
-    // Pre-register broadcast peer so scan/ping works without explicit add.
-    static const uint8_t broadcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-    ensurePeer(broadcast);
+    xTaskCreate(rxTask, "espnow_rx", 4096, nullptr, 5, nullptr);
 
     // Report own MAC so the app can identify the gateway.
-    JsonDocument ready;
-    ready["status"] = "gateway_ready";
-    ready["mac"]    = WiFi.macAddress();
-    serializeJson(ready, Serial);
-    Serial.println();
-}
+    char mac[18];
+    se::ownMac(mac);
+    char ready[64];
+    snprintf(ready, sizeof(ready),
+             "{\"status\":\"gateway_ready\",\"mac\":\"%s\"}", mac);
+    usbWriteLine(ready);
 
-void loop() {
-    // Fixed-size stack buffer — avoids String heap allocation on every serial line
-    static char lineBuf[SERIAL_BUF_LEN];
-    static size_t lineLen = 0;
-
-    while (Serial.available()) {
-        char c = Serial.read();
-        if (c == '\n' || c == '\r') {
-            if (lineLen > 0) {
-                lineBuf[lineLen] = '\0';
-                processLine(lineBuf, lineLen);
-                lineLen = 0;
+    // Read serial line-by-line into a fixed stack buffer (no heap per line).
+    static char line[SERIAL_BUF_LEN];
+    size_t      llen = 0;
+    uint8_t     ch;
+    for (;;) {
+        if (usb_serial_jtag_read_bytes(&ch, 1, pdMS_TO_TICKS(20)) <= 0) continue;
+        if (ch == '\n' || ch == '\r') {
+            if (llen > 0) {
+                line[llen] = '\0';
+                processLine(line, llen);
+                llen = 0;
             }
-        } else if (lineLen < SERIAL_BUF_LEN - 1) {
-            lineBuf[lineLen++] = c;
+        } else if (llen < SERIAL_BUF_LEN - 1) {
+            line[llen++] = static_cast<char>(ch);
         }
     }
 }
