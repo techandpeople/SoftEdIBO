@@ -43,13 +43,13 @@ GATEWAY_FIRMWARES: dict[str, dict[str, Any]] = {
 # Each entry holds release + debug variants; the wizard exposes a checkbox to
 # pick the debug build (verbose Serial output, see firmware/.../dbg.h).
 NODE_FIRMWARES: dict[str, dict[str, Path]] = {
-    "node_direct  (3 chambers, GPIO valves, onboard pumps)": {
-        "release": Settings.BUNDLE / "firmware" / "node_direct" / "firmware-release.bin",
-        "debug":   Settings.BUNDLE / "firmware" / "node_direct" / "firmware-debug.bin",
+    "node_direct  (3 chambers, GPIO valves, onboard pumps, LED ring)": {
+        "release": Settings.BUNDLE / "firmware" / "node_actuator" / "firmware-direct-release.bin",
+        "debug":   Settings.BUNDLE / "firmware" / "node_actuator" / "firmware-direct-debug.bin",
     },
     "node_multiplexed  (up to 12 chambers, optional pressure/vacuum tanks)": {
-        "release": Settings.BUNDLE / "firmware" / "node_multiplexed" / "firmware-release.bin",
-        "debug":   Settings.BUNDLE / "firmware" / "node_multiplexed" / "firmware-debug.bin",
+        "release": Settings.BUNDLE / "firmware" / "node_actuator" / "firmware-multiplexed-release.bin",
+        "debug":   Settings.BUNDLE / "firmware" / "node_actuator" / "firmware-multiplexed-debug.bin",
     },
     # node_sensor ships a single build (no separate debug variant), so both
     # keys point at the same bin — the debug checkbox is a no-op for it.

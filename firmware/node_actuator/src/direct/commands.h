@@ -5,6 +5,7 @@
 #include "se_espnow.h"
 #include "cmd_queue.h"
 #include "chambers.h"
+#include "leds.h"
 #include "pins.h"
 #include "units.h"
 #include "dbg.h"
@@ -137,6 +138,24 @@ inline void parseAndQueue(const uint8_t* data, int len) {
 #ifdef DEBUG_BUILD
     else if (strcmp(cmd, "debug") == 0)             { c.type = CMD_DEBUG;        c.chamber = -1; }
 #endif
+    else if (strcmp(cmd, "set_led") == 0) {
+        // Handled inline (not queued): just stores the target LED state, which
+        // loop()'s leds::update() animates. {"cmd":"set_led","color":"#RRGGBB",
+        // "pattern":"off|solid|blink|pulse","period_ms":N,"count":N}
+        const char* col = doc["color"]   | "#000000";
+        const char* pat = doc["pattern"]  | "solid";
+        uint32_t period = doc["period_ms"] | 0;
+        int32_t  count  = doc["count"]     | 0;
+        uint8_t r = 0, g = 0, b = 0;
+        if (col[0] == '#' && strlen(col) >= 7) {
+            long v = strtol(col + 1, nullptr, 16);
+            r = (v >> 16) & 0xFF; g = (v >> 8) & 0xFF; b = v & 0xFF;
+        }
+        int idx = doc["index"] | -1;
+        if (idx >= 0) leds::setPixel(idx, r, g, b);   // single pixel (test panel)
+        else          leds::set(r, g, b, leds::patternFromStr(pat), period, count);
+        return;
+    }
     else return;
 
     if (!push(c)) {

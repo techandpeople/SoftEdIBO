@@ -29,6 +29,7 @@
 #include "pins.h"
 #include "pressure.h"
 #include "chambers.h"
+#include "leds.h"
 #include "cmd_queue.h"
 #include "commands.h"
 #include "dbg.h"
@@ -62,6 +63,7 @@ void setup() {
     Serial.begin(115200);
 
     chambers::hardware_init();
+    leds::hardware_init();
 
     if (!se::begin(onReceived)) {
         LOG("{\"error\":\"esp_now_init_failed\"}\n");
@@ -82,6 +84,9 @@ void setup() {
 
 void loop() {
     uint32_t now = millis();
+
+    // ---- Animate the LED ring (non-blocking, throttled) ----
+    leds::update();
 
     // ---- Process queued commands ----
     cmd_queue::Cmd c;
