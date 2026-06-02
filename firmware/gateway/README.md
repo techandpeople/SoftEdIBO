@@ -1,22 +1,31 @@
 # ESP-NOW Gateway Firmware
 
-ESP32-WROOM-32 firmware that bridges USB/serial (PC) <-> ESP-NOW (nodes).
+**ESP-IDF** firmware for the **Seeed XIAO ESP32-C6** that bridges USB/serial
+(PC) <-> ESP-NOW (nodes). The ESP-NOW / MAC / radio plumbing is shared with the
+Arduino node firmwares via `firmware/common/se_espnow.h`.
 
 ## Hardware
 
-- **Board:** ESP32-WROOM-32 (DevKit)
-- **Connection to PC:** USB via CH340/CP2102
+- **Board:** Seeed XIAO ESP32-C6 (RISC-V)
+- **Connection to PC:** native USB-Serial/JTAG (the USB-C port)
 - **Baud rate:** 115200
 
 ## Build & Flash
 
 ```bash
 cd firmware/gateway
-pio run --target upload
+pio run -e seeed_xiao_esp32c6 --target upload
 ```
 
-Requires [PlatformIO](https://platformio.org/). The ESP32 toolchain (~500 MB)
-is downloaded automatically on first build and cached for subsequent builds.
+Requires [PlatformIO](https://platformio.org/). The C6 needs ESP-IDF 5.1+
+(Arduino core 2.x does not support it). If the official `espressif32` platform
+does not yet recognise the C6 with the `espidf` framework on your install, build
+with native ESP-IDF instead — the `CMakeLists.txt` are shared:
+
+```bash
+cd firmware/gateway
+idf.py set-target esp32c6 && idf.py build flash
+```
 
 ## Serial Protocol (newline-terminated JSON)
 
@@ -61,10 +70,12 @@ Maximum line length: **256 bytes** (`SERIAL_BUF_LEN` constant).
 
 ## Performance notes
 
-- Serial loop uses a **fixed char buffer** instead of Arduino `String` — zero heap
-  allocation per received line, no fragmentation.
-- `serializeJson` writes directly into a stack-allocated `char[256]` for outgoing
-  ESP-NOW payloads.
+- The serial read loop uses a **fixed char buffer** — zero heap allocation per
+  received line.
+- ESP-NOW receives run in the WiFi task: the callback only copies the payload
+  into a **FreeRTOS queue**; a dedicated task serialises (cJSON) and writes to
+  USB, so the radio stack never blocks on serial I/O.
+- JSON is handled with **cJSON** (bundled in ESP-IDF) — no external dependency.
 
 ## Important caveats
 

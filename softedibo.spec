@@ -13,11 +13,12 @@
 #     config/
 #       settings.yaml
 #     firmware/
-#       gateway/firmware.bin
+#       gateway/firmware.bin               (ESP32-C6, ESP-IDF)
 #       node_direct/firmware-release.bin
 #       node_direct/firmware-debug.bin
 #       node_multiplexed/firmware-release.bin
 #       node_multiplexed/firmware-debug.bin
+#       node_sensor/firmware-release.bin   (MLX90393 touch board)
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
@@ -55,6 +56,7 @@ main_a = Analysis(
         ("firmware/node_direct/firmware-debug.bin",       "firmware/node_direct"),
         ("firmware/node_multiplexed/firmware-release.bin", "firmware/node_multiplexed"),
         ("firmware/node_multiplexed/firmware-debug.bin",   "firmware/node_multiplexed"),
+        ("firmware/node_sensor/firmware-release.bin",      "firmware/node_sensor"),
     ],
     hiddenimports=[
         *collect_submodules("src"),

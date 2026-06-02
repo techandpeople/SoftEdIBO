@@ -38,6 +38,12 @@ NODE_FIRMWARES: dict[str, dict[str, Path]] = {
         "release": Settings.BUNDLE / "firmware" / "node_multiplexed" / "firmware-release.bin",
         "debug":   Settings.BUNDLE / "firmware" / "node_multiplexed" / "firmware-debug.bin",
     },
+    # node_sensor ships a single build (no separate debug variant), so both
+    # keys point at the same bin — the debug checkbox is a no-op for it.
+    "node_sensor  (4x MLX90393 magnetic touch board)": {
+        "release": Settings.BUNDLE / "firmware" / "node_sensor" / "firmware-release.bin",
+        "debug":   Settings.BUNDLE / "firmware" / "node_sensor" / "firmware-release.bin",
+    },
 }
 
 

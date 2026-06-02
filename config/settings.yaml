@@ -26,12 +26,17 @@ robots:
 #       skins:
 #         - skin_id: belly
 #           name: Belly
+#           # Skin shape: "rect" (default) or "round". Round masks off-circle
+#           # cells in both the editor and the activity view.
+#           shape: rect
 #           chambers:
 #             # Chambers fed only by the pressure tank: keep min_pressure at 0.
 #             - {mac: "AA:BB:CC:DD:EE:01", slot: 0, max_pressure: 8.0}
 #             # Chambers also pulled by the vacuum tank: set min_pressure < 0.
 #             - {mac: "AA:BB:CC:DD:EE:01", slot: 1, max_pressure: 8.0, min_pressure: -3.0}
-#           # Optional 2D layout (edited from the skin dialog grid editor):
+#           # Optional 2D layout (edited from the skin dialog grid editor).
+#           # ``grid`` is the CHAMBER grid resolution; the sensor grid below
+#           # can override its dimensions independently.
 #           grid: {cols: 8, rows: 4}
 #           chamber_grid:    # rows × cols, cell = chamber index in `chambers` (-1 = empty)
 #             - [-1, -1,  0,  0,  0,  0, -1, -1]
@@ -42,11 +47,19 @@ robots:
 #           touch:
 #             node_mac: "BB:CC:DD:EE:FF:00"   # MAC of a node_imu in the same robot
 #             sensor_count: 4
-#             sensor_grid:                    # rows × cols, cell = sensor index (-1 = none)
+#             # Optional separate sensor-grid dimensions. If omitted, the
+#             # sensor grid uses the same dims as ``grid`` above.
+#             grid: {cols: 8, rows: 4}
+#             sensor_grid:                    # rows × cols of touch.grid, cell = sensor index (-1 = none)
 #               - [0, 0, 1, 1, 1, 1, 2, 2]
 #               - [0, 0, 1, 1, 1, 1, 2, 2]
 #               - [0, 0, 1, 1, 1, 1, 2, 2]
 #               - [0, 0, 1, 1, 1, 1, 2, 2]
+#             # Optional sensor → chamber mapping (keys are sensor indices).
+#             # Used by activities (and the SkinGridView in simulation) to
+#             # route touches into chamber actions. Edited from the same
+#             # Skin dialog ("Sensor → Chamber mapping" table).
+#             sensor_to_chamber: {"0": 0, "1": 0, "2": 1}
 #
 # Example node_multiplexed entry WITHOUT reservoirs (chambers only):
 # robots:
@@ -70,3 +83,41 @@ database:
   user: softedibo
   password: ''
   name: softedibo
+
+# Example OrganSwap activity configuration (saved as DB preset, not YAML):
+# activity_presets:
+#   - preset_id: "AP001"
+#     activity_name: "Organ Swap"
+#     name: "Easy - 3 organs"
+#     description: "Basic organ swap with 3 organs, forgiving tolerance"
+#     params:
+#       # Simulation params (inherited from BaseActivity.SIM_PARAMS)
+#       sim_inflate_speed_pct_per_s: 33
+#       sim_deflate_speed_pct_per_s: 33
+#       sim_touch_release_delay_ms: 300
+#
+#       # OrganSwap-specific params
+#       organ_readout_mode: "aggregate"  # or "per_organ"
+#       cured_total_resistance_ohm: 952.4
+#       cured_tolerance_ohm: 80.0
+#       organ_catalogue:
+#         liver_good: 1500
+#         heart_good: 2200
+#         lung_good: 3300
+#         liver_bad: 4700
+#         heart_bad: 5600
+#         lung_bad: 6800
+#
+#       # Sick state look & feel
+#       sick_color: "#e74c3c"
+#       sick_pulse_ms: 1000
+#       sick_touch_inflate_pct: 30
+#       sensor_to_chamber: {}  # empty = use skin's default sensor_to_chamber
+#
+#       # Cured state look & feel
+#       cured_color: "#2ecc71"
+#       breathe_period_ms: 4000
+#       breathe_depth_pct: 60
+#
+#     created_at: "2026-05-31T12:00:00Z"
+#     updated_at: "2026-05-31T12:00:00Z"

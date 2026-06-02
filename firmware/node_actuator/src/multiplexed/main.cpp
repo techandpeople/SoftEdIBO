@@ -1,8 +1,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
-#include <WiFi.h>
-#include <esp_now.h>
 
+#include "se_espnow.h"
 #include "chambers.h"
 #include "cmd_queue.h"
 #include "config.h"
@@ -22,8 +21,9 @@ constexpr float DETECT_DELTA_KPA     = 0.3f;
 uint32_t lastPressureMs = 0;
 uint32_t lastStatusMs = 0;
 
-uint8_t gatewayMac[6] = {};
-bool gatewayKnown = false;
+// Gateway MAC tracking lives in the shared ESP-NOW layer.
+using se::node::gatewayMac;
+using se::node::gatewayKnown;
 bool configured = false;
 
 void sendRaw(const char* payload) {
@@ -455,15 +455,7 @@ void onReceived(const uint8_t* mac_addr, const uint8_t* data, int len) {
     for (int i = 0; i < len; i++) DBG_PRINT("%c", (char)data[i]);
     DBG_PRINTLN("");
 
-    if (!gatewayKnown) {
-        memcpy(gatewayMac, mac_addr, 6);
-        gatewayKnown = true;
-        esp_now_peer_info_t peer{};
-        memcpy(peer.peer_addr, gatewayMac, 6);
-        peer.channel = 0;
-        peer.encrypt = false;
-        esp_now_add_peer(&peer);
-    }
+    se::node::learnGateway(mac_addr);   // remember gateway + add peer on first msg
     parseAndQueue(data, len);
 }
 
@@ -488,14 +480,11 @@ void setup() {
     pumps::hardware_init();
     pumps::stopAll();
 
-    WiFi.mode(WIFI_STA);
-    WiFi.disconnect();
-    if (esp_now_init() != ESP_OK) {
+    if (!se::begin(onReceived)) {
         LOG("{\"error\":\"esp_now_init_failed\"}\n");
         config::state.error = true;
         return;
     }
-    esp_now_register_recv_cb(onReceived);
 
     bool pca_ok = pca_valves::init();
     if (!pca_ok) {
@@ -510,16 +499,8 @@ void setup() {
     // Broadcast the ready message so the gateway can forward it to the PC
     // even before the node has received its first command (and therefore
     // doesn't yet know the gateway's MAC).
-    static const uint8_t broadcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-    esp_now_peer_info_t bcast_peer{};
-    memcpy(bcast_peer.peer_addr, broadcast, 6);
-    bcast_peer.channel = 0;
-    bcast_peer.encrypt = false;
-    esp_now_add_peer(&bcast_peer);
-
     static const char ready_msg[] = "{\"status\":\"node_multiplexed_ready\"}";
-    esp_now_send(broadcast, reinterpret_cast<const uint8_t*>(ready_msg),
-                 sizeof(ready_msg) - 1);
+    se::broadcast(ready_msg);
 
     LOG("%s\n", ready_msg);
 }
