@@ -248,7 +248,7 @@ class SessionPanel(QWidget, Ui_SessionPanel):
     def _start_activity(self, activity: BaseActivity, session_id: str,
                         robots: list[BaseRobot]) -> None:
         """Set up and start the activity so it subscribes to controller events
-        (e.g. ``on_imu``) and drives its state machine. Without this the
+        (e.g. ``on_magnet``) and drives its state machine. Without this the
         activity never reacts to touches — real or simulated."""
         from src.core.session import Session
         try:

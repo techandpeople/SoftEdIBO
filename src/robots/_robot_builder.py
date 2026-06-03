@@ -99,7 +99,7 @@ def build_skins(
         controllers:   Pre-built ``{mac: controller}`` dict for all nodes of this robot.
         touch_controllers:  Optional ``{skin_id: touch_controller}`` overriding the
             per-skin touch device. Used in simulation to give each skin its own
-            ``SimulatedIMU`` so its T-buttons drive only that skin, even when
+            ``SimulatedMagnetSensor`` so its T-buttons drive only that skin, even when
             several skins share a touch ``node_mac``. When absent, the touch
             controller is resolved from ``controllers`` by ``touch.node_mac``.
     """
@@ -159,7 +159,7 @@ def _build_one_skin(skin_cfg: dict[str, Any],
 
 def _resolve_touch_ctrl(skin_cfg: dict[str, Any],
                         controllers: dict[str, Any]) -> Any:
-    """Return the controller for the IMU referenced by ``skin_cfg.touch``."""
+    """Return the controller for the magnet sensor referenced by ``skin_cfg.touch``."""
     touch_cfg = skin_cfg.get("touch") or {}
     return controllers.get(touch_cfg.get("node_mac")) if touch_cfg else None
 

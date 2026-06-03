@@ -29,7 +29,7 @@ two variants are built: **Seeed XIAO ESP32-C6** (ESP-IDF) and the classic
 |----------|------|-------------|
 | `node_actuator` env `direct` / `direct_debug` | [firmware/node_actuator/](firmware/node_actuator/) | Direct board (fixed 3 chambers) |
 | `node_actuator` env `multiplexed` / `multiplexed_debug` | [firmware/node_actuator/](firmware/node_actuator/) | Multiplexed board (default 12 chambers, runtime configurable; tanks optional) |
-| `node_sensor` | [firmware/node_sensor/](firmware/node_sensor/) | 4× MLX90393 magnetic touch board (`node_imu` protocol) |
+| `node_magnet_sensor` | [firmware/node_magnet_sensor/](firmware/node_magnet_sensor/) | 4× MLX90393 magnetic touch board (`node_magnet_sensor` protocol) |
 
 ---
 
@@ -59,7 +59,7 @@ SessionPanel
 - **Per-chamber max pressure** is set in `settings.yaml` and enforced both in the app and on the ESP32 (hardware safety — survives app crashes).
           - **Pressure sensing** uses the XGZP6847A datasheet transfer function (see [pressure.h](firmware/common/pressure.h)).
 
-**Touch sensing (optional).** A skin may reference a `node_imu` (4-sensor IMU/touch board) via its `touch:` block — see [firmware/PROTOCOL.md](firmware/PROTOCOL.md). The activity-time view (`SkinGridView`) overlays a pulsing yellow outline on the active sensor cells so the operator sees where each touch lands relative to the chamber regions.
+**Touch sensing (optional).** A skin may reference a `node_magnet_sensor` (4-sensor magnet sensor/touch board) via its `touch:` block — see [firmware/PROTOCOL.md](firmware/PROTOCOL.md). The activity-time view (`SkinGridView`) overlays a pulsing yellow outline on the active sensor cells so the operator sees where each touch lands relative to the chamber regions.
 
 **Skin layout editor.** The skin config dialog exposes a paint-grid editor (left-click paints, right-click erases, drag to multi-select) where chambers and touch zones are placed on a 2-D matrix. Layouts can be saved as reusable **Skin Templates** (DB-backed) so the same shape can be applied to many skins with one click — see [docs/ACTIVITIES.md](docs/ACTIVITIES.md) for the broader behavior-framework plan.
 
@@ -169,10 +169,16 @@ cd firmware/node_actuator && pio run -e direct      --target upload
 cd firmware/node_actuator && pio run -e multiplexed --target upload
 
 # Sensor node (4x MLX90393 touch board)
-cd firmware/node_sensor && pio run --target upload
+cd firmware/node_magnet_sensor && pio run --target upload
 ```
 
 Requires [PlatformIO](https://platformio.org/).
+
+> **Updating nodes later:** once a node has been cable-flashed once with the
+> current partition table, you can reflash it wirelessly via **Tools → Update
+> Nodes (OTA)…** in the app — it streams the bundled firmware to the node over
+> ESP-NOW through the connected gateway (no cable, no WiFi). See
+> [firmware/gateway/README.md](firmware/gateway/README.md#ota-firmware-update-over-esp-now).
 
 The CI pipeline automatically selects the firmware environment:
 - **Nightly** (push to `master`) → node debug build
@@ -202,6 +208,6 @@ The CI pipeline automatically selects the firmware environment:
 | `firmware/gateway/` | Gateway firmware (ESP-IDF, Seeed XIAO ESP32-C6) |
 | `firmware/common/` | Shared firmware headers (`se_espnow.h`, units/pressure/dbg/cmd_queue) |
 | `firmware/node_actuator/` | Actuator nodes — `direct` + `multiplexed` variants (build-flag envs) |
-| `firmware/node_sensor/` | Sensor node — 4× MLX90393 touch board (`node_imu` protocol) |
+| `firmware/node_magnet_sensor/` | Sensor node — 4× MLX90393 touch board (`node_magnet_sensor` protocol) |
 | `firmware/node_actuator/src/direct/pins.h` | node_direct pin definitions |
 | `firmware/node_actuator/src/multiplexed/pins.h` | node_multiplexed pin definitions |

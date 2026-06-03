@@ -9,6 +9,8 @@ enum CmdType : uint8_t {
     CMD_NONE = 0,
     // Per-chamber commands (chamber field is the chamber index).
     CMD_INFLATE, CMD_DEFLATE, CMD_SET_PRESSURE, CMD_SET_MAX, CMD_SET_MIN, CMD_HOLD,
+    // Manual valve/pump control (debug/test).
+    CMD_VALVE_MANUAL, CMD_PUMP_MANUAL,
     // Configuration / status.
     CMD_CONFIGURE, CMD_PING
 #ifdef DEBUG_BUILD
@@ -19,9 +21,9 @@ enum CmdType : uint8_t {
 struct Cmd {
     CmdType  type;
     int8_t   chamber;       // chamber index
-    int16_t  param;         // delta or value (percent)
+    int16_t  param;         // delta or value (percent), or valve side / pump idx
     float    param_kpa;     // chamber min or max in kPa (depends on type)
-    int16_t  cfg_chambers;  // configure: num_chambers
+    int16_t  cfg_chambers;  // configure: num_chambers, or manual: open/on (bool)
     float    cfg_p_min;     // configure: tank_pressure_min_kpa
     float    cfg_p_max;     // configure: tank_pressure_max_kpa
     float    cfg_v_min;     // configure: tank_vacuum_min_kpa

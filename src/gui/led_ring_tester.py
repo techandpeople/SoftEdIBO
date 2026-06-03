@@ -1,8 +1,8 @@
 """LED ring tester — a circle of N clickable LEDs for testing a WS2812 ring.
 
-Click a single LED to pick its colour, or use "Set all…" to colour the whole
-ring. Each action calls back into the host (the Test Actuators dialog), which
-forwards a ``set_led`` command to the node over the gateway.
+Basic colors (red, green, blue, white, yellow, cyan) with pattern selection
+(solid, blink, pulse). Each action calls back into the host (the Test Actuators
+dialog), which forwards a ``set_led`` command to the node over the gateway.
 """
 
 from __future__ import annotations
@@ -13,11 +13,25 @@ from typing import Callable
 from PySide6.QtCore import QPointF, Qt, Signal
 from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPaintEvent, QPen
 from PySide6.QtWidgets import (
-    QColorDialog, QGroupBox, QHBoxLayout, QLabel, QPushButton,
+    QGroupBox, QHBoxLayout, QLabel, QPushButton,
     QSizePolicy, QVBoxLayout, QWidget,
 )
 
-_OFF_COLOR = QColor("#202020")   # how an "off" LED is drawn in the UI
+from src.gui.led_animation import AnimationPattern, LedAnimator, apply_animation
+
+_OFF_COLOR = QColor("#202020")
+
+# Basic LED colors
+_COLORS = {
+    "Red":    "#ff0000",
+    "Green":  "#00ff00",
+    "Blue":   "#0000ff",
+    "White":  "#ffffff",
+    "Yellow": "#ffff00",
+    "Cyan":   "#00ffff",
+}
+
+_PATTERNS = ["solid", "blink", "pulse"]
 
 
 class LedRingWidget(QWidget):
@@ -29,7 +43,9 @@ class LedRingWidget(QWidget):
         super().__init__(parent)
         self._count = max(1, count)
         self._colors = [QColor(_OFF_COLOR) for _ in range(self._count)]
-        self.setMinimumSize(240, 240)
+        self._pattern = AnimationPattern.SOLID
+        self._anim_step = 0
+        self.setMinimumSize(280, 280)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
     def set_color(self, i: int, color: QColor) -> None:
@@ -41,15 +57,21 @@ class LedRingWidget(QWidget):
         self._colors = [QColor(color) for _ in range(self._count)]
         self.update()
 
+    def set_pattern(self, pattern: AnimationPattern) -> None:
+        self._pattern = pattern
+
+    def set_anim_step(self, step: int) -> None:
+        self._anim_step = step
+        self.update()
+
     def _geometry(self) -> tuple[list[QPointF], float]:
         w, h = self.width(), self.height()
         cx, cy = w / 2.0, h / 2.0
         ring_r = min(w, h) / 2.0 - 18.0
-        # Dot radius scales with spacing so dense rings don't overlap.
         led_r = max(5.0, min(16.0, math.pi * ring_r / self._count / 1.4))
         pts = []
         for i in range(self._count):
-            a = 2.0 * math.pi * i / self._count - math.pi / 2.0   # LED 0 at top
+            a = 2.0 * math.pi * i / self._count - math.pi / 2.0
             pts.append(QPointF(cx + ring_r * math.cos(a), cy + ring_r * math.sin(a)))
         return pts, led_r
 
@@ -58,7 +80,8 @@ class LedRingWidget(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         pts, led_r = self._geometry()
         for i, color in enumerate(self._colors):
-            painter.setBrush(color)
+            display_color = apply_animation(color, self._pattern, self._anim_step, max_steps=10)
+            painter.setBrush(display_color)
             painter.setPen(QPen(QColor("#7f8c8d"), 1))
             painter.drawEllipse(pts[i], led_r, led_r)
 
@@ -73,57 +96,96 @@ class LedRingWidget(QWidget):
 
 
 class LedRingTester(QGroupBox):
-    """LED ring test group: the ring + "set all" / "all off" controls.
+    """LED ring test: clickable ring + preset color/pattern buttons.
 
-    ``send_cb(index, color_hex)`` is called on every change:
-      - index is the LED number, or None for the whole ring;
-      - color_hex is "#RRGGBB", or None to turn off.
+    ``send_cb(index, color_hex, pattern)`` is called on every change:
+      - index: LED number, or None for whole ring
+      - color_hex: "#RRGGBB" or None to turn off
+      - pattern: "solid", "blink", "pulse"
     """
 
     def __init__(self, count: int,
-                 send_cb: Callable[[int | None, str | None], None],
+                 send_cb: Callable[[int | None, str | None, str], None],
                  parent: QWidget | None = None) -> None:
         super().__init__("LED ring test", parent)
         self._send = send_cb
-        self._last = "#ff0000"
+        self._color = "#ff0000"
+        self._pattern = AnimationPattern.SOLID
+        self._pattern_buttons = {}
+        self._animator = LedAnimator(interval_ms=100, max_steps=10, parent=self)
+        self._animator.stepped.connect(self._on_animation_step)
 
-        layout = QVBoxLayout(self)
+        main_layout = QHBoxLayout(self)
+
+        # Left side: controls
+        left_layout = QVBoxLayout()
+        left_layout.addWidget(QLabel("Select color & pattern:"))
+
+        # Color buttons
+        color_row = QHBoxLayout()
+        for name, hex_color in _COLORS.items():
+            btn = QPushButton(name)
+            btn.clicked.connect(lambda checked=False, c=hex_color, n=name: self._set_color(c, n))
+            color_row.addWidget(btn)
+        color_row.addStretch()
+        left_layout.addLayout(color_row)
+
+        # Pattern buttons
+        pattern_row = QHBoxLayout()
+        pattern_row.addWidget(QLabel("Pattern:"))
+        for pattern in _PATTERNS:
+            btn = QPushButton(pattern.capitalize())
+            btn.clicked.connect(lambda checked=False, p=pattern: self._set_pattern(p))
+            self._pattern_buttons[pattern] = btn
+            pattern_row.addWidget(btn)
+        pattern_row.addStretch()
+        left_layout.addLayout(pattern_row)
+
+        # Control buttons
+        control_row = QHBoxLayout()
+        all_btn = QPushButton("Apply to All")
+        off_btn = QPushButton("Off")
+        all_btn.clicked.connect(self._on_apply_all)
+        off_btn.clicked.connect(self._on_off)
+        control_row.addWidget(all_btn)
+        control_row.addWidget(off_btn)
+        control_row.addStretch()
+        left_layout.addLayout(control_row)
+
+        left_layout.addWidget(QLabel("Click LED to set individually:"))
+        left_layout.addStretch()
+
+        # Right side: LED ring
         self._ring = LedRingWidget(count)
         self._ring.ledClicked.connect(self._on_led_clicked)
-        layout.addWidget(self._ring)
-        layout.addWidget(QLabel("Click a LED to set its colour, or:"))
 
-        row = QHBoxLayout()
-        all_btn = QPushButton("Set all…")
-        all_btn.clicked.connect(self._on_set_all)
-        off_btn = QPushButton("All off")
-        off_btn.clicked.connect(self._on_off)
-        row.addWidget(all_btn)
-        row.addWidget(off_btn)
-        row.addStretch()
-        layout.addLayout(row)
+        main_layout.addLayout(left_layout, 1)
+        main_layout.addWidget(self._ring, 1)
 
-    def _pick(self) -> QColor | None:
-        color = QColorDialog.getColor(QColor(self._last), self, "Pick LED colour")
-        if not color.isValid():
-            return None
-        self._last = color.name()
-        return color
+    def _on_animation_step(self, step: int) -> None:
+        """Callback when animation step changes."""
+        self._ring.set_anim_step(step)
+
+    def _set_color(self, hex_color: str, name: str) -> None:
+        self._color = hex_color
+
+    def _set_pattern(self, pattern: str) -> None:
+        pattern_enum = AnimationPattern(pattern)
+        self._pattern = pattern_enum
+        self._ring.set_pattern(pattern_enum)
+        if pattern_enum == AnimationPattern.SOLID:
+            self._animator.stop()
+        else:
+            self._animator.start()
 
     def _on_led_clicked(self, i: int) -> None:
-        color = self._pick()
-        if color is None:
-            return
-        self._ring.set_color(i, color)
-        self._send(i, color.name())
+        self._ring.set_color(i, QColor(self._color))
+        self._send(i, self._color, self._pattern.value)
 
-    def _on_set_all(self) -> None:
-        color = self._pick()
-        if color is None:
-            return
-        self._ring.set_all(color)
-        self._send(None, color.name())
+    def _on_apply_all(self) -> None:
+        self._ring.set_all(QColor(self._color))
+        self._send(None, self._color, self._pattern.value)
 
     def _on_off(self) -> None:
         self._ring.set_all(_OFF_COLOR)
-        self._send(None, None)
+        self._send(None, None, "off")

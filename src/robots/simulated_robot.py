@@ -10,7 +10,7 @@ TANK_REFILL_RATE: int = 1         # % per 300 ms tick (0→100 in 30 s)
 
 from src.hardware.air_reservoir import AirReservoir
 from src.hardware.simulated_controller import SimulatedController
-from src.hardware.simulated_imu import SimulatedIMU
+from src.hardware.simulated_magnet_sensor import SimulatedMagnetSensor
 from src.hardware.skin import Skin
 from src.robots._robot_builder import build_skins
 from src.robots.base_robot import BaseRobot, RobotStatus
@@ -61,21 +61,21 @@ class SimulatedRobot(BaseRobot):
                         mac, sim_params=self._sim_params,
                     )
 
-        # One SimulatedIMU **per skin** — the simulated "sensor board" the
+        # One SimulatedMagnetSensor **per skin** — the simulated "sensor board" the
         # T-buttons feed. Keyed by skin_id (not node_mac) so each skin's
         # T-buttons drive only that skin, even if several skins share a touch
         # node_mac. Keeps touch input separate from chamber actuation,
-        # mirroring the real node_imu vs chamber-node split.
-        self._imus: dict[str, SimulatedIMU] = {}
+        # mirroring the real node_magnet_sensor vs chamber-node split.
+        self._magnet_sensors: dict[str, SimulatedMagnetSensor] = {}
         for skin_cfg in skin_configs:
             touch = skin_cfg.get("touch") or {}
             if touch:
                 skin_id = skin_cfg.get("skin_id", "")
                 mac = touch.get("node_mac", skin_id)
-                self._imus[skin_id] = SimulatedIMU(mac)
+                self._magnet_sensors[skin_id] = SimulatedMagnetSensor(mac)
 
         self._skins: dict[str, Skin] = build_skins(
-            skin_configs, self._controllers, touch_controllers=self._imus,
+            skin_configs, self._controllers, touch_controllers=self._magnet_sensors,
         )
         self._reservoirs: dict[str, AirReservoir] = self._build_simulated_reservoirs(
             tank_kinds or []

@@ -76,8 +76,8 @@ jobs:
             firmware/node_actuator/firmware-direct-debug.bin
             firmware/node_actuator/firmware-multiplexed-release.bin
             firmware/node_actuator/firmware-multiplexed-debug.bin
-            firmware/node_sensor/firmware-release.bin
-          key: fwbins-${{ hashFiles('firmware/common/**', 'firmware/gateway/src/**', 'firmware/gateway/platformio.ini', 'firmware/gateway/CMakeLists.txt', 'firmware/gateway/sdkconfig.defaults', 'firmware/node_actuator/src/**', 'firmware/node_actuator/platformio.ini', 'firmware/node_sensor/src/**', 'firmware/node_sensor/platformio.ini') }}
+            firmware/node_magnet_sensor/firmware-release.bin
+          key: fwbins-${{ hashFiles('firmware/common/**', 'firmware/gateway/src/**', 'firmware/gateway/platformio.ini', 'firmware/gateway/CMakeLists.txt', 'firmware/gateway/sdkconfig.defaults', 'firmware/node_actuator/src/**', 'firmware/node_actuator/platformio.ini', 'firmware/node_magnet_sensor/src/**', 'firmware/node_magnet_sensor/platformio.ini') }}
 
       - name: Install PlatformIO
         if: steps.fwcache.outputs.cache-hit != 'true'
@@ -134,7 +134,7 @@ jobs:
           mergebin direct_debug      node_actuator/firmware-direct-debug.bin
           mergebin multiplexed       node_actuator/firmware-multiplexed-release.bin
           mergebin multiplexed_debug node_actuator/firmware-multiplexed-debug.bin
-          cd ../node_sensor
+          cd ../node_magnet_sensor
           python -m platformio run -e esp32dev
           python -m esptool --chip esp32 merge_bin \
             --flash_mode dio --flash_freq 40m --flash_size 4MB \
@@ -156,7 +156,7 @@ jobs:
           cp firmware/node_actuator/firmware-direct-debug.bin         firmware-binaries/node_direct-debug.bin
           cp firmware/node_actuator/firmware-multiplexed-release.bin  firmware-binaries/node_multiplexed-release.bin
           cp firmware/node_actuator/firmware-multiplexed-debug.bin    firmware-binaries/node_multiplexed-debug.bin
-          cp firmware/node_sensor/firmware-release.bin           firmware-binaries/node_sensor.bin
+          cp firmware/node_magnet_sensor/firmware-release.bin           firmware-binaries/node_magnet_sensor.bin
 
       - name: Upload firmware artifact (flat, for releases)
         uses: actions/upload-artifact@v4
@@ -178,7 +178,7 @@ jobs:
             firmware/node_actuator/firmware-direct-debug.bin
             firmware/node_actuator/firmware-multiplexed-release.bin
             firmware/node_actuator/firmware-multiplexed-debug.bin
-            firmware/node_sensor/firmware-release.bin
+            firmware/node_magnet_sensor/firmware-release.bin
           retention-days: 30
 
       # ----------------------------------------------------------------
@@ -445,7 +445,7 @@ jobs:
             | `node_direct-debug.bin` | `node_direct` | Same as above with Serial logs (`DEBUG_BUILD`) |
             | `node_multiplexed-release.bin` | `node_multiplexed` | Up to 12 chambers, multiplexed valves/sensors, optional shared pressure/vacuum tanks, runtime-sized |
             | `node_multiplexed-debug.bin` | `node_multiplexed` | Same as above with Serial logs (`DEBUG_BUILD`) |
-            | `node_sensor.bin` | `node_imu` | 4× MLX90393 magnetic touch board (node_imu protocol) |
+            | `node_magnet_sensor.bin` | `node_magnet_sensor` | 4× MLX90393 magnetic touch board (node_magnet_sensor protocol) |
 
             > **Note:** pick the gateway bin for your board. The C6 flashes at
             > `0x0` (`esptool.py --chip esp32c6 write_flash 0x0 gateway-c6.bin`);

@@ -100,6 +100,16 @@ class ESPNowGateway:
         """Register a callback for incoming messages from ESP32 nodes."""
         self._callbacks.append(weakref.WeakMethod(callback))
 
+    def remove_message_callback(self, callback: Callable[[dict[str, Any]], None]) -> None:
+        """Deregister a callback previously passed to :meth:`on_message`.
+
+        Used by short-lived consumers (e.g. the OTA updater) that need to stop
+        receiving messages deterministically rather than waiting for GC.
+        """
+        self._callbacks = [
+            wr for wr in self._callbacks if wr() is not None and wr() != callback
+        ]
+
     def _read_loop(self) -> None:
         """Background thread that reads incoming serial data."""
         while self._running and self._serial is not None:

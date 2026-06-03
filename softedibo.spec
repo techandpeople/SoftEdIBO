@@ -19,7 +19,7 @@
 #       node_actuator/firmware-direct-debug.bin
 #       node_actuator/firmware-multiplexed-release.bin
 #       node_actuator/firmware-multiplexed-debug.bin
-#       node_sensor/firmware-release.bin             (MLX90393 touch board)
+#       node_magnet_sensor/firmware-release.bin             (MLX90393 touch board)
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
@@ -58,7 +58,7 @@ main_a = Analysis(
         ("firmware/node_actuator/firmware-direct-debug.bin",        "firmware/node_actuator"),
         ("firmware/node_actuator/firmware-multiplexed-release.bin", "firmware/node_actuator"),
         ("firmware/node_actuator/firmware-multiplexed-debug.bin",   "firmware/node_actuator"),
-        ("firmware/node_sensor/firmware-release.bin",               "firmware/node_sensor"),
+        ("firmware/node_magnet_sensor/firmware-release.bin",               "firmware/node_magnet_sensor"),
     ],
     hiddenimports=[
         *collect_submodules("src"),

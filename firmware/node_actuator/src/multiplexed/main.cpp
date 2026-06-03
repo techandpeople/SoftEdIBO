@@ -2,6 +2,7 @@
 #include <ArduinoJson.h>
 
 #include "se_espnow.h"
+#include "se_ota.h"
 #include "chambers.h"
 #include "cmd_queue.h"
 #include "config.h"
@@ -220,6 +221,15 @@ void parseAndQueue(const uint8_t* data, int len) {
     } else if (strcmp(cmd, "hold") == 0) {
         c.type = cmd_queue::CMD_HOLD;
         c.chamber = doc["chamber"] | -1;
+    } else if (strcmp(cmd, "valve_manual") == 0) {
+        c.type = cmd_queue::CMD_VALVE_MANUAL;
+        c.chamber = doc["chamber"] | -1;
+        c.param = doc["side"] | 0;     // 0=inflate, 1=deflate
+        c.cfg_chambers = doc["open"] | 0;
+    } else if (strcmp(cmd, "pump_manual") == 0) {
+        c.type = cmd_queue::CMD_PUMP_MANUAL;
+        c.param = doc["pump"] | 0;     // 0=pressure, 1=vacuum
+        c.cfg_chambers = doc["on"] | 0;
     } else if (strcmp(cmd, "configure") == 0) {
         c.type = cmd_queue::CMD_CONFIGURE;
         c.cfg_chambers = doc["num_chambers"] | config::state.num_chambers;
@@ -265,6 +275,53 @@ void parseAndQueue(const uint8_t* data, int len) {
     }
 
     cmd_queue::push(c);
+}
+
+// ---------------------------------------------------------------------------
+// Manual (dev/test) override. The pumps normally run autonomously to maintain
+// the tanks, so a manual command would fight that loop. While a manual command
+// is active we SUSPEND the autonomous tank/chamber control and drive the
+// requested actuator directly. Safety nets (enforced in loop()):
+//   1. Dead-man: the override auto-clears after MANUAL_MAX_ON_MS and autonomous
+//      control resumes, so a lost "off" command can't leave a pump running.
+//   2. HARD limits: pumps/valves are cut if a tank or chamber hits its hard cap.
+// At most one valve per chamber is held open at a time (inflate XOR deflate).
+// Dev/teacher tool only — never exposed to children.
+// ---------------------------------------------------------------------------
+
+constexpr uint32_t MANUAL_MAX_ON_MS = 5000;
+
+bool     manualActive               = false;
+uint32_t manualTs                   = 0;
+bool     manualPumpOn[2]            = {false, false};   // [0]=pressure, [1]=vacuum
+bool     manualValveOpen[MAX_CHAMBERS][2] = {};         // [chamber][0=inflate,1=deflate]
+
+void applyManualPump(int role01, bool on) {
+    if (role01 < 0 || role01 > 1) return;
+    manualPumpOn[role01] = on;
+    pumps::Role role = (role01 == 0) ? pumps::ROLE_PRESSURE : pumps::ROLE_VACUUM;
+    pumps::setRoleDuty(role, on ? pumps::PUMP_DEFAULT_DUTY : 0);
+}
+
+void applyManualValve(int chamber, int side, bool open) {
+    if (chamber < 0 || chamber >= MAX_CHAMBERS || side < 0 || side > 1) return;
+    if (open) manualValveOpen[chamber][1 - side] = false;   // single side open
+    manualValveOpen[chamber][side] = open;
+    pca_valves::setChamberValve(chamber,
+        manualValveOpen[chamber][0], manualValveOpen[chamber][1]);
+}
+
+// Turn every manual actuator off and hand control back to the autonomous loops.
+void manualClearAll() {
+    pumps::setRoleDuty(pumps::ROLE_PRESSURE, 0);
+    pumps::setRoleDuty(pumps::ROLE_VACUUM, 0);
+    manualPumpOn[0] = manualPumpOn[1] = false;
+    for (int chmbr = 0; chmbr < MAX_CHAMBERS; chmbr++) {
+        if (manualValveOpen[chmbr][0] || manualValveOpen[chmbr][1])
+            pca_valves::setChamberValve(chmbr, false, false);
+        manualValveOpen[chmbr][0] = manualValveOpen[chmbr][1] = false;
+    }
+    manualActive = false;
 }
 
 void processCommand(const cmd_queue::Cmd& c) {
@@ -367,6 +424,21 @@ void processCommand(const cmd_queue::Cmd& c) {
     case CMD_HOLD:
         chambers::stop(n);
         break;
+    case CMD_VALVE_MANUAL: {
+        // chamber = chamber, param = side (0=inflate, 1=deflate), cfg_chambers = open (0/1)
+        // Enter manual override (suspends autonomous control); auto-cleared by dead-man.
+        manualActive = true;
+        manualTs     = millis();
+        applyManualValve(n, c.param, c.cfg_chambers != 0);
+        break;
+    }
+    case CMD_PUMP_MANUAL: {
+        // param = pump role (0=pressure, 1=vacuum), cfg_chambers = on (0/1)
+        manualActive = true;
+        manualTs     = millis();
+        applyManualPump(c.param, c.cfg_chambers != 0);
+        break;
+    }
     default:
         break;
     }
@@ -375,6 +447,21 @@ void processCommand(const cmd_queue::Cmd& c) {
 float readTankKpa(int mux_ch) {
     if (mux_ch < 0 || mux_ch >= mux::MUX_CHANNELS) return 0.0f;
     return mux::readKpa(mux_ch);
+}
+
+// Enforce hard limits while in manual override (called at the pressure cadence
+// with freshly-read chamber pressures). Cuts any manual actuator that would push
+// a tank or chamber past its hard cap. Dead-man timeout is handled in loop().
+void manualPressureSafety() {
+    float p = readTankKpa(config::state.pressure_tank_mux_ch);
+    float v = readTankKpa(config::state.vacuum_tank_mux_ch);
+    if (manualPumpOn[0] && p >= config::HARD_TANK_MAX_KPA) applyManualPump(0, false);
+    if (manualPumpOn[1] && v <= config::HARD_TANK_MIN_KPA) applyManualPump(1, false);
+    for (int i = 0; i < config::state.num_chambers; i++) {
+        float k = chambers::cachedKpa[i];
+        if (manualValveOpen[i][0] && k >= config::HARD_CHAMBER_MAX_KPA) applyManualValve(i, 0, false);
+        if (manualValveOpen[i][1] && k <= config::HARD_CHAMBER_MIN_KPA) applyManualValve(i, 1, false);
+    }
 }
 
 void tankControlStep() {
@@ -428,15 +515,6 @@ void chamberControlStep(uint32_t now) {
         chambers::cachedKpa[i] = mux::readKpa(mux_ch);
 
         auto& ch = chambers::state[i];
-        if (ch.state == chambers::PRE_INFLATE && now - ch.settle_ts >= chambers::VALVE_SETTLE_MS) {
-            ch.state = chambers::INFLATING;
-            pca_valves::setChamberValve(i, true, false);
-        }
-        if (ch.state == chambers::PRE_DEFLATE && now - ch.settle_ts >= chambers::VALVE_SETTLE_MS) {
-            ch.state = chambers::DEFLATING;
-            pca_valves::setChamberValve(i, false, true);
-        }
-
         if (ch.state == chambers::INFLATING &&
             (chambers::cachedKpa[i] >= ch.target_kpa || chambers::cachedKpa[i] >= ch.max_kpa)) {
             chambers::stop(i);
@@ -456,6 +534,7 @@ void onReceived(const uint8_t* mac_addr, const uint8_t* data, int len) {
     DBG_PRINTLN("");
 
     se::node::learnGateway(mac_addr);   // remember gateway + add peer on first msg
+    if (se::ota::tryHandle(data, len)) return;   // firmware update over ESP-NOW
     parseAndQueue(data, len);
 }
 
@@ -519,10 +598,25 @@ void loop() {
     }
 
     uint32_t now = millis();
+
+    // Manual (dev) override: dead-man auto-off every loop (cheap, no I/O). When
+    // it fires, autonomous control resumes on the next pressure tick.
+    if (manualActive && now - manualTs >= MANUAL_MAX_ON_MS) manualClearAll();
+
     if (now - lastPressureMs >= PRESSURE_CHECK_MS) {
         lastPressureMs = now;
-        tankControlStep();
-        chamberControlStep(now);
+        if (manualActive) {
+            // Autonomous control suspended. Refresh chamber pressures and enforce
+            // hard limits on whatever the operator is driving manually.
+            for (int i = 0; i < config::state.num_chambers; i++) {
+                int m = config::state.chamber_mux_ch[i];
+                if (m >= 0) chambers::cachedKpa[i] = mux::readKpa(m);
+            }
+            manualPressureSafety();
+        } else {
+            tankControlStep();
+            chamberControlStep(now);
+        }
     }
 
     if (now - lastStatusMs >= STATUS_REPORT_MS) {

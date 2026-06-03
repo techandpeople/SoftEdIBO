@@ -1,9 +1,9 @@
-# node_sensor Firmware
+# node_magnet_sensor Firmware
 
 Touch-sensing board: 4× MLX90393 magnetometers (+1 optional 5th on a second I2C
 bus). A magnet sits above each sensor inside the silicone; pressing the skin
 moves the magnet and changes the measured field. The board streams the
-**node_imu protocol** over ESP-NOW so it plugs straight into the SoftEdIBO PC
+**node_magnet_sensor protocol** over ESP-NOW so it plugs straight into the SoftEdIBO PC
 (`QuadrantDetector` / touch tracking).
 
 Adapted from the thesis MLX90393 live-stream firmware. The offline **calibration
@@ -27,12 +27,12 @@ S2→Q3 (bottom-left), S3→Q4 (bottom-right)** — matches the PC `QuadrantDete
 
 **Boot** (broadcast):
 ```json
-{"status":"node_imu_ready","sensors":4,"variant":"mlx90393"}
+{"status":"node_magnet_sensor_ready","sensors":4,"variant":"mlx90393"}
 ```
 
 **Stream** (~28 Hz, to the gateway once it is known):
 ```json
-{"type":"imu","mag":[mT,...],"adj":[0.0-1.0,...],"act":[active_idx,...]}
+{"type":"magnet","mag":[mT,...],"adj":[0.0-1.0,...],"act":[active_idx,...]}
 ```
 - `mag` — per-sensor field-change magnitude in mT (`|sample − baseline|`).
 - `adj` — `mag / fullscale_mt`, clamped 0..1 (the value the PC prefers).
@@ -52,7 +52,7 @@ board was touched during boot). Streaming pauses until the baseline is ready.
 
 ## Build & flash
 ```bash
-cd firmware/node_sensor
+cd firmware/node_magnet_sensor
 pio run --target upload
 ```
 Uses the shared `firmware/common/se_espnow.h` (added to the include path in

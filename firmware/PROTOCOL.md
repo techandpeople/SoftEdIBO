@@ -5,7 +5,7 @@ Three firmware flavors share this protocol:
 - **`node_direct`** — 3 chambers, GPIO valves, onboard pumps.
 - **`node_multiplexed`** — up to 12 chambers, multiplexed valves/sensors,
   optional shared pressure/vacuum tanks.
-- **`node_imu`** — 4-sensor IMU (separate firmware, no chambers / pumps;
+- **`node_magnet_sensor`** — 4-sensor magnet sensor (separate firmware, no chambers / pumps;
   streams sensor data only).
 
 The gateway is a **transparent bridge** between the PC (USB serial) and the
@@ -49,7 +49,7 @@ runtime `set_tank_pressure` command; re-send `configure` to change them.
 |---|---|---|
 | `set_led` | `color` ("#RRGGBB"), `pattern` ("off"/"solid"/"blink"/"pulse"), `period_ms`, `count`, `index` | WS2812 ring. `index` sets a single pixel (solid); omit it for the whole ring. `period_ms`/`count` apply to blink/pulse (count ≤ 0 = forever). |
 
-### Sensor / IMU-node only
+### Sensor / magnet sensor-node only
 
 | `cmd` | Fields | Notes |
 |---|---|---|
@@ -97,7 +97,7 @@ Each message arrives on the PC with a `source` field added by the gateway.
 | `debug` | (per-node — see below) | Reply to `debug`, debug build only |
 
 The boot announce is `{"status":"node_<type>_ready"}` (e.g.,
-`node_direct_ready`, `node_multiplexed_ready`, `node_imu_ready`). It is
+`node_direct_ready`, `node_multiplexed_ready`, `node_magnet_sensor_ready`). It is
 broadcast on the ESP-NOW channel so the gateway can forward it before the
 node knows the gateway's MAC.
 
@@ -110,9 +110,9 @@ node knows the gateway's MAC.
 
 `error.reason` values: `pca9685_address_conflict`, `not_configured`.
 
-### IMU-node only
+### magnet sensor-node only
 
-#### `imu` — live sample (every reading)
+#### `magnet` — live sample (every reading)
 
 | Field | Shape |
 |---|---|
@@ -133,12 +133,12 @@ Register `controller.on_imu(cb)` to receive each message (the gateway adds
 
 #### Boot announce (self-describing)
 
-The IMU firmware broadcasts its configuration once at the end of `setup()`,
+The magnet sensor firmware broadcasts its configuration once at the end of `setup()`,
 so the PC can adapt to different sensor / magnet variants without per-board
 knowledge:
 
 ```json
-{"status":"node_imu_ready",
+{"status":"node_magnet_sensor_ready",
  "sensors": N,
  "magnets": M,
  "variant": "label",
@@ -149,10 +149,10 @@ Coordinates can be normalised `[0, 1]` or in mm — document which on the
 firmware side. `ESP32Controller` caches the payload on receipt; read it
 later via `controller.imu_geometry`.
 
-#### Linking a skin to an IMU node
+#### Linking a skin to an magnet sensor node
 
 A skin's YAML may opt into touch sensing by adding a `touch` block referencing
-the IMU node's MAC:
+the magnet sensor node's MAC:
 
 ```yaml
 skins:
@@ -222,4 +222,4 @@ Emitted on the serial line by the gateway itself, no `source` field.
 - Gateway dispatch — [`firmware/gateway/src/main.cpp`](gateway/src/main.cpp)
 - node_direct command parser/handler — [`firmware/node_actuator/src/direct/commands.h`](node_actuator/src/direct/commands.h)
 - node_multiplexed command parser — [`firmware/node_actuator/src/multiplexed/main.cpp`](node_actuator/src/multiplexed/main.cpp) (`parseAndQueue`, `processCommand`)
-- node_imu / touch board (MLX90393) — [`firmware/node_sensor/src/main.cpp`](node_sensor/src/main.cpp)
+- node_magnet_sensor / touch board (MLX90393) — [`firmware/node_magnet_sensor/src/main.cpp`](node_magnet_sensor/src/main.cpp)

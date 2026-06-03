@@ -29,7 +29,7 @@ ESP-NOW/MAC/radio plumbing and the common helpers come from `firmware/common`
 (added to the include path in `platformio.ini`):
 
 - `se_espnow.h` — ESP-NOW init, peers, send, gateway-MAC tracking (also used by
-  the gateway and node_sensor).
+  the gateway and node_magnet_sensor).
 - `units.h`, `pressure.h`, `dbg.h`, `cmd_queue.h` — shared by both variants.
 
 Variant-specific modules (`pins.h`, `chambers.h`, `commands.h`, `mux.h`,

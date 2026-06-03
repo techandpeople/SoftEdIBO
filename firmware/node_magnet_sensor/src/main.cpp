@@ -1,14 +1,14 @@
 /**
- * SoftEdIBO — node_sensor firmware
+ * SoftEdIBO — node_magnet_sensor firmware
  *
  * 4x MLX90393 magnetometers (+1 optional 5th on a second I2C bus) acting as a
  * touch-sensing board for a soft skin. A small magnet sits above each sensor in
  * the silicone; pressing the skin moves the magnet and changes the field.
  *
- * Emits the node_imu protocol over ESP-NOW via the shared se_espnow.h, so it
+ * Emits the node_magnet_sensor protocol over ESP-NOW via the shared se_espnow.h, so it
  * drops straight into the SoftEdIBO PC (QuadrantDetector / touch tracking):
- *   boot:   {"status":"node_imu_ready","sensors":N,"variant":"mlx90393"}
- *   stream: {"type":"imu","mag":[mT..],"adj":[0..1..],"act":[idx..]}
+ *   boot:   {"status":"node_magnet_sensor_ready","sensors":N,"variant":"mlx90393"}
+ *   stream: {"type":"magnet","mag":[mT..],"adj":[0..1..],"act":[idx..]}
  *
  * Sensor order matters: S0..S3 map to quadrants Q1(TL) Q2(TR) Q3(BL) Q4(BR),
  * which is the order of the I2C addresses below. The PC's QuadrantDetector
@@ -30,6 +30,7 @@
 #include <math.h>
 
 #include "se_espnow.h"
+#include "se_ota.h"
 
 namespace {
 
@@ -103,6 +104,7 @@ void resetBaseline() {
 
 void onReceived(const uint8_t* mac, const uint8_t* data, int len) {
     se::node::learnGateway(mac);   // remember gateway + add peer on first msg
+    if (se::ota::tryHandle(data, len)) return;   // firmware update over ESP-NOW
 
     JsonDocument doc;
     if (deserializeJson(doc, data, len) != DeserializationError::Ok) return;
@@ -139,9 +141,9 @@ void accumulateBaseline(const Vec3* samples, const bool* valid) {
     if (baselineN >= BASELINE_SAMPLES) baselineReady = true;
 }
 
-// Build {"type":"imu","mag":[..],"adj":[..],"act":[..]} into buf.
+// Build {"type":"magnet","mag":[..],"adj":[..],"act":[..]} into buf.
 void buildImuMessage(const Vec3* samples, const bool* valid, char* buf, size_t cap) {
-    int pos = snprintf(buf, cap, "{\"type\":\"imu\",\"mag\":[");
+    int pos = snprintf(buf, cap, "{\"type\":\"magnet\",\"mag\":[");
     for (size_t i = 0; i < streamCount; ++i) {
         float m = valid[i] ? vmag({samples[i].x - baseline[i].x,
                                     samples[i].y - baseline[i].y,
@@ -202,7 +204,7 @@ void setup() {
 
     char buf[80];
     snprintf(buf, sizeof(buf),
-             "{\"status\":\"node_imu_ready\",\"sensors\":%u,\"variant\":\"mlx90393\"}",
+             "{\"status\":\"node_magnet_sensor_ready\",\"sensors\":%u,\"variant\":\"mlx90393\"}",
              (unsigned)streamCount);
     se::broadcast(buf);
     Serial.println(buf);

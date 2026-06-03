@@ -105,3 +105,8 @@ class Settings:
     def gateway_baud(self) -> int:
         """Baud rate for the ESP-NOW gateway."""
         return self._data.get("gateway", {}).get("baud_rate", 115200)
+
+    @property
+    def gateway_auto_connect(self) -> bool:
+        """Whether to connect the gateway automatically on app startup."""
+        return self._data.get("gateway", {}).get("auto_connect", True)

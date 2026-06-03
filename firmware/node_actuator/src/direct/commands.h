@@ -115,6 +115,18 @@ inline void process(const cmd_queue::Cmd& c) {
         chambers::stop(n);
         chambers::recalcPumps();
         break;
+    case CMD_VALVE_MANUAL: {
+        // chamber = chamber, param = side (0=inflate, 1=deflate), cfg_chambers = open (0/1)
+        // Routed through setManualValve so manualSafetyTick() can auto-off it.
+        chambers::setManualValve(n, c.param, c.cfg_chambers != 0);
+        break;
+    }
+    case CMD_PUMP_MANUAL: {
+        // param = pump (0=inflate, 1=deflate), cfg_chambers = on (0/1)
+        // Routed through setManualPump so manualSafetyTick() can auto-off it.
+        chambers::setManualPump(c.param, c.cfg_chambers != 0);
+        break;
+    }
     default:
         break;
     }
@@ -135,6 +147,17 @@ inline void parseAndQueue(const uint8_t* data, int len) {
     else if (strcmp(cmd, "set_max_pressure") == 0)  { c.type = CMD_SET_MAX;      c.chamber = doc["chamber"] | -1; c.param_kpa = doc["value"] | chambers::DEFAULT_MAX_KPA; }
     else if (strcmp(cmd, "set_min_pressure") == 0)  { c.type = CMD_SET_MIN;      c.chamber = doc["chamber"] | -1; c.param_kpa = doc["value"] | chambers::DEFAULT_MIN_KPA; }
     else if (strcmp(cmd, "hold") == 0)              { c.type = CMD_HOLD;         c.chamber = doc["chamber"] | -1; }
+    else if (strcmp(cmd, "valve_manual") == 0) {
+        c.type = CMD_VALVE_MANUAL;
+        c.chamber = doc["chamber"] | -1;
+        c.param = doc["side"] | 0;     // 0=inflate, 1=deflate
+        c.cfg_chambers = doc["open"] | 0;
+    }
+    else if (strcmp(cmd, "pump_manual") == 0) {
+        c.type = CMD_PUMP_MANUAL;
+        c.param = doc["pump"] | 0;     // 0=inflate, 1=deflate
+        c.cfg_chambers = doc["on"] | 0;
+    }
 #ifdef DEBUG_BUILD
     else if (strcmp(cmd, "debug") == 0)             { c.type = CMD_DEBUG;        c.chamber = -1; }
 #endif

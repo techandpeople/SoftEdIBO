@@ -39,25 +39,51 @@ GATEWAY_FIRMWARES: dict[str, dict[str, Any]] = {
     },
 }
 
-# Available node firmware binaries, keyed by display label.
-# Each entry holds release + debug variants; the wizard exposes a checkbox to
-# pick the debug build (verbose Serial output, see firmware/.../dbg.h).
-NODE_FIRMWARES: dict[str, dict[str, Path]] = {
-    "node_direct  (3 chambers, GPIO valves, onboard pumps, LED ring)": {
+# Available node firmware binaries, keyed by the canonical ``node_type`` used in
+# config (settings.yaml). Each entry holds release + debug variants; the wizard
+# exposes a checkbox to pick the debug build (verbose Serial, see firmware/dbg.h).
+# This is the single source of truth shared by the setup wizard and the OTA
+# updater dialog.
+NODE_TYPE_FIRMWARES: dict[str, dict[str, Path]] = {
+    "node_direct": {
         "release": Settings.BUNDLE / "firmware" / "node_actuator" / "firmware-direct-release.bin",
         "debug":   Settings.BUNDLE / "firmware" / "node_actuator" / "firmware-direct-debug.bin",
     },
-    "node_multiplexed  (up to 12 chambers, optional pressure/vacuum tanks)": {
+    "node_multiplexed": {
         "release": Settings.BUNDLE / "firmware" / "node_actuator" / "firmware-multiplexed-release.bin",
         "debug":   Settings.BUNDLE / "firmware" / "node_actuator" / "firmware-multiplexed-debug.bin",
     },
-    # node_sensor ships a single build (no separate debug variant), so both
+    # node_magnet_sensor ships a single build (no separate debug variant), so both
     # keys point at the same bin — the debug checkbox is a no-op for it.
-    "node_sensor  (4x MLX90393 magnetic touch board)": {
-        "release": Settings.BUNDLE / "firmware" / "node_sensor" / "firmware-release.bin",
-        "debug":   Settings.BUNDLE / "firmware" / "node_sensor" / "firmware-release.bin",
+    "node_magnet_sensor": {
+        "release": Settings.BUNDLE / "firmware" / "node_magnet_sensor" / "firmware-release.bin",
+        "debug":   Settings.BUNDLE / "firmware" / "node_magnet_sensor" / "firmware-release.bin",
     },
 }
+
+# Human-readable labels for the wizard's node-type picker.
+_NODE_TYPE_LABELS: dict[str, str] = {
+    "node_direct":         "node_direct  (3 chambers, GPIO valves, onboard pumps, LED ring)",
+    "node_multiplexed":    "node_multiplexed  (up to 12 chambers, optional pressure/vacuum tanks)",
+    "node_magnet_sensor":  "node_magnet_sensor  (4x MLX90393 magnetic touch board)",
+}
+
+# Display-label -> {release, debug} view used by the wizard's FlashNodePage.
+NODE_FIRMWARES: dict[str, dict[str, Path]] = {
+    _NODE_TYPE_LABELS[nt]: fw for nt, fw in NODE_TYPE_FIRMWARES.items()
+}
+
+
+def firmware_for_node_type(node_type: str, debug: bool = False) -> Path | None:
+    """Return the bundled firmware bin for a ``node_type``, or None if unknown.
+
+    ``node_magnet_sensor`` has no separate debug build, so ``debug`` is a no-op
+    for it. Used by both the setup wizard and the OTA updater dialog.
+    """
+    entry = NODE_TYPE_FIRMWARES.get(node_type)
+    if entry is None:
+        return None
+    return entry["debug" if debug else "release"]
 
 
 def _esptool_cmd(port: str, firmware: Path, chip: str = "esp32") -> tuple[str, list[str]]:

@@ -35,7 +35,7 @@ _YAML_KEY = {"turtle": "turtles", "tree": "trees", "thymio": "thymios"}
 NODE_TYPES: dict[str, int] = {
     "node_direct":      3,
     "node_multiplexed": 12,
-    "node_imu":         4,
+    "node_magnet_sensor":         4,
 }
 
 
@@ -111,6 +111,23 @@ class RobotPanel(QWidget, Ui_RobotPanel):
         self._robots = robots
         self._refresh_all_trees()
 
+    def sync_gateway_ui(self) -> None:
+        """Reflect the gateway's current connection state in this panel.
+
+        Called when the connection was made/dropped outside this panel (e.g.
+        startup auto-connect), so the button/label/trees stay consistent.
+        """
+        if self._gateway.is_connected:
+            port = self._gateway._port
+            self.gateway_status_label.setText(f"Connected ({port})")
+            self.connect_btn.setText("Disconnect")
+            self.scan_btn.setEnabled(True)
+        else:
+            self.gateway_status_label.setText("Disconnected")
+            self.connect_btn.setText("Connect")
+            self.scan_btn.setEnabled(False)
+        self._refresh_all_trees()
+
     # ------------------------------------------------------------------
     # Gateway
     # ------------------------------------------------------------------
@@ -165,11 +182,29 @@ class RobotPanel(QWidget, Ui_RobotPanel):
             else:
                 self.gateway_status_label.setText(f"Connection failed ({port})")
 
+    def start_scan(self, on_done=None) -> None:
+        """Broadcast a node scan and refresh after ~2 s — non-blocking.
+
+        ``on_done`` (optional) is invoked once the scan window closes, so callers
+        (e.g. the add-node flow) can act on a fresh ``known_macs`` without
+        freezing the UI.
+        """
+        if not self._gateway.is_connected:
+            if on_done is not None:
+                on_done()
+            return
+        self._gateway.scan()
+        QTimer.singleShot(2000, lambda: self._scan_finished(on_done))
+
+    def _scan_finished(self, on_done=None) -> None:
+        self._on_scan_done()
+        if on_done is not None:
+            on_done()
+
     def _on_scan(self) -> None:
         self.scan_btn.setEnabled(False)
         self.scan_btn.setText("Scanning…")
-        self._gateway.scan()
-        QTimer.singleShot(2000, self._on_scan_done)
+        self.start_scan()
 
     def _on_scan_done(self) -> None:
         self.scan_btn.setEnabled(True)
@@ -365,6 +400,14 @@ class RobotPanel(QWidget, Ui_RobotPanel):
     # ------------------------------------------------------------------
 
     def _on_add_node(self, robot_type: str, robot_index: int) -> None:
+        # Auto-scan first so the discovered-node list is fresh, without blocking
+        # the UI; the picker opens once the scan window closes.
+        if self._gateway.is_connected and not self._gateway.known_macs:
+            self.start_scan(lambda: self._show_add_node(robot_type, robot_index))
+        else:
+            self._show_add_node(robot_type, robot_index)
+
+    def _show_add_node(self, robot_type: str, robot_index: int) -> None:
         prefill_mac = ""
         known = self._gateway.known_macs
         if known:

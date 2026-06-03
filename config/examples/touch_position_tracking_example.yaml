@@ -19,9 +19,9 @@ robots:
           tank_pressure_target_kpa: 25.0
           tank_vacuum_target_kpa: -25.0
 
-        # IMU node for touch sensing
+        # magnet sensor node for touch sensing
         - mac: "BB:CC:DD:EE:FF:00"
-          node_type: "node_imu"
+          node_type: "node_magnet_sensor"
           max_slots: 4  # 4 touch sensors
 
       skins:
@@ -45,7 +45,7 @@ robots:
 
           # Touch position tracking configuration
           touch:
-            node_mac: "BB:CC:DD:EE:FF:00"  # IMU node for touch sensing
+            node_mac: "BB:CC:DD:EE:FF:00"  # magnet sensor node for touch sensing
             sensor_count: 4  # 4 sensors for quadrant detection
             magnet_strength: "weak"  # "weak" or "strong"
 
@@ -89,7 +89,7 @@ robots:
           node_type: "node_multiplexed"
           max_slots: 8
         - mac: "DD:EE:FF:00:01:02"
-          node_type: "node_imu"
+          node_type: "node_magnet_sensor"
           max_slots: 4
 
       skins:

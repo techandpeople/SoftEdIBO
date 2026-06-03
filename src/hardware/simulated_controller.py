@@ -7,7 +7,7 @@ would report back the *actual* pressure. This lets the widget / activity layer
 stay hardware-agnostic — swap in an ``ESP32Controller`` and behaviour is
 identical.
 
-Touch / IMU sensing lives in :class:`~src.hardware.simulated_imu.SimulatedIMU`,
+Touch / magnet sensor sensing lives in :class:`~src.hardware.simulated_magnet_sensor.SimulatedMagnetSensor`,
 not here, so the two hardware roles (sense vs actuate) stay separate.
 
 Session-level concerns (pause, freeze) are handled by SimulatedRobot.
