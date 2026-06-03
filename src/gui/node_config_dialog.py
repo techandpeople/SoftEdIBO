@@ -33,7 +33,7 @@ _YAML_KEY = {"turtle": "turtles", "tree": "trees", "thymio": "thymios"}
 NODE_TYPES: dict[str, int] = {
     "node_direct": 3,
     "node_multiplexed": 12,
-    "node_imu": 4,
+    "node_magnet_sensor": 4,
 }
 
 
@@ -238,8 +238,8 @@ class NodeConfigDialog(QDialog):
             self._reservoirs_chk.setChecked(False)
             self._reservoirs_chk.setVisible(False)
             self._reservoirs_label.setVisible(False)
-        elif node_type == "node_imu":
-            # IMU node: 4 fixed sensors, no chambers/reservoirs.
+        elif node_type == "node_magnet_sensor":
+            # magnet sensor node: 4 fixed sensors, no chambers/reservoirs.
             self._slots_spin.setRange(4, 4)
             self._slots_spin.setValue(4)
             self._slots_spin.setEnabled(False)
@@ -264,9 +264,9 @@ class NodeConfigDialog(QDialog):
                 "Optional shared pressure/vacuum tanks — enable 'Reservoirs' "
                 "and set tank limits in settings.yaml."
             ),
-            "node_imu": (
-                "4-sensor IMU. Sends raw / magnitudes / baseline-adjusted / "
-                "active-quadrant data via the standard `imu` message. No "
+            "node_magnet_sensor": (
+                "4-sensor magnet sensor. Sends raw / magnitudes / baseline-adjusted / "
+                "active-quadrant data via the standard `magnet` message. No "
                 "chambers, no pumps."
             ),
         }

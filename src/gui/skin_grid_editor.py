@@ -6,7 +6,7 @@ surface. The user can paint two independent layers:
 - **chamber layer**: which cell belongs to which inflatable chamber
   (-1 = no chamber). Index points into the skin's ``chambers`` list.
 - **sensor layer**: which cell maps to which touch sensor index
-  (-1 = no sensor). Sensor indices come from the linked ``node_imu``.
+  (-1 = no sensor). Sensor indices come from the linked ``node_magnet_sensor``.
 
 The two layers can have **different dimensions** (e.g. 4×2 for chambers,
 8×4 for sensors) — the editor swaps the visible resolution when the user

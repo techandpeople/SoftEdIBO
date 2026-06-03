@@ -45,7 +45,7 @@ robots:
 #             - [-1, -1, -1, -1, -1, -1, -1, -1]
 #           # Optional touch sensing on top of the same skin:
 #           touch:
-#             node_mac: "BB:CC:DD:EE:FF:00"   # MAC of a node_imu in the same robot
+#             node_mac: "BB:CC:DD:EE:FF:00"   # MAC of a node_magnet_sensor in the same robot
 #             sensor_count: 4
 #             # Optional separate sensor-grid dimensions. If omitted, the
 #             # sensor grid uses the same dims as ``grid`` above.

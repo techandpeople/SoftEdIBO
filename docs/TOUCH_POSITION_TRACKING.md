@@ -18,7 +18,7 @@ Each skin that has touch sensing is built as a layered stack:
 ───────────────────────────────
   MLX90393 sensors
 ───────────────────────────────
-[ rigid plastic / PCB (node_imu) ]
+[ rigid plastic / PCB (node_magnet_sensor) ]
 ```
 
 **How touch detection works:**  
@@ -44,13 +44,13 @@ chambers are well-separated and each magnet is directly above its own sensor.
 | File | Role |
 |------|------|
 | `src/hardware/quadrant_detector.py` | Signal processing — threshold + hysteresis per sensor, position estimation from active sensors |
-| `src/hardware/skin.py` | Receives raw IMU messages, feeds them to the detector, exposes `get_touch_position()` |
+| `src/hardware/skin.py` | Receives raw magnet sensor messages, feeds them to the detector, exposes `get_touch_position()` |
 | `src/gui/monitor/skin_grid_view.py` | GUI — yellow pulse on the `sensor_grid` cells of each active sensor |
 
 ### Data flow
 
 ```
-node_imu (ESP32)
+node_magnet_sensor (ESP32)
   → ESP-NOW → ESPNowGateway
     → ESP32Controller._handle_message()
       → _dispatch_imu(data)
@@ -60,12 +60,12 @@ node_imu (ESP32)
                 → skin.get_touch_position()  ← polled by activities
 ```
 
-### IMU message format
+### magnet sensor message format
 
-The `node_imu` firmware sends via ESP-NOW:
+The `node_magnet_sensor` firmware sends via ESP-NOW:
 
 ```json
-{"type": "imu", "adj": [0.0, 0.82, 0.0, 0.0], "act": [1], "source": "AA:BB:CC:DD:EE:FF"}
+{"type": "magnet", "adj": [0.0, 0.82, 0.0, 0.0], "act": [1], "source": "AA:BB:CC:DD:EE:FF"}
 ```
 
 | Field | Description |
@@ -149,7 +149,7 @@ Full example (add inside a skin entry in `config/settings.yaml`):
 
 ```yaml
 touch:
-  node_mac: "BB:CC:DD:EE:FF:00"   # MAC of the node_imu for this skin
+  node_mac: "BB:CC:DD:EE:FF:00"   # MAC of the node_magnet_sensor for this skin
   sensor_count: 4                  # must match number of sensors on the board
 
   # Visual layout — which cells flash yellow in SkinGridView when sensor N fires.
@@ -174,7 +174,7 @@ touch:
 
 | Parameter | Default | Notes |
 |-----------|---------|-------|
-| `node_mac` | required | MAC of the `node_imu` node |
+| `node_mac` | required | MAC of the `node_magnet_sensor` node |
 | `sensor_count` | 4 | Total number of MLX90393 sensors |
 | `sensor_grid` | — | Rows × cols of sensor indices; drives the yellow GUI highlight |
 | `quadrant_thresholds` | `[0.3, …]` | One threshold per sensor; lower = more sensitive |
@@ -283,7 +283,7 @@ YAML, so any skin shape (rectangular, round, asymmetric) is supported.
 | Constant false positive | Threshold too low or magnet too strong | Raise threshold, or add `hysteresis: 0.1` |
 | Flickering on/off | Sensor noise at edge of threshold | Increase `hysteresis` (try 0.1–0.15) |
 | Wrong chamber reacts | `sensor_to_chamber` mapping wrong | Check sensor physical positions and update mapping |
-| No yellow flash in GUI | `node_mac` mismatch or IMU not connected | Verify MAC in config matches node_imu |
+| No yellow flash in GUI | `node_mac` mismatch or magnet sensor not connected | Verify MAC in config matches node_magnet_sensor |
 
 ---
 
@@ -292,6 +292,6 @@ YAML, so any skin shape (rectangular, round, asymmetric) is supported.
 | Component | Origin |
 |-----------|--------|
 | `QuadrantDetector` / `TouchPositionTracker` | Adapted from `Tese/tools/quadrant_detection.py` |
-| IMU firmware | Colleague's repo (external, not in this tree) |
+| magnet sensor firmware | Colleague's repo (external, not in this tree) |
 | `Skin._extract_sensor_magnitudes` | New — handles `adj`/`mag`/`act` fallback chain |
 | `SkinGridView` yellow pulse | Pre-existing, unchanged |

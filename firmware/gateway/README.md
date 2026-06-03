@@ -64,7 +64,35 @@ The gateway strips `"target"` before forwarding so nodes receive only the comman
 All `"pressure"` values are **0-100 %** of the node's configured maximum pressure.
 The `"debug"` response is only available from nodes flashed with the debug firmware.
 
-Maximum line length: **256 bytes** (`SERIAL_BUF_LEN` constant).
+Maximum line length: **512 bytes** (`SERIAL_BUF_LEN` constant). It was raised
+from 256 for OTA: an `ota_data` line carries a base64 chunk *plus* the `"target"`
+MAC, which overflows 256.
+
+## OTA firmware update (over ESP-NOW)
+
+Nodes can be reflashed wirelessly through the gateway — the PC streams the image
+as ordinary JSON commands, the gateway relays them unchanged, and the node
+writes flash via `firmware/common/se_ota.h`. Driven PC-side by
+`src/hardware/node_ota_updater.py`; the gateway itself needs no OTA-specific code
+(only the larger line buffer above).
+
+```jsonc
+// PC => node
+{"target":"AA:..","cmd":"ota_begin","size":768929,"md5":"<hex>","chunk":144}
+{"target":"AA:..","cmd":"ota_data","seq":0,"data":"<base64 of 144 bytes>"}
+{"target":"AA:..","cmd":"ota_end"}
+// node => PC
+{"source":"AA:..","type":"ota_ready"}
+{"source":"AA:..","type":"ota_ack","seq":0}
+{"source":"AA:..","type":"ota_done"}          // node then reboots
+{"source":"AA:..","type":"ota_error","reason":"verify_failed"}
+```
+
+Chunk = 144 raw bytes (→ 192 base64 chars, comfortably under the 250-byte
+ESP-NOW limit). The node tolerates a sliding window (re-ACKs duplicates, drops
+out-of-order future chunks); the PC retransmits on a per-sequence timeout and
+verifies the image with the MD5 from `ota_begin`. Nodes need an OTA partition
+table (`default.csv`); see each node's `platformio.ini`.
 
 ## Behaviour
 

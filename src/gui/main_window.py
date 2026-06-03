@@ -90,6 +90,25 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.actionActivityPresets.triggered.connect(self._open_activity_presets)
         self.menuTools.addAction(self.actionActivityPresets)
 
+        self.actionUpdateNodesOTA = QAction("Update Nodes (OTA)…", self)
+        self.actionUpdateNodesOTA.triggered.connect(self._open_ota_dialog)
+        self.menuTools.addAction(self.actionUpdateNodesOTA)
+
+        # Track whether a session is live so OTA can refuse mid-actuation.
+        self._session_active = False
+        self._session_panel.session_started.connect(
+            lambda *_: setattr(self, "_session_active", True))
+        self._session_panel.session_stopped.connect(
+            lambda *_: setattr(self, "_session_active", False))
+
+        # Auto-connect the gateway on startup (configurable) so the user doesn't
+        # reconnect every launch. connect() spins a daemon read thread, so this
+        # doesn't block the UI.
+        if self._settings.gateway_auto_connect and not self._gateway.is_connected:
+            if self._gateway.connect():
+                self._home_panel.set_gateway_status(True)
+                self._robot_panel.sync_gateway_ui()
+
         # OTA updater — silent background check 5 s after startup
         self._updater = AppUpdater(self)
         self._updater.update_available.connect(self._on_update_available)
@@ -181,6 +200,15 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         from src.gui.setup_wizard import SetupWizard
         wizard = SetupWizard(parent=self)
         wizard.exec()
+
+    def _open_ota_dialog(self) -> None:
+        """Tools => Update Nodes (OTA)… — flash node firmware over ESP-NOW."""
+        from src.gui.ota_update_dialog import OTAUpdateDialog
+        dlg = OTAUpdateDialog(
+            self._gateway, self._settings,
+            session_active=self._session_active, parent=self,
+        )
+        dlg.exec()
 
     def _open_settings(self) -> None:
         dlg = SettingsDialog(self._settings, parent=self)

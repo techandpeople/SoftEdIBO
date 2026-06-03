@@ -545,7 +545,7 @@ The behaviour framework builds on top of work already shipped this session:
   `SimulationActivity` with a checkbox; baseline `SIM_PARAMS` give every
   activity tunable inflate/deflate speeds for free.
 - **Sensor → Chamber mapping** (this phase) — declarative wiring from
-  IMU sensor index to chamber index, stored per skin in YAML.
+  magnet sensor sensor index to chamber index, stored per skin in YAML.
 - **Skin geometry config** (this phase) — `shape: rect | round` +
   per-layer grid dimensions (chambers vs sensors can have different
   resolutions on the same skin). Editor and `SkinGridView` both honour
@@ -555,7 +555,7 @@ The behaviour framework builds on top of work already shipped this session:
   pressure fill and a touch-pulse overlay tied to `controller.on_imu`.
   Same widget will display behavior state (e.g. tint the whole skin red
   in `sick`, green in `cured`).
-- **`node_imu` plumbing** ([src/hardware/esp32_controller.py](../src/hardware/esp32_controller.py)
+- **`node_magnet_sensor` plumbing** ([src/hardware/esp32_controller.py](../src/hardware/esp32_controller.py)
   → `on_imu`, [src/gui/node_config_dialog.py](../src/gui/node_config_dialog.py)
   → 4-sensor type). The new `on_organ` follows the exact same pattern.
 - **Unified Serial output** (`LOG` always, `DBG_PRINT` only in debug

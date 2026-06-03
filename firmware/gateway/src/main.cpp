@@ -31,7 +31,9 @@
 // Config
 // ---------------------------------------------------------------------------
 
-static constexpr size_t SERIAL_BUF_LEN = 256;   // max bytes per JSON line from PC
+static constexpr size_t SERIAL_BUF_LEN = 512;   // max bytes per JSON line from PC
+                                                // (OTA data lines carry base64 +
+                                                // a "target" MAC; 256 truncated)
 static constexpr int    ESPNOW_MAXLEN  = 250;   // max ESP-NOW payload
 
 // Received ESP-NOW messages are handed from the WiFi task (recv callback) to a

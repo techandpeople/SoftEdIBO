@@ -515,9 +515,9 @@ class SkinConfigDialog(QDialog):
     # Touch + grid widgets
     # ------------------------------------------------------------------
 
-    def _imu_macs(self) -> list[str]:
+    def _magnet_macs(self) -> list[str]:
         return [n["mac"] for n in self._robot_nodes()
-                if n.get("node_type") == "node_imu" and n.get("mac")]
+                if n.get("node_type") == "node_magnet_sensor" and n.get("mac")]
 
     def _build_touch_group(self) -> QGroupBox:
         group = QGroupBox("Touch sensors (optional)")
@@ -528,7 +528,7 @@ class SkinConfigDialog(QDialog):
 
         self._touch_mac_combo = QComboBox()
         self._touch_mac_combo.addItem(_NONE_LABEL, userData="")
-        for mac in self._imu_macs():
+        for mac in self._magnet_macs():
             self._touch_mac_combo.addItem(mac, userData=mac)
         self._touch_mac_combo.currentTextChanged.connect(
             lambda _t: self._rebuild_palette()

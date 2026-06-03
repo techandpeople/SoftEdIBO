@@ -26,6 +26,7 @@
 #include <Arduino.h>
 
 #include "se_espnow.h"
+#include "se_ota.h"
 #include "pins.h"
 #include "pressure.h"
 #include "chambers.h"
@@ -52,6 +53,7 @@ static void onReceived(const uint8_t* mac_addr, const uint8_t* data, int len) {
     DBG_PRINTLN("");
 
     se::node::learnGateway(mac_addr);   // remember gateway + add peer on first msg
+    if (se::ota::tryHandle(data, len)) return;   // firmware update over ESP-NOW
     commands::parseAndQueue(data, len);
 }
 
@@ -93,23 +95,6 @@ void loop() {
     while (cmd_queue::pop(c))
         commands::process(c);
 
-    // ---- Valve settle transitions ----
-    for (int i = 0; i < NUM_CHAMBERS; i++) {
-        auto& ch = chambers::state[i];
-        if (ch.state == chambers::PRE_INFLATE &&
-            now - ch.settle_ts >= chambers::VALVE_SETTLE_MS) {
-            ch.state = chambers::INFLATING;
-            chambers::setValve(i, 0, true);
-            chambers::recalcPumps();
-        }
-        if (ch.state == chambers::PRE_DEFLATE &&
-            now - ch.settle_ts >= chambers::VALVE_SETTLE_MS) {
-            ch.state = chambers::DEFLATING;
-            chambers::setValve(i, 1, true);
-            chambers::recalcPumps();
-        }
-    }
-
     // ---- Pressure read + safety stop ----
     if (now - lastPressureMs >= PRESSURE_CHECK_MS) {
         lastPressureMs = now;
@@ -128,6 +113,9 @@ void loop() {
             }
         }
     }
+
+    // ---- Manual (dev) actuation safety: dead-man auto-off + HARD_MAX cutoff ----
+    chambers::manualSafetyTick(now);
 
     // ---- Status broadcast ----
     if (now - lastStatusMs >= STATUS_REPORT_MS) {

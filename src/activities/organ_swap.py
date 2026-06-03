@@ -119,7 +119,7 @@ class OrganSwapActivity(BaseActivity):
             name="sensor_to_chamber",
             type="sensor_map", default="auto",
             label="Sensor → Chamber routing",
-            description="Maps an IMU sensor index to the chamber that should "
+            description="Maps an magnet sensor sensor index to the chamber that should "
                         "react to its touch in this activity. 'auto' means 1:1 "
                         "mapping (sensor 0→chamber 0, sensor 1→chamber 1, etc.). "
                         "Click '+ Add mapping' to customize — so different "
@@ -165,7 +165,7 @@ class OrganSwapActivity(BaseActivity):
         # countdown so a held/repeated touch keeps it inflated.
         self._deflate_timers: dict[tuple[str, int], QTimer] = {}
         # Currently-active (held) sensors per skin, for press/release edge
-        # detection against the IMU's ``act`` set.
+        # detection against the magnet sensor's ``act`` set.
         self._active_touch: dict[str, set[int]] = {}
 
     # ------------------------------------------------------------------
@@ -303,13 +303,13 @@ class OrganSwapActivity(BaseActivity):
                 on_organ(lambda r, rb=robot: self._on_organ(rb, r))
         # Touch is subscribed **per skin**, bound to that skin's own touch
         # controller, so a touch on one skin only drives that skin's chambers
-        # (no cross-skin leakage). Each skin has its own IMU (real node_imu or
-        # a per-skin SimulatedIMU), so the binding is unambiguous.
+        # (no cross-skin leakage). Each skin has its own magnet sensor (real node_magnet_sensor or
+        # a per-skin SimulatedMagnetSensor), so the binding is unambiguous.
         for skin in getattr(robot, "skins", {}).values():
             tc = getattr(skin, "touch_controller", None)
-            on_imu = getattr(tc, "on_imu", None) if tc is not None else None
-            if on_imu is not None:
-                on_imu(lambda data, rb=robot, sk=skin: self._on_imu(rb, sk, data))
+            on_magnet = getattr(tc, "on_magnet", None) if tc is not None else None
+            if on_magnet is not None:
+                on_magnet(lambda data, rb=robot, sk=skin: self._on_magnet(rb, sk, data))
 
     def _on_organ(self, robot: BaseRobot, resistance_ohm: float) -> None:
         """Firmware reports the combined resistance for this robot. Re-evaluate
@@ -322,9 +322,9 @@ class OrganSwapActivity(BaseActivity):
             if self._state.get(robot.robot_id) != STATE_SICK:
                 self._enter_state(robot, STATE_SICK)
 
-    def _on_imu(self, robot: BaseRobot, skin, data: dict[str, Any]) -> None:
-        """Route this **skin's** IMU sensor activations to its chamber actions.
-        The IMU streams the set of *currently active* sensors in ``act``; we
+    def _on_magnet(self, robot: BaseRobot, skin, data: dict[str, Any]) -> None:
+        """Route this **skin's** magnet sensor sensor activations to its chamber actions.
+        The magnet sensor streams the set of *currently active* sensors in ``act``; we
         edge-detect against the previous set so a sensor entering the set
         inflates its mapped chamber and a sensor leaving it (the release) starts
         the deflate countdown. Only active in SICK state; the cured robot

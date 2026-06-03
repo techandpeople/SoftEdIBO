@@ -86,12 +86,12 @@ class SkinGridView(QWidget):
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
         ctrl = getattr(skin, "touch_controller", None)
-        if ctrl is not None and hasattr(ctrl, "on_imu"):
-            ctrl.on_imu(self._on_imu_msg)
+        if ctrl is not None and hasattr(ctrl, "on_magnet"):
+            ctrl.on_magnet(self._on_magnet_msg)
 
         self._sensor_buttons: dict[int, QPushButton] = {}
         # T-buttons only make sense in simulation — on real hardware the
-        # IMU board fires the touches, so an in-app simulate button would
+        # magnet sensor board fires the touches, so an in-app simulate button would
         # be misleading. Detect sim mode via the controller class.
         if self._is_simulation():
             self._build_sensor_buttons()
@@ -257,7 +257,7 @@ class SkinGridView(QWidget):
             )
             btn.setToolTip(
                 f"Simulate sensor {sensor_idx} touch — same code path as a "
-                "real IMU `act` event."
+                "real magnet sensor `act` event."
             )
             btn.pressed.connect(lambda idx=sensor_idx: self._simulate_sensor_press(idx))
             btn.released.connect(lambda idx=sensor_idx: self._simulate_sensor_release(idx))
@@ -294,27 +294,27 @@ class SkinGridView(QWidget):
 
     def _simulate_sensor_press(self, sensor_idx: int) -> None:
         """T button pressed — light the sensor yellow and broadcast the new set
-        of held sensors as an IMU event. The running activity decides whether
+        of held sensors as an magnet sensor event. The running activity decides whether
         (and how) to drive a chamber, exactly as for a real hardware touch."""
         self._held_sensors.add(sensor_idx)
         self._active_sensors[sensor_idx] = 255
         if not self._tick.isActive():
             self._tick.start()
         self.update()
-        self._fire_imu_act()
+        self._fire_magnet_act()
 
     def _simulate_sensor_release(self, sensor_idx: int) -> None:
         """T button released — drop the sensor from the held set and broadcast
         the updated set. The activity sees the sensor leave ``act`` (the
         release) and starts its deflate countdown. Yellow starts fading."""
         self._held_sensors.discard(sensor_idx)
-        self._fire_imu_act()
+        self._fire_magnet_act()
 
-    def _fire_imu_act(self) -> None:
-        """Broadcast the current held-sensor set as an ``imu`` event on the
-        skin's touch controller — a ``SimulatedIMU`` in simulation, a real IMU
+    def _fire_magnet_act(self) -> None:
+        """Broadcast the current held-sensor set as an ``magnet`` event on the
+        skin's touch controller — a ``SimulatedMagnetSensor`` in simulation, a real magnet sensor
         ``ESP32Controller`` on hardware. The activity reacts to the same
-        ``on_imu`` event either way, so behaviour is identical when the real
+        ``on_magnet`` event either way, so behaviour is identical when the real
         board is plugged in. Falls back to the local visual handler if there is
         no touch controller (visual-only skin)."""
         data: dict[str, Any] = {"act": sorted(self._held_sensors)}
@@ -322,19 +322,19 @@ class SkinGridView(QWidget):
         if source:
             data["source"] = source
         ctrl = getattr(self._skin, "touch_controller", None)
-        fire = getattr(ctrl, "fire_imu", None) if ctrl is not None else None
+        fire = getattr(ctrl, "fire_magnet", None) if ctrl is not None else None
         if fire is not None:
             fire(data)
         else:
-            self._on_imu_msg(data)
+            self._on_magnet_msg(data)
 
     def _is_simulation(self) -> bool:
         """True when the skin is backed by simulated hardware (the session was
         launched with ``simulation_mode`` on) — a SimulatedController for the
-        chambers or a SimulatedIMU for touch. Gates the T-button input."""
+        chambers or a SimulatedMagnetSensor for touch. Gates the T-button input."""
         from src.hardware.simulated_controller import SimulatedController
-        from src.hardware.simulated_imu import SimulatedIMU
-        sim_types = (SimulatedController, SimulatedIMU)
+        from src.hardware.simulated_magnet_sensor import SimulatedMagnetSensor
+        sim_types = (SimulatedController, SimulatedMagnetSensor)
         return (isinstance(getattr(self._skin, "_ctrl", None), sim_types)
                 or isinstance(getattr(self._skin, "touch_controller", None), sim_types))
 
@@ -386,7 +386,7 @@ class SkinGridView(QWidget):
                 p.drawLine(x + w - inset, y + inset,
                            x + w - inset, y + h - inset)
 
-    def _on_imu_msg(self, data: dict[str, Any]) -> None:
+    def _on_magnet_msg(self, data: dict[str, Any]) -> None:
         active = data.get("act") or []
         if not isinstance(active, list):
             return

@@ -56,9 +56,9 @@ class Skin:
         #   "grid": {cols, rows}?,            # optional, defaults to ``grid``
         #   "sensor_grid": rows × cols of sensor-index-or-(-1),
         #   "sensor_to_chamber": {str_idx: chamber_idx}?}.
-        # ``touch_controller``: optional ESP32Controller (or sim) for the IMU
+        # ``touch_controller``: optional ESP32Controller (or sim) for the magnet sensor
         # node referenced by ``touch.node_mac`` — bound in build_skins so the
-        # UI can subscribe to `on_imu` directly via ``skin.touch_controller``.
+        # UI can subscribe to `on_magnet` directly via ``skin.touch_controller``.
         self.shape = shape if shape in ("rect", "round") else "rect"
         self.grid = grid
         self.chamber_grid = chamber_grid
@@ -265,7 +265,7 @@ class Skin:
         The quadrant detector resolves *where* on the skin a touch lands from a
         4-sensor magnet board, so it only engages when the touch node actually
         exposes 4 sensors. Other layouts (e.g. the simulated T-button skins)
-        skip it — they still get touch *reactions* via the activity's on_imu
+        skip it — they still get touch *reactions* via the activity's on_magnet
         handler; only spatial position tracking is unavailable."""
         if int(touch.get("sensor_count", 0)) != 4:
             return
@@ -295,9 +295,9 @@ class Skin:
                 min_touch_duration_ms=min_duration,
             )
 
-            # Register IMU callback for touch data
-            if hasattr(touch_controller, "on_imu"):
-                touch_controller.on_imu(self._on_imu_touch_data)
+            # Register magnet sensor callback for touch data
+            if hasattr(touch_controller, "on_magnet"):
+                touch_controller.on_magnet(self._on_magnet_touch_data)
 
             logger.info(f"Touch position tracking enabled for skin {self.skin_id}")
 
@@ -306,10 +306,10 @@ class Skin:
         except Exception:
             logger.exception(f"Failed to setup touch tracking for skin {self.skin_id}")
 
-    def _on_imu_touch_data(self, data: dict[str, Any]) -> None:
-        """Process IMU touch data for position tracking.
+    def _on_magnet_touch_data(self, data: dict[str, Any]) -> None:
+        """Process magnet sensor touch data for position tracking.
 
-        The node_imu sends: {"type":"imu", "raw":[...], "mag":[...], "adj":[...], "act":[...]}
+        The node_magnet_sensor sends: {"type":"magnet", "raw":[...], "mag":[...], "adj":[...], "act":[...]}
         - adj: adjusted/calibrated per-sensor values (preferred, list of 4 floats 0.0-1.0)
         - mag: raw magnitudes (list of 4 floats, in mT — needs normalisation)
         - act: list of active sensor indices (binary fallback)
@@ -339,7 +339,7 @@ class Skin:
 
     @staticmethod
     def _extract_sensor_magnitudes(data: dict[str, Any], count: int) -> list[float] | None:
-        """Extract per-sensor 0.0–1.0 magnitudes from a node_imu message.
+        """Extract per-sensor 0.0–1.0 magnitudes from a node_magnet_sensor message.
 
         Tries adj → mag → act (binary) in order. Returns None if no usable
         data is found.
