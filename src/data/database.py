@@ -455,13 +455,21 @@ class Database:
         """Enqueue an interaction event for async writing (non-blocking)."""
         self._event_queue.put(event)
 
+    def flush_events(self) -> None:
+        """Block until all queued interaction events have been written.
+
+        Events are logged asynchronously (see :meth:`log_event`); call this when
+        you need to read them back immediately afterwards.
+        """
+        self._event_queue.join()
+
     def _event_worker(self) -> None:
         """Background thread: drains the event queue and writes to the DB."""
         while True:
             event = self._event_queue.get()
-            if event is None:  # sentinel
-                break
             try:
+                if event is None:  # sentinel
+                    break
                 with self._db_engine.begin() as conn:
                     conn.execute(
                         _events.insert().values(
@@ -476,6 +484,8 @@ class Database:
                     )
             except Exception:
                 logger.exception("Failed to write event to database: %s", event)
+            finally:
+                self._event_queue.task_done()
 
     def get_session_events(self, session_id: str) -> list[InteractionEvent]:
         """Return all events for a session ordered by timestamp."""
