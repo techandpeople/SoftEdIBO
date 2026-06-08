@@ -137,6 +137,10 @@ class WelcomePage(QWizardPage):
 class _FlashPage(QWizardPage):
     """Base page for flashing a single firmware binary via esptool."""
 
+    # Subclasses can set this to a substring that should be preferred when
+    # auto-selecting the port (e.g. "ACM" for gateway, "USB" for nodes).
+    _preferred_port_hint: str = ""
+
     def __init__(self, title: str, subtitle: str, firmware_path: Path,
                  chip: str = "esp32"):
         super().__init__()
@@ -197,8 +201,15 @@ class _FlashPage(QWizardPage):
         ports = _list_ports()
         for p in ports:
             self._port_combo.addItem(p)
+        # Restore previous selection if still present.
         if current in ports:
             self._port_combo.setCurrentText(current)
+        elif self._preferred_port_hint:
+            # Auto-select the first port whose name matches the hint (e.g. "ACM"
+            # for the gateway's USB-JTAG device, "USB" for classic node UART).
+            preferred = [p for p in ports if self._preferred_port_hint in p]
+            if preferred:
+                self._port_combo.setCurrentText(preferred[0])
 
     def _toggle_skip(self) -> None:
         self._skipped = not self._skipped
@@ -277,12 +288,15 @@ class _FlashPage(QWizardPage):
 class FlashGatewayPage(_FlashPage):
     """Flash page for the gateway; lets the user pick the board variant."""
 
+    # XIAO C6 gateway appears as /dev/ttyACM* (USB-JTAG, not USB-UART)
+    _preferred_port_hint = "ACM"
+
     def __init__(self):
         first_label = next(iter(GATEWAY_FIRMWARES))
         first = GATEWAY_FIRMWARES[first_label]
         super().__init__(
             "Flash Gateway Firmware",
-            "Select your gateway board, connect it via USB, then click Flash.",
+            "Connect the gateway board (appears as /dev/ttyACM0), then click Flash.",
             first["path"],
             chip=first["chip"],
         )
@@ -310,11 +324,14 @@ class FlashGatewayPage(_FlashPage):
 class FlashNodePage(_FlashPage):
     """Flash page for nodes; lets the user pick node type and flash multiple units."""
 
+    # Nodes use a classic USB-UART bridge — appears as /dev/ttyUSB*
+    _preferred_port_hint = "USB"
+
     def __init__(self):
         first_label = next(iter(NODE_FIRMWARES))
         super().__init__(
             "Flash Node Firmware",
-            "Select the node type, connect it via USB, then click Flash.",
+            "Connect the node board (appears as /dev/ttyUSB0), then click Flash.",
             NODE_FIRMWARES[first_label]["release"],
         )
 

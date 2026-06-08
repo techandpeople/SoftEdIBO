@@ -272,17 +272,21 @@ class Skin:
         try:
             from src.hardware.quadrant_detector import QuadrantDetector, TouchPositionTracker
 
-            # Get magnet strength from touch config or default to weak
-            magnet_strength = touch.get("magnet_strength", "weak")
+            # Get magnet strength from touch config or default to strong
+            magnet_strength = touch.get("magnet_strength", "strong")
 
-            # Get custom thresholds if provided
+            # Thresholds and hysteresis are now in raw μT units (absolute).
+            # Default 100 μT assumes the firmware re-zeroed at rest; tune via
+            # the Touch Tuning panel until rest < threshold < touch peak.
             thresholds = touch.get("quadrant_thresholds", None)
-            hysteresis = touch.get("hysteresis", 0.05)
+            hysteresis = float(touch.get("hysteresis", 20.0))
+            ema_alpha  = float(touch.get("ema_alpha", 0.25))
 
             # Create quadrant detector
             self._touch_detector = QuadrantDetector(
                 thresholds=thresholds,
                 hysteresis=hysteresis,
+                ema_alpha=ema_alpha,
                 magnet_strength=magnet_strength,
             )
 
@@ -310,9 +314,11 @@ class Skin:
         """Process magnet sensor touch data for position tracking.
 
         The node_magnet_sensor sends: {"type":"magnet", "raw":[...], "mag":[...], "adj":[...], "act":[...]}
-        - adj: adjusted/calibrated per-sensor values (preferred, list of 4 floats 0.0-1.0)
-        - mag: raw magnitudes (list of 4 floats, in mT — needs normalisation)
+        - mag: raw magnitudes in μT (preferred — passed directly to QuadrantDetector)
         - act: list of active sensor indices (binary fallback)
+        The firmware 'adj' field is intentionally skipped: it depends on the
+        firmware fullscaleMt constant and saturates at 1.0 when that constant is
+        too small.  Raw μT values with absolute PC-side thresholds are more robust.
         """
         if self._touch_position_tracker is None:
             return
@@ -339,19 +345,19 @@ class Skin:
 
     @staticmethod
     def _extract_sensor_magnitudes(data: dict[str, Any], count: int) -> list[float] | None:
-        """Extract per-sensor 0.0–1.0 magnitudes from a node_magnet_sensor message.
+        """Extract raw per-sensor magnitudes (μT) from a node_magnet_sensor message.
 
-        Tries adj → mag → act (binary) in order. Returns None if no usable
-        data is found.
+        Tries mag (raw μT) → act (binary) in order.  The firmware 'adj' field
+        is deliberately skipped — it normalises against fullscaleMt which can
+        saturate, making all values 1.0 and breaking detection.
         """
-        return (Skin._try_adj(data, count)
-                or Skin._try_mag(data, count)
+        return (Skin._try_mag(data, count)
                 or Skin._try_act(data, count))
 
     @staticmethod
-    def _try_adj(data: dict[str, Any], count: int) -> list[float] | None:
-        """Extract from the pre-normalised 'adj' field (list of floats 0.0–1.0)."""
-        raw = data.get("adj")
+    def _try_mag(data: dict[str, Any], count: int) -> list[float] | None:
+        """Extract raw magnitudes in μT from the 'mag' field."""
+        raw = data.get("mag")
         if not isinstance(raw, (list, tuple)) or len(raw) < count:
             return None
         try:
@@ -360,24 +366,17 @@ class Skin:
             return None
         if not all(math.isfinite(v) for v in vals):
             return None
-        return [min(max(v, 0.0), 1.0) for v in vals]
-
-    @staticmethod
-    def _try_mag(data: dict[str, Any], count: int) -> list[float] | None:
-        """Extract from 'mag' (raw mT magnitudes), normalised against peak."""
-        raw = data.get("mag")
-        if not isinstance(raw, (list, tuple)) or len(raw) < count:
-            return None
-        try:
-            vals = [float(v) for v in raw[:count]]
-            peak = max(vals)
-            return [min(max(v / peak, 0.0), 1.0) for v in vals] if peak > 0 else None
-        except (TypeError, ValueError, ZeroDivisionError):
-            return None
+        return [max(0.0, v) for v in vals]
 
     @staticmethod
     def _try_act(data: dict[str, Any], count: int) -> list[float] | None:
-        """Extract from 'act' (list of active sensor indices) as binary 0/1."""
+        """Extract from 'act' (list of active sensor indices) as binary 0/1.
+
+        Used as last-resort fallback — the QuadrantDetector thresholds (μT) will
+        not fire on these 0/1 values unless the threshold is ≤1.0 μT, which is
+        unlikely in practice.  The fallback is kept so the tracker doesn't crash
+        when only 'act' is present.
+        """
         raw = data.get("act")
         if not isinstance(raw, (list, tuple)):
             return None

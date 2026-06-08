@@ -23,7 +23,7 @@ import logging
 from collections import deque
 from typing import Any
 
-from PySide6.QtCore import QRect, QRectF, QSize, Qt, QTimer
+from PySide6.QtCore import QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPaintEvent, QPen
 from PySide6.QtWidgets import QPushButton, QSizePolicy, QWidget
 
@@ -50,6 +50,8 @@ _NEIGHBOURS = ((-1, 0), (1, 0), (0, -1), (0, 1))
 
 class SkinGridView(QWidget):
     """Spatial view of a skin's chambers + current pressure levels."""
+
+    _magnet_msg = Signal(object)  # thread-safe bridge for on_magnet callbacks
 
     def __init__(self, skin: Skin, cell_px: int = 28,
                  parent: QWidget | None = None) -> None:
@@ -87,7 +89,13 @@ class SkinGridView(QWidget):
 
         ctrl = getattr(skin, "touch_controller", None)
         if ctrl is not None and hasattr(ctrl, "on_magnet"):
-            ctrl.on_magnet(self._on_magnet_msg)
+            # Force QueuedConnection: gateway uses a Python threading.Thread (not
+            # QThread), so AutoConnection delivers the signal synchronously in the
+            # wrong thread.  QueuedConnection always routes through the event loop.
+            self._magnet_msg.connect(
+                self._on_magnet_msg, Qt.ConnectionType.QueuedConnection
+            )
+            ctrl.on_magnet(self._magnet_msg.emit)
 
         self._sensor_buttons: dict[int, QPushButton] = {}
         # T-buttons only make sense in simulation — on real hardware the

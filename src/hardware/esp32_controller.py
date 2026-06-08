@@ -198,27 +198,35 @@ class ESP32Controller:
         """Get the last known status of this ESP32 node."""
         return self._last_status.copy()
 
+    @staticmethod
+    def _call_callbacks(callbacks: list, *args: Any) -> None:
+        """Call each callback, pruning any whose Qt signal source has been deleted."""
+        dead: list[int] = []
+        for i, callback in enumerate(callbacks):
+            try:
+                callback(*args)
+            except RuntimeError:
+                dead.append(i)
+        for i in reversed(dead):
+            callbacks.pop(i)
+
     def _dispatch_touch(self, data: dict[str, Any]) -> None:
         sensor_id = data.get("sensor", 0)
         raw_value = data.get("value", 0)
-        for callback in self._touch_callbacks:
-            callback(sensor_id, raw_value)
+        self._call_callbacks(self._touch_callbacks, sensor_id, raw_value)
 
     def _dispatch_chamber_pressure(self, data: dict[str, Any]) -> None:
         chamber_id = int(data["chamber"])
         pressure = int(data["pressure"])
-        for callback in self._pressure_callbacks:
-            callback(chamber_id, pressure)
+        self._call_callbacks(self._pressure_callbacks, chamber_id, pressure)
 
     def _dispatch_tank_pressure(self, data: dict[str, Any]) -> None:
         kind = str(data["kind"])
         pressure = int(data["pressure"])
-        for callback in self._tank_pressure_callbacks:
-            callback(kind, pressure)
+        self._call_callbacks(self._tank_pressure_callbacks, kind, pressure)
 
     def _dispatch_magnet(self, data: dict[str, Any]) -> None:
-        for callback in self._magnet_callbacks:
-            callback(data)
+        self._call_callbacks(self._magnet_callbacks, data)
 
     def _handle_message(self, data: dict[str, Any]) -> None:
         """Process incoming messages, filtering for this node's MAC."""
