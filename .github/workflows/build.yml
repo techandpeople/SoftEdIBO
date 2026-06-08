@@ -91,57 +91,11 @@ jobs:
           key: ${{ runner.os }}-pio-${{ hashFiles('firmware/**/platformio.ini') }}
           restore-keys: ${{ runner.os }}-pio-
 
-      # Gateway — two board variants (see firmware/gateway/README.md):
-      #   firmware.bin       -> Seeed XIAO ESP32-C6 (ESP-IDF, bootloader @ 0x0)
-      #   firmware-esp32.bin -> classic ESP32-WROOM  (Arduino, bootloader @ 0x1000)
-      - name: Build gateway firmware (XIAO ESP32-C6 + ESP32-WROOM)
+      # All firmware (gateway + nodes) — single source of truth is
+      # scripts/build-firmware.sh, so local dev bundles and CI stay in sync.
+      - name: Build all firmware (gateway + nodes)
         if: steps.fwcache.outputs.cache-hit != 'true'
-        run: |
-          cd firmware/gateway
-          python -m platformio run -e seeed_xiao_esp32c6
-          python -m esptool --chip esp32c6 merge_bin \
-            --flash_mode dio --flash_freq 80m --flash_size 4MB \
-            -o firmware.bin \
-            0x0 .pio/build/seeed_xiao_esp32c6/bootloader.bin \
-            0x8000 .pio/build/seeed_xiao_esp32c6/partitions.bin \
-            0x10000 .pio/build/seeed_xiao_esp32c6/firmware.bin
-          python -m platformio run -e esp32dev
-          python -m esptool --chip esp32 merge_bin \
-            --flash_mode dio --flash_freq 40m --flash_size 4MB \
-            -o firmware-esp32.bin \
-            0x1000 .pio/build/esp32dev/bootloader.bin \
-            0x8000 .pio/build/esp32dev/partitions.bin \
-            0x10000 .pio/build/esp32dev/firmware.bin
-
-      # Nodes: actuator (direct + multiplexed x release/debug) + sensor.
-      # Bins land in per-node-type dirs so the .spec/wizard layout stays
-      # keyed by node type.
-      - name: Build node firmware (actuator + sensor)
-        if: steps.fwcache.outputs.cache-hit != 'true'
-        run: |
-          cd firmware/node_actuator
-          mergebin() {  # $1 = pio env, $2 = output path (relative to firmware/)
-            python -m platformio run -e "$1"
-            mkdir -p "$(dirname "../$2")"
-            python -m esptool --chip esp32 merge_bin \
-              --flash_mode dio --flash_freq 40m --flash_size 4MB \
-              -o "../$2" \
-              0x1000 ".pio/build/$1/bootloader.bin" \
-              0x8000 ".pio/build/$1/partitions.bin" \
-              0x10000 ".pio/build/$1/firmware.bin"
-          }
-          mergebin direct            node_actuator/firmware-direct-release.bin
-          mergebin direct_debug      node_actuator/firmware-direct-debug.bin
-          mergebin multiplexed       node_actuator/firmware-multiplexed-release.bin
-          mergebin multiplexed_debug node_actuator/firmware-multiplexed-debug.bin
-          cd ../node_magnet_sensor
-          python -m platformio run -e esp32dev
-          python -m esptool --chip esp32 merge_bin \
-            --flash_mode dio --flash_freq 40m --flash_size 4MB \
-            -o firmware-release.bin \
-            0x1000 .pio/build/esp32dev/bootloader.bin \
-            0x8000 .pio/build/esp32dev/partitions.bin \
-            0x10000 .pio/build/esp32dev/firmware.bin
+        run: scripts/build-firmware.sh
 
       # ----------------------------------------------------------------
       # Collect all firmware binaries (flat names, for the release zip)

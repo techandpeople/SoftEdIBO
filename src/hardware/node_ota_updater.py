@@ -37,11 +37,19 @@ from src.hardware.espnow_gateway import ESPNowGateway
 
 logger = logging.getLogger(__name__)
 
-# Chunk sizing: the ESP-NOW payload is capped at 250 bytes. The data message
-# ``{"cmd":"ota_data","seq":NNNNN,"data":"<base64>"}`` adds ~40 bytes of
-# envelope; 144 raw bytes -> 192 base64 chars -> ~232 byte payload, comfortably
-# under the limit (and a multiple of 3, so no base64 padding).
-CHUNK_SIZE = 144
+# Chunk sizing: although ESP-NOW's nominal payload cap is 250 bytes, in practice
+# the gateway->node relay silently drops frames once the JSON payload grows past
+# ~190 bytes — a 144-byte chunk (~232 byte payload) never reaches the node, while
+# a 96-byte chunk (~164 byte payload) gets through reliably. So keep chunks small.
+# The data message ``{"cmd":"ota_data","seq":NNNNN,"data":"<base64>"}`` adds ~40
+# bytes of envelope; 96 raw bytes -> 128 base64 chars (multiple of 3, no padding).
+CHUNK_SIZE = 96
+
+# ESP32 application image magic byte (first byte of a bare app-partition image).
+_ESP_APP_MAGIC = 0xE9
+# Standard offset of the application partition within a full/merged flash image
+# (bootloader @ 0x1000, partition table @ 0x8000, app @ 0x10000).
+_APP_OFFSET = 0x10000
 
 
 class NodeOTAUpdater:
@@ -93,6 +101,10 @@ class NodeOTAUpdater:
         if not data:
             return False, "Firmware file is empty"
 
+        data = self._app_image(data)
+        if not data:
+            return False, "Firmware does not contain a valid app image"
+
         md5 = hashlib.md5(data).hexdigest()
         chunks = [
             base64.b64encode(data[i : i + CHUNK_SIZE]).decode("ascii")
@@ -105,6 +117,23 @@ class NodeOTAUpdater:
             return self._transfer(len(data), md5, chunks)
         finally:
             self._gateway.remove_message_callback(self._handle)
+
+    def _app_image(self, data: bytes) -> bytes:
+        """Return the bare app-partition image to flash over OTA.
+
+        The bundled node ``.bin`` files are *merged* flash images (bootloader +
+        partition table + app, meant for esptool at offset 0x0). ``Update.h`` on
+        the node expects only the application image (first byte = 0xE9), so a
+        merged image makes the node reject the first sector. Detect that case and
+        slice out the app partition at its standard 0x10000 offset; a file that
+        already starts with the app magic is sent as-is.
+        """
+        if data[0] == _ESP_APP_MAGIC:
+            return data
+        if len(data) > _APP_OFFSET and data[_APP_OFFSET] == _ESP_APP_MAGIC:
+            self._log(f"merged flash image — extracting app at 0x{_APP_OFFSET:x}")
+            return data[_APP_OFFSET:]
+        return b""
 
     # ------------------------------------------------------------------
     # Transfer phases

@@ -20,9 +20,10 @@ All entries must share the same ``controller`` (single-MAC invariant).
 import logging
 import math
 import time
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from src.hardware.air_chamber import AirChamber, ChamberState
+from src.hardware.touch_event_router import TouchEventRouter
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +120,13 @@ class Skin:
         self._touch_detector = None
         if touch and touch_controller:
             self._setup_touch_tracking(touch, touch_controller)
+
+        # Higher-level touch events (press/release per chamber), independent of
+        # position tracking so they work for any sensor count. Delegated to a
+        # TouchEventRouter (edge detection + sensor→chamber mapping).
+        self._touch_router = TouchEventRouter.from_touch_config(
+            touch, len(self._chambers), name=self.skin_id)
+        self._touch_router.attach(touch_controller)
 
     # ------------------------------------------------------------------
     # Properties
@@ -254,6 +262,18 @@ class Skin:
         else:
             chamber.state = ChamberState.IDLE
         return self._ctrl.set_pressure(slot, v)
+
+    # ------------------------------------------------------------------
+    # Touch events (press/release per chamber)
+    # ------------------------------------------------------------------
+
+    def on_touch_event(self, callback: Callable[[int, str], None]) -> None:
+        """Register ``callback(chamber_id, action)`` for sensor press/release on
+        this skin's magnet board. ``chamber_id`` is the skin-local chamber the
+        sensor maps to (raw sensor index when unmapped); ``action`` is
+        ``"press"`` or ``"release"``. Fires on the gateway thread — marshal to
+        the GUI thread before touching Qt."""
+        self._touch_router.subscribe(callback)
 
     # ------------------------------------------------------------------
     # Touch position tracking
