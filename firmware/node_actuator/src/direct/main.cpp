@@ -24,6 +24,7 @@
  */
 
 #include <Arduino.h>
+#include <esp_ota_ops.h>
 
 #include "se_espnow.h"
 #include "se_ota.h"
@@ -62,6 +63,7 @@ static void onReceived(const uint8_t* mac_addr, const uint8_t* data, int len) {
 // ---------------------------------------------------------------------------
 
 void setup() {
+    esp_ota_mark_app_valid_cancel_rollback();
     Serial.begin(115200);
 
     chambers::hardware_init();

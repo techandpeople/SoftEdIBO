@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
+#include <esp_ota_ops.h>
 
 #include "se_espnow.h"
 #include "se_ota.h"
@@ -553,6 +554,7 @@ void autodetect() {
 }  // namespace
 
 void setup() {
+    esp_ota_mark_app_valid_cancel_rollback();
     Serial.begin(115200);
 
     mux::hardware_init();

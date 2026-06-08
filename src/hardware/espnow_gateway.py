@@ -110,27 +110,54 @@ class ESPNowGateway:
             wr for wr in self._callbacks if wr() is not None and wr() != callback
         ]
 
+    def _dispatch_line(self, raw: bytes) -> None:
+        """Parse one complete line and fan it out to registered callbacks."""
+        if not raw.strip():
+            return
+        try:
+            data = json.loads(raw.decode("utf-8").strip())
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            logger.warning("Invalid JSON from gateway: %s", raw)
+            return
+        if "source" in data:
+            self._known_macs.add(data["source"])
+        dead: list[weakref.ref] = []
+        for wr in self._callbacks:
+            cb = wr()
+            if cb is None:
+                dead.append(wr)
+            else:
+                cb(data)
+        for d in dead:
+            self._callbacks.remove(d)
+
     def _read_loop(self) -> None:
-        """Background thread that reads incoming serial data."""
+        """Background thread that reads incoming serial data.
+
+        Accumulates raw bytes and only dispatches complete newline-terminated
+        lines. This avoids parsing partial messages: ``readline()`` returns
+        whatever is buffered when the serial timeout fires, which can split a
+        message mid-line and produce spurious "Invalid JSON" warnings.
+
+        The gateway streams continuously, so opening the port usually lands
+        mid-message. The bytes before the first newline are therefore a partial
+        fragment — discard them to resync rather than dispatch a broken line.
+        """
+        buf = bytearray()
+        synced = False
         while self._running and self._serial is not None:
             try:
-                line = self._serial.readline()
-                if not line:
+                chunk = self._serial.read(self._serial.in_waiting or 1)
+                if not chunk:
                     continue
-                data = json.loads(line.decode("utf-8").strip())
-                if "source" in data:
-                    self._known_macs.add(data["source"])
-                dead: list[weakref.ref] = []
-                for wr in self._callbacks:
-                    cb = wr()
-                    if cb is None:
-                        dead.append(wr)
-                    else:
-                        cb(data)
-                for d in dead:
-                    self._callbacks.remove(d)
-            except (json.JSONDecodeError, UnicodeDecodeError):
-                logger.warning("Invalid JSON from gateway: %s", line)
+                buf.extend(chunk)
+                while b"\n" in buf:
+                    raw, _, rest = buf.partition(b"\n")
+                    buf = bytearray(rest)
+                    if not synced:
+                        synced = True  # first fragment is a partial line; drop it
+                        continue
+                    self._dispatch_line(raw)
             except serial.SerialException:
                 logger.exception("Serial read error — gateway disconnected")
                 if self._serial is not None:

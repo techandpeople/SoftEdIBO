@@ -223,6 +223,11 @@ void setup() {
 void loop() {
     uint32_t now = millis();
 
+    // While a firmware update is streaming in, stay off the air: ~28 Hz magnet
+    // broadcasts plus blocking I2C reads congest the ESP-NOW link and starve the
+    // ota_ack replies, which makes the transfer fail ("No ACK for chunk N").
+    if (se::ota::active) return;
+
     if (!se::node::gatewayKnown && now - lastAnnounceMs >= ANNOUNCE_INTERVAL_MS) {
         lastAnnounceMs = now;
         se::broadcast(announceMsg);

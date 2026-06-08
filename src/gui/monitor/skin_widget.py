@@ -24,12 +24,20 @@ class SkinWidget(QGroupBox):
 
     touch_event   = Signal(str, int, str)  # (skin_id, chamber_id, action)
     _sensor_pulse = Signal(int)            # thread-safe bridge → pulse_sensor
+    _touch_log    = Signal(int, str)       # thread-safe bridge → touch_event log
 
     def __init__(self, skin: Skin) -> None:
         super().__init__(skin.name)
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        self._skin_id = skin.skin_id
         self._chamber_widgets: list[ChamberWidget] = []
         self._grid_view: SkinGridView | None = None
+
+        # Bubble skin sensor touches up as touch_event so the session panel logs
+        # them. The Skin's TouchEventRouter fires on the gateway thread, so hop
+        # through a QueuedConnection bridge before re-emitting on the GUI thread.
+        self._touch_log.connect(self._emit_touch_log, Qt.ConnectionType.QueuedConnection)
+        skin.on_touch_event(lambda chamber_id, action: self._touch_log.emit(chamber_id, action))
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(2, 2, 2, 2)
@@ -68,6 +76,11 @@ class SkinWidget(QGroupBox):
             self._chamber_widgets.append(cw)
             cols.addWidget(cw)
         outer.addLayout(cols)
+
+    def _emit_touch_log(self, chamber_id: int, action: str) -> None:
+        """Re-emit a router touch event as the widget's ``touch_event`` (on the
+        GUI thread) so it bubbles up to the session panel for DB logging."""
+        self.touch_event.emit(self._skin_id, chamber_id, action)
 
     def _relay_to_grid(self, _skin_id: str, chamber_id: int, action: str) -> None:
         """Mirror chamber touches onto the SkinGridView as a blue pulse on
