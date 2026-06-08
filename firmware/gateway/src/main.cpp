@@ -55,8 +55,18 @@ static void usbWrite(const char* s, size_t len) {
 }
 
 static void usbWriteLine(const char* s) {
-    usbWrite(s, strlen(s));
-    usbWrite("\n", 1);
+    // Single write to avoid USB packet fragmentation splitting the line.
+    size_t len = strlen(s);
+    char buf[512];
+    if (len + 1 < sizeof(buf)) {
+        memcpy(buf, s, len);
+        buf[len]     = '\n';
+        buf[len + 1] = '\0';
+        usbWrite(buf, len + 1);
+    } else {
+        usbWrite(s, len);
+        usbWrite("\n", 1);
+    }
 }
 
 // ---------------------------------------------------------------------------

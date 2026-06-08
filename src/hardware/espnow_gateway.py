@@ -129,7 +129,7 @@ class ESPNowGateway:
                         cb(data)
                 for d in dead:
                     self._callbacks.remove(d)
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, UnicodeDecodeError):
                 logger.warning("Invalid JSON from gateway: %s", line)
             except serial.SerialException:
                 logger.exception("Serial read error — gateway disconnected")

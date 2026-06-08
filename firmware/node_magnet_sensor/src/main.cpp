@@ -28,6 +28,7 @@
 #include <Adafruit_MLX90393.h>
 #include <ArduinoJson.h>
 #include <math.h>
+#include <esp_ota_ops.h>
 
 #include "se_espnow.h"
 #include "se_ota.h"
@@ -57,8 +58,13 @@ constexpr uint32_t STREAM_INTERVAL_MS = 35;   // ~28 Hz
 // Tunables (overridable at runtime via "configure")
 // ---------------------------------------------------------------------------
 
-float fullscaleMt  = 30.0f;   // |delta| mapped to adj = 1.0
-float actThreshold = 0.2f;    // adj level at/above which a sensor is "active"
+float fullscaleMt  = 1000.0f;  // |delta| mapped to adj = 1.0
+float actThreshold = 0.3f;    // adj level at/above which a sensor is "active"
+#ifdef DEBUG_BUILD
+bool  debugMode    = true;
+#else
+bool  debugMode    = false;
+#endif
 
 // ---------------------------------------------------------------------------
 // State
@@ -74,7 +80,11 @@ size_t            streamCount = NUM_PRIMARY;   // 4, or 5 if the extra is presen
 Vec3     baseline[MAX_SENSORS] = {};
 bool     baselineReady = false;
 uint16_t baselineN     = 0;
-uint32_t lastStreamMs  = 0;
+uint32_t lastStreamMs    = 0;
+uint32_t lastAnnounceMs  = 0;
+char     announceMsg[80] = {};
+
+constexpr uint32_t ANNOUNCE_INTERVAL_MS = 2000;
 
 inline float vmag(const Vec3& v) { return sqrtf(v.x * v.x + v.y * v.y + v.z * v.z); }
 
@@ -178,6 +188,7 @@ void buildImuMessage(const Vec3* samples, const bool* valid, char* buf, size_t c
 // ---------------------------------------------------------------------------
 
 void setup() {
+    esp_ota_mark_app_valid_cancel_rollback();
     Serial.begin(115200);
 
     Wire.begin(I2C_SDA, I2C_SCL);
@@ -202,16 +213,21 @@ void setup() {
         return;
     }
 
-    char buf[80];
-    snprintf(buf, sizeof(buf),
+    snprintf(announceMsg, sizeof(announceMsg),
              "{\"status\":\"node_magnet_sensor_ready\",\"sensors\":%u,\"variant\":\"mlx90393\"}",
              (unsigned)streamCount);
-    se::broadcast(buf);
-    Serial.println(buf);
+    se::broadcast(announceMsg);
+    Serial.println(announceMsg);
 }
 
 void loop() {
     uint32_t now = millis();
+
+    if (!se::node::gatewayKnown && now - lastAnnounceMs >= ANNOUNCE_INTERVAL_MS) {
+        lastAnnounceMs = now;
+        se::broadcast(announceMsg);
+    }
+
     if (now - lastStreamMs < STREAM_INTERVAL_MS) return;
     lastStreamMs = now;
 
@@ -233,4 +249,5 @@ void loop() {
     char msg[256];
     buildImuMessage(samples, valid, msg, sizeof(msg));
     se::node::toGateway(msg);
+    if (debugMode) Serial.println(msg);
 }

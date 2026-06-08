@@ -31,8 +31,9 @@ class TouchTuningPanel(QGroupBox):
         super().__init__("Touch tuning", parent)
         self._skin = skin
 
-        thresholds = skin.touch_thresholds or [0.3, 0.3, 0.3, 0.3]
-        hysteresis = skin.touch_hysteresis if skin.touch_hysteresis is not None else 0.05
+        # Thresholds and hysteresis are now in raw μT (absolute, post-rebaseline).
+        thresholds = skin.touch_thresholds or [100.0, 100.0, 100.0, 100.0]
+        hysteresis = skin.touch_hysteresis if skin.touch_hysteresis is not None else 20.0
 
         grid = QGridLayout(self)
         grid.setContentsMargins(6, 4, 6, 4)
@@ -43,11 +44,16 @@ class TouchTuningPanel(QGroupBox):
         for i, label in enumerate(_QUADRANTS):
             grid.addWidget(QLabel(label), 0, i, alignment=Qt.AlignmentFlag.AlignHCenter)
             spin = QDoubleSpinBox()
-            spin.setRange(0.0, 1.0)
-            spin.setSingleStep(0.01)
-            spin.setDecimals(2)
-            spin.setValue(float(thresholds[i]) if i < len(thresholds) else 0.3)
-            spin.setToolTip(f"Activation threshold for {label} (0–1 of full scale)")
+            spin.setRange(0.0, 2000.0)
+            spin.setSingleStep(10.0)
+            spin.setDecimals(0)
+            spin.setValue(float(thresholds[i]) if i < len(thresholds) else 100.0)
+            spin.setSuffix(" μT")
+            spin.setToolTip(
+                f"Activation threshold for {label} in μT.\n"
+                "Set above resting value and below touch peak.\n"
+                "Re-zero sensors first so rest values are near 0."
+            )
             spin.valueChanged.connect(self._apply_thresholds)
             grid.addWidget(spin, 1, i)
             self._threshold_spins.append(spin)
@@ -55,14 +61,26 @@ class TouchTuningPanel(QGroupBox):
         bottom = QHBoxLayout()
         bottom.addWidget(QLabel("Hysteresis:"))
         self._hyst_spin = QDoubleSpinBox()
-        self._hyst_spin.setRange(0.0, 0.5)
-        self._hyst_spin.setSingleStep(0.01)
-        self._hyst_spin.setDecimals(2)
+        self._hyst_spin.setRange(0.0, 500.0)
+        self._hyst_spin.setSingleStep(5.0)
+        self._hyst_spin.setDecimals(0)
         self._hyst_spin.setValue(float(hysteresis))
-        self._hyst_spin.setToolTip("Drop-out margin below threshold (anti-flicker)")
+        self._hyst_spin.setSuffix(" μT")
+        self._hyst_spin.setToolTip(
+            "Schmitt-trigger drop-out margin (μT).\n"
+            "A sensor deactivates at (threshold − hysteresis), preventing flicker."
+        )
         self._hyst_spin.valueChanged.connect(self._apply_hysteresis)
         bottom.addWidget(self._hyst_spin)
         bottom.addStretch(1)
+
+        apply_btn = QPushButton("Apply to node")
+        apply_btn.setToolTip(
+            "Send configure to the touch node\n"
+            "(fullscale_mt=1000, act_threshold=0.3)"
+        )
+        apply_btn.clicked.connect(self._apply_node_config)
+        bottom.addWidget(apply_btn)
 
         self._rebaseline_btn = QPushButton("Re-zero sensors")
         self._rebaseline_btn.setToolTip(
@@ -90,3 +108,13 @@ class TouchTuningPanel(QGroupBox):
     def _restore_button(self) -> None:
         self._rebaseline_btn.setText("Re-zero sensors")
         self._rebaseline_btn.setEnabled(True)
+
+    def _apply_node_config(self) -> None:
+        """Send configure to the firmware to ensure fullscale_mt is set high
+        (so 'mag' values are in a useful range for Serial debug) and
+        act_threshold matches a sensible default."""
+        ctrl = getattr(self._skin, "touch_controller", None)
+        if ctrl is None or not hasattr(ctrl, "send_command"):
+            return
+        ctrl.send_command("configure", fullscale_mt=1000.0, act_threshold=0.3)
+

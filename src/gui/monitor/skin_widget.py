@@ -22,7 +22,8 @@ from src.hardware.skin import Skin
 class SkinWidget(QGroupBox):
     """Widget for a single Skin — one ChamberWidget per AirChamber."""
 
-    touch_event = Signal(str, int, str)  # (skin_id, chamber_id, action)
+    touch_event   = Signal(str, int, str)  # (skin_id, chamber_id, action)
+    _sensor_pulse = Signal(int)            # thread-safe bridge → pulse_sensor
 
     def __init__(self, skin: Skin) -> None:
         super().__init__(skin.name)
@@ -39,12 +40,18 @@ class SkinWidget(QGroupBox):
             self._grid_view = SkinGridView(skin)
             outer.addWidget(self._grid_view, alignment=Qt.AlignmentFlag.AlignCenter)
             # Mirror real-hardware touch events as yellow pulses on the grid.
+            # Use a Signal bridge so the gateway thread never calls Qt directly.
             touch_ctrl = getattr(skin, "touch_controller", None)
             if touch_ctrl is not None:
                 on_touch = getattr(touch_ctrl, "on_touch", None)
                 if on_touch is not None:
-                    on_touch(lambda sensor_id, _raw, gv=self._grid_view:
-                             gv.pulse_sensor(sensor_id))
+                    # Force QueuedConnection for the same reason as _magnet_msg:
+                    # gateway thread is a Python thread, not QThread.
+                    self._sensor_pulse.connect(
+                        self._grid_view.pulse_sensor,
+                        Qt.ConnectionType.QueuedConnection,
+                    )
+                    on_touch(lambda sensor_id, _raw: self._sensor_pulse.emit(sensor_id))
 
         # Live tuning panel for skins with 4-sensor quadrant touch detection.
         if skin.has_touch_tracking:

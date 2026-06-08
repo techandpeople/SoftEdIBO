@@ -711,21 +711,22 @@ class SkinConfigDialog(QDialog):
 
     def _rebuild_palette(self) -> None:
         """Refresh the paint-target buttons for the active layer."""
-        # Clear current buttons
-        for btn in self._palette_group.buttons():
-            self._palette_group.removeButton(btn)
-            btn.deleteLater()
-        # Drop everything except the leading "Paint:" label (index 0)
+        # Remove all palette buttons from both the layout and the button group.
+        # Widgets must be hidden immediately after takeAt — deleteLater() defers
+        # actual destruction, so an orphaned (still-visible) old button would
+        # overlap the newly-added one with the same label.
         while self._palette_row.count() > 1:
             item = self._palette_row.takeAt(1)
             w = item.widget()
             if w is not None:
+                self._palette_group.removeButton(w)
+                w.hide()
                 w.deleteLater()
 
         def add_btn(label: str, value: int) -> None:
             btn = QPushButton(label)
             btn.setCheckable(True)
-            btn.setFixedWidth(60)
+            btn.setFixedSize(60, 24)
             self._palette_group.addButton(btn, id=value)
             btn.clicked.connect(lambda _c, v=value: self._grid.set_paint_target(v))
             self._palette_row.addWidget(btn)
