@@ -39,9 +39,9 @@
         "other_text_thickness": 0.15,
         "other_text_upright": false,
         "pads": {
-          "drill": 0.8,
-          "height": 1.27,
-          "width": 2.54
+          "drill": 0.0,
+          "height": 10.0,
+          "width": 10.0
         },
         "silk_line_width": 0.1,
         "silk_text_italic": false,
@@ -54,7 +54,7 @@
           "border_hatch_pitch": 0.5,
           "corner_radius": 0.0,
           "corner_smoothing": 0,
-          "fill_mode": 0,
+          "fill_mode": 1,
           "hatch_gap": 1.5,
           "hatch_orientation": 0.0,
           "hatch_smoothing_level": 0,
@@ -781,7 +781,7 @@
         "uuid": "fd36ba3b-1ade-4083-b71d-0ba561ad92cf"
       }
     ],
-    "used_designators": "",
+    "used_designators": "#FLG1,#PWR29,#PWR79-80",
     "variants": []
   },
   "sheets": [
@@ -791,7 +791,35 @@
     ],
     [
       "bda5b488-e44f-445b-82b8-68a6f912ee6c",
+      "Signal"
+    ],
+    [
+      "845fd934-9bdf-4d9a-bf72-fe9d14350cb5",
+      "Power"
+    ],
+    [
+      "88113b0a-a30f-46ea-9f41-7f4ab04c88d8",
+      "Battery"
+    ],
+    [
+      "380068a1-589a-47b0-bda5-7f17d798883e",
       "IMU"
+    ],
+    [
+      "1052d0d4-338b-4f9e-9777-2a326d3cf565",
+      "Audio"
+    ],
+    [
+      "49c487cb-da81-432d-893e-34b6f26ddd43",
+      "PPG"
+    ],
+    [
+      "1aa35fe7-7157-4e33-8e94-155ac3f8ff1f",
+      "BIA"
+    ],
+    [
+      "15334146-ca05-49da-9760-055353f6bc69",
+      "Front End"
     ]
   ],
   "text_variables": {},

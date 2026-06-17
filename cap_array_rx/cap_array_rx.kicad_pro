@@ -495,7 +495,7 @@
       "no_connect_dangling": "warning",
       "pin_not_connected": "error",
       "pin_not_driven": "error",
-      "pin_to_pin": "warning",
+      "pin_to_pin": "error",
       "power_pin_not_driven": "error",
       "same_local_global_label": "warning",
       "similar_label_and_power": "warning",
@@ -765,13 +765,17 @@
         "uuid": "5b710e96-a17f-4a3e-83ad-f65c116df319"
       }
     ],
-    "used_designators": "U1-4,Mux_y1,Mux_x1,J1-18,CN1-2,#PWR1-25,TP1-2,JP1-3,R1-10,C1-11",
+    "used_designators": "",
     "variants": []
   },
   "sheets": [
     [
       "5b710e96-a17f-4a3e-83ad-f65c116df319",
       "cap_array_rx"
+    ],
+    [
+      "c2d78940-d4c2-439e-b69a-9ab6ba299ea0",
+      "Op amps"
     ]
   ],
   "text_variables": {},
