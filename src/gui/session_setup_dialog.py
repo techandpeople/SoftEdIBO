@@ -72,17 +72,33 @@ class SessionSetupDialog(QDialog, Ui_SessionSetupDialog):
             "instances instead of the real ESP32 nodes. Useful for testing "
             "behaviors without the physical robots."
         )
+
+        # Record-sensor-streams checkbox — same programmatic pattern. Records
+        # every gateway message of the session to a JSONL file (no video); read
+        # via ``record_streams`` after accept(). On by default; no effect in
+        # simulation (no real gateway traffic).
+        self._record_check = QCheckBox(
+            "Record sensor streams (JSONL, for analysis)"
+        )
+        self._record_check.setChecked(True)
+        self._record_check.setToolTip(
+            "When ticked, all sensor messages of the session are saved to "
+            "data/recordings/<session_id>.jsonl for later analysis and "
+            "touch-gesture model training. No camera / video is involved."
+        )
         form = self.activity_combo.parentWidget().layout()
         if isinstance(form, QFormLayout):
             base = form.getWidgetPosition(self.activity_combo)[0]
             form.insertRow(base + 1, "Preset:", preset_row)
             form.insertRow(base + 2, "", self._sim_check)
+            form.insertRow(base + 3, "", self._record_check)
         else:
-            # Fallback: stash both below the activity combo if the parent
-            # layout isn't a form (e.g. after .ui refactors).
+            # Fallback: stash below the activity combo if the parent layout
+            # isn't a form (e.g. after .ui refactors).
             self.activity_combo.parentWidget().layout().addWidget(QLabel("Preset:"))
             self.activity_combo.parentWidget().layout().addLayout(preset_row)
             self.activity_combo.parentWidget().layout().addWidget(self._sim_check)
+            self.activity_combo.parentWidget().layout().addWidget(self._record_check)
 
         self.activity_combo.currentIndexChanged.connect(self._on_activity_changed)
         self.button_box.accepted.connect(self.accept)
@@ -119,6 +135,11 @@ class SessionSetupDialog(QDialog, Ui_SessionSetupDialog):
     def simulation_mode(self) -> bool:
         """True if the user ticked 'Run in simulation mode'."""
         return self._sim_check.isChecked()
+
+    @property
+    def record_streams(self) -> bool:
+        """True if the user wants raw sensor streams recorded to JSONL."""
+        return self._record_check.isChecked()
 
     @property
     def selected_robots(self) -> list[BaseRobot]:

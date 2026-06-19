@@ -47,6 +47,8 @@ def wrap_robots_in_simulation(
                 "chamber_grid": skin.chamber_grid,
                 "touch":        skin.touch,
                 "shape":        skin.shape,
+                "organ":        getattr(skin, "organ", None),
+                "skin_type":    getattr(skin, "skin_type", ""),
             }
             for skin in skins.values()
         ]

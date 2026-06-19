@@ -1,5 +1,6 @@
 """Main application window for SoftEdIBO."""
 
+import logging
 import os
 import sys
 from pathlib import Path
@@ -33,6 +34,8 @@ from src.robots.thymio.thymio_robot import ThymioRobot
 from src.robots.tree.tree_robot import TreeRobot
 from src.robots.turtle.turtle_robot import TurtleRobot
 
+logger = logging.getLogger(__name__)
+
 
 class MainWindow(QMainWindow, Ui_MainWindow):
     """Main application window with tabbed panels."""
@@ -54,7 +57,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
         self._home_panel = HomePanel()
         self._participant_panel = ParticipantPanel(self._db)
-        self._session_panel = SessionPanel(self._db)
+        self._session_panel = SessionPanel(self._db, gateway=self._gateway)
         self._robot_panel = RobotPanel(self._gateway, self._settings, self._db)
         self._data_panel = DataPanel(self._db)
 
@@ -93,6 +96,10 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.actionUpdateNodesOTA = QAction("Update Nodes (OTA)…", self)
         self.actionUpdateNodesOTA.triggered.connect(self._open_ota_dialog)
         self.menuTools.addAction(self.actionUpdateNodesOTA)
+
+        self.actionTrainTouch = QAction("Touch Gestures…", self)
+        self.actionTrainTouch.triggered.connect(self._open_train_touch)
+        self.menuTools.addAction(self.actionTrainTouch)
 
         # Track whether a session is live so OTA can refuse mid-actuation.
         self._session_active = False
@@ -209,6 +216,12 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             session_active=self._session_active, parent=self,
         )
         dlg.exec()
+
+    def _open_train_touch(self) -> None:
+        """Tools => Train Touch Models… — train per-skin-type gesture models
+        from recorded sessions + their label CSVs."""
+        from src.gui.train_touch_dialog import TrainTouchDialog
+        TrainTouchDialog(parent=self).exec()
 
     def _open_settings(self) -> None:
         dlg = SettingsDialog(self._settings, parent=self)

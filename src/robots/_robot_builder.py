@@ -39,8 +39,13 @@ def configure_multiplexed_nodes(
 
         max_slots = max(1, min(int(node_cfg.get("max_slots", 12)), 16))
 
+        # Mux channels carrying organ+cover circuits (index = slot in the
+        # firmware's organ broadcasts). Convention: highest channels first
+        # (I13..I15) so they stay clear of the chamber autodetect.
+        organ_channels = [int(c) for c in node_cfg.get("organ_channels", [])] or None
+
         if not node_cfg.get("has_reservoirs", False):
-            ctrl.configure(num_chambers=max_slots)
+            ctrl.configure(num_chambers=max_slots, organ_channels=organ_channels)
             continue
 
         pump_inflate_count = max(0, min(int(node_cfg.get("pump_inflate_count", 3)), 6))
@@ -51,7 +56,7 @@ def configure_multiplexed_nodes(
         tank_vacuum_max_kpa   = float(node_cfg.get("tank_vacuum_max_kpa", 0.0))
 
         # Operational set-point: take from YAML if present, otherwise default
-        # to the midpoint of [min, max] so the bombas têm para onde trabalhar.
+        # to the midpoint of [min, max] so the pumps have headroom to work in.
         tank_pressure_target_kpa = float(node_cfg.get(
             "tank_pressure_target_kpa",
             (tank_pressure_min_kpa + tank_pressure_max_kpa) / 2.0))
@@ -75,6 +80,7 @@ def configure_multiplexed_nodes(
             tank_vacuum_max_kpa=tank_vacuum_max_kpa,
             tank_vacuum_target_kpa=tank_vacuum_target_kpa,
             pump_groups={"pressure": pressure_group, "vacuum": vacuum_group},
+            organ_channels=organ_channels,
         )
 
 
@@ -154,6 +160,8 @@ def _build_one_skin(skin_cfg: dict[str, Any],
         touch=skin_cfg.get("touch"),
         touch_controller=touch_ctrl,
         shape=skin_cfg.get("shape", "rect"),
+        organ=skin_cfg.get("organ"),
+        skin_type=skin_cfg.get("skin_type", ""),
     )
 
 

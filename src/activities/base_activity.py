@@ -27,6 +27,7 @@ from src.robots.base_robot import BaseRobot
 
 if TYPE_CHECKING:
     from src.core.session import Session
+    from src.data.event_logger import EventLogger
 
 
 # ---------------------------------------------------------------------------
@@ -104,6 +105,12 @@ class BaseActivity(ABC):
     # SessionPanel "Simulation mode" checkbox).
     simulation_mode: bool = False
 
+    # Injected by the SessionPanel when a session starts so activities can
+    # record behavioral events (state transitions, cover open/close, organ
+    # readings, …) into the session's interaction_events table. None outside
+    # a session — ``log_event`` is then a no-op.
+    event_logger: "EventLogger | None" = None
+
     @classmethod
     def all_params(cls) -> tuple[Param, ...]:
         """SIM_PARAMS first, then activity-specific PARAMS. Used by the GUI."""
@@ -147,6 +154,22 @@ class BaseActivity(ABC):
     def current_preset(self) -> dict[str, Any]:
         """Return a copy of the live values (suitable for saving as a preset)."""
         return dict(self.param_values)
+
+    # ------------------------------------------------------------------
+    # Event logging
+    # ------------------------------------------------------------------
+
+    def log_event(self, type: str, action: str, target: str = "",
+                  metadata: str = "", participant_id: str = "system") -> None:
+        """Record a behavioral event for the running session (no-op when no
+        ``event_logger`` is attached, e.g. in unit tests).
+
+        Robot-level events (organ readings, cover open/close) use the robot_id
+        as ``target`` and keep ``participant_id="system"`` — analysis joins
+        ``session_assignments`` on robot_id for participant attribution.
+        """
+        if self.event_logger is not None:
+            self.event_logger.log(participant_id, type, action, target, metadata)
 
     # ------------------------------------------------------------------
     # Lifecycle

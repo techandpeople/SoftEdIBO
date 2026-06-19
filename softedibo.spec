@@ -26,14 +26,12 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 block_cipher = None
 
 # ---------------------------------------------------------------------------
-# Hidden imports shared by both Analysis calls
+# Excludes
 # ---------------------------------------------------------------------------
+# Shared by both Analysis calls — pure bloat neither executable ever needs.
 COMMON_EXCLUDES = [
     "tkinter",
     "matplotlib",
-    "numpy",
-    "scipy",
-    "pandas",
     "PIL",
     "IPython",
     "jupyter",
@@ -42,6 +40,11 @@ COMMON_EXCLUDES = [
     "MySQLdb",     # MySQL backend
     "psycopg2",    # PostgreSQL backend (not installed in the frozen bundle)
 ]
+
+# The standalone esptool executable does no ML — keep it lean by stripping the
+# numeric stack there. The main app DOES use it (touch-gesture classifier:
+# numpy / scipy / scikit-learn / joblib), so those must NOT be excluded from it.
+ESPTOOL_EXCLUDES = COMMON_EXCLUDES + ["numpy", "scipy", "pandas"]
 
 # ---------------------------------------------------------------------------
 # 1. Main application
@@ -66,6 +69,13 @@ main_a = Analysis(
         "serial.tools.list_ports",
         "PySide6.QtSvg",
         "PySide6.QtXml",
+        # Touch-gesture ML stack (lazily imported in src/ml/training.py).
+        # scikit-learn pulls these in but the lazy imports can dodge static
+        # analysis, so name them explicitly.
+        *collect_submodules("sklearn"),
+        "joblib",
+        "numpy",
+        "scipy",
     ],
     hookspath=[],
     hooksconfig={},
@@ -114,7 +124,7 @@ esptool_a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=COMMON_EXCLUDES,
+    excludes=ESPTOOL_EXCLUDES,
     cipher=block_cipher,
     noarchive=False,
 )

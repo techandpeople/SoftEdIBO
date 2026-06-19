@@ -32,6 +32,7 @@
 #include "pressure.h"
 #include "chambers.h"
 #include "leds.h"
+#include "organ.h"
 #include "cmd_queue.h"
 #include "commands.h"
 #include "dbg.h"
@@ -68,6 +69,7 @@ void setup() {
 
     chambers::hardware_init();
     leds::hardware_init();
+    organ::hardware_init();
 
     if (!se::begin(onReceived)) {
         LOG("{\"error\":\"esp_now_init_failed\"}\n");
@@ -118,6 +120,12 @@ void loop() {
 
     // ---- Manual (dev) actuation safety: dead-man auto-off + HARD_MAX cutoff ----
     chambers::manualSafetyTick(now);
+
+    // ---- Child-safety watchdog: stop runaway actuations (sensor failure) ----
+    chambers::actuationWatchdog(now);
+
+    // ---- Organ + cover sensing (broadcasts on change + heartbeat) ----
+    organ::tick(now);
 
     // ---- Status broadcast ----
     if (now - lastStatusMs >= STATUS_REPORT_MS) {

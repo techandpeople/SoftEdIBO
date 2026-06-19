@@ -61,7 +61,11 @@ SessionPanel
 
 **Touch sensing (optional).** A skin may reference a `node_magnet_sensor` (4-sensor magnet sensor/touch board) via its `touch:` block — see [firmware/PROTOCOL.md](firmware/PROTOCOL.md). The activity-time view (`SkinGridView`) overlays a pulsing yellow outline on the active sensor cells so the operator sees where each touch lands relative to the chamber regions.
 
-**Skin layout editor.** The skin config dialog exposes a paint-grid editor (left-click paints, right-click erases, drag to multi-select) where chambers and touch zones are placed on a 2-D matrix. Layouts can be saved as reusable **Skin Templates** (DB-backed) so the same shape can be applied to many skins with one click — see [docs/ACTIVITIES.md](docs/ACTIVITIES.md) for the broader behavior-framework plan.
+**Skin geometry by type.** Each skin sets a `skin_type` (e.g. `turtle_square`, `tree_round`, `thymio`) whose **shape and sensor coordinates** are hardcoded in [`src/hardware/skin_geometry.py`](src/hardware/skin_geometry.py). The skin dialog offers only the current robot's types and draws the real outline/aspect (square, rectangle, round, triangle, Thymio "D") — editor and activity view share the masks in [`src/gui/skin_shapes.py`](src/gui/skin_shapes.py). The legacy paint-grid editor still applies to skins without a `skin_type`.
+
+**Sensor stream recording + touch-gesture ML.** A session can record every sensor message to `data/recordings/<id>.jsonl` (toggle in the setup dialog — no video). Those recordings, plus gestures tagged live in the observer panel, feed a **per-`skin_type`, coordinate-free** touch-gesture classifier (tap / press / stroke / squeeze). `scikit-learn` is the optional `ml` extra; the classifier is inert without a trained model. See [docs/TOUCH_ML.md](docs/TOUCH_ML.md).
+
+See [docs/ACTIVITIES.md](docs/ACTIVITIES.md) for the broader behavior-framework plan.
 
 ---
 
@@ -196,13 +200,19 @@ The CI pipeline automatically selects the firmware environment:
 
 | Path | Description |
 |------|-------------|
-| `src/hardware/skin.py` | Skin model — groups 1-3 AirChambers on one ESP32 node |
+| `src/hardware/skin.py` | Skin model — groups 1-3 AirChambers on one ESP32 node; `skin_type` + `geometry` |
+| `src/hardware/skin_geometry.py` | Hardcoded skin-geometry registry (shape + sensor coords) keyed by `skin_type` |
 | `src/hardware/air_chamber.py` | AirChamber model — pressure 0-100 %, configurable max |
 | `src/hardware/esp32_controller.py` | Real hardware controller (via ESP-NOW gateway) |
 | `src/hardware/simulated_controller.py` | Mock controller for simulation mode |
+| `src/data/stream_recorder.py` | Per-session JSONL recorder of all gateway sensor messages |
+| `src/data/export.py` | Session CSV export with robot/participant attribution |
+| `src/ml/` | Touch-gesture pipeline (segmenter, features, classifier) — see [docs/TOUCH_ML.md](docs/TOUCH_ML.md) |
+| `src/gui/skin_shapes.py` | Shared skin-outline masks (round/triangle/thymio) + aspect ratio |
 | `src/robots/` | TurtleRobot, TreeRobot, ThymioRobot, SimulatedRobot |
-| `src/activities/` | Activity registry + GroupTouch + SimulationActivity |
+| `src/activities/` | Activity registry + GroupTouch + OrganSwap |
 | `src/gui/monitor/` | Live pressure monitor widgets |
+| `scripts/label_touches.py` / `scripts/train_touch_model.py` | Offline touch-gesture labelling + training (`.[ml]` extra) |
 | `src/log.py` | Centralized logging setup (console + rotating file) |
 | `config/settings.yaml` | Robot and hardware configuration |
 | `firmware/gateway/` | Gateway firmware (ESP-IDF, Seeed XIAO ESP32-C6) |

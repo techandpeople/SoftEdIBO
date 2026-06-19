@@ -9,6 +9,7 @@
 #include "config.h"
 #include "dbg.h"
 #include "mux.h"
+#include "organ.h"
 #include "pca_valves.h"
 #include "pins.h"
 #include "pumps.h"
@@ -27,6 +28,11 @@ uint32_t lastStatusMs = 0;
 using se::node::gatewayMac;
 using se::node::gatewayKnown;
 bool configured = false;
+
+// Organ channels arrive inside `configure` but are applied from loop() (not
+// the ESP-NOW receive task) so organ::tick never races a reconfiguration.
+int pendingOrganCh[organ::MAX_ORGANS] = {};
+volatile int pendingOrganCount = -1;   // -1 = nothing pending
 
 void sendRaw(const char* payload) {
     if (!gatewayKnown) return;
@@ -266,6 +272,20 @@ void parseAndQueue(const uint8_t* data, int len) {
             for (int i = inflate_count; i < inflate_count + deflate_count && i < NUM_PUMPS; i++) {
                 c.cfg_vacuum_mask |= (1u << i);
             }
+        }
+
+        // Organ circuits: list of mux channels; index in the list = slot in
+        // the organ broadcasts. Staged here, applied from loop().
+        JsonArray organ_channels = doc["organ_channels"].as<JsonArray>();
+        if (!organ_channels.isNull()) {
+            int count = 0;
+            for (JsonVariant v : organ_channels) {
+                int ch = v.as<int>();
+                if (count < organ::MAX_ORGANS && ch >= 0 && ch < mux::MUX_CHANNELS) {
+                    pendingOrganCh[count++] = ch;
+                }
+            }
+            pendingOrganCount = count;
         }
 #ifdef DEBUG_BUILD
     } else if (strcmp(cmd, "debug") == 0) {
@@ -527,6 +547,26 @@ void chamberControlStep(uint32_t now) {
     }
 }
 
+// Apply a staged organ-channel configuration: hand the channels to the organ
+// module and scrub them from any chamber/tank assignment the boot autodetect
+// may have claimed (organ circuits read mid-range when the cover is on, so
+// they can masquerade as pressure sensors during the scan).
+void applyPendingOrganChannels() {
+    int count = pendingOrganCount;
+    if (count < 0) return;
+    pendingOrganCount = -1;
+    organ::setChannels(pendingOrganCh, count);
+    for (int i = 0; i < count; i++) {
+        int ch = pendingOrganCh[i];
+        for (int c = 0; c < MAX_CHAMBERS; c++) {
+            if (config::state.chamber_mux_ch[c] == ch) config::state.chamber_mux_ch[c] = -1;
+        }
+        if (config::state.pressure_tank_mux_ch == ch) config::state.pressure_tank_mux_ch = -1;
+        if (config::state.vacuum_tank_mux_ch == ch) config::state.vacuum_tank_mux_ch = -1;
+    }
+    LOG("TODO: organ circuits on %d mux channel(s) — confirm wiring\n", count);
+}
+
 void onReceived(const uint8_t* mac_addr, const uint8_t* data, int len) {
     DBG_PRINT("RX %02X:%02X:%02X:%02X:%02X:%02X (%d) ",
               mac_addr[0], mac_addr[1], mac_addr[2],
@@ -604,6 +644,13 @@ void loop() {
     // Manual (dev) override: dead-man auto-off every loop (cheap, no I/O). When
     // it fires, autonomous control resumes on the next pressure tick.
     if (manualActive && now - manualTs >= MANUAL_MAX_ON_MS) manualClearAll();
+
+    // ---- Organ + cover sensing (per configured slot) ----
+    applyPendingOrganChannels();
+    organ::tick(now);
+
+    // ---- Child-safety watchdog: stop runaway actuations (sensor failure) ----
+    if (!manualActive) chambers::actuationWatchdog(now);
 
     if (now - lastPressureMs >= PRESSURE_CHECK_MS) {
         lastPressureMs = now;

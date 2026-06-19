@@ -19,6 +19,7 @@ class ESP32Controller:
         self._pressure_callbacks: list[Callable[[int, int], None]] = []
         self._tank_pressure_callbacks: list[Callable[[str, int], None]] = []
         self._magnet_callbacks: list[Callable[[dict[str, Any]], None]] = []
+        self._organ_callbacks: list[Callable[[float, int], None]] = []
         # Latest magnet sensor geometry, captured from a `node_magnet_sensor_ready` boot announce.
         # Shape: {"sensors": N, "magnets": M, "variant": str|None, "geometry": {...}}.
         self._magnet_geometry: dict[str, Any] | None = None
@@ -79,6 +80,7 @@ class ESP32Controller:
         tank_vacuum_max_kpa: float | None = None,
         tank_vacuum_target_kpa: float | None = None,
         pump_groups: dict[str, list[int]] | None = None,
+        organ_channels: list[int] | None = None,
     ) -> bool:
         """Configure a multiplexed node at runtime.
 
@@ -102,6 +104,8 @@ class ESP32Controller:
                 (kPa, typically negative). Firmware clamps it inside [min, max].
             pump_groups: Optional explicit mapping, e.g.
                 ``{"pressure":[1,3], "vacuum":[2,4]}``.
+            organ_channels: Mux channels carrying organ+cover circuits; the
+                index in this list becomes the ``slot`` in organ broadcasts.
         """
         payload: dict[str, Any] = {"num_chambers": int(num_chambers)}
         if pump_inflate_count is not None:
@@ -122,6 +126,8 @@ class ESP32Controller:
             payload["tank_vacuum_target_kpa"] = float(tank_vacuum_target_kpa)
         if pump_groups:
             payload["pump_groups"] = pump_groups
+        if organ_channels:
+            payload["organ_channels"] = [int(c) for c in organ_channels]
         return self.send_command("configure", **payload)
 
     def debug(self) -> bool:
@@ -194,6 +200,18 @@ class ESP32Controller:
         """
         self._magnet_callbacks.append(callback)
 
+    def on_organ(self, callback: Callable[[float, int], None]) -> None:
+        """Register a callback for organ-resistance (`type:"organ"`) messages.
+
+        Args:
+            callback: Called with ``(resistance_ohm, slot)``. The resistance
+                is the total of the organ network in ohms; an open circuit
+                (silicone cover off) is delivered as ``float("inf")``. ``slot``
+                is 0 on direct nodes; multiplexed nodes report one slot per
+                configured organ circuit (``configure`` ``organ_channels``).
+        """
+        self._organ_callbacks.append(callback)
+
     def get_last_status(self) -> dict[str, Any]:
         """Get the last known status of this ESP32 node."""
         return self._last_status.copy()
@@ -228,6 +246,14 @@ class ESP32Controller:
     def _dispatch_magnet(self, data: dict[str, Any]) -> None:
         self._call_callbacks(self._magnet_callbacks, data)
 
+    def _dispatch_organ(self, data: dict[str, Any]) -> None:
+        if data.get("open"):
+            resistance = float("inf")
+        else:
+            resistance = float(data.get("resistance_ohm", -1.0))
+        slot = int(data.get("slot", 0))
+        self._call_callbacks(self._organ_callbacks, resistance, slot)
+
     def _handle_message(self, data: dict[str, Any]) -> None:
         """Process incoming messages, filtering for this node's MAC."""
         if data.get("source") == self.mac_address:
@@ -257,6 +283,9 @@ class ESP32Controller:
 
             elif data.get("type") == "magnet":
                 self._dispatch_magnet(data)
+
+            elif data.get("type") == "organ":
+                self._dispatch_organ(data)
 
     def __repr__(self) -> str:
         return f"ESP32Controller(mac={self.mac_address!r})"
