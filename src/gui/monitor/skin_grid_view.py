@@ -58,7 +58,10 @@ class SkinGridView(QWidget):
         super().__init__(parent)
         self._skin = skin
         self._cell_px = max(8, int(cell_px))
-        self._shape = getattr(skin, "shape", "rect")
+        # Outline comes from the skin TYPE's registry geometry when set (the
+        # reliable source), falling back to the per-skin ``shape`` field.
+        geo = getattr(skin, "geometry", None)
+        self._shape = geo.shape if geo is not None else getattr(skin, "shape", "rect")
 
         self._chamber_cols, self._chamber_rows, self._chamber_grid = \
             self._read_chamber_layout(skin)
@@ -151,13 +154,13 @@ class SkinGridView(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
-        # Round skins clip every layer (background, regions, pulses) to the
-        # inscribed ellipse. Cells that straddle the border are cut by the
-        # circle instead of being individually blanked.
-        if self._shape == "round":
-            clip = QPainterPath()
-            clip.addEllipse(QRectF(0, 0, self.width(), self.height()))
-            p.setClipPath(clip)
+        # Non-rect skins clip every layer (background, regions, pulses) to the
+        # physical skin outline; cells that straddle the border are cut by the
+        # shape instead of being individually blanked.
+        from src.gui.skin_shapes import shape_path
+        outline = shape_path(self._shape, QRectF(0, 0, self.width(), self.height()))
+        if outline is not None:
+            p.setClipPath(outline)
 
         self._paint_empty_grid(p)
         for ch_idx, cells in self._regions:
@@ -165,13 +168,12 @@ class SkinGridView(QWidget):
         if self._active_sensors or self._active_chambers:
             self._paint_pulse_overlay(p)
 
-        # Always draw the circle outline last (unclipped) so the boundary is
-        # visible regardless of which cells fall inside it.
-        if self._shape == "round":
+        # Draw the outline last (unclipped) so the boundary is always visible.
+        if outline is not None:
             p.setClipping(False)
             p.setPen(QPen(_REGION_PEN, 2))
             p.setBrush(Qt.BrushStyle.NoBrush)
-            p.drawEllipse(QRectF(0, 0, self.width(), self.height()))
+            p.drawPath(outline)
 
     # ------------------------------------------------------------------
     # Painting helpers
@@ -280,13 +282,28 @@ class SkinGridView(QWidget):
         the next ``resizeEvent``."""
         side = self._SENSOR_BTN_SIZE
         for sensor_idx, btn in self._sensor_buttons.items():
-            cells = self._sensor_cells.get(sensor_idx)
-            if not cells:
-                continue
-            cx, cy = self._region_pixel_centre(cells,
-                                               self._sensor_cols,
-                                               self._sensor_rows)
-            btn.move(cx - side // 2, cy - side // 2)
+            pos = self._sensor_pixel_pos(sensor_idx)
+            if pos is None:
+                cells = self._sensor_cells.get(sensor_idx)
+                if not cells:
+                    continue
+                pos = self._region_pixel_centre(cells, self._sensor_cols,
+                                                self._sensor_rows)
+            btn.move(pos[0] - side // 2, pos[1] - side // 2)
+
+    def _sensor_pixel_pos(self, sensor_idx: int) -> tuple[int, int] | None:
+        """Pixel centre of a sensor from the skin type's registry COORDINATES
+        (so the T buttons sit exactly where the sensors are), or None when the
+        skin has no typed geometry (then a grid-cell centre is used)."""
+        geo = getattr(self._skin, "geometry", None)
+        if geo is None or sensor_idx >= len(geo.sensors_mm):
+            return None
+        x_mm, y_mm = geo.sensors_mm[sensor_idx]
+        w_mm, h_mm = geo.size_mm
+        if not (w_mm and h_mm):
+            return None
+        return (int(x_mm / w_mm * self.width()),
+                int(y_mm / h_mm * self.height()))
 
     def _region_pixel_centre(self, cells: list[tuple[int, int]],
                              cols: int, rows: int) -> tuple[int, int]:
@@ -325,7 +342,19 @@ class SkinGridView(QWidget):
         ``on_magnet`` event either way, so behaviour is identical when the real
         board is plugged in. Falls back to the local visual handler if there is
         no touch controller (visual-only skin)."""
-        data: dict[str, Any] = {"act": sorted(self._held_sensors)}
+        # Shape the simulated message like a real ``magnet`` one so it can be
+        # recorded and fed to the touch-gesture pipeline: a per-sensor ``mag``
+        # vector (1 for held sensors, 0 otherwise) alongside the active set.
+        held = sorted(self._held_sensors)
+        geo = getattr(self._skin, "geometry", None)
+        n = max((geo.sensor_count if geo else 0),
+                int((self._skin.touch or {}).get("sensor_count", 0)),
+                (max(held) + 1) if held else 0)
+        data: dict[str, Any] = {
+            "type": "magnet",
+            "act": held,
+            "mag": [1.0 if i in self._held_sensors else 0.0 for i in range(n)],
+        }
         source = (self._skin.touch or {}).get("node_mac")
         if source:
             data["source"] = source
@@ -531,8 +560,15 @@ class SkinGridView(QWidget):
     @staticmethod
     def _read_sensor_layout(skin: Skin, fallback_cols: int, fallback_rows: int
                             ) -> tuple[int, int, list[list[int]]]:
-        """Sensor dims come from ``skin.touch.grid``, falling back to the
-        chamber dims for legacy skins that share a single grid."""
+        """Sensor placement. For typed skins it comes from the geometry
+        registry's sensor COORDINATES (the constants), not a drawn grid; legacy
+        skins fall back to ``skin.touch.sensor_grid`` / chamber dims."""
+        geo = getattr(skin, "geometry", None)
+        if geo is not None and geo.sensor_count:
+            # Size the grid to the actual sensor arrangement (e.g. 2×2 for a
+            # quadrant layout) so each sensor's touch highlight fills its whole
+            # region instead of a single cell of an oversized 4×4 grid.
+            return geo.natural_sensor_grid()
         touch = skin.touch or {}
         grid_cfg = touch.get("grid") or {}
         cols = max(1, int(grid_cfg.get("cols", fallback_cols)))

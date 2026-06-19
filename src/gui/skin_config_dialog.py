@@ -200,8 +200,37 @@ class SkinConfigDialog(QDialog):
         self._skin_id_edit.textEdited.connect(self._on_skin_id_edited)
         self._name_edit = QLineEdit()
         self._name_edit.setPlaceholderText("Display name (e.g. Belly)")
-        form.addRow("Skin ID:", self._skin_id_edit)
-        form.addRow("Name:",    self._name_edit)
+        # Skin type — indexes the hardcoded geometry registry (shape + sensor
+        # coordinates) and the per-type touch-gesture model. Only the types of
+        # THIS robot kind are offered, so e.g. configuring a Tree never shows
+        # Turtle shapes. Geometry (shape) is driven by the chosen type — there
+        # is no separate freeform shape selector.
+        self._skin_type_combo = QComboBox()
+        from src.hardware.skin_geometry import skin_types_for
+        types = skin_types_for(self._robot_type)
+        single_type = len(types) == 1
+        # When the robot has several skin types (Turtle), offer a choice with an
+        # opt-out. When it has exactly one (Tree, Thymio) there is nothing to
+        # choose — preselect it and hide the row below.
+        if not single_type:
+            self._skin_type_combo.addItem("(none)", "")
+        for st in types:
+            self._skin_type_combo.addItem(st, st)
+        self._skin_type_combo.setToolTip(
+            "Skin type for this robot. Determines the shape and sensor layout "
+            "(from src/hardware/skin_geometry.py) and selects the touch-gesture "
+            "model."
+        )
+        self._skin_type_combo.currentIndexChanged.connect(
+            self._on_skin_type_changed)
+        form.addRow("Skin ID:",   self._skin_id_edit)
+        form.addRow("Name:",      self._name_edit)
+        form.addRow("Skin type:", self._skin_type_combo)
+        if single_type:
+            try:
+                form.setRowVisible(self._skin_type_combo, False)
+            except (AttributeError, TypeError):
+                self._skin_type_combo.setVisible(False)
         left.addLayout(form)
 
         # Chamber rows inside a scroll area
@@ -261,10 +290,18 @@ class SkinConfigDialog(QDialog):
         helpers so ``__init__`` stays simple."""
         self._skin_id_edit.setText(skin_cfg.get("skin_id", ""))
         self._name_edit.setText(skin_cfg.get("name", ""))
+        # Select the saved skin_type by data; its registry geometry then drives
+        # the shape (via _on_skin_type_changed). Fall back to the stored shape
+        # only when the skin has no (registered) type.
+        st_idx = self._skin_type_combo.findData(skin_cfg.get("skin_type", ""))
+        self._skin_type_combo.setCurrentIndex(st_idx if st_idx >= 0 else 0)
         self._populate_chambers(skin_cfg)
         touch_cfg = skin_cfg.get("touch") or {}
         self._populate_touch_header(touch_cfg)
-        self._populate_shape(skin_cfg.get("shape", "rect"))
+        if not self._skin_type_combo.currentData():
+            self._populate_shape(skin_cfg.get("shape", "rect"))
+        else:
+            self._on_skin_type_changed()
         self._populate_dims(skin_cfg.get("grid") or {}, touch_cfg.get("grid"))
         self._grid.set_chamber_grid(skin_cfg.get("chamber_grid"))
         self._grid.set_sensor_grid(touch_cfg.get("sensor_grid"))
@@ -298,9 +335,11 @@ class SkinConfigDialog(QDialog):
                        sensor_grid_cfg: dict | None) -> None:
         """Apply per-layer dimensions from YAML. Chamber dims come from
         ``grid``; sensor dims from ``touch.grid`` (falling back to chamber
-        dims for legacy skins without a separate sensor grid)."""
-        ch_cols = int(grid_cfg.get("cols", 8))
-        ch_rows = int(grid_cfg.get("rows", 4))
+        dims for legacy skins without a separate sensor grid). A brand-new skin
+        (no saved grid) starts at 3×3."""
+        d_cols, d_rows = (3, 3) if self._skin_index < 0 else (8, 4)
+        ch_cols = int(grid_cfg.get("cols", d_cols))
+        ch_rows = int(grid_cfg.get("rows", d_rows))
         sn = sensor_grid_cfg or grid_cfg
         sn_cols = int(sn.get("cols", ch_cols))
         sn_rows = int(sn.get("rows", ch_rows))
@@ -556,10 +595,10 @@ class SkinConfigDialog(QDialog):
         group = QGroupBox("Skin layout (chambers + zones)")
         v = QVBoxLayout(group)
 
-        # Shape selector — applies to BOTH layers; the grid editor masks
-        # off-circle cells when ``round`` is picked. Put into its own
-        # QButtonGroup so it stays independent from the Mode radios below
-        # (Qt's default exclusivity would otherwise lump them together).
+        # Shape is now DERIVED from the chosen skin_type (geometry registry),
+        # not freely selectable — so this robot only ever shows its own shapes.
+        # The radios are kept (other code reads/writes them + the grid mask)
+        # but hidden; ``_on_skin_type_changed`` drives them from the registry.
         shape_row = QHBoxLayout()
         shape_row.addWidget(QLabel("Shape:"))
         self._shape_rect_btn  = QRadioButton("Rectangle")
@@ -572,7 +611,10 @@ class SkinConfigDialog(QDialog):
         shape_row.addWidget(self._shape_rect_btn)
         shape_row.addWidget(self._shape_round_btn)
         shape_row.addStretch()
-        v.addLayout(shape_row)
+        self._shape_row_widget = QWidget()
+        self._shape_row_widget.setLayout(shape_row)
+        self._shape_row_widget.setVisible(False)
+        v.addWidget(self._shape_row_widget)
 
         # Per-layer dimensions — the Mode buttons come FIRST so the user
         # picks what they're editing, then sees the dims for that layer.
@@ -582,7 +624,12 @@ class SkinConfigDialog(QDialog):
         # doesn't fight the Shape radios.
         size_row = QHBoxLayout()
 
-        size_row.addWidget(QLabel("Mode:"))
+        # Sensors are hardcoded per skin_type in the geometry registry — they
+        # are NOT painted here. The grid editor is chamber-only, so the
+        # layer-switch ("Mode") is built (other code reads the radios) but
+        # hidden; the chamber layer is always active.
+        self._mode_label = QLabel("Mode:")
+        size_row.addWidget(self._mode_label)
         self._mode_chamber = QRadioButton("Chambers")
         self._mode_sensor  = QRadioButton("Touch zones")
         self._mode_chamber.setChecked(True)
@@ -592,6 +639,8 @@ class SkinConfigDialog(QDialog):
         self._mode_group.addButton(self._mode_sensor)
         size_row.addWidget(self._mode_chamber)
         size_row.addWidget(self._mode_sensor)
+        for _w in (self._mode_label, self._mode_chamber, self._mode_sensor):
+            _w.setVisible(False)
         size_row.addSpacing(12)
 
         self._layer_dims_label = QLabel("Chamber grid:")
@@ -665,6 +714,29 @@ class SkinConfigDialog(QDialog):
         shape = "round" if self._shape_round_btn.isChecked() else "rect"
         self._grid.set_shape(shape)
 
+    def _on_skin_type_changed(self, _index: int = 0) -> None:
+        """Drive the grid's outline + aspect ratio from the chosen skin type's
+        registry geometry (square vs rectangle vs round/triangle/'D')."""
+        from src.hardware.skin_geometry import geometry_for
+        geo = geometry_for(self._skin_type_combo.currentData())
+        if geo is None:
+            self._grid.set_geometry("rect", None)
+            self._shape_rect_btn.setChecked(True)
+            self._sensor_count_spin.setEnabled(True)   # legacy skin: editable
+            self._sensor_count_spin.setToolTip("")
+            return
+        self._grid.set_geometry(geo.shape, geo.size_mm)
+        # Sensor count is a registry constant for this type — show it, read-only.
+        self._sensor_count_spin.setValue(geo.sensor_count)
+        self._sensor_count_spin.setEnabled(False)
+        self._sensor_count_spin.setToolTip(
+            "Fixed by the skin type (geometry registry).")
+        # Keep the (hidden) radios consistent for the legacy ``shape`` save.
+        if geo.shape == "round":
+            self._shape_round_btn.setChecked(True)
+        else:
+            self._shape_rect_btn.setChecked(True)
+
     def _apply_layout_and_touch(self, skin_entry: dict) -> None:
         """Persist grid + touch fields onto ``skin_entry`` (only when used)."""
         chamber_grid = self._grid.chamber_grid()
@@ -687,26 +759,14 @@ class SkinConfigDialog(QDialog):
             skin_entry["chamber_grid"] = chamber_grid
 
         touch_mac = self._touch_mac_combo.currentData() or ""
-        # Persist whatever the user has filled in. The touch block is written
-        # even without a node_mac so painted zones survive across saves while
-        # the user is still wiring things up. Activities just won't act on
-        # touch events until ``node_mac`` is set.
-        if not (touch_mac or sensors_painted):
+        # Touch wiring only — which magnet node feeds this skin. Sensor LAYOUT
+        # (count + positions) comes from the skin_type geometry registry, not a
+        # drawn sensor_grid. We persist node_mac (+ sensor_count for skins
+        # without a type); the sensor_grid is no longer written.
+        if not touch_mac:
             return
-        touch_entry: dict = {
-            "sensor_count": int(self._sensor_count_spin.value()),
-        }
-        if touch_mac:
-            touch_entry["node_mac"] = touch_mac
-        # Only persist a separate sensor grid dimension when it actually
-        # differs from the chamber grid — keeps existing YAMLs untouched if
-        # the user never changed the sensor resolution.
-        sn_cols, sn_rows = self._grid.sensor_cols(), self._grid.sensor_rows()
-        if (sn_cols, sn_rows) != (self._grid.chamber_cols(),
-                                  self._grid.chamber_rows()):
-            touch_entry["grid"] = {"cols": sn_cols, "rows": sn_rows}
-        if sensors_painted:
-            touch_entry["sensor_grid"] = sensor_grid
+        touch_entry: dict = {"node_mac": touch_mac,
+                             "sensor_count": int(self._sensor_count_spin.value())}
         skin_entry["touch"] = touch_entry
 
     def _rebuild_palette(self) -> None:
@@ -876,6 +936,9 @@ class SkinConfigDialog(QDialog):
                 del ch["max_pressure"]
 
         skin_entry: dict = {"skin_id": skin_id, "name": name, "chambers": chambers}
+        skin_type = self._skin_type_combo.currentData() or ""
+        if skin_type:
+            skin_entry["skin_type"] = skin_type
         self._apply_layout_and_touch(skin_entry)
 
         data = self._settings.data

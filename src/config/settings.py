@@ -96,6 +96,20 @@ class Settings:
         return self.ROOT / rel
 
     @property
+    def recordings_dir(self) -> Path:
+        """Folder where per-session sensor-stream JSONL recordings are written.
+
+        Configurable via ``data.recordings_dir`` in settings.yaml (absolute, or
+        relative to the app data root). Defaults to ``data/recordings``."""
+        rel = self._data.get("data", {}).get("recordings_dir", "data/recordings")
+        p = Path(rel)
+        return p if p.is_absolute() else self.ROOT / p
+
+    def set_recordings_dir(self, path: str) -> None:
+        """Persist the recordings folder (stored as given — absolute or relative)."""
+        self._data.setdefault("data", {})["recordings_dir"] = str(path)
+
+    @property
     def gateway_port(self) -> str:
         """Serial port for the ESP-NOW gateway."""
         default = "COM3" if sys.platform == "win32" else "/dev/ttyUSB0"

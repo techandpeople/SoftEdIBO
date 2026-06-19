@@ -35,7 +35,7 @@ class SimulatedMagnetSensor:
     def __init__(self, mac_address: str) -> None:
         self.mac_address = mac_address
         self._magnet_callbacks:   list[Callable[[dict[str, Any]], None]] = []
-        self._organ_callbacks: list[Callable[[float], None]] = []
+        self._organ_callbacks: list[Callable[[float, int], None]] = []
         self._touch_callbacks: list[Callable[[int, int], None]] = []
 
     @property
@@ -80,9 +80,11 @@ class SimulatedMagnetSensor:
     # Organ bio-impedance (cure signal); debug-firable in simulation
     # ------------------------------------------------------------------
 
-    def on_organ(self, callback: Callable[[float], None]) -> None:
+    def on_organ(self, callback: Callable[[float, int], None]) -> None:
+        """Same contract as ``ESP32Controller.on_organ``: ``cb(resistance_ohm,
+        slot)``; ``float("inf")`` means open circuit (cover off)."""
         self._organ_callbacks.append(callback)
 
-    def fire_organ(self, resistance_ohm: float) -> None:
+    def fire_organ(self, resistance_ohm: float, slot: int = 0) -> None:
         for cb in self._organ_callbacks:
-            cb(float(resistance_ohm))
+            cb(float(resistance_ohm), slot)

@@ -26,8 +26,14 @@ robots:
 #       skins:
 #         - skin_id: belly
 #           name: Belly
-#           # Skin shape: "rect" (default) or "round". Round masks off-circle
-#           # cells in both the editor and the activity view.
+#           # Skin type — picks the hardcoded geometry (shape + sensor
+#           # coordinates) from src/hardware/skin_geometry.py and the per-type
+#           # touch-gesture model. Offered (filtered by robot) in the skin
+#           # dialog. When set, it supersedes the legacy per-skin shape/grids.
+#           # e.g. turtle_square | turtle_side | turtle_triangle
+#           #      | tree_round | thymio
+#           skin_type: turtle_square
+#           # Legacy fallback for skins WITHOUT a skin_type: "rect"/"round".
 #           shape: rect
 #           chambers:
 #             # Chambers fed only by the pressure tank: keep min_pressure at 0.
@@ -83,6 +89,11 @@ database:
   user: softedibo
   password: ''
   name: softedibo
+
+data:
+  # Folder for per-session sensor-stream JSONL recordings (absolute, or relative
+  # to the app data root). Also editable in Settings → Recordings.
+  recordings_dir: data/recordings
 
 # Example OrganSwap activity configuration (saved as DB preset, not YAML):
 # activity_presets:

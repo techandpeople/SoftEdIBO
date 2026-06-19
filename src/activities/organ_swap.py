@@ -1,34 +1,52 @@
 """OrganSwap activity — heal a soft robot by plugging in the right organs.
 
-State machine (per robot):
+State machine (per **patient**). A patient is the curable unit:
 
-    ┌──────┐  organs_match?  ┌───────┐
-    │ SICK │ ──────────────► │ CURED │
-    └──────┘                 └───────┘
-       │ on_enter:                │ on_enter:
-       │  - LED pulsing red       │  - LED solid green
-       │  - touch → inflate       │  - breathing animation
-       │ periodic:                │ periodic:
-       │  - small idle "pant"     │  - slow inflate/deflate cycle
-       └──────────────────────────┘
+- a whole robot sharing one organ circuit (Turtle: the group cures one
+  patient together; Thymio: one robot per child), or
+- a single skin with its own organ circuit — declared via the skin's
+  ``organ: {slot, node_mac?}`` config block (Tree: one patient per branch).
 
-Hardware support is wired through getattr so the activity runs even before
-``set_led`` / ``on_organ`` land on ``ESP32Controller`` (Phase 1d). In
-simulation mode, the LED commands are silently swallowed and the operator
-drives organ swaps via the dialog's "Organ catalogue" tool (planned —
-today, transitions are exposed via :meth:`force_state` so the GUI can fire
-them manually for testing).
+The silicone cover closes the organ sensing circuit, so the firmware
+reports an open circuit while the cover is off:
+
+    ┌──────┐  cover off   ┌──────┐  cover on +    ┌───────┐
+    │ SICK │ ───────────► │ OPEN │  organs match  │ CURED │
+    └──────┘ ◄─────────── └──────┘ ─────────────► └───────┘
+       │ cover on, wrong organs        ▲    cover off │
+       │                               └──────────────┘
+       │ SICK:  LED pulsing red, touch → inflate
+       │ OPEN:  LED pulsing blue ("surgery"), chambers deflated
+       │ CURED: LED solid green, breathing animation
+
+Responsibilities are split across collaborators:
+
+- :class:`~src.hardware.organ_sensor.OrganSensor` — turns the raw controller
+  readings into cover / resistance events.
+- :class:`~src.activities.organ_matching.OrganMatcher` — decides whether a
+  resistance means "cured" (aggregate or per-organ catalogue decomposition).
+- This class — per-patient state machine, LED / chamber reactions, and
+  behavioral event logging via ``BaseActivity.log_event``.
+
+Hardware support is wired through getattr so the activity runs against any
+controller that exposes the relevant slice (``set_led`` / ``on_organ`` /
+``on_magnet``) — real or simulated. Transitions can also be forced via
+:meth:`force_state` for GUI testing.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import time
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import QObject, QTimer
 
 from src.activities.base_activity import BaseActivity, Param
+from src.activities.organ_matching import OrganMatcher
+from src.hardware.organ_sensor import OrganSensor
 from src.robots.base_robot import BaseRobot
 
 if TYPE_CHECKING:
@@ -38,7 +56,19 @@ logger = logging.getLogger(__name__)
 
 
 STATE_SICK  = "sick"
+STATE_OPEN  = "open"     # cover off — "surgery" in progress
 STATE_CURED = "cured"
+
+
+@dataclass
+class _Patient:
+    """One curable unit: a whole robot sharing a single organ circuit, or a
+    single skin with its own circuit (``skin.organ``). Holds the skins it
+    animates and the OrganSensor(s) watching its circuit."""
+    patient_id: str
+    robot: BaseRobot
+    skins: list[Any]
+    sensors: list[OrganSensor] = field(default_factory=list)
 
 
 class OrganSwapActivity(BaseActivity):
@@ -88,6 +118,12 @@ class OrganSwapActivity(BaseActivity):
         Param(
             name="sick_color", type="color", default="#e74c3c",
             label="Sick LED colour",
+        ),
+        Param(
+            name="open_color", type="color", default="#3498db",
+            label="Open (cover off) LED colour",
+            description="Shown while the silicone cover is off and the "
+                        "organ circuit is open — the 'surgery' phase.",
         ),
         Param(
             name="sick_pulse_ms", type="int", default=1000, min=100, max=5000,
@@ -150,11 +186,16 @@ class OrganSwapActivity(BaseActivity):
             description="Heal the robot by swapping bad organs for good ones.",
         )
         self._robots: list[BaseRobot] = []
-        # Per-robot state machine (always per-robot for this activity — each
-        # child works on their own robot independently).
+        # Curable units, keyed by patient_id (robot_id for whole-robot
+        # patients, "robot_id/skin_id" for per-skin patients like Tree
+        # branches). The state machine runs per patient.
+        self._patients: dict[str, _Patient] = {}
+        self._skin_patient: dict[str, str] = {}   # skin_id → patient_id
         self._state: dict[str, str] = {}
         self._cured_at: dict[str, float] = {}
         self._last_resistance: dict[str, float] = {}
+        # Cure decision logic, built from the preset params in _setup.
+        self._matcher: OrganMatcher | None = None
         # Periodic driver for breathing + idle "pant". Started in ``start``,
         # paused/stopped via the BaseActivity lifecycle.
         self._tick_owner: QObject | None = None
@@ -174,17 +215,23 @@ class OrganSwapActivity(BaseActivity):
 
     def _setup(self, session: "Session", robots: list[BaseRobot]) -> None:
         self._robots = robots
+        self._matcher = OrganMatcher.from_params(self.param_values)
         for robot in robots:
-            self._state[robot.robot_id] = STATE_SICK
-            self._last_resistance[robot.robot_id] = float("inf")
-            self._subscribe_robot(robot)
-        logger.info("OrganSwap set up with %d robots", len(robots))
+            for patient in self._build_patients(robot):
+                self._patients[patient.patient_id] = patient
+                self._state[patient.patient_id] = STATE_SICK
+                self._last_resistance[patient.patient_id] = float("inf")
+                for skin in patient.skins:
+                    self._skin_patient[skin.skin_id] = patient.patient_id
+            self._subscribe_touch(robot)
+        logger.info("OrganSwap set up with %d robots / %d patients",
+                    len(robots), len(self._patients))
 
     def start(self) -> None:
-        # Kick every robot into its initial state (sick) so the LED and any
+        # Kick every patient into its initial state (sick) so the LED and any
         # other on_enter actions fire immediately.
-        for robot in self._robots:
-            self._enter_state(robot, STATE_SICK)
+        for patient in self._patients.values():
+            self._enter_state(patient, STATE_SICK)
         # Drive periodic animations on a 60 ms tick — enough for visibly
         # smooth breathing without burning CPU.
         self._tick_owner = QObject()
@@ -212,11 +259,14 @@ class OrganSwapActivity(BaseActivity):
         self._active_touch.clear()
         self._tick_owner = None
         for robot in self._robots:
-            for ctrl in self._controllers_of(robot):
+            for ctrl in self._controllers_of_skins(
+                    getattr(robot, "skins", {}).values()):
                 set_led = getattr(ctrl, "set_led", None)
                 if set_led is not None:
                     set_led("#000000", pattern="off", period_ms=0)
         self._robots = []
+        self._patients.clear()
+        self._skin_patient.clear()
         self._state.clear()
         self._cured_at.clear()
         self._last_resistance.clear()
@@ -232,104 +282,196 @@ class OrganSwapActivity(BaseActivity):
     # Operator hooks (useful for the preset editor / debug panel)
     # ------------------------------------------------------------------
 
-    def force_state(self, robot_id: str, state: str) -> None:
-        """Set a robot's state from outside (debug button or scripted demo)."""
-        if state not in (STATE_SICK, STATE_CURED):
+    def force_state(self, patient_id: str, state: str) -> None:
+        """Set a patient's state from outside (debug button or scripted demo).
+        ``patient_id`` is the robot_id for whole-robot patients."""
+        if state not in (STATE_SICK, STATE_OPEN, STATE_CURED):
             return
-        robot = next((r for r in self._robots if r.robot_id == robot_id), None)
-        if robot is None:
+        patient = self._patients.get(patient_id)
+        if patient is None:
             return
-        self._enter_state(robot, state)
+        self._enter_state(patient, state)
 
-    def robot_state(self, robot_id: str) -> str:
-        return self._state.get(robot_id, STATE_SICK)
+    def robot_state(self, patient_id: str) -> str:
+        """Current state of a patient (robot_id for whole-robot patients)."""
+        return self._state.get(patient_id, STATE_SICK)
 
     # ------------------------------------------------------------------
     # State machine
     # ------------------------------------------------------------------
 
-    def _enter_state(self, robot: BaseRobot, state: str) -> None:
-        prev = self._state.get(robot.robot_id)
-        self._state[robot.robot_id] = state
+    def _enter_state(self, patient: _Patient, state: str) -> None:
+        prev = self._state.get(patient.patient_id)
+        self._state[patient.patient_id] = state
         if state == STATE_CURED:
-            self._cured_at[robot.robot_id] = time.monotonic()
-            self._set_robot_led(
-                robot,
+            self._cured_at[patient.patient_id] = time.monotonic()
+            self._set_patient_led(
+                patient,
                 color=self.param_values["cured_color"],
                 pattern="solid",
                 period_ms=0,
             )
+        elif state == STATE_OPEN:
+            # Cover off — "surgery" phase: blue pulse, patient deflated so
+            # the chambers don't fight the child working on the organs.
+            self._cured_at.pop(patient.patient_id, None)
+            self._set_patient_led(
+                patient,
+                color=self.param_values["open_color"],
+                pattern="pulse",
+                period_ms=int(self.param_values["sick_pulse_ms"]),
+            )
+            for skin in patient.skins:
+                for chamber_id in skin.chambers:
+                    skin.set_pressure(chamber_id, 0)
         else:  # sick
-            self._cured_at.pop(robot.robot_id, None)
-            self._set_robot_led(
-                robot,
+            self._cured_at.pop(patient.patient_id, None)
+            self._set_patient_led(
+                patient,
                 color=self.param_values["sick_color"],
                 pattern="pulse",
                 period_ms=int(self.param_values["sick_pulse_ms"]),
             )
         if prev != state:
-            logger.info("OrganSwap %s → %s", robot.robot_id, state)
+            logger.info("OrganSwap %s → %s", patient.patient_id, state)
+            self.log_event(
+                "activity", "state", target=patient.patient_id,
+                metadata=json.dumps({"from": prev, "to": state}),
+            )
 
     def _on_tick(self) -> None:
-        """Periodic driver — runs every 60 ms. Per-robot:
+        """Periodic driver — runs every 60 ms. Per-patient:
         - SICK: nothing (touches drive inflation reactively).
         - CURED: update each chamber's target to follow the breathing sine."""
         period = max(100, int(self.param_values["breathe_period_ms"]))
         depth  = max(0, min(100, int(self.param_values["breathe_depth_pct"])))
-        for robot in self._robots:
-            if self._state.get(robot.robot_id) != STATE_CURED:
+        for patient in self._patients.values():
+            if self._state.get(patient.patient_id) != STATE_CURED:
                 continue
-            self._breathe(robot, period, depth)
+            self._breathe(patient, period, depth)
 
-    def _breathe(self, robot: BaseRobot, period_ms: int, depth_pct: int) -> None:
+    def _breathe(self, patient: _Patient, period_ms: int, depth_pct: int) -> None:
         import math
-        elapsed = (time.monotonic() - self._cured_at.get(robot.robot_id, 0)) * 1000
+        elapsed = (time.monotonic()
+                   - self._cured_at.get(patient.patient_id, 0)) * 1000
         phase = (elapsed % period_ms) / period_ms          # 0..1
         # Sine raised so it's always ≥0; full breath = depth_pct.
         target = int(depth_pct * 0.5 * (1 - math.cos(2 * math.pi * phase)))
-        skins = getattr(robot, "skins", {})
-        for skin in skins.values():
+        for skin in patient.skins:
             for chamber_id in skin.chambers:
                 skin.set_pressure(chamber_id, target)
 
     # ------------------------------------------------------------------
-    # Event handlers — wired via _subscribe_robot
+    # Patient construction
     # ------------------------------------------------------------------
 
-    def _subscribe_robot(self, robot: BaseRobot) -> None:
-        for ctrl in self._controllers_of(robot):
-            on_organ = getattr(ctrl, "on_organ", None)
-            if on_organ is not None:
-                on_organ(lambda r, rb=robot: self._on_organ(rb, r))
-        # Touch is subscribed **per skin**, bound to that skin's own touch
-        # controller, so a touch on one skin only drives that skin's chambers
-        # (no cross-skin leakage). Each skin has its own magnet sensor (real node_magnet_sensor or
-        # a per-skin SimulatedMagnetSensor), so the binding is unambiguous.
+    def _build_patients(self, robot: BaseRobot) -> list[_Patient]:
+        """Split a robot into curable patients.
+
+        A skin carrying its own ``organ: {slot, node_mac?}`` block becomes its
+        own patient (Tree branch); every skin without one is folded into a
+        single whole-robot patient sharing the robot's organ circuit
+        (Turtle / Thymio). Each patient gets the OrganSensor(s) bound to its
+        circuit so its cover/resistance events are independent."""
+        skins = list(getattr(robot, "skins", {}).values())
+        per_skin = [s for s in skins if getattr(s, "organ", None)]
+        shared = [s for s in skins if not getattr(s, "organ", None)]
+
+        patients: list[_Patient] = []
+
+        # Per-skin patients (own circuit on a named slot).
+        for skin in per_skin:
+            organ_cfg = skin.organ or {}
+            slot = int(organ_cfg.get("slot", 0))
+            mac = organ_cfg.get("node_mac")
+            ctrl = self._organ_controller(skin, mac)
+            patient = _Patient(
+                patient_id=f"{robot.robot_id}/{skin.skin_id}",
+                robot=robot, skins=[skin])
+            self._bind_sensor(patient, ctrl, slot)
+            patients.append(patient)
+
+        # One whole-robot patient for the rest (shared circuit, slot 0).
+        if shared:
+            patient = _Patient(patient_id=robot.robot_id,
+                               robot=robot, skins=shared)
+            for ctrl in self._controllers_of_skins(shared):
+                self._bind_sensor(patient, ctrl, 0)
+            patients.append(patient)
+
+        return patients
+
+    @staticmethod
+    def _organ_controller(skin: Any, node_mac: str | None) -> Any:
+        """Resolve the controller carrying a per-skin organ circuit. Defaults
+        to the skin's own chamber controller; ``node_mac`` (rarely needed)
+        points at the touch controller when the circuit lives elsewhere."""
+        ctrl = getattr(skin, "_ctrl", None)
+        if node_mac and getattr(ctrl, "mac_address", None) != node_mac:
+            touch = getattr(skin, "touch_controller", None)
+            if getattr(touch, "mac_address", None) == node_mac:
+                return touch
+        return ctrl
+
+    def _bind_sensor(self, patient: _Patient, ctrl: Any, slot: int) -> None:
+        """Attach an OrganSensor on ``ctrl``/``slot`` to this patient."""
+        if ctrl is None or getattr(ctrl, "on_organ", None) is None:
+            return
+        sensor = OrganSensor(ctrl, slot=slot)
+        sensor.on_cover(
+            lambda closed, p=patient, s=sensor: self._on_cover(p, s, closed))
+        sensor.on_resistance(
+            lambda ohm, p=patient: self._on_resistance(p, ohm))
+        patient.sensors.append(sensor)
+
+    def _subscribe_touch(self, robot: BaseRobot) -> None:
+        """Subscribe to each skin's magnet board for touch reactions. Bound
+        per skin so a touch on one skin only drives that skin's chambers."""
         for skin in getattr(robot, "skins", {}).values():
             tc = getattr(skin, "touch_controller", None)
             on_magnet = getattr(tc, "on_magnet", None) if tc is not None else None
             if on_magnet is not None:
-                on_magnet(lambda data, rb=robot, sk=skin: self._on_magnet(rb, sk, data))
+                on_magnet(lambda data, sk=skin: self._on_magnet(sk, data))
 
-    def _on_organ(self, robot: BaseRobot, resistance_ohm: float) -> None:
-        """Firmware reports the combined resistance for this robot. Re-evaluate
-        the cure condition and transition if needed."""
-        self._last_resistance[robot.robot_id] = float(resistance_ohm)
-        if self._is_cured(resistance_ohm):
-            if self._state.get(robot.robot_id) != STATE_CURED:
-                self._enter_state(robot, STATE_CURED)
+    # ------------------------------------------------------------------
+    # Event handlers
+    # ------------------------------------------------------------------
+
+    def _on_cover(self, patient: _Patient, sensor: OrganSensor,
+                  closed: bool) -> None:
+        """The silicone cover opened or closed this patient's organ circuit."""
+        self.log_event("cover", "close" if closed else "open",
+                       target=patient.patient_id)
+        if not closed:
+            self._last_resistance[patient.patient_id] = float("inf")
+            if self._state.get(patient.patient_id) != STATE_OPEN:
+                self._enter_state(patient, STATE_OPEN)
         else:
-            if self._state.get(robot.robot_id) != STATE_SICK:
-                self._enter_state(robot, STATE_SICK)
+            self._evaluate(patient, sensor.resistance_ohm)
 
-    def _on_magnet(self, robot: BaseRobot, skin, data: dict[str, Any]) -> None:
-        """Route this **skin's** magnet sensor sensor activations to its chamber actions.
+    def _on_resistance(self, patient: _Patient, resistance_ohm: float) -> None:
+        """The organ network's resistance changed (cover is on)."""
+        self.log_event("organ", "reading", target=patient.patient_id,
+                       metadata=f"{resistance_ohm:.1f}")
+        self._evaluate(patient, resistance_ohm)
+
+    def _evaluate(self, patient: _Patient, resistance_ohm: float) -> None:
+        """Re-run the cure decision and transition if needed."""
+        self._last_resistance[patient.patient_id] = float(resistance_ohm)
+        cured = self._matcher is not None and self._matcher.is_cured(resistance_ohm)
+        target = STATE_CURED if cured else STATE_SICK
+        if self._state.get(patient.patient_id) != target:
+            self._enter_state(patient, target)
+
+    def _on_magnet(self, skin, data: dict[str, Any]) -> None:
+        """Route this **skin's** magnet sensor activations to its chamber actions.
         The magnet sensor streams the set of *currently active* sensors in ``act``; we
         edge-detect against the previous set so a sensor entering the set
         inflates its mapped chamber and a sensor leaving it (the release) starts
-        the deflate countdown. Only active in SICK state; the cured robot
-        ignores touches and just breathes."""
-        if self._state.get(robot.robot_id) != STATE_SICK:
+        the deflate countdown. Only active while this skin's patient is SICK;
+        a cured/open patient ignores touches and just breathes (or rests)."""
+        patient_id = self._skin_patient.get(skin.skin_id)
+        if patient_id is None or self._state.get(patient_id) != STATE_SICK:
             return
         active = data.get("act") or []
         if not isinstance(active, list):
@@ -407,87 +549,34 @@ class OrganSwapActivity(BaseActivity):
             return
 
     # ------------------------------------------------------------------
-    # Cure logic
-    # ------------------------------------------------------------------
-
-    def _is_cured(self, resistance_ohm: float) -> bool:
-        mode = self.param_values["organ_readout_mode"]
-        if mode == "per_organ":
-            return self._matches_per_organ(resistance_ohm)
-        return self._matches_aggregate(resistance_ohm)
-
-    def _matches_aggregate(self, resistance_ohm: float) -> bool:
-        target = float(self.param_values["cured_total_resistance_ohm"])
-        tol    = float(self.param_values["cured_tolerance_ohm"])
-        return abs(resistance_ohm - target) <= tol
-
-    def _matches_per_organ(self, resistance_ohm: float) -> bool:
-        """Decompose the measured total against the catalogue (1/Rtot =
-        Σ 1/Ri) and return True only when the best-matching subset is
-        exactly the set of "good" organs.
-
-        Convention: organ IDs ending in ``_good`` are required; anything
-        else (e.g. ``_bad``) is forbidden. Empty catalogue or no good
-        organs fall back to the aggregate check so the activity stays
-        usable while the operator is still authoring the preset.
-        """
-        from itertools import combinations
-        catalogue: dict[str, float] = self.param_values.get("organ_catalogue") or {}
-        if not catalogue:
-            return self._matches_aggregate(resistance_ohm)
-        required = {k for k in catalogue if k.endswith("_good")}
-        if not required:
-            return self._matches_aggregate(resistance_ohm)
-        tolerance = float(self.param_values["cured_tolerance_ohm"])
-        best_subset: set[str] | None = None
-        best_diff = float("inf")
-        keys = list(catalogue.keys())
-        for size in range(1, len(keys) + 1):
-            for combo in combinations(keys, size):
-                r_total = self._parallel_resistance(
-                    [catalogue[k] for k in combo]
-                )
-                diff = abs(r_total - resistance_ohm)
-                if diff < best_diff:
-                    best_diff = diff
-                    best_subset = set(combo)
-        if best_subset is None or best_diff > tolerance:
-            return False
-        return best_subset == required
-
-    @staticmethod
-    def _parallel_resistance(values: list[float]) -> float:
-        """1 / Rtot = Σ 1 / Ri (parallel circuit). Ignores non-positive
-        values; returns +inf for an empty (or all-zero) input."""
-        inv_sum = sum(1.0 / v for v in values if v > 0)
-        return 1.0 / inv_sum if inv_sum > 0 else float("inf")
-
-    # ------------------------------------------------------------------
     # Controller helpers
     # ------------------------------------------------------------------
 
-    def _controllers_of(self, robot: BaseRobot):
-        """Yield each unique controller of the robot's skins. Robots expose
-        their controllers privately, so we walk the skins instead — that
+    @staticmethod
+    def _controllers_of_skins(skins):
+        """Yield each unique controller (chamber + touch) of the given skins.
+        Robots expose their controllers privately, so we walk the skins — that
         works for both real and simulated robots without poking internals."""
         seen: set[int] = set()
-        for skin in getattr(robot, "skins", {}).values():
-            ctrl = getattr(skin, "_ctrl", None)
-            if ctrl is not None and id(ctrl) not in seen:
-                seen.add(id(ctrl))
-                yield ctrl
-            touch_ctrl = getattr(skin, "touch_controller", None)
-            if touch_ctrl is not None and id(touch_ctrl) not in seen:
-                seen.add(id(touch_ctrl))
-                yield touch_ctrl
+        for skin in skins:
+            for attr in ("_ctrl", "touch_controller"):
+                ctrl = getattr(skin, attr, None)
+                if ctrl is not None and id(ctrl) not in seen:
+                    seen.add(id(ctrl))
+                    yield ctrl
 
-    def _set_robot_led(self, robot: BaseRobot, color: str,
-                       pattern: str, period_ms: int) -> None:
-        for ctrl in self._controllers_of(robot):
+    def _set_patient_led(self, patient: _Patient, color: str,
+                         pattern: str, period_ms: int) -> None:
+        """Drive the LED on every controller backing this patient's skins.
+
+        Whole-robot patients light their whole robot; a per-skin (branch)
+        patient lights only its own skin's node, so each Tree branch shows its
+        own state independently."""
+        for ctrl in self._controllers_of_skins(patient.skins):
             set_led = getattr(ctrl, "set_led", None)
             if set_led is None:
                 continue
             try:
                 set_led(color, pattern=pattern, period_ms=period_ms)
             except Exception:   # noqa: BLE001 — controller errors are non-fatal
-                logger.exception("set_led failed on %s", robot.robot_id)
+                logger.exception("set_led failed on %s", patient.patient_id)

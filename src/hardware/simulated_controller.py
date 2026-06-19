@@ -50,6 +50,9 @@ class SimulatedController(QObject):
         self._max_pressures: dict[int, float] = {}
         self._pressure_callbacks: list[Callable[[int, int], None]] = []
         self._target_callbacks:   list[Callable[[int, int], None]] = []
+        self._organ_callbacks:    list[Callable[[float, int], None]] = []
+        # Simulated organ networks per slot: None = open circuit (cover off).
+        self._organ_resistance: dict[int, float | None] = {}
 
         # Tunable knobs from the activity preset (Param defaults in
         # BaseActivity.SIM_PARAMS). Values converted from "%/s" to per-tick
@@ -138,6 +141,26 @@ class SimulatedController(QObject):
     def on_target(self, callback: Callable[[int, int], None]) -> None:
         """Register callback fired whenever a target pressure changes (chamber_id, target)."""
         self._target_callbacks.append(callback)
+
+    def on_organ(self, callback: Callable[[float, int], None]) -> None:
+        """Register a callback for simulated organ-resistance readings.
+
+        Same contract as ``ESP32Controller.on_organ``: called with
+        ``(resistance_ohm, slot)``; ``float("inf")`` when the cover is off.
+        """
+        self._organ_callbacks.append(callback)
+
+    def sim_set_organ(self, resistance_ohm: float | None, slot: int = 0) -> None:
+        """Drive a simulated organ circuit from the GUI / tests.
+
+        ``None`` simulates the cover being off (open circuit); a float is the
+        total parallel resistance of the plugged-in organs with the cover on.
+        Fires ``on_organ`` callbacks exactly like real hardware would.
+        """
+        self._organ_resistance[slot] = resistance_ohm
+        value = float("inf") if resistance_ohm is None else float(resistance_ohm)
+        for cb in self._organ_callbacks:
+            cb(value, slot)
 
     def set_led(self, color: str, pattern: str = "solid",
                 period_ms: int = 0, count: int | None = None) -> bool:

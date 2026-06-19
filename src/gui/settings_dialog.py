@@ -8,6 +8,9 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QGroupBox,
+    QHBoxLayout,
+    QLineEdit,
+    QPushButton,
 )
 
 from src.config.settings import Settings
@@ -30,6 +33,7 @@ class SettingsDialog(QDialog, Ui_SettingsDialog):
         self.setupUi(self)
         self._settings = settings
         self._build_gateway_section()
+        self._build_recordings_section()
         self._load()
 
         self.backend_combo.currentIndexChanged.connect(self._on_backend_changed)
@@ -66,6 +70,32 @@ class SettingsDialog(QDialog, Ui_SettingsDialog):
         # Insert just above the Save/Cancel button box.
         self.verticalLayout.insertWidget(self.verticalLayout.count() - 1, group)
 
+    def _build_recordings_section(self) -> None:
+        """Add a Data group to choose where session sensor-stream JSONL
+        recordings are written."""
+        group = QGroupBox("Recordings", self)
+        form = QFormLayout(group)
+
+        row = QHBoxLayout()
+        self.recordings_dir_edit = QLineEdit()
+        self.recordings_dir_edit.setToolTip(
+            "Folder for per-session sensor-stream JSONL recordings "
+            "(absolute, or relative to the app data folder).")
+        browse = QPushButton("Browse…")
+        browse.clicked.connect(self._browse_recordings)
+        row.addWidget(self.recordings_dir_edit, stretch=1)
+        row.addWidget(browse)
+        form.addRow("Recordings folder", row)
+
+        self.verticalLayout.insertWidget(self.verticalLayout.count() - 1, group)
+
+    def _browse_recordings(self) -> None:
+        start = str(self._settings.recordings_dir)
+        path = QFileDialog.getExistingDirectory(
+            self, "Select recordings folder", start)
+        if path:
+            self.recordings_dir_edit.setText(path)
+
     def _load(self) -> None:
         """Populate fields from current settings."""
         # Gateway
@@ -89,6 +119,10 @@ class SettingsDialog(QDialog, Ui_SettingsDialog):
         self.pg_name_edit.setText(db.get("name", "softedibo"))
         self.pg_user_edit.setText(db.get("user", ""))
         self.pg_password_edit.setText(db.get("password", ""))
+
+        rec = self._settings.data.get("data", {}).get("recordings_dir",
+                                                      "data/recordings")
+        self.recordings_dir_edit.setText(rec)
         self._on_backend_changed(self.backend_combo.currentIndex())
 
     def _on_backend_changed(self, index: int) -> None:
@@ -123,6 +157,10 @@ class SettingsDialog(QDialog, Ui_SettingsDialog):
         d["database"]["name"] = self.pg_name_edit.text().strip()
         d["database"]["user"] = self.pg_user_edit.text().strip()
         d["database"]["password"] = self.pg_password_edit.text()
+
+        rec_dir = self.recordings_dir_edit.text().strip()
+        if rec_dir:
+            self._settings.set_recordings_dir(rec_dir)
 
         self._settings.save()
         self.settings_saved.emit()

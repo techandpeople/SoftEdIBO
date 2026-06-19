@@ -42,6 +42,8 @@ class Skin:
         touch: dict[str, Any] | None = None,
         touch_controller: Any = None,
         shape: str = "rect",
+        organ: dict[str, Any] | None = None,
+        skin_type: str = "",
     ):
         if not chamber_inputs:
             raise ValueError(f"Skin {skin_id!r} has no chambers")
@@ -65,6 +67,18 @@ class Skin:
         self.chamber_grid = chamber_grid
         self.touch = touch
         self.touch_controller = touch_controller
+        # ``organ``: {"slot": int, "node_mac": str?} — this skin has its OWN
+        # organ+cover circuit (e.g. a Tree branch). ``slot`` indexes the
+        # node's organ circuits (``configure`` ``organ_channels``); ``node_mac``
+        # defaults to this skin's chamber node. Skins without this block share
+        # their robot's single circuit (Turtle / Thymio) or have none.
+        self.organ = organ
+        # ``skin_type``: stable identity of this skin's TYPE (e.g.
+        # "turtle_square"). Indexes the hardcoded geometry registry
+        # (src/hardware/skin_geometry.py) — used by the GUI to render the skin
+        # and by the touch-gesture ML to pick a per-type model. Empty string
+        # means the skin opts out of both.
+        self.skin_type = skin_type or ""
 
         self._ctrl = chamber_inputs[0]["controller"]
         self.mac: str = self._ctrl.mac_address
@@ -140,6 +154,16 @@ class Skin:
     @property
     def chamber_count(self) -> int:
         return len(self._chambers)
+
+    @property
+    def geometry(self):
+        """Hardcoded geometry for this skin's ``skin_type`` (or None).
+
+        Looks the type up in the geometry registry — the reliable source of the
+        skin's shape and sensor coordinates. Returns None when ``skin_type`` is
+        empty or unregistered, so callers fall back to per-skin descriptors."""
+        from src.hardware.skin_geometry import geometry_for
+        return geometry_for(self.skin_type)
 
     @property
     def node_macs(self) -> list[str]:

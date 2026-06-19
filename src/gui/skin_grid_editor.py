@@ -44,7 +44,10 @@ SENSOR_PALETTE = [
 
 EMPTY = -1
 
-_ROUND_BORDER = QColor("#566573")  # outline of the round-skin clip
+_SHAPE_BORDER = QColor("#566573")   # outline of the clipped skin shape
+# Supported skin outlines. "rect" = no clip; the others mask painting to the
+# physical skin shape (see ``_shape_path``).
+_SHAPES = ("rect", "round", "triangle", "thymio")
 
 
 class SkinGridEditor(QWidget):
@@ -64,7 +67,11 @@ class SkinGridEditor(QWidget):
         self._sensor_grid:  list[list[int]] = self._blank("sensor")
         self._layer = "chamber"
         self._paint_value = 0
-        self._shape = shape if shape in ("rect", "round") else "rect"
+        self._shape = shape if shape in _SHAPES else "rect"
+        # Physical bounding-box size (w, h) in mm of the skin TYPE, used to draw
+        # the grid with the correct aspect ratio (a 125×125 square vs a 75×125
+        # rectangle look different). None → fill the widget (legacy skins).
+        self._size_mm: tuple[float, float] | None = None
         self.setMinimumSize(320, 160)
 
     # ------------------------------------------------------------------
@@ -105,11 +112,19 @@ class SkinGridEditor(QWidget):
             self.update()
 
     def set_shape(self, shape: str) -> None:
-        """Switch between ``"rect"`` and ``"round"``. Round masks out cells
-        whose centroid falls outside the inscribed circle."""
-        if shape in ("rect", "round") and shape != self._shape:
+        """Set the skin outline (``rect``/``round``/``triangle``/``thymio``).
+        Non-rect shapes clip painting to the physical skin shape."""
+        if shape in _SHAPES and shape != self._shape:
             self._shape = shape
             self.update()
+
+    def set_geometry(self, shape: str, size_mm: tuple[float, float] | None) -> None:
+        """Set the outline shape AND the physical aspect ratio together (from a
+        skin type's registry geometry). Pass ``size_mm=None`` to fill the
+        widget (legacy skins without a type)."""
+        self._size_mm = size_mm if (size_mm and size_mm[0] > 0 and size_mm[1] > 0) else None
+        self._shape = shape if shape in _SHAPES else "rect"
+        self.update()
 
     def set_paint_target(self, value: int) -> None:
         """Select which chamber/sensor index is being painted with left-click."""
@@ -178,14 +193,13 @@ class SkinGridEditor(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
-        # Round skins clip painting to the inscribed ellipse — cells on the
-        # border get partially shown (the bits outside the circle are clipped),
-        # cells fully outside disappear. No cell is "invalidated"; the user
-        # can still paint them and the data is preserved verbatim.
-        if self._shape == "round":
-            ellipse_rect = QRectF(ox, oy, cols * cw, rows * ch)
-            path = QPainterPath()
-            path.addEllipse(ellipse_rect)
+        # Non-rect skins clip painting to the physical skin outline — cells on
+        # the border get partially shown (the bits outside are clipped), cells
+        # fully outside disappear. No cell is "invalidated"; the user can still
+        # paint them and the data is preserved verbatim.
+        shape_rect = QRectF(ox, oy, cols * cw, rows * ch)
+        path = self._shape_path(shape_rect)
+        if path is not None:
             p.setClipPath(path)
 
         for r in range(rows):
@@ -194,13 +208,13 @@ class SkinGridEditor(QWidget):
                 value = grid[r][c] if (r < len(grid) and c < len(grid[r])) else -1
                 self._paint_cell(p, cell, value)
 
-        # Draw the circle outline on top, unclipped, so the round boundary
-        # is always visible regardless of which cells are painted underneath.
-        if self._shape == "round":
+        # Draw the outline on top, unclipped, so the skin boundary is always
+        # visible regardless of which cells are painted underneath.
+        if path is not None:
             p.setClipping(False)
-            p.setPen(QPen(_ROUND_BORDER, 2))
+            p.setPen(QPen(_SHAPE_BORDER, 2))
             p.setBrush(Qt.BrushStyle.NoBrush)
-            p.drawEllipse(QRectF(ox, oy, cols * cw, rows * ch))
+            p.drawPath(path)
 
     def _paint_cell(self, p: QPainter, cell: QRect, value: int) -> None:
         """Render a single grid cell — only the active layer is shown so each
@@ -240,14 +254,25 @@ class SkinGridEditor(QWidget):
                 out[r][c] = int(row[c])
         return out
 
+    def _content_box(self) -> tuple[int, int, int, int]:
+        """Largest box of the skin's physical aspect ratio that fits the widget,
+        centred. Falls back to the full widget when no ``size_mm`` is set."""
+        from src.gui.skin_shapes import aspect_box
+        return aspect_box(self._size_mm, self.width(), self.height())
+
     def _cell_metrics(self) -> tuple[int, int, int, int]:
-        w, h = self.width(), self.height()
+        bx, by, bw, bh = self._content_box()
         cols, rows = self.cols(), self.rows()
-        cw = w // cols
-        ch = h // rows
-        ox = (w - cw * cols) // 2
-        oy = (h - ch * rows) // 2
+        cw = bw // cols
+        ch = bh // rows
+        ox = bx + (bw - cw * cols) // 2
+        oy = by + (bh - ch * rows) // 2
         return max(cw, 1), max(ch, 1), ox, oy
+
+    def _shape_path(self, rect: QRectF) -> QPainterPath | None:
+        """Outline path of the current shape inside ``rect`` (None = rect)."""
+        from src.gui.skin_shapes import shape_path
+        return shape_path(self._shape, rect)
 
     def _paint_cell_at(self, pos: QPoint, value: int) -> None:
         cw, ch, ox, oy = self._cell_metrics()

@@ -37,3 +37,8 @@ constexpr int NUM_CHAMBERS = 3;
 // WS2812 / NeoPixel ring on a single data line (IO23 is otherwise unused).
 constexpr int LED_PIN  = 23;
 constexpr int NUM_LEDS = 24;
+
+// Organ + cover sensing ADC input (see organ.h). IO36 (SENSOR_VP) is the
+// only free ADC1 input — IO34/35/39 are the pressure sensors, IO32/33 the
+// pumps. TODO: verify IO36 is routed to a header/test pad on the PCB.
+constexpr int ORGAN_SENSE_PIN = 36;

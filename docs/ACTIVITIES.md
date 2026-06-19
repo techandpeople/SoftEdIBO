@@ -334,9 +334,41 @@ participant IDs).
 
 ---
 
-## Skin geometry: shape + per-layer dims
+## Skin geometry: `skin_type` registry (current) + legacy per-skin dims
 
-Each skin declares two things that govern how the grid editor and the
+> **Update.** Skin geometry is now defined **per skin type** in a hardcoded
+> registry, not drawn freehand per skin. See
+> [`src/hardware/skin_geometry.py`](../src/hardware/skin_geometry.py) and
+> [TOUCH_ML.md](TOUCH_ML.md). Each skin sets `skin_type` (e.g.
+> `turtle_square`); the registry supplies that type's **shape** and
+> **sensor coordinates** (editable constants), so:
+>
+> - the firmware doesn't need to announce geometry (it doesn't), and the
+>   unreliable per-skin `sensor_grid` drawing is superseded;
+> - the skin dialog offers only the **current robot's** skin types and draws
+>   the real shape/aspect — `rect` (square 125 vs rectangle 75×125), `round`
+>   (Ø99), `triangle` (Turtle corner) and `thymio` (a 'D' rotated −90°);
+> - the same shape masks + aspect ratio are shared by the editor and the
+>   activity-time `SkinGridView` via
+>   [`src/gui/skin_shapes.py`](../src/gui/skin_shapes.py);
+> - `skin_type` also keys the per-type touch-gesture model.
+>
+> ```yaml
+> skins:
+>   - skin_id: shell
+>     name: Shell
+>     skin_type: turtle_square    # → registry shape + sensor coordinates
+>     chambers:
+>       - {mac: "AA:BB:CC:DD:EE:01", slot: 0, max_pressure: 8.0}
+> ```
+>
+> The per-skin `shape` / `grid` / `chamber_grid` / `touch.sensor_grid` fields
+> below still load for skins **without** a `skin_type` (legacy / opt-out), and
+> the dialog falls back to them then. New skins should set `skin_type`.
+
+### Legacy per-skin geometry (skins without a `skin_type`)
+
+Each such skin declares two things that govern how the grid editor and the
 activity-time `SkinGridView` render it:
 
 - **`shape`** — `"rect"` (default) or `"round"`. Round masks off cells

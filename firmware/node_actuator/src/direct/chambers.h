@@ -23,12 +23,19 @@ enum State : uint8_t {
     IDLE, INFLATING, DEFLATING
 };
 
+// Child-safety watchdog: if a chamber stays INFLATING/DEFLATING longer than
+// this without reaching its target (e.g. pressure sensor unplugged or stuck,
+// so the cutoff in loop() never fires), force-stop it. Normal actuations on
+// these small chambers finish in a few seconds.
+constexpr uint32_t ACTUATION_TIMEOUT_MS = 10000;
+
 struct Chamber {
     State    state      = IDLE;
     uint8_t  duty       = 0;
     float    target_kpa = 0.0f;
     float    min_kpa    = DEFAULT_MIN_KPA;
     float    max_kpa    = DEFAULT_MAX_KPA;
+    uint32_t since_ms   = 0;     // when INFLATING/DEFLATING began (watchdog)
 };
 
 inline Chamber state[NUM_CHAMBERS];
@@ -88,6 +95,7 @@ inline void beginInflate(int n, uint8_t duty, float target_kpa) {
     state[n].state      = INFLATING;
     state[n].duty       = duty;
     state[n].target_kpa = target_kpa;
+    state[n].since_ms   = millis();
     setValve(n, 0, true);
     recalcPumps();
 }
@@ -98,8 +106,23 @@ inline void beginDeflate(int n, float target_kpa) {
     setValve(n, 0, false);              // close inflate before opening deflate
     state[n].state      = DEFLATING;
     state[n].target_kpa = target_kpa;
+    state[n].since_ms   = millis();
     setValve(n, 1, true);
     recalcPumps();
+}
+
+// Force-stop any chamber actuating past ACTUATION_TIMEOUT_MS (sensor failure
+// safety net — see constant above). Call periodically from loop().
+inline void actuationWatchdog(uint32_t now) {
+    for (int i = 0; i < NUM_CHAMBERS; i++) {
+        if (state[i].state == IDLE) continue;
+        if (now - state[i].since_ms >= ACTUATION_TIMEOUT_MS) {
+            DBG_PRINT("WATCHDOG ch=%d stopped after %lu ms\n", i,
+                      (unsigned long)(now - state[i].since_ms));
+            stop(i);
+            recalcPumps();
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

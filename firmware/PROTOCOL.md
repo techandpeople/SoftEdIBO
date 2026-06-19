@@ -76,6 +76,11 @@ Fields:
 - `tank_vacuum_max_kpa` — shallowest vacuum (least negative kPa, safety stop)
 - `tank_vacuum_target_kpa` — operational set-point for the vacuum tank (kPa, typically negative, clamped into `[min, max]`)
 - `pump_groups` — `{pressure:[i,…], vacuum:[i,…]}`, indices 1..6 of `PUMP1..PUMP6`
+- `organ_channels` — `[c, …]` mux channels carrying organ+cover circuits; the
+  index in this list becomes the `slot` in the node's `organ` broadcasts. Wire
+  them to the highest channels (I13..I15) so the chamber autodetect (which
+  claims low channels first) doesn't collide. Up to 4. Applying this also
+  scrubs those channels from any autodetected chamber/tank assignment.
 
 All tank fields are optional in the payload — omitted ones keep their current
 firmware state. Targets default to 0.0 until set; the Python launcher fills
@@ -100,6 +105,29 @@ The boot announce is `{"status":"node_<type>_ready"}` (e.g.,
 `node_direct_ready`, `node_multiplexed_ready`, `node_magnet_sensor_ready`). It is
 broadcast on the ESP-NOW channel so the gateway can forward it before the
 node knows the gateway's MAC.
+
+### `organ` — organ network + silicone cover state (direct + multiplexed)
+
+```json
+{"type":"organ", "resistance_ohm": 952.4, "open": false}          // direct
+{"type":"organ", "slot": 0, "resistance_ohm": 952.4, "open": false}  // multiplexed
+```
+
+An ADC line measures the parallel resistance of all plugged-in organs of one
+circuit; the silicone cover closes the circuit's return path, so an open
+circuit means the cover is off (`open: true`, `resistance_ohm: -1`). Sent on
+change (±25 Ω hysteresis, 3-sample debounce on the open/closed flip — the
+cover rests by gravity) and re-sent every 2 s as a heartbeat.
+
+- **Direct node**: a single circuit on `ORGAN_SENSE_PIN` (IO36). No `slot`
+  field (treated as `slot 0`).
+- **Multiplexed node**: one circuit per `organ_channels` entry (see
+  `configure`); `slot` = index in that list. Lets one node serve several
+  independent patients (e.g. one per Tree branch).
+
+On the PC, `ESP32Controller.on_organ(cb)` delivers `(resistance_ohm, slot)`
+(`inf` when open); `src/hardware/organ_sensor.py` follows one slot and splits
+it into cover / resistance event streams for activities.
 
 ### Multiplexed-node only
 

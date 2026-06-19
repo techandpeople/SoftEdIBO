@@ -39,11 +39,15 @@ class SessionPanel(QWidget, Ui_SessionPanel):
     session_started = Signal(str)   # emits session_id
     session_stopped = Signal()
 
-    def __init__(self, db: Database):
+    def __init__(self, db: Database, gateway=None):
         super().__init__()
         self.setupUi(self)
 
         self._db = db
+        # Optional ESP-NOW gateway — only used to record raw sensor streams of a
+        # real session. None in tests / headless contexts (then no recording).
+        self._gateway = gateway
+        self._stream_recorder = None   # StreamRecorder | None, active during a session
         self._available_robots: list[BaseRobot] = []
         self._current_record: SessionRecord | None = None
         self._current_activity: BaseActivity | None = None
@@ -52,6 +56,7 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         self._session_participants: list[ParticipantRecord] = []
         self._pending_touches: list[tuple[str, int]] = []  # (skin_id, chamber_id) waiting for assignment
         self._assignment_panel: TouchAssignmentPanel | None = None
+        self._observer_panel = None   # ObserverPanel | None, opened during a session
 
         self.new_session_btn.clicked.connect(self._open_setup_dialog)
         self.pause_btn.clicked.connect(self._on_pause)
@@ -137,11 +142,14 @@ class SessionPanel(QWidget, Ui_SessionPanel):
                 self._current_activity.simulation_mode = last_data.get("simulation_mode", False)
             session_robots = self._current_activity.prepare_robots(session_robots)
         self._monitor.set_robots(session_robots)
+        sim = self._current_activity.simulation_mode if self._current_activity else False
+        self._start_recording(record.session_id, True, sim, session_robots)
         if self._current_activity is not None:
             self._start_activity(self._current_activity, record.session_id, session_robots)
         self._build_skin_participant_map(record.session_id)
         self._session_participants = list(participants)
         self._open_assignment_panel(session_robots)
+        self._open_observer_panel()
 
     def _open_setup_dialog(self) -> None:
         """Open the session setup dialog and start a new session."""
@@ -241,9 +249,12 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         self._session_participants = list(participants)
         self.session_started.emit(session_id)
         self._monitor.set_robots(robots)
+        self._start_recording(session_id, dialog.record_streams,
+                              activity.simulation_mode, robots)
         self._start_activity(activity, session_id, robots)
         self._build_skin_participant_map(session_id)
         self._open_assignment_panel(robots)
+        self._open_observer_panel()
 
     def _start_activity(self, activity: BaseActivity, session_id: str,
                         robots: list[BaseRobot]) -> None:
@@ -251,12 +262,46 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         (e.g. ``on_magnet``) and drives its state machine. Without this the
         activity never reacts to touches — real or simulated."""
         from src.core.session import Session
+        from src.data.event_logger import EventLogger
         try:
             session = Session(session_id, activity)
+            activity.event_logger = EventLogger(self._db, session_id)
             activity.setup(session, robots)
             activity.start()
         except Exception:   # noqa: BLE001 — surface but don't crash the GUI
             logger.exception("Failed to start activity %s", activity.name)
+
+    def _start_recording(self, session_id: str, enabled: bool,
+                         simulation: bool, robots: list[BaseRobot]) -> None:
+        """Start recording sensor streams for this session, if enabled.
+
+        On real hardware it taps the gateway; in simulation it taps each skin's
+        simulated magnet sensor (touches there don't go through the gateway).
+        The recorder is kept on ``self`` so the gateway's WeakMethod
+        subscription stays alive."""
+        if not enabled:
+            return
+        from src.config.settings import Settings
+        from src.data.stream_recorder import StreamRecorder
+        path = Settings().recordings_dir / f"{session_id}.jsonl"
+        try:
+            gateway = None if simulation else self._gateway
+            recorder = StreamRecorder(path, session_id=session_id, gateway=gateway)
+            recorder.start()
+            if simulation:
+                for robot in robots:
+                    for skin in getattr(robot, "skins", {}).values():
+                        tc = getattr(skin, "touch_controller", None)
+                        if tc is not None:
+                            recorder.attach_magnet(tc)
+            self._stream_recorder = recorder
+        except Exception:   # noqa: BLE001 — recording must never break a session
+            logger.exception("Failed to start stream recording for %s", session_id)
+
+    def _stop_recording(self) -> None:
+        if self._stream_recorder is not None:
+            self._stream_recorder.stop()
+            self._stream_recorder = None
 
     def _build_skin_participant_map(self, session_id: str) -> None:
         """Build a skin_id → participant_id lookup from session assignments."""
@@ -348,6 +393,41 @@ class SessionPanel(QWidget, Ui_SessionPanel):
                 remaining.append((sk, ch))
         self._pending_touches = remaining
 
+    def _open_observer_panel(self) -> None:
+        """Open the live behavioral-coding panel for the session's participants.
+
+        No participants → nothing to code, so the panel is skipped. Events the
+        observer taps are logged via :meth:`_on_observer_event`."""
+        if self._observer_panel is not None:
+            self._observer_panel.close()
+            self._observer_panel = None
+        if not self._session_participants:
+            return
+        from src.gui.observer_panel import ObserverPanel
+        panel = ObserverPanel(self._session_participants, parent=self)
+        panel.event.connect(self._on_observer_event)
+        panel.show()
+        self._observer_panel = panel
+
+    def _on_observer_event(self, type_: str, action: str,
+                           target: str, metadata: str) -> None:
+        """Persist a live-coded observation / marker to the session timeline.
+
+        ``target`` is the participant_id for behavior codes (empty for a
+        session-wide marker); we store it both as the event ``target`` and as
+        ``participant_id`` so per-child queries work without a join."""
+        if self._current_record is None:
+            return
+        self._db.log_event(InteractionEvent(
+            session_id=self._current_record.session_id,
+            participant_id=target or "system",
+            type=type_,
+            action=action,
+            target=target,
+            timestamp=datetime.now(),
+            metadata=metadata,
+        ))
+
     def _on_skin_touch_skipped(self, skin_id: str) -> None:
         """Called when the operator skips the first queued touch for a skin."""
         if self._current_record is None:
@@ -438,6 +518,8 @@ class SessionPanel(QWidget, Ui_SessionPanel):
             self._flush_last_assignments(self._current_record.session_id)
             self._current_record = None
 
+        self._stop_recording()
+
         self.session_id_label.setText("—")
         self.activity_label.setText("—")
         self.robots_label.setText("—")
@@ -450,11 +532,16 @@ class SessionPanel(QWidget, Ui_SessionPanel):
 
         if self._current_activity is not None:
             self._current_activity.stop()
+            self._current_activity.event_logger = None
             self._current_activity = None
 
         if self._assignment_panel is not None:
             self._assignment_panel.close()
             self._assignment_panel = None
+
+        if self._observer_panel is not None:
+            self._observer_panel.close()
+            self._observer_panel = None
 
         self.session_finished.emit()
         self.session_stopped.emit()
