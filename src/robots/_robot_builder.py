@@ -15,6 +15,32 @@ from src.hardware.skin import Skin
 logger = logging.getLogger(__name__)
 
 
+def set_pump_counts(
+    node_configs: list[dict[str, Any]],
+    controllers: dict[str, Any],
+) -> None:
+    """Tell each controller how many pressure pumps its node shares.
+
+    Drives the shared-pump fill-time scaling (see
+    :mod:`src.hardware.fill_scaling`): concurrent inflations on a node split its
+    pumps' airflow. ``node_direct`` has two onboard pumps; ``node_multiplexed``
+    shares ``pump_inflate_count`` pumps when it has reservoirs (else there are no
+    chamber pumps, so the count is left at the default 1).
+    """
+    for node_cfg in node_configs:
+        ctrl = controllers.get(node_cfg.get("mac", ""))
+        if ctrl is None or not hasattr(ctrl, "fill_load"):
+            continue
+        node_type = node_cfg.get("node_type")
+        if node_type == "node_direct":
+            count = 2
+        elif node_type == "node_multiplexed" and node_cfg.get("has_reservoirs"):
+            count = int(node_cfg.get("pump_inflate_count", 3))
+        else:
+            count = 1
+        ctrl.fill_load.pump_count = max(1, count)
+
+
 def configure_multiplexed_nodes(
     node_configs: list[dict[str, Any]],
     controllers: dict[str, Any],
@@ -145,7 +171,8 @@ def _build_one_skin(skin_cfg: dict[str, Any],
         {"controller":   ctrl,
          "node_slot":    int(ch["slot"]),
          "max_pressure": float(ch.get("max_pressure", 8.0)),
-         "min_pressure": float(ch.get("min_pressure", 0.0))}
+         "min_pressure": float(ch.get("min_pressure", 0.0)),
+         "fill_time_ms": ch.get("fill_time_ms")}
         for ch in chambers
     ]
     touch_ctrl = (touch_controllers or {}).get(skin_id)
@@ -162,6 +189,7 @@ def _build_one_skin(skin_cfg: dict[str, Any],
         shape=skin_cfg.get("shape", "rect"),
         organ=skin_cfg.get("organ"),
         skin_type=skin_cfg.get("skin_type", ""),
+        skin_variant=skin_cfg.get("skin_variant", ""),
     )
 
 

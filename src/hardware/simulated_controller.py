@@ -45,6 +45,11 @@ class SimulatedController(QObject):
     ) -> None:
         super().__init__(parent)
         self.mac_address = mac_address
+        # Interface parity with ESP32Controller — Skin consults ``fill_load`` to
+        # scale calibrated fill times. The simulation ignores the resulting
+        # ``ms`` (it models pressure directly), but the attribute must exist.
+        from src.hardware.fill_scaling import FillLoadTracker
+        self.fill_load = FillLoadTracker()
         self._targets:  dict[int, int] = {}
         self._current:  dict[int, int] = {}
         self._max_pressures: dict[int, float] = {}
@@ -81,8 +86,12 @@ class SimulatedController(QObject):
     def is_connected(self) -> bool:
         return True
 
-    def inflate(self, chamber: int, delta: int = 10) -> bool:
-        """Inflate by delta % (relative to current target)."""
+    def inflate(self, chamber: int, delta: int = 10,
+                ms: int | None = None) -> bool:
+        """Inflate by delta % (relative to current target).
+
+        ``ms`` (time-based fill on real hardware) is accepted for interface
+        parity and ignored — the simulation models pressure directly."""
         self._current.setdefault(chamber, 0)
         base = self._targets.get(chamber, self._current[chamber])
         new_target = min(100, base + delta)

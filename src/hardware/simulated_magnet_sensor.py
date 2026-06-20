@@ -34,6 +34,10 @@ class SimulatedMagnetSensor:
 
     def __init__(self, mac_address: str) -> None:
         self.mac_address = mac_address
+        # Touches fired in simulation didn't come off a real radio, so they're
+        # tagged with a ``sim:`` source (not the config MAC) — recordings stay
+        # honest about which samples are synthetic.
+        self.source_id = f"sim:{mac_address}"
         self._magnet_callbacks:   list[Callable[[dict[str, Any]], None]] = []
         self._organ_callbacks: list[Callable[[float, int], None]] = []
         self._touch_callbacks: list[Callable[[int, int], None]] = []
@@ -58,10 +62,11 @@ class SimulatedMagnetSensor:
 
     def fire_magnet(self, data: dict[str, Any]) -> None:
         """Broadcast a synthetic magnet sensor event to every ``on_magnet`` subscriber.
-        Tags the message with this board's MAC as ``source`` (unless one is
-        already set) so activities can attribute it to the right skin."""
+        Tags the message with this board's ``sim:`` source (unless one is
+        already set) so activities can attribute it to the right skin and
+        recordings flag the sample as simulated."""
         if "source" not in data:
-            data = {**data, "source": self.mac_address}
+            data = {**data, "source": self.source_id}
         for cb in self._magnet_callbacks:
             cb(data)
 

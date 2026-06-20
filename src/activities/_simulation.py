@@ -49,6 +49,7 @@ def wrap_robots_in_simulation(
                 "shape":        skin.shape,
                 "organ":        getattr(skin, "organ", None),
                 "skin_type":    getattr(skin, "skin_type", ""),
+                "skin_variant": getattr(skin, "skin_variant", ""),
             }
             for skin in skins.values()
         ]

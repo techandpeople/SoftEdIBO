@@ -12,20 +12,25 @@ from __future__ import annotations
 
 # Class labels.
 TAP = "tap"
+DOUBLE_TAP = "double_tap"
+TRIPLE_TAP = "triple_tap"
 PRESS = "press"
 STROKE = "stroke"
 SQUEEZE = "squeeze"
 UNKNOWN = "unknown"
 
-GESTURE_CLASSES: tuple[str, ...] = (TAP, PRESS, STROKE, SQUEEZE)
+GESTURE_CLASSES: tuple[str, ...] = (
+    TAP, DOUBLE_TAP, TRIPLE_TAP, PRESS, STROKE, SQUEEZE)
 
 # Operational definitions (also used as button tooltips / docs).
 DEFINITIONS: dict[str, str] = {
-    TAP:     "Short contact, one dominant sensor, abrupt onset.",
-    PRESS:   "Sustained contact, same sensor(s), stable.",
-    STROKE:  "Distinct sensors activate in temporal sequence (movement).",
-    SQUEEZE: "High fraction of sensors active simultaneously.",
-    UNKNOWN: "Not classifiable / noise.",
+    TAP:        "Short contact, one dominant sensor, abrupt onset.",
+    DOUBLE_TAP: "Two quick taps in a row (group the two touches as one).",
+    TRIPLE_TAP: "Three quick taps in a row (group the three touches as one).",
+    PRESS:      "Sustained contact, same sensor(s), stable.",
+    STROKE:     "Distinct sensors activate in temporal sequence (movement).",
+    SQUEEZE:    "High fraction of sensors active simultaneously.",
+    UNKNOWN:    "Not classifiable / noise.",
 }
 
 # Tunable thresholds for the rule baseline (and as priors for ML). Durations in

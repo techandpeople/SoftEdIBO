@@ -2,9 +2,12 @@
 #include <Arduino.h>
 #include "pins.h"
 #include "dbg.h"
+#include "fill_control.h"   // shared time-based fill + idle leak-maintenance policy
 
 // Per-chamber state machine + valve/pump coordination for node_direct.
 // Pumps are shared: any chamber inflating runs PUMP1, any deflating runs PUMP2.
+// Board-agnostic fill policy (time-based fill, leak maintenance, safety ceilings)
+// lives in firmware/common/fill_control.h, shared with node_multiplexed.
 
 namespace chambers {
 
@@ -30,12 +33,15 @@ enum State : uint8_t {
 constexpr uint32_t ACTUATION_TIMEOUT_MS = 10000;
 
 struct Chamber {
-    State    state      = IDLE;
-    uint8_t  duty       = 0;
-    float    target_kpa = 0.0f;
-    float    min_kpa    = DEFAULT_MIN_KPA;
-    float    max_kpa    = DEFAULT_MAX_KPA;
-    uint32_t since_ms   = 0;     // when INFLATING/DEFLATING began (watchdog)
+    State    state         = IDLE;
+    uint8_t  duty          = 0;
+    float    target_kpa    = 0.0f;
+    float    min_kpa       = DEFAULT_MIN_KPA;
+    float    max_kpa       = DEFAULT_MAX_KPA;
+    uint32_t since_ms      = 0;  // when INFLATING/DEFLATING began (watchdog)
+    uint32_t fill_until_ms = 0;  // INFLATING: stop at this millis() (0 = pressure-based)
+    float    hold_kpa      = 0.0f;  // IDLE: level to maintain against leaks (0 = none)
+    uint8_t  droop_count   = 0;  // consecutive idle checks seen below hold (touch debounce)
 };
 
 inline Chamber state[NUM_CHAMBERS];
@@ -88,16 +94,51 @@ inline void stop(int n) {
 // the valve then stays open until stop() (target/limit reached, or hold).
 // ---------------------------------------------------------------------------
 
-inline void beginInflate(int n, uint8_t duty, float target_kpa) {
+// ``fill_ms`` > 0 selects time-based fill: the inflate valve stays open for that
+// long (clamped to MAX_FILL_MS) regardless of pressure, with HARD_MAX_KPA as the
+// only pressure cutoff (caller passes target_kpa = max_kpa). ``fill_ms`` == 0 is
+// the classic pressure-target behaviour.
+inline void beginInflate(int n, uint8_t duty, float target_kpa, uint32_t fill_ms = 0) {
     target_kpa = max(state[n].min_kpa, min(target_kpa, state[n].max_kpa));
-    if (state[n].state == INFLATING && state[n].target_kpa == target_kpa) return;
+    uint32_t until = fill_control::fillUntil(fill_ms);
+    if (state[n].state == INFLATING && state[n].target_kpa == target_kpa
+        && state[n].fill_until_ms == 0 && until == 0) return;
     setValve(n, 1, false);              // close deflate before opening inflate
-    state[n].state      = INFLATING;
-    state[n].duty       = duty;
-    state[n].target_kpa = target_kpa;
-    state[n].since_ms   = millis();
+    state[n].state         = INFLATING;
+    state[n].duty          = duty;
+    state[n].target_kpa    = target_kpa;
+    state[n].since_ms      = millis();
+    state[n].fill_until_ms = until;
     setValve(n, 0, true);
     recalcPumps();
+}
+
+// Close any chamber whose time-based fill window has elapsed. Call every loop()
+// (cheap; only acts on time-based INFLATING chambers). Pressure HARD_MAX and the
+// actuation watchdog remain independent safety nets.
+// Thin node-specific wrappers over the shared fill-control policy: they supply
+// the direct board's state predicates and its stop/top-up actuation.
+inline void fillTimeTick(uint32_t now) {
+    fill_control::fillTimeTick(
+        state, cachedKpa, NUM_CHAMBERS, now,
+        [](const Chamber& ch) { return ch.state == INFLATING; },
+        [](int i, float achieved) {
+            DBG_PRINT("FILL ch=%d done (time)\n", i);
+            stop(i);
+            state[i].hold_kpa = achieved;   // maintain the level we reached
+            recalcPumps();
+        });
+}
+
+inline void maintainTick(uint32_t now) {
+    static uint32_t last = 0;
+    fill_control::maintainTick(
+        state, cachedKpa, NUM_CHAMBERS, now, last,
+        [](const Chamber& ch) { return ch.state == IDLE; },
+        [](int i, float hold) {
+            DBG_PRINT("MAINTAIN ch=%d top-up to %.2f\n", i, hold);
+            beginInflate(i, DEFAULT_INFLATE_DUTY, hold);   // pressure-based top-up
+        });
 }
 
 inline void beginDeflate(int n, float target_kpa) {

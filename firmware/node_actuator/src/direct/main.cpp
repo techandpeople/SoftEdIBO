@@ -109,6 +109,7 @@ void loop() {
             if (ch.state == chambers::INFLATING &&
                 (kpa >= ch.target_kpa || kpa >= ch.max_kpa)) {
                 chambers::stop(i);
+                ch.hold_kpa = chambers::cachedKpa[i];   // maintain the achieved level
                 chambers::recalcPumps();
             }
             if (ch.state == chambers::DEFLATING && kpa <= ch.target_kpa) {
@@ -117,6 +118,12 @@ void loop() {
             }
         }
     }
+
+    // ---- Time-based fill cutoff (calibrated fill_time; checked every loop) ----
+    chambers::fillTimeTick(now);
+
+    // ---- Idle leak maintenance: top up a drooping held chamber (self-throttled) ----
+    chambers::maintainTick(now);
 
     // ---- Manual (dev) actuation safety: dead-man auto-off + HARD_MAX cutoff ----
     chambers::manualSafetyTick(now);

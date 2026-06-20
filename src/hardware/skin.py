@@ -23,6 +23,7 @@ import time
 from typing import Any, Callable, Optional
 
 from src.hardware.air_chamber import AirChamber, ChamberState
+from src.hardware.fill_scaling import effective_fill_ms
 from src.hardware.touch_event_router import TouchEventRouter
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,7 @@ class Skin:
         shape: str = "rect",
         organ: dict[str, Any] | None = None,
         skin_type: str = "",
+        skin_variant: str = "",
     ):
         if not chamber_inputs:
             raise ValueError(f"Skin {skin_id!r} has no chambers")
@@ -79,6 +81,10 @@ class Skin:
         # and by the touch-gesture ML to pick a per-type model. Empty string
         # means the skin opts out of both.
         self.skin_type = skin_type or ""
+        # ``skin_variant``: the silicone format of this skin (e.g. "wrinkles",
+        # "natural", "organ"), orthogonal to ``skin_type``. Different chamber
+        # sizes per variant; fed to the touch ML as a feature. Empty = unset.
+        self.skin_variant = skin_variant or ""
 
         self._ctrl = chamber_inputs[0]["controller"]
         self.mac: str = self._ctrl.mac_address
@@ -89,6 +95,8 @@ class Skin:
         self._reverse: dict[int, int] = {}
         # local_idx → AirChamber
         self._chambers: dict[int, AirChamber] = {}
+        # local_idx → calibrated fill time (ms) or None (pressure-based)
+        self._fill_times: dict[int, int | None] = {}
 
         for local_idx, inp in enumerate(chamber_inputs):
             if inp["controller"] is not self._ctrl:
@@ -103,6 +111,8 @@ class Skin:
             max_pressure = float(inp.get("max_pressure", 8.0))
             min_pressure = float(inp.get("min_pressure", 0.0))
 
+            fill_time = inp.get("fill_time_ms")
+            self._fill_times[local_idx] = int(fill_time) if fill_time else None
             self._slots.append(node_slot)
             self._reverse[node_slot] = local_idx
             self._chambers[local_idx] = AirChamber(
@@ -187,6 +197,9 @@ class Skin:
             min_p = getattr(ch, "min_pressure", 0.0)
             if abs(min_p) > 1e-3:   # only persist explicit non-zero defaults
                 d["min_pressure"] = min_p
+            fill = self._fill_times.get(idx)
+            if fill:
+                d["fill_time_ms"] = fill
             defs.append(d)
         return defs
 
@@ -219,6 +232,7 @@ class Skin:
             return False
         chamber.target_pressure = chamber.pressure
         chamber.state = ChamberState.IDLE
+        self._ctrl.fill_load.note_stop(self._slots[local_idx])
         return self._ctrl.hold(self._slots[local_idx])
 
     def pause(self) -> None:
@@ -263,6 +277,18 @@ class Skin:
                 chamber.state = ChamberState.INFLATING
             elif new_target > 0:
                 chamber.state = ChamberState.INFLATED
+            # Calibrated chamber → inflate by time so the firmware doesn't depend
+            # on the laggy pressure sensor. The window scales with the requested
+            # delta AND the node's concurrent fill load (pumps are shared per
+            # node): the more chambers inflating at once, the longer each takes.
+            # Uncalibrated → classic pressure-based inflate.
+            fill = self._fill_times.get(local_idx)
+            if fill:
+                load = self._ctrl.fill_load
+                ms = effective_fill_ms(fill, value, load.active_count() + 1,
+                                       load.pump_count)
+                load.note_inflate(slot, ms)
+                return self._ctrl.inflate(slot, value, ms=ms)
             return self._ctrl.inflate(slot, value)
 
         if kind == "deflate":
@@ -272,6 +298,7 @@ class Skin:
                 chamber.state = ChamberState.DEFLATING
             else:
                 chamber.state = ChamberState.IDLE
+            self._ctrl.fill_load.note_stop(slot)
             return self._ctrl.deflate(slot, value)
 
         # set_pressure
@@ -285,6 +312,8 @@ class Skin:
             chamber.state = ChamberState.INFLATED
         else:
             chamber.state = ChamberState.IDLE
+        # set_pressure overrides any time-based fill window for this slot.
+        self._ctrl.fill_load.note_stop(slot)
         return self._ctrl.set_pressure(slot, v)
 
     # ------------------------------------------------------------------
