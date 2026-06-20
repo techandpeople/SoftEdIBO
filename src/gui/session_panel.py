@@ -38,6 +38,7 @@ class SessionPanel(QWidget, Ui_SessionPanel):
     session_finished = Signal()
     session_started = Signal(str)   # emits session_id
     session_stopped = Signal()
+    reload_requested = Signal()     # ask the app to rebuild robots (e.g. after calibration)
 
     def __init__(self, db: Database, gateway=None):
         super().__init__()
@@ -169,6 +170,11 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         # ``prepare_robots`` so the default in BaseActivity sees it.
         activity.simulation_mode = dialog.simulation_mode
 
+        # On real hardware, warn if any selected chamber has no calibrated fill
+        # time (it would fall back to pressure-based fill). Offer to calibrate now.
+        if not activity.simulation_mode and not self._check_fill_times(robots):
+            return
+
         # Apply the chosen ActivityPreset (if any) so the activity's
         # tunable params reflect the user's selection. With no preset,
         # ``param_values`` stays at the PARAMS / SIM_PARAMS defaults.
@@ -271,6 +277,38 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         except Exception:   # noqa: BLE001 — surface but don't crash the GUI
             logger.exception("Failed to start activity %s", activity.name)
 
+    def _check_fill_times(self, robots: list[BaseRobot]) -> bool:
+        """Warn when a selected chamber has no calibrated fill time.
+
+        Returns True to proceed with the session (calibrated, or the operator
+        chose to start anyway with the pressure-based fallback), False to abort
+        (the operator opened the calibration tool instead)."""
+        from src.hardware.fill_calibration import chambers_missing_fill_time
+        selected = {r.robot_id for r in robots}
+        missing = [c for c in chambers_missing_fill_time(Settings().data)
+                   if c["robot_id"] in selected]
+        if not missing:
+            return True
+        reply = QMessageBox.question(
+            self, "Fill times not calibrated",
+            f"{len(missing)} chamber(s) have no calibrated fill time and will "
+            "use pressure-based fill.\n\nCalibrate them now?\n"
+            "(Choose No to start the session anyway.)",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            | QMessageBox.StandardButton.Cancel)
+        if reply == QMessageBox.StandardButton.Cancel:
+            return False
+        if reply == QMessageBox.StandardButton.No:
+            return True                      # start anyway (pressure-based)
+        # Yes → calibrate now; reload robots afterwards and let the operator
+        # restart the session so the new fill times take effect.
+        from src.gui.fill_calibration_dialog import FillCalibrationDialog
+        dlg = FillCalibrationDialog(Settings(), self._gateway, parent=self,
+                                    chambers=missing)
+        dlg.saved.connect(self.reload_requested.emit)
+        dlg.exec()
+        return False
+
     def _start_recording(self, session_id: str, enabled: bool,
                          simulation: bool, robots: list[BaseRobot]) -> None:
         """Start recording sensor streams for this session, if enabled.
@@ -286,7 +324,10 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         path = Settings().recordings_dir / f"{session_id}.jsonl"
         try:
             gateway = None if simulation else self._gateway
-            recorder = StreamRecorder(path, session_id=session_id, gateway=gateway)
+            types, variants = self._magnet_skin_types(robots)
+            recorder = StreamRecorder(
+                path, session_id=session_id, gateway=gateway,
+                skin_types=types, skin_variants=variants)
             recorder.start()
             if simulation:
                 for robot in robots:
@@ -297,6 +338,32 @@ class SessionPanel(QWidget, Ui_SessionPanel):
             self._stream_recorder = recorder
         except Exception:   # noqa: BLE001 — recording must never break a session
             logger.exception("Failed to start stream recording for %s", session_id)
+
+    @staticmethod
+    def _magnet_skin_types(
+            robots: list[BaseRobot]) -> tuple[dict[str, str], dict[str, str]]:
+        """``({touch_source: skin_type}, {touch_source: skin_variant})`` for
+        every touch-capable skin.
+
+        Keyed by the *source* each magnet board actually stamps on its messages
+        — a real board's MAC, or a simulated board's ``sim:`` id — so the
+        recording header maps cleanly onto the recorded ``source`` field. Stored
+        so the Touch Gestures dialog is self-describing and auto-selects the
+        skin type per recording, without re-tagging."""
+        skin_types: dict[str, str] = {}
+        skin_variants: dict[str, str] = {}
+        for robot in robots:
+            for skin in getattr(robot, "skins", {}).values():
+                tc = getattr(skin, "touch_controller", None)
+                st = getattr(skin, "skin_type", "")
+                source = getattr(tc, "source_id", None) or getattr(
+                    tc, "mac_address", None)
+                if source and st:
+                    skin_types[source] = st
+                    variant = getattr(skin, "skin_variant", "")
+                    if variant:
+                        skin_variants[source] = variant
+        return skin_types, skin_variants
 
     def _stop_recording(self) -> None:
         if self._stream_recorder is not None:

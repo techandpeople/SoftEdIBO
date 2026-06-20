@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from src.config.settings import Settings
+from src.gui.async_task import run_async
 from src.gui.ui_robot_panel import Ui_RobotPanel
 from src.hardware.espnow_gateway import ESPNowGateway
 from src.hardware.serial_ports import list_esp32_ports
@@ -138,7 +139,15 @@ class RobotPanel(QWidget, Ui_RobotPanel):
             or self.port_combo.currentText()
             or self._settings.gateway_port
         )
-        esp_ports = list_esp32_ports()
+        # Enumerating serial ports can take a moment on Linux (sysfs/udev walk),
+        # so do it off the GUI thread and populate the combo when it returns.
+        run_async(
+            list_esp32_ports,
+            on_done=lambda ports, cur=current: self._populate_ports(ports, cur),
+            parent=self,
+        )
+
+    def _populate_ports(self, esp_ports, current) -> None:
         self.port_combo.clear()
         if not esp_ports:
             default_port = "COM3" if sys.platform == "win32" else "/dev/ttyUSB0"
@@ -170,17 +179,31 @@ class RobotPanel(QWidget, Ui_RobotPanel):
             baud = int(self.baud_rate_combo.currentText())
             self._gateway._port      = port
             self._gateway._baud_rate = baud
-            if self._gateway.connect():
-                self.gateway_status_label.setText(f"Connected ({port})")
-                self.connect_btn.setText("Disconnect")
-                self.scan_btn.setEnabled(True)
-                self.gateway_changed.emit(True)
-                self._settings.data.setdefault("gateway", {})
-                self._settings.data["gateway"]["serial_port"] = port
-                self._settings.data["gateway"]["baud_rate"]   = baud
-                self._settings.save()
-            else:
-                self.gateway_status_label.setText(f"Connection failed ({port})")
+            # Opening the serial port blocks while the driver/USB enumerates, so
+            # do it off the GUI thread to keep the window responsive.
+            self.connect_btn.setEnabled(False)
+            self.gateway_status_label.setText(f"Connecting ({port})…")
+            run_async(
+                self._gateway.connect,
+                on_done=lambda ok, p=port, b=baud: self._on_connect_result(ok, p, b),
+                on_error=lambda _exc, p=port: self._on_connect_result(False, p, 0),
+                parent=self,
+            )
+
+    def _on_connect_result(self, ok: bool, port: str, baud: int) -> None:
+        """GUI-thread handler for the async gateway connect result."""
+        self.connect_btn.setEnabled(True)
+        if not ok:
+            self.gateway_status_label.setText(f"Connection failed ({port})")
+            return
+        self.gateway_status_label.setText(f"Connected ({port})")
+        self.connect_btn.setText("Disconnect")
+        self.scan_btn.setEnabled(True)
+        self.gateway_changed.emit(True)
+        self._settings.data.setdefault("gateway", {})
+        self._settings.data["gateway"]["serial_port"] = port
+        self._settings.data["gateway"]["baud_rate"]   = baud
+        self._settings.save()
 
     def start_scan(self, on_done=None) -> None:
         """Broadcast a node scan and refresh after ~2 s — non-blocking.

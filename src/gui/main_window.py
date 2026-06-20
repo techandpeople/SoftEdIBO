@@ -21,6 +21,7 @@ from src._version import __build_time__, __version__
 from src.config.settings import Settings
 from src.updater import AppUpdater
 from src.data.database import Database
+from src.gui.async_task import run_async
 from src.gui.data_panel import DataPanel
 from src.gui.home_panel import HomePanel
 from src.gui.participant_panel import ParticipantPanel
@@ -72,6 +73,8 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self._session_panel.session_started.connect(lambda _: self._on_navigate("Session"))
         self._session_panel.session_stopped.connect(lambda: self._home_panel.set_session_status(None))
         self._session_panel.session_finished.connect(self._data_panel.refresh)
+        # Rebuild robots when the session panel calibrates fill times mid-flow.
+        self._session_panel.reload_requested.connect(self._on_robot_configured)
         self._robot_panel.gateway_changed.connect(self._home_panel.set_gateway_status)
         self._robot_panel.robot_configured.connect(self._on_robot_configured)
 
@@ -101,6 +104,10 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.actionTrainTouch.triggered.connect(self._open_train_touch)
         self.menuTools.addAction(self.actionTrainTouch)
 
+        self.actionCalibrateFill = QAction("Calibrate Fill Times…", self)
+        self.actionCalibrateFill.triggered.connect(self._open_fill_calibration)
+        self.menuTools.addAction(self.actionCalibrateFill)
+
         # Track whether a session is live so OTA can refuse mid-actuation.
         self._session_active = False
         self._session_panel.session_started.connect(
@@ -109,12 +116,15 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             lambda *_: setattr(self, "_session_active", False))
 
         # Auto-connect the gateway on startup (configurable) so the user doesn't
-        # reconnect every launch. connect() spins a daemon read thread, so this
-        # doesn't block the UI.
+        # reconnect every launch. Opening the serial port blocks while the driver
+        # enumerates, so do it off the GUI thread to avoid freezing the window on
+        # launch.
         if self._settings.gateway_auto_connect and not self._gateway.is_connected:
-            if self._gateway.connect():
-                self._home_panel.set_gateway_status(True)
-                self._robot_panel.sync_gateway_ui()
+            run_async(
+                self._gateway.connect,
+                on_done=self._on_auto_connect,
+                parent=self,
+            )
 
         # OTA updater — silent background check 5 s after startup
         self._updater = AppUpdater(self)
@@ -125,6 +135,12 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.setWindowTitle(f"SoftEdIBO  {__version__}")
         self.statusBar().show()  # keep bar always visible to prevent layout shifts
         QTimer.singleShot(5000, self._updater.check)
+
+    def _on_auto_connect(self, ok: bool) -> None:
+        """GUI-thread handler for the async startup auto-connect."""
+        if ok:
+            self._home_panel.set_gateway_status(True)
+            self._robot_panel.sync_gateway_ui()
 
     # ------------------------------------------------------------------
     # Robot loading
@@ -222,6 +238,20 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         from recorded sessions + their label CSVs."""
         from src.gui.train_touch_dialog import TrainTouchDialog
         TrainTouchDialog(parent=self).exec()
+
+    def _open_fill_calibration(self) -> None:
+        """Tools => Calibrate Fill Times… — measure each chamber's inflate time
+        against the pressure sensor and store it as ``fill_time_ms``."""
+        if self._session_active:
+            QMessageBox.warning(
+                self, "Calibrate Fill Times",
+                "Stop the running session before calibrating — calibration "
+                "drives the pumps directly.")
+            return
+        from src.gui.fill_calibration_dialog import FillCalibrationDialog
+        dlg = FillCalibrationDialog(self._settings, self._gateway, parent=self)
+        dlg.saved.connect(self._on_robot_configured)   # rebuild robots with new fill times
+        dlg.exec()
 
     def _open_settings(self) -> None:
         dlg = SettingsDialog(self._settings, parent=self)
@@ -438,5 +468,9 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 def create_app() -> tuple[QApplication, MainWindow]:
     """Create and return the application and main window."""
     app = QApplication(sys.argv)
+    # Diagnostic only — off unless SOFTEDIBO_WATCHDOG is set. Dumps the GUI
+    # thread's stack to stderr whenever the event loop stalls (busy cursor).
+    from src.gui.loop_watchdog import install_loop_watchdog
+    install_loop_watchdog(app)
     window = MainWindow()
     return app, window

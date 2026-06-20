@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from src.config.settings import Settings
+from src.gui.async_task import run_async
 from src.hardware.serial_ports import list_esp32_ports
 
 SENTINEL_PATH: Path = Settings.ROOT / "data" / ".setup_done"
@@ -197,8 +198,15 @@ class _FlashPage(QWizardPage):
 
     def _refresh_ports(self) -> None:
         current = self._port_combo.currentText()
+        # Port enumeration can stall briefly; keep the wizard responsive.
+        run_async(
+            _list_ports,
+            on_done=lambda ports, cur=current: self._populate_ports(ports, cur),
+            parent=self,
+        )
+
+    def _populate_ports(self, ports: list[str], current: str) -> None:
         self._port_combo.clear()
-        ports = _list_ports()
         for p in ports:
             self._port_combo.addItem(p)
         # Restore previous selection if still present.

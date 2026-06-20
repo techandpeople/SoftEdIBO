@@ -39,13 +39,23 @@ class StreamRecorder:
         gateway: The shared ``ESPNowGateway`` to tap.
         path: Destination ``.jsonl`` file (parent dirs are created).
         session_id: Stored in the header line for traceability.
+        skin_types: ``{touch_source: skin_type}`` for the skins recorded in
+            this session. Stored in the header so the Touch Gestures dialog can
+            tell which skin type each touch ``source`` belongs to and filter /
+            train per type without the operator re-tagging anything.
+        skin_variants: ``{touch_source: skin_variant}`` (silicone format) for the
+            same sources — stored alongside ``skin_types`` and fed to the touch
+            ML as a feature.
     """
 
     def __init__(self, path: str | Path, session_id: str = "",
-                 gateway: Any = None):
+                 gateway: Any = None, skin_types: dict[str, str] | None = None,
+                 skin_variants: dict[str, str] | None = None):
         self._gateway = gateway
         self._path = Path(path)
         self._session_id = session_id
+        self._skin_types = dict(skin_types or {})
+        self._skin_variants = dict(skin_variants or {})
         self._lock = threading.Lock()
         self._file = None
         self._count = 0
@@ -72,6 +82,8 @@ class StreamRecorder:
             "schema": SCHEMA_VERSION,
             "session_id": self._session_id,
             "started": datetime.now().isoformat(timespec="milliseconds"),
+            "skin_types": self._skin_types,
+            "skin_variants": self._skin_variants,
         }
         self._file.write(json.dumps(header) + "\n")
         self._file.flush()

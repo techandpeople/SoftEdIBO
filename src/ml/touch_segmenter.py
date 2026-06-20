@@ -25,12 +25,16 @@ class TouchSegment:
         mags: per-sample list of per-sensor magnitudes (``mag`` vectors).
         acts: per-sample set of active sensor indices.
         times_ms: timestamp of each sample (ms).
+        n_pulses: how many press→release touches this segment represents. 1 for a
+            plain segment; >1 when several touches were merged into one logical
+            gesture (e.g. a double/triple tap — see :func:`merge_segments`).
     """
     start_ms: float
     end_ms: float
     mags: list[list[float]] = field(default_factory=list)
     acts: list[set[int]] = field(default_factory=list)
     times_ms: list[float] = field(default_factory=list)
+    n_pulses: int = 1
 
     @property
     def duration_ms(self) -> float:
@@ -39,6 +43,27 @@ class TouchSegment:
     @property
     def sensor_count(self) -> int:
         return max((len(m) for m in self.mags), default=0)
+
+
+def merge_segments(segments) -> TouchSegment | None:
+    """Merge several touch segments into one logical gesture (e.g. a multi-tap).
+
+    Samples are concatenated in start-time order; ``n_pulses`` accumulates so the
+    feature pipeline can tell a triple-tap from a single long touch. The inactive
+    gaps between the merged touches are not materialised as samples (the
+    segmenter only records while active) — ``n_pulses`` carries that information
+    instead. Returns ``None`` if ``segments`` is empty."""
+    segs = sorted((s for s in segments if s is not None),
+                  key=lambda s: s.start_ms)
+    if not segs:
+        return None
+    merged = TouchSegment(start_ms=segs[0].start_ms, end_ms=segs[-1].end_ms)
+    for s in segs:
+        merged.mags.extend(s.mags)
+        merged.acts.extend(s.acts)
+        merged.times_ms.extend(s.times_ms)
+    merged.n_pulses = sum(s.n_pulses for s in segs)
+    return merged
 
 
 class TouchSegmenter:

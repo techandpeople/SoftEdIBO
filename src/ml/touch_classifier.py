@@ -18,7 +18,7 @@ from typing import Any, Callable
 
 from src.config.settings import Settings
 from src.ml import gesture_taxonomy as tax
-from src.ml.touch_features import feature_vector
+from src.ml.touch_features import full_feature_vector
 from src.ml.touch_segmenter import TouchSegment, TouchSegmenter
 
 logger = logging.getLogger(__name__)
@@ -37,8 +37,10 @@ class TouchGestureClassifier:
         path: Optional explicit model path (defaults to :func:`model_path`).
     """
 
-    def __init__(self, skin_type: str, path: str | Path | None = None):
+    def __init__(self, skin_type: str, path: str | Path | None = None,
+                 skin_variant: str = ""):
         self.skin_type = skin_type or ""
+        self.skin_variant = skin_variant or ""
         self._path = Path(path) if path else model_path(self.skin_type)
         self._model = None
         self._loaded = False
@@ -71,7 +73,8 @@ class TouchGestureClassifier:
         if self._model is None:
             return tax.UNKNOWN
         try:
-            pred = self._model.predict([feature_vector(seg)])[0]
+            pred = self._model.predict(
+                [full_feature_vector(seg, self.skin_variant)])[0]
             return str(pred)
         except Exception:   # noqa: BLE001 — never break a session on inference
             logger.exception("Touch inference failed for %s", self.skin_type)
@@ -92,7 +95,9 @@ class LiveTouchClassifier:
                  on_gesture: Callable[[str, str, TouchSegment], None]):
         self._skin = skin
         self._on_gesture = on_gesture
-        self._clf = TouchGestureClassifier(getattr(skin, "skin_type", ""))
+        self._clf = TouchGestureClassifier(
+            getattr(skin, "skin_type", ""),
+            skin_variant=getattr(skin, "skin_variant", ""))
         self._seg = TouchSegmenter()
         self._t0: float | None = None
 

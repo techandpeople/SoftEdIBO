@@ -4,6 +4,7 @@ import logging
 from typing import Any, Callable
 
 from src.hardware.espnow_gateway import ESPNowGateway
+from src.hardware.fill_scaling import FillLoadTracker
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +15,10 @@ class ESP32Controller:
     def __init__(self, mac_address: str, gateway: ESPNowGateway):
         self.mac_address = mac_address
         self._gateway = gateway
+        # Shared per-node fill-load tracker: every Skin on this node consults it
+        # to scale calibrated fill times for concurrent inflation (pumps are
+        # shared per node). ``pump_count`` is set by the robot builder.
+        self.fill_load = FillLoadTracker()
         self._last_status: dict[str, Any] = {}
         self._touch_callbacks:    list[Callable[[int, int], None]] = []
         self._pressure_callbacks: list[Callable[[int, int], None]] = []
@@ -35,8 +40,18 @@ class ESP32Controller:
         """Send a command to this ESP32 node."""
         return self._gateway.send(self.mac_address, command, **kwargs)
 
-    def inflate(self, chamber: int, delta: int = 10) -> bool:
-        """Inflate a chamber by delta % of its max pressure (0-100)."""
+    def inflate(self, chamber: int, delta: int = 10,
+                ms: int | None = None) -> bool:
+        """Inflate a chamber by delta % of its max pressure (0-100).
+
+        When ``ms`` is given, the node inflates for that many milliseconds
+        (time-based fill from a calibrated ``fill_time_ms``) instead of closing
+        the loop on the pressure sensor; the firmware still caps at 5 s and at
+        the chamber's HARD_MAX pressure.
+        """
+        if ms is not None:
+            return self.send_command("inflate", chamber=chamber, delta=delta,
+                                     ms=int(ms))
         return self.send_command("inflate", chamber=chamber, delta=delta)
 
     def deflate(self, chamber: int, delta: int = 10) -> bool:

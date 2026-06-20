@@ -27,6 +27,12 @@ def classify(seg: TouchSegment) -> str:
     if (f["is_sequential"] >= 1.0
             and f["n_distinct_sensors"] >= tax.STROKE_MIN_DISTINCT):
         return tax.STROKE
+    # Repeated taps: a merged multi-tap gesture carries its pulse count.
+    pulses = int(f.get("n_pulses", 1))
+    if pulses >= 3:
+        return tax.TRIPLE_TAP
+    if pulses == 2:
+        return tax.DOUBLE_TAP
     # Tap vs press by duration.
     if f["duration_ms"] <= tax.TAP_MAX_MS:
         return tax.TAP

@@ -12,6 +12,7 @@ classifier.
 
 from __future__ import annotations
 
+from src.hardware.skin_geometry import SKIN_VARIANTS
 from src.ml.touch_segmenter import TouchSegment
 
 
@@ -27,6 +28,7 @@ def extract_features(seg: TouchSegment) -> dict[str, float]:
         "duration_ms": seg.duration_ms,
         "n_samples": float(n_samples),
         "n_sensors": float(n_sensors),
+        "n_pulses": float(getattr(seg, "n_pulses", 1)),
     }
     if n_samples == 0 or n_sensors == 0:
         # Empty/degenerate segment — fill the schema with zeros so the feature
@@ -85,7 +87,7 @@ def extract_features(seg: TouchSegment) -> dict[str, float]:
 
 # Stable feature order for vectorisation.
 FEATURE_NAMES: tuple[str, ...] = (
-    "duration_ms", "n_samples", "n_sensors",
+    "duration_ms", "n_samples", "n_sensors", "n_pulses",
     "peak_mag", "mean_mag", "rise_ms",
     "active_frac_max", "active_frac_mean",
     "n_distinct_sensors", "n_transitions", "is_sequential",
@@ -96,3 +98,26 @@ def feature_vector(seg: TouchSegment) -> list[float]:
     """Flatten :func:`extract_features` to a fixed-order list for a model."""
     feats = extract_features(seg)
     return [float(feats.get(name, 0.0)) for name in FEATURE_NAMES]
+
+
+# --- Silicone-variant feature (one-hot) -----------------------------------
+# The skin's silicone format is orthogonal to its shape; the per-shape model is
+# trained across variants, so the variant is fed in as a one-hot block. The
+# variant list is single-sourced from the geometry registry (imported at top).
+VARIANT_FEATURE_NAMES: tuple[str, ...] = tuple(f"variant_{v}" for v in SKIN_VARIANTS)
+
+
+def variant_features(skin_variant: str) -> list[float]:
+    """One-hot encode the silicone variant (all zeros when unset/unknown)."""
+    return [1.0 if skin_variant == v else 0.0 for v in SKIN_VARIANTS]
+
+
+def full_feature_vector(seg: TouchSegment, skin_variant: str = "") -> list[float]:
+    """Model input: the segment features plus the one-hot silicone variant.
+
+    Used by both training and inference so the vector length/order always match.
+    """
+    return feature_vector(seg) + variant_features(skin_variant)
+
+
+FULL_FEATURE_NAMES: tuple[str, ...] = FEATURE_NAMES + VARIANT_FEATURE_NAMES

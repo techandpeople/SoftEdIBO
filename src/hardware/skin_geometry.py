@@ -15,8 +15,18 @@ type and index-based); they exist for rendering and as the reliable geometry
 source should spatial features ever be added.
 
 > Several entries below are first-pass placeholders (marked ``# TODO: measure``)
-> — adjust to the real builds. Sensor count is 4 (the MLX90393 board) unless a
-> type genuinely differs.
+> — adjust to the real builds. Sensor count varies by build: a skin uses as many
+> of the board's sensors as fit (e.g. ``tree_round`` 1, ``turtle_side`` 2,
+> ``turtle_square`` 4).
+>
+> **Sensor-count limitation (honest):** spatial quadrant position tracking only
+> engages at **4 sensors** (see ``Skin._setup_touch_tracking``, skin.py:314).
+> Fewer-sensor skins still get touch *reactions* and per-skin-type gesture ML,
+> but resolve less:
+>   - **1 sensor** (e.g. ``tree_round``): only tap / press / hold, by magnitude
+>     and timing — no direction, no drag.
+>   - **2 sensors** (e.g. ``turtle_side``): the above plus one axis of direction.
+>   - **4 sensors** (e.g. ``turtle_square``): full quadrant position + drag.
 """
 
 from __future__ import annotations
@@ -112,11 +122,13 @@ SKIN_GEOMETRIES: dict[str, SkinGeometry] = {
         sensors_mm=_grid_2x2(125.0, 125.0), robot_kind="turtle",
         notes="Turtle central square, 4 sensors at quadrant centres.",
     ),
-    # Turtle — lateral rectangles (left/right flanks).
+    # Turtle — lateral rectangles (left/right flanks). Only 2 sensors fit on the
+    # narrow 75 mm width, stacked along the 125 mm length.
     "turtle_side": SkinGeometry(
         skin_type="turtle_side", shape="rect", size_mm=(75.0, 125.0),
-        sensors_mm=_grid_2x2(75.0, 125.0), robot_kind="turtle",
-        notes="Turtle side rectangle.",
+        sensors_mm=((37.5, 41.67), (37.5, 83.33)), robot_kind="turtle",
+        notes="Turtle side rectangle, 2 sensors at 1/3 and 2/3 of the length. "
+              "TODO: confirm exact positions on the real build.",
     ),
     # Turtle — functional corner triangles (head/tail are aesthetic and are
     # NOT skins, so they are absent from this registry).
@@ -126,13 +138,13 @@ SKIN_GEOMETRIES: dict[str, SkinGeometry] = {
         robot_kind="turtle",
         notes="TODO: measure — functional corner triangle sensor positions.",
     ),
-    # Tree — round branch skins, Ø99 mm.
+    # Tree — round branch skins, Ø99 mm. A single sensor at the centre (one
+    # magnet per branch); no spatial position tracking, only touch reactions.
     "tree_round": SkinGeometry(
         skin_type="tree_round", shape="round", size_mm=(99.0, 99.0),
-        # 4 sensors on a ~25 mm radius around the centre (49.5, 49.5).
-        sensors_mm=((31.8, 31.8), (67.2, 31.8), (31.8, 67.2), (67.2, 67.2)),
+        sensors_mm=((49.5, 49.5),),
         robot_kind="tree",
-        notes="Tree branch, Ø99 round.",
+        notes="Tree branch, Ø99 round, single central sensor.",
     ),
     # Thymio — 'D' (rotated +90°): semicircular bulge on top, flat bottom.
     # Square bounding box so it isn't stretched tall/narrow.
@@ -156,6 +168,18 @@ def geometry_for(skin_type: str | None) -> SkinGeometry | None:
 def known_skin_types() -> list[str]:
     """All registered skin types (for GUI pickers)."""
     return sorted(SKIN_GEOMETRIES)
+
+
+# --- Silicone variants ----------------------------------------------------
+# Orthogonal to skin_type (the shape): the same shape is cast in several
+# silicone formats with different chamber sizes. Referenced across the app
+# (config, GUI, recordings) and fed to the touch ML as a feature.
+SKIN_VARIANTS: tuple[str, ...] = ("natural", "wrinkles", "organ")
+
+
+def known_skin_variants() -> list[str]:
+    """All silicone variants (for GUI pickers / ML encoding)."""
+    return list(SKIN_VARIANTS)
 
 
 def skin_types_for(robot_kind: str | None) -> list[str]:

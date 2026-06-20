@@ -8,6 +8,14 @@ from pathlib import Path
 
 os.environ.setdefault("QT_LOGGING_RULES", "qt.qpa.wayland.textinput=false")
 
+# Run via XWayland (xcb) instead of native Wayland. On GNOME/Wayland, creating a
+# new top-level window (a config dialog) occasionally costs ~120 ms in native Qt
+# surface setup — compositor roundtrips whose latency varies — which makes GNOME
+# flash the "busy" spinner cursor (the app never actually blocks; verified with
+# the loop watchdog). Under XWayland that cost disappears. Override by exporting
+# QT_QPA_PLATFORM=wayland to go back to native Wayland.
+os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
+
 # Add project root to path
 project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
@@ -34,6 +42,11 @@ def _fatal(msg: str) -> None:
 def main():
     app = QApplication(sys.argv)
     install_exception_hooks("SoftEdIBO")
+
+    # Diagnostic only — off unless SOFTEDIBO_WATCHDOG is set. Dumps the GUI
+    # thread's stack to stderr whenever the event loop stalls (busy cursor).
+    from src.gui.loop_watchdog import install_loop_watchdog
+    install_loop_watchdog(app)
 
     if needs_setup():
         try:

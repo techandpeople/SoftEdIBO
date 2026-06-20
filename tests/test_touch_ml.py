@@ -11,7 +11,7 @@ from src.ml import gesture_taxonomy as tax
 from src.ml import rule_baseline
 from src.ml.touch_classifier import TouchGestureClassifier, model_path
 from src.ml.touch_features import FEATURE_NAMES, extract_features, feature_vector
-from src.ml.touch_segmenter import TouchSegmenter
+from src.ml.touch_segmenter import TouchSegmenter, merge_segments
 
 
 # ---------------------------------------------------------------------------
@@ -80,6 +80,21 @@ def test_feature_vector_has_stable_length_across_sensor_counts():
     assert len(v4) == len(v6) == len(FEATURE_NAMES)
 
 
+def test_full_feature_vector_appends_one_hot_variant():
+    from src.hardware.skin_geometry import SKIN_VARIANTS
+    from src.ml.touch_features import full_feature_vector, FULL_FEATURE_NAMES
+    seg = TouchSegmenter().segment_stream(_tap_stream(4))[0]
+    base = feature_vector(seg)
+    full = full_feature_vector(seg, "wrinkles")
+    assert len(full) == len(FULL_FEATURE_NAMES) == len(base) + len(SKIN_VARIANTS)
+    assert full[:len(base)] == base
+    # exactly one variant bit set, and it's the "wrinkles" slot
+    assert sum(full[len(base):]) == 1.0
+    assert full[len(base) + SKIN_VARIANTS.index("wrinkles")] == 1.0
+    # unknown / unset variant → all-zero one-hot block
+    assert sum(full_feature_vector(seg, "")[len(base):]) == 0.0
+
+
 def test_stroke_features_show_sequence():
     seg = TouchSegmenter().segment_stream(_stroke_stream())[0]
     f = extract_features(seg)
@@ -105,6 +120,37 @@ def test_rule_baseline_separates_tap_press_stroke():
     assert rule_baseline.classify(seg_tap) == tax.TAP
     assert rule_baseline.classify(seg_press) == tax.PRESS
     assert rule_baseline.classify(seg_stroke) == tax.STROKE
+
+
+# ---------------------------------------------------------------------------
+# Multi-tap: merge segments into one gesture (n_pulses)
+# ---------------------------------------------------------------------------
+
+def test_merge_segments_accumulates_pulses_and_samples():
+    taps = TouchSegmenter().segment_stream(
+        _tap_stream() + _tap_stream() + _tap_stream())
+    assert len(taps) == 3                       # three separate touches
+    merged = merge_segments(taps)
+    assert merged.n_pulses == 3
+    assert len(merged.mags) == sum(len(t.mags) for t in taps)
+    # n_pulses surfaces as a feature.
+    assert int(extract_features(merged)["n_pulses"]) == 3
+
+
+def test_merge_segments_empty_is_none():
+    assert merge_segments([]) is None
+
+
+def test_rule_baseline_labels_double_and_triple_tap():
+    one = TouchSegmenter().segment_stream(_tap_stream())[0]
+    double = merge_segments(
+        TouchSegmenter().segment_stream(_tap_stream() + _tap_stream()))
+    triple = merge_segments(
+        TouchSegmenter().segment_stream(
+            _tap_stream() + _tap_stream() + _tap_stream()))
+    assert rule_baseline.classify(one) == tax.TAP
+    assert rule_baseline.classify(double) == tax.DOUBLE_TAP
+    assert rule_baseline.classify(triple) == tax.TRIPLE_TAP
 
 
 # ---------------------------------------------------------------------------

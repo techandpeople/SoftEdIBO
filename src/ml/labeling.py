@@ -9,41 +9,81 @@ class. Dependency-free (stdlib only).
 from __future__ import annotations
 
 import csv
+import json
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
 from src.ml.training import segments_of   # re-use the recording segmenter
 
-CSV_FIELDS = ("skin_type", "source", "start_ms", "end_ms", "label")
+CSV_FIELDS = ("skin_type", "skin_variant", "source", "start_ms", "end_ms",
+              "label", "group_id")
 
 
 @dataclass
 class LabelRow:
-    """One labelled (or to-be-labelled) touch segment."""
+    """One labelled (or to-be-labelled) touch segment.
+
+    ``group_id`` ties several rows into one logical gesture (e.g. a triple tap):
+    rows with the same non-zero ``group_id`` are merged into a single training
+    sample sharing one ``label``. ``0`` means ungrouped (a standalone touch).
+    ``skin_variant`` is the silicone format (a touch ML feature)."""
     skin_type: str
     source: str
     start_ms: float
     end_ms: float
     label: str = ""
+    group_id: int = 0
+    skin_variant: str = ""
 
     @property
     def duration_ms(self) -> float:
         return self.end_ms - self.start_ms
 
 
+def _header_map(recording: Path, key: str) -> dict[str, str]:
+    """Read a ``{source: value}`` map from the recording's JSON header line.
+
+    Written by :class:`~src.data.stream_recorder.StreamRecorder`. Returns ``{}``
+    for recordings made before the field was tagged (or unreadable headers)."""
+    try:
+        with open(recording, encoding="utf-8") as f:
+            header = json.loads(f.readline() or "{}")
+    except (OSError, ValueError):
+        return {}
+    m = header.get(key)
+    return {str(k): str(v) for k, v in m.items()} if isinstance(m, dict) else {}
+
+
+def skin_types_of(recording: Path) -> dict[str, str]:
+    """Per-source skin-type map ``{source: skin_type}`` from the header line."""
+    return _header_map(recording, "skin_types")
+
+
+def skin_variants_of(recording: Path) -> dict[str, str]:
+    """Per-source silicone-variant map ``{source: skin_variant}`` from the header."""
+    return _header_map(recording, "skin_variants")
+
+
 def label_rows_for(recording: Path, skin_type: str = "",
                    gesture_events: list[tuple[float, str]] | None = None,
-                   window_ms: float = 1500.0) -> list[LabelRow]:
+                   window_ms: float = 1500.0,
+                   source_types: dict[str, str] | None = None,
+                   source_variants: dict[str, str] | None = None
+                   ) -> list[LabelRow]:
     """Build one :class:`LabelRow` per touch segment in ``recording``.
 
     ``gesture_events`` is ``[(epoch_ms, label), …]`` from the live observer
     tags; each segment is pre-filled with the nearest one within ``window_ms``
-    (blank if none). ``skin_type`` is applied to every row (single-skin
-    recordings); leave blank and set per-row in the UI for mixed recordings."""
+    (blank if none). Each row's skin type/variant comes from ``source_types`` /
+    ``source_variants`` keyed by the touch ``source`` MAC (so one recording can
+    mix skins); ``skin_type`` is the fallback when a source isn't in the map."""
+    source_types = source_types or {}
+    source_variants = source_variants or {}
     rows: list[LabelRow] = [
-        LabelRow(skin_type=skin_type, source=source,
-                 start_ms=seg.start_ms, end_ms=seg.end_ms)
+        LabelRow(skin_type=source_types.get(source, skin_type), source=source,
+                 start_ms=seg.start_ms, end_ms=seg.end_ms,
+                 skin_variant=source_variants.get(source, ""))
         for source, seg in segments_of(recording)
     ]
     rows.sort(key=lambda r: r.start_ms)
@@ -88,9 +128,10 @@ def write_csv(rows: list[LabelRow], path: Path) -> int:
         w = csv.DictWriter(f, fieldnames=list(CSV_FIELDS))
         w.writeheader()
         for r in labelled:
-            w.writerow({"skin_type": r.skin_type, "source": r.source,
+            w.writerow({"skin_type": r.skin_type, "skin_variant": r.skin_variant,
+                        "source": r.source,
                         "start_ms": f"{r.start_ms:.1f}", "end_ms": f"{r.end_ms:.1f}",
-                        "label": r.label})
+                        "label": r.label, "group_id": r.group_id})
     return len(labelled)
 
 
@@ -101,16 +142,20 @@ def read_csv(path: Path) -> list[LabelRow]:
         for row in csv.DictReader(f):
             out.append(LabelRow(
                 skin_type=row.get("skin_type", ""),
+                skin_variant=row.get("skin_variant", ""),
                 source=row.get("source", "?"),
                 start_ms=float(row["start_ms"]),
                 end_ms=float(row.get("end_ms", row["start_ms"])),
-                label=row.get("label", "")))
+                label=row.get("label", ""),
+                group_id=int(row.get("group_id") or 0)))
     return out
 
 
 def label_map(rows: list[LabelRow]) -> dict:
-    """``{(source, round(start_ms)): (skin_type, label)}`` for the trainer."""
-    return {(r.source, round(r.start_ms)): (r.skin_type, r.label)
+    """``{(source, round(start_ms)): (skin_type, skin_variant, label, group_id)}``
+    for the trainer."""
+    return {(r.source, round(r.start_ms)):
+            (r.skin_type, r.skin_variant, r.label, r.group_id)
             for r in rows if r.label}
 
 

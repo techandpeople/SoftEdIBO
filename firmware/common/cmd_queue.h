@@ -22,6 +22,7 @@ struct Cmd {
     CmdType  type;
     int8_t   chamber;       // chamber index
     int16_t  param;         // delta or value (percent), or valve side / pump idx
+    uint32_t fill_ms;       // inflate: time-based fill window (ms; 0 = pressure-based)
     float    param_kpa;     // chamber min or max in kPa (depends on type)
     int16_t  cfg_chambers;  // configure: num_chambers, or manual: open/on (bool)
     float    cfg_p_min;     // configure: tank_pressure_min_kpa

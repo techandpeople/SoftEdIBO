@@ -53,7 +53,7 @@ class SkinGridView(QWidget):
 
     _magnet_msg = Signal(object)  # thread-safe bridge for on_magnet callbacks
 
-    def __init__(self, skin: Skin, cell_px: int = 28,
+    def __init__(self, skin: Skin, cell_px: int = 40,
                  parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._skin = skin

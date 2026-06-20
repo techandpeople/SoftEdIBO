@@ -223,9 +223,20 @@ class SkinConfigDialog(QDialog):
         )
         self._skin_type_combo.currentIndexChanged.connect(
             self._on_skin_type_changed)
+        # Silicone variant — orthogonal to the shape (same shape, different
+        # silicone format / chamber sizes). Fed to the touch ML as a feature.
+        self._skin_variant_combo = QComboBox()
+        from src.hardware.skin_geometry import known_skin_variants
+        self._skin_variant_combo.addItem("(none)", "")
+        for sv in known_skin_variants():
+            self._skin_variant_combo.addItem(sv, sv)
+        self._skin_variant_combo.setToolTip(
+            "Silicone format of this skin (different chamber sizes per variant). "
+            "Used as a touch-gesture ML feature.")
         form.addRow("Skin ID:",   self._skin_id_edit)
         form.addRow("Name:",      self._name_edit)
         form.addRow("Skin type:", self._skin_type_combo)
+        form.addRow("Silicone:",  self._skin_variant_combo)
         if single_type:
             try:
                 form.setRowVisible(self._skin_type_combo, False)
@@ -261,12 +272,17 @@ class SkinConfigDialog(QDialog):
         # ---- Action buttons (full width, pinned at the bottom) ----
         btn_row = QHBoxLayout()
         self._test_btn   = QPushButton("Test Actuators")
+        self._calib_btn  = QPushButton("Calibrate Fill")
         self._delete_btn = QPushButton("Delete Skin")
         self._cancel_btn = QPushButton("Cancel")
         self._save_btn   = QPushButton("Save")
         self._test_btn.setEnabled(gateway.is_connected)
+        self._calib_btn.setEnabled(gateway.is_connected)
+        self._calib_btn.setToolTip(
+            "Measure this skin's chamber fill times against the pressure sensor.")
         self._delete_btn.setVisible(not is_new)
         btn_row.addWidget(self._test_btn)
+        btn_row.addWidget(self._calib_btn)
         btn_row.addWidget(self._delete_btn)
         btn_row.addStretch()
         btn_row.addWidget(self._cancel_btn)
@@ -277,6 +293,7 @@ class SkinConfigDialog(QDialog):
         self._populate_from_cfg(self._load_skin_cfg())
 
         self._test_btn.clicked.connect(self._on_test)
+        self._calib_btn.clicked.connect(self._on_calibrate)
         self._delete_btn.clicked.connect(self._on_delete)
         self._cancel_btn.clicked.connect(self.reject)
         self._save_btn.clicked.connect(self._on_save)
@@ -295,6 +312,8 @@ class SkinConfigDialog(QDialog):
         # only when the skin has no (registered) type.
         st_idx = self._skin_type_combo.findData(skin_cfg.get("skin_type", ""))
         self._skin_type_combo.setCurrentIndex(st_idx if st_idx >= 0 else 0)
+        sv_idx = self._skin_variant_combo.findData(skin_cfg.get("skin_variant", ""))
+        self._skin_variant_combo.setCurrentIndex(sv_idx if sv_idx >= 0 else 0)
         self._populate_chambers(skin_cfg)
         touch_cfg = skin_cfg.get("touch") or {}
         self._populate_touch_header(touch_cfg)
@@ -829,6 +848,39 @@ class SkinConfigDialog(QDialog):
         )
         dlg.exec()
 
+    def _on_calibrate(self) -> None:
+        """Calibrate fill times for just this skin's chambers.
+
+        Builds the chamber list from the current (possibly unsaved) rows so the
+        user can calibrate before committing the skin. Only actuator-typed nodes
+        are included — magnet/sensor nodes have nothing to inflate."""
+        node_types = {n.get("mac"): n.get("node_type")
+                      for n in self._robot_nodes()}
+        skin_id = self._skin_id_edit.text().strip() or "(unsaved)"
+        chambers: list[dict] = []
+        for row in self._rows:
+            mac, slot, _max_p = row.get_values()
+            if not mac:
+                continue
+            if node_types.get(mac) not in ("node_direct", "node_multiplexed"):
+                continue
+            chambers.append({
+                "robot_id": self._robot_type,
+                "skin_id": skin_id,
+                "mac": mac,
+                "slot": int(slot),
+                "node_type": node_types.get(mac),
+                "fill_time_ms": None,
+            })
+        if not chambers:
+            QMessageBox.warning(
+                self, "Calibrate Fill",
+                "Add at least one chamber on an actuator node first.")
+            return
+        from src.gui.fill_calibration_dialog import FillCalibrationDialog
+        FillCalibrationDialog(self._settings, self._gateway,
+                              parent=self, chambers=chambers).exec()
+
     # ------------------------------------------------------------------
     # Save validation helpers
     # ------------------------------------------------------------------
@@ -939,6 +991,9 @@ class SkinConfigDialog(QDialog):
         skin_type = self._skin_type_combo.currentData() or ""
         if skin_type:
             skin_entry["skin_type"] = skin_type
+        skin_variant = self._skin_variant_combo.currentData() or ""
+        if skin_variant:
+            skin_entry["skin_variant"] = skin_variant
         self._apply_layout_and_touch(skin_entry)
 
         data = self._settings.data

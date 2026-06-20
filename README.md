@@ -7,6 +7,9 @@ SoftEdIBO controls soft robots equipped with inflatable air chambers.
 Participants interact by touching the robots, which respond through inflation and deflation.
 The system supports multiple robot types (Turtle, Tree, Thymio) and activity modes.
 
+> **Running a study?** See [SETUP.md](SETUP.md) for skin/sensor setup, magnet
+> polarity, touch calibration, and the gesture-training workflow.
+
 ---
 
 ## Hardware requirements

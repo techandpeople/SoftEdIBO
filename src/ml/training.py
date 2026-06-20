@@ -17,8 +17,8 @@ from pathlib import Path
 from typing import Callable
 
 from src.ml import rule_baseline
-from src.ml.touch_features import feature_vector
-from src.ml.touch_segmenter import TouchSegmenter
+from src.ml.touch_features import full_feature_vector
+from src.ml.touch_segmenter import TouchSegmenter, merge_segments
 
 
 class MLNotInstalled(RuntimeError):
@@ -57,7 +57,8 @@ def _labels_of(labels_csv: Path) -> dict:
     with open(labels_csv, encoding="utf-8") as f:
         for row in csv.DictReader(f):
             key = (row.get("source", "?"), round(float(row["start_ms"])))
-            out[key] = (row.get("skin_type", ""), row["label"])
+            out[key] = (row.get("skin_type", ""), row.get("skin_variant", ""),
+                        row["label"], int(row.get("group_id") or 0))
     return out
 
 
@@ -66,16 +67,41 @@ def collect_samples(pairs):
 
     ``pairs`` is a list of ``(recording_path, labels)`` where ``labels`` is
     either a CSV path or an in-memory ``{(source, round(start_ms)):
-    (skin_type, label)}`` map (so the GUI can train without writing a CSV)."""
+    (skin_type, skin_variant, label, group_id)}`` map (so the GUI can train
+    without writing a CSV). Rows sharing a non-zero ``group_id`` (within a
+    recording + source) are merged into a single sample — that's how a multi-tap
+    is labelled as one gesture (see :func:`merge_segments`)."""
     for gi, (rec, lab) in enumerate(pairs):
         labels = lab if isinstance(lab, dict) else _labels_of(Path(lab))
+        # Collect grouped segments first; emit ungrouped ones immediately.
+        grouped: dict[tuple, dict] = {}
         for source, seg in segments_of(Path(rec)):
             entry = labels.get((source, round(seg.start_ms)))
             if entry is None:
                 continue
-            skin_type, label = entry
-            yield (skin_type, feature_vector(seg), label,
-                   rule_baseline.classify(seg), f"rec{gi}")
+            skin_type, skin_variant, label, group_id = entry
+            if group_id:
+                g = grouped.setdefault(
+                    (source, group_id),
+                    {"skin_type": skin_type, "skin_variant": skin_variant,
+                     "label": label, "segs": []})
+                g["segs"].append(seg)
+            else:
+                yield _sample(skin_type, skin_variant, label, seg, gi)
+        for g in grouped.values():
+            merged = merge_segments(g["segs"])
+            if merged is not None:
+                yield _sample(g["skin_type"], g["skin_variant"], g["label"],
+                              merged, gi)
+
+
+def _sample(skin_type, skin_variant, label, seg, gi):
+    """One training tuple ``(skin_type, features, label, baseline, group)``.
+
+    Features include the one-hot silicone variant so the per-shape model can
+    adapt across silicone formats."""
+    return (skin_type, full_feature_vector(seg, skin_variant), label,
+            rule_baseline.classify(seg), f"rec{gi}")
 
 
 @dataclass

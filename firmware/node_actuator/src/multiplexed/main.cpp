@@ -209,6 +209,7 @@ void parseAndQueue(const uint8_t* data, int len) {
         c.type = cmd_queue::CMD_INFLATE;
         c.chamber = doc["chamber"] | -1;
         c.param = doc["delta"] | 10;
+        c.fill_ms = doc["ms"] | 0;
     } else if (strcmp(cmd, "deflate") == 0) {
         c.type = cmd_queue::CMD_DEFLATE;
         c.chamber = doc["chamber"] | -1;
@@ -406,9 +407,15 @@ void processCommand(const cmd_queue::Cmd& c) {
 
     switch (c.type) {
     case CMD_INFLATE: {
-        float delta  = (ch.max_kpa - ch.min_kpa) * constrain(c.param, 0, 100) / 100.0f;
-        float target = min(chambers::cachedKpa[n] + delta, ch.max_kpa);
-        chambers::beginInflate(n, target);
+        if (c.fill_ms > 0) {
+            // Time-based fill: open for the calibrated window; max_kpa is the
+            // only pressure cutoff.
+            chambers::beginInflate(n, ch.max_kpa, c.fill_ms);
+        } else {
+            float delta  = (ch.max_kpa - ch.min_kpa) * constrain(c.param, 0, 100) / 100.0f;
+            float target = min(chambers::cachedKpa[n] + delta, ch.max_kpa);
+            chambers::beginInflate(n, target);
+        }
         break;
     }
     case CMD_DEFLATE: {
@@ -485,13 +492,32 @@ void manualPressureSafety() {
     }
 }
 
+// True while at least one chamber is in the given state. Used to refill the
+// shared tanks ONLY when no chamber is drawing from / dumping into them, so a
+// chamber's calibrated fill time isn't disturbed by a concurrent tank refill
+// (the PC fill-time calibration assumes a steady tank).
+bool anyChamberInState(chambers::State want) {
+    for (int i = 0; i < config::state.num_chambers; i++) {
+        if (chambers::state[i].state == want) return true;
+    }
+    return false;
+}
+
 void tankControlStep() {
     float pressure_kpa = readTankKpa(config::state.pressure_tank_mux_ch);
     float vacuum_kpa   = readTankKpa(config::state.vacuum_tank_mux_ch);
 
+    // Refill the tanks only while idle: pause the pressure pump whenever a
+    // chamber is inflating (drawing from the pressure tank) and the vacuum pump
+    // whenever a chamber is deflating. The tank simply droops during a fill and
+    // is topped back up once the chambers settle.
+    bool inflating = anyChamberInState(chambers::INFLATING);
+    bool deflating = anyChamberInState(chambers::DEFLATING);
+
     // Pressure tank — pump fills it when below target. Stop at hard max.
     // Also stop if reading drops below min (sensor or seal failure).
-    if (pressure_kpa >= config::state.tank_pressure_max_kpa ||
+    if (inflating ||
+        pressure_kpa >= config::state.tank_pressure_max_kpa ||
         pressure_kpa <  config::state.tank_pressure_min_kpa) {
         pumps::setRoleDuty(pumps::ROLE_PRESSURE, 0);
     } else {
@@ -501,7 +527,8 @@ void tankControlStep() {
 
     // Vacuum tank — pump evacuates (pulls pressure DOWN) when above target.
     // Stop at hard min (deepest vacuum). Also stop if above max (broken seal).
-    if (vacuum_kpa <= config::state.tank_vacuum_min_kpa ||
+    if (deflating ||
+        vacuum_kpa <= config::state.tank_vacuum_min_kpa ||
         vacuum_kpa >  config::state.tank_vacuum_max_kpa) {
         pumps::setRoleDuty(pumps::ROLE_VACUUM, 0);
     } else {
@@ -539,6 +566,7 @@ void chamberControlStep(uint32_t now) {
         if (ch.state == chambers::INFLATING &&
             (chambers::cachedKpa[i] >= ch.target_kpa || chambers::cachedKpa[i] >= ch.max_kpa)) {
             chambers::stop(i);
+            ch.hold_kpa = chambers::cachedKpa[i];   // maintain the achieved level
         }
         if (ch.state == chambers::DEFLATING &&
             (chambers::cachedKpa[i] <= ch.target_kpa || chambers::cachedKpa[i] <= ch.min_kpa)) {
@@ -651,6 +679,13 @@ void loop() {
 
     // ---- Child-safety watchdog: stop runaway actuations (sensor failure) ----
     if (!manualActive) chambers::actuationWatchdog(now);
+
+    // ---- Time-based fill cutoff (calibrated fill_time; every loop, not gated
+    //      by the slow mux pressure cadence) ----
+    if (!manualActive) chambers::fillTimeTick(now);
+
+    // ---- Idle leak maintenance: top up a drooping held chamber (self-throttled) ----
+    if (!manualActive) chambers::maintainTick(now);
 
     if (now - lastPressureMs >= PRESSURE_CHECK_MS) {
         lastPressureMs = now;
