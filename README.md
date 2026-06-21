@@ -80,7 +80,7 @@ See [docs/ACTIVITIES.md](docs/ACTIVITIES.md) for the broader behavior-framework 
 curl -fsSL https://raw.githubusercontent.com/techandpeople/SoftEdIBO/master/install.sh | bash
 ```
 
-This will download the latest release, install it to `/opt/SoftEdIBO/`, create a `softedibo` command in your PATH, and add a desktop entry to the application menu.
+This will download the latest release, install it to `~/.local/opt/SoftEdIBO/`, create a `softedibo` command in `~/.local/bin/`, and add a desktop entry to the application menu.
 
 **Nightly build** (latest commit on `master`):
 
@@ -91,7 +91,7 @@ curl -fsSL https://raw.githubusercontent.com/techandpeople/SoftEdIBO/master/inst
 **Uninstall:**
 
 ```bash
-softedibo --uninstall 2>/dev/null || /opt/SoftEdIBO/install.sh --uninstall
+softedibo --uninstall
 ```
 
 > **First time with USB?** After installing, run:
