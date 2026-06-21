@@ -18,6 +18,12 @@
  * {"cmd":"rebaseline"} (e.g. after the silicone settles). Normalisation scale
  * and activation level are tunable with {"cmd":"configure",...}.
  *
+ * Optional adaptive baseline ({"cmd":"configure","adaptive_baseline":true,
+ * "baseline_tau_ms":2000}): after boot, the baseline keeps slowly tracking the
+ * field for sensors that are not currently touched, so slow drift (e.g. a
+ * chamber inflating and pushing the magnet) is absorbed while fast touches
+ * still register. Off by default — measure the actuation contamination first.
+ *
  * Adapted from the thesis MLX90393 live-stream firmware. The offline
  * calibration protocol (CSV) was dropped: the SoftEdIBO runtime detects touch
  * with thresholds on the normalised values, not a calibrated model.
@@ -60,6 +66,8 @@ constexpr uint32_t STREAM_INTERVAL_MS = 35;   // ~28 Hz
 
 float fullscaleMt  = 1000.0f;  // |delta| mapped to adj = 1.0
 float actThreshold = 0.3f;    // adj level at/above which a sensor is "active"
+bool  adaptiveBaseline = false;  // continuously track slow drift (opt-in via configure)
+float baselineTauMs    = 2000.0f; // adaptive-baseline time constant (ms); larger = slower
 #ifdef DEBUG_BUILD
 bool  debugMode    = true;
 #else
@@ -125,8 +133,10 @@ void onReceived(const uint8_t* mac, const uint8_t* data, int len) {
     } else if (strcmp(cmd, "rebaseline") == 0) {
         resetBaseline();
     } else if (strcmp(cmd, "configure") == 0) {
-        if (!doc["fullscale_mt"].isNull())  fullscaleMt  = doc["fullscale_mt"].as<float>();
-        if (!doc["act_threshold"].isNull()) actThreshold = doc["act_threshold"].as<float>();
+        if (!doc["fullscale_mt"].isNull())      fullscaleMt     = doc["fullscale_mt"].as<float>();
+        if (!doc["act_threshold"].isNull())     actThreshold    = doc["act_threshold"].as<float>();
+        if (!doc["adaptive_baseline"].isNull()) adaptiveBaseline = doc["adaptive_baseline"].as<bool>();
+        if (!doc["baseline_tau_ms"].isNull())   baselineTauMs   = doc["baseline_tau_ms"].as<float>();
     }
 }
 
@@ -149,6 +159,30 @@ void accumulateBaseline(const Vec3* samples, const bool* valid) {
         }
     }
     if (baselineN >= BASELINE_SAMPLES) baselineReady = true;
+}
+
+// Continuously nudge the baseline toward the current reading for sensors that
+// are NOT being touched, so slow drift (silicone settling, a chamber inflating
+// and pushing the magnet) is absorbed while fast touches still stand out.
+// Active sensors are frozen so the touch itself is never averaged into the
+// baseline. Opt-in: {"cmd":"configure","adaptive_baseline":true}. The EWMA step
+// is dt/tau, where dt is the real time since the last stream (not a fixed
+// constant) so the time constant stays honest even when reads are delayed.
+void updateAdaptiveBaseline(const Vec3* samples, const bool* valid, float dtMs) {
+    if (!adaptiveBaseline || baselineTauMs <= 0.0f) return;
+    float a = dtMs / baselineTauMs;
+    if (a > 1.0f) a = 1.0f;             // clamp if a read was badly delayed
+    for (size_t i = 0; i < streamCount; ++i) {
+        if (!valid[i]) continue;
+        float m = vmag({samples[i].x - baseline[i].x,
+                        samples[i].y - baseline[i].y,
+                        samples[i].z - baseline[i].z});
+        float adj = fullscaleMt > 0.0f ? m / fullscaleMt : 0.0f;
+        if (adj >= actThreshold) continue;   // touch in progress — freeze this sensor
+        baseline[i].x += a * (samples[i].x - baseline[i].x);
+        baseline[i].y += a * (samples[i].y - baseline[i].y);
+        baseline[i].z += a * (samples[i].z - baseline[i].z);
+    }
 }
 
 // Build {"type":"magnet","mag":[..],"adj":[..],"act":[..]} into buf.
@@ -234,6 +268,7 @@ void loop() {
     }
 
     if (now - lastStreamMs < STREAM_INTERVAL_MS) return;
+    const float dtMs = (float)(now - lastStreamMs);   // real elapsed time, for the EWMA
     lastStreamMs = now;
 
     Vec3 samples[MAX_SENSORS];
@@ -250,6 +285,8 @@ void loop() {
         accumulateBaseline(samples, valid);
         return;
     }
+
+    updateAdaptiveBaseline(samples, valid, dtMs);
 
     char msg[256];
     buildImuMessage(samples, valid, msg, sizeof(msg));
