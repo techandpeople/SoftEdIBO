@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
-    QDoubleSpinBox, QGridLayout, QGroupBox, QHBoxLayout, QLabel,
+    QCheckBox, QDoubleSpinBox, QGridLayout, QGroupBox, QHBoxLayout, QLabel,
     QPushButton, QWidget,
 )
 
@@ -104,6 +104,35 @@ class TouchTuningPanel(QGroupBox):
 
         grid.addLayout(bottom, 2, 0, 1, len(_QUADRANTS))
 
+        # Adaptive baseline: let the node keep tracking slow drift (e.g. a chamber
+        # inflating under the magnet) so it doesn't read as a false touch. Off by
+        # default — only useful once actuation contamination is confirmed.
+        self._adaptive_chk = QCheckBox("Adaptive baseline (track slow drift)")
+        self._adaptive_chk.setFont(compact)
+        self._adaptive_chk.setToolTip(
+            "Send configure adaptive_baseline to the touch node.\n"
+            "Frozen per-sensor while that sensor is active, so touches survive.\n"
+            "tau is the drift time constant in ms (larger = slower tracking)."
+        )
+        self._adaptive_chk.toggled.connect(self._apply_adaptive_baseline)
+
+        self._tau_spin = QDoubleSpinBox()
+        self._tau_spin.setFont(compact)
+        self._tau_spin.setRange(200.0, 20000.0)
+        self._tau_spin.setSingleStep(500.0)
+        self._tau_spin.setDecimals(0)
+        self._tau_spin.setValue(2000.0)
+        self._tau_spin.setSuffix(" ms")
+        self._tau_spin.setToolTip("Adaptive-baseline time constant (tau).")
+        self._tau_spin.valueChanged.connect(self._apply_adaptive_baseline)
+
+        adaptive_row = QHBoxLayout()
+        adaptive_row.setSpacing(4)
+        adaptive_row.addWidget(self._adaptive_chk)
+        adaptive_row.addWidget(self._tau_spin)
+        adaptive_row.addStretch(1)
+        grid.addLayout(adaptive_row, 3, 0, 1, len(_QUADRANTS))
+
     # ------------------------------------------------------------------
 
     def _apply_thresholds(self) -> None:
@@ -131,4 +160,13 @@ class TouchTuningPanel(QGroupBox):
         if ctrl is None or not hasattr(ctrl, "send_command"):
             return
         ctrl.send_command("configure", fullscale_mt=1000.0, act_threshold=0.3)
+
+    def _apply_adaptive_baseline(self) -> None:
+        """Toggle the node's adaptive baseline (and its time constant)."""
+        ctrl = getattr(self._skin, "touch_controller", None)
+        if ctrl is None or not hasattr(ctrl, "send_command"):
+            return
+        ctrl.send_command("configure",
+                          adaptive_baseline=self._adaptive_chk.isChecked(),
+                          baseline_tau_ms=self._tau_spin.value())
 
