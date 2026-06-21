@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>ActivityPresetDialog</class>
+ <widget class="QDialog" name="ActivityPresetDialog">
+  <property name="geometry">
+   <rect><x>0</x><y>0</y><width>540</width><height>600</height></rect>
+  </property>
+  <property name="windowTitle"><string>Activity Presets</string></property>
+  <property name="minimumSize">
+   <size><width>540</width><height>600</height></size>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <layout class="QFormLayout" name="top_form">
+     <item row="0" column="0">
+      <widget class="QLabel" name="activity_label">
+       <property name="text"><string>Activity:</string></property>
+      </widget>
+     </item>
+     <item row="0" column="1">
+      <widget class="QComboBox" name="activity_combo"/>
+     </item>
+     <item row="1" column="0">
+      <widget class="QLabel" name="preset_label">
+       <property name="text"><string>Preset:</string></property>
+      </widget>
+     </item>
+     <item row="1" column="1">
+      <layout class="QHBoxLayout" name="preset_row">
+       <item>
+        <widget class="QComboBox" name="preset_combo">
+         <property name="minimumSize">
+          <size><width>240</width><height>0</height></size>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="new_btn">
+         <property name="text"><string>+ New</string></property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="delete_btn">
+         <property name="text"><string>Delete</string></property>
+        </widget>
+       </item>
+      </layout>
+     </item>
+     <item row="2" column="0">
+      <widget class="QLabel" name="name_label">
+       <property name="text"><string>Name:</string></property>
+      </widget>
+     </item>
+     <item row="2" column="1">
+      <widget class="QLineEdit" name="name_edit">
+       <property name="placeholderText"><string>e.g. Easy, Therapy v3, 1st grade…</string></property>
+      </widget>
+     </item>
+     <item row="3" column="0">
+      <widget class="QLabel" name="desc_label">
+       <property name="text"><string>Description:</string></property>
+      </widget>
+     </item>
+     <item row="3" column="1">
+      <widget class="QLineEdit" name="desc_edit">
+       <property name="placeholderText"><string>Optional description</string></property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <widget class="QLabel" name="params_header">
+     <property name="text"><string>&lt;b&gt;Parameters&lt;/b&gt;</string></property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QScrollArea" name="scroll_area">
+     <property name="sizePolicy">
+      <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+       <horstretch>0</horstretch>
+       <verstretch>0</verstretch>
+      </sizepolicy>
+     </property>
+     <property name="widgetResizable"><bool>true</bool></property>
+     <widget class="QWidget" name="params_container">
+      <layout class="QFormLayout" name="params_layout"/>
+     </widget>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="btn_row">
+     <item>
+      <spacer name="btn_spacer">
+       <property name="orientation"><enum>Qt::Horizontal</enum></property>
+       <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="QPushButton" name="save_btn">
+       <property name="text"><string>Save</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="close_btn">
+       <property name="text"><string>Close</string></property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

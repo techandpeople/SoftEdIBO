@@ -31,19 +31,27 @@ class TouchTuningPanel(QGroupBox):
         super().__init__("Touch tuning", parent)
         self._skin = skin
 
+        # Compact styling so the panel stays small under the skin grid view.
+        compact = self.font()
+        compact.setPointSizeF(max(7.0, compact.pointSizeF() - 1.0))
+        self.setStyleSheet("QDoubleSpinBox { min-width: 56px; }")
+
         # Thresholds and hysteresis are now in raw μT (absolute, post-rebaseline).
         thresholds = skin.touch_thresholds or [100.0, 100.0, 100.0, 100.0]
         hysteresis = skin.touch_hysteresis if skin.touch_hysteresis is not None else 20.0
 
         grid = QGridLayout(self)
-        grid.setContentsMargins(6, 4, 6, 4)
-        grid.setHorizontalSpacing(6)
-        grid.setVerticalSpacing(2)
+        grid.setContentsMargins(4, 2, 4, 2)
+        grid.setHorizontalSpacing(4)
+        grid.setVerticalSpacing(1)
 
         self._threshold_spins: list[QDoubleSpinBox] = []
         for i, label in enumerate(_QUADRANTS):
-            grid.addWidget(QLabel(label), 0, i, alignment=Qt.AlignmentFlag.AlignHCenter)
+            lbl = QLabel(label)
+            lbl.setFont(compact)
+            grid.addWidget(lbl, 0, i, alignment=Qt.AlignmentFlag.AlignHCenter)
             spin = QDoubleSpinBox()
+            spin.setFont(compact)
             spin.setRange(0.0, 2000.0)
             spin.setSingleStep(10.0)
             spin.setDecimals(0)
@@ -59,8 +67,12 @@ class TouchTuningPanel(QGroupBox):
             self._threshold_spins.append(spin)
 
         bottom = QHBoxLayout()
-        bottom.addWidget(QLabel("Hysteresis:"))
+        bottom.setSpacing(4)
+        hyst_lbl = QLabel("Hysteresis:")
+        hyst_lbl.setFont(compact)
+        bottom.addWidget(hyst_lbl)
         self._hyst_spin = QDoubleSpinBox()
+        self._hyst_spin.setFont(compact)
         self._hyst_spin.setRange(0.0, 500.0)
         self._hyst_spin.setSingleStep(5.0)
         self._hyst_spin.setDecimals(0)
@@ -75,6 +87,7 @@ class TouchTuningPanel(QGroupBox):
         bottom.addStretch(1)
 
         apply_btn = QPushButton("Apply to node")
+        apply_btn.setFont(compact)
         apply_btn.setToolTip(
             "Send configure to the touch node\n"
             "(fullscale_mt=1000, act_threshold=0.3)"
@@ -83,6 +96,7 @@ class TouchTuningPanel(QGroupBox):
         bottom.addWidget(apply_btn)
 
         self._rebaseline_btn = QPushButton("Re-zero sensors")
+        self._rebaseline_btn.setFont(compact)
         self._rebaseline_btn.setToolTip(
             "Tell the touch node to recapture its baseline (ESP-NOW rebaseline)")
         self._rebaseline_btn.clicked.connect(self._rebaseline)

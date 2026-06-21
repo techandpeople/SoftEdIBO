@@ -25,11 +25,9 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QMessageBox,
     QPushButton,
     QRadioButton,
-    QScrollArea,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -38,6 +36,7 @@ from PySide6.QtWidgets import (
 from src.config.settings import Settings
 from src.data.models import SkinTemplate
 from src.gui.skin_grid_editor import SkinGridEditor
+from src.gui.ui_skin_config_dialog import Ui_SkinConfigDialog
 from src.hardware.espnow_gateway import ESPNowGateway
 
 _YAML_KEY = {"turtle": "turtles", "tree": "trees", "thymio": "thymios"}
@@ -46,6 +45,9 @@ _MAX_ALLOWED_KPA   = 12.0
 _CONFIRM_DELTA     = 2.0
 _MAX_CHAMBERS      = 3
 _NONE_LABEL        = "(none)"
+# Node types that actually own chambers (can inflate/deflate). Sensor-only
+# boards (node_magnet_sensor) are excluded from chamber selection.
+_ACTUATOR_NODE_TYPES = ("node_direct", "node_multiplexed")
 _MISSING_FIELD_TITLE = "Missing Field"
 
 
@@ -124,7 +126,7 @@ class _ChamberRow(QWidget):
             self._slot_spin.setValue(0)
 
 
-class SkinConfigDialog(QDialog):
+class SkinConfigDialog(QDialog, Ui_SkinConfigDialog):
     """Dialog for adding or editing a single skin entry.
 
     Args:
@@ -148,6 +150,7 @@ class SkinConfigDialog(QDialog):
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
+        self.setupUi(self)
         self._robot_type  = robot_type
         self._robot_index = robot_index
         self._skin_index  = skin_index
@@ -161,142 +164,65 @@ class SkinConfigDialog(QDialog):
 
         is_new = skin_index < 0
         self.setWindowTitle("Add Skin" if is_new else "Configure Skin")
-        # Two-column layout keeps the dialog reasonable on smaller screens
-        # without an outer scrollbar — left = metadata/chambers/touch,
-        # right = layout/grid editor (the tallest section).
-        self.setMinimumWidth(820)
-        self.resize(900, 620)
+        # Left = metadata/chambers/touch, right = layout/grid editor (tallest).
+        self.columns.setStretch(0, 2)
+        self.columns.setStretch(1, 3)
 
-        root = QVBoxLayout(self)
-        root.setContentsMargins(6, 6, 6, 6)
-        root.setSpacing(6)
+        # The static two-column frame (metadata form, chambers list, action
+        # buttons) lives in the .ui; the dynamic groups (template / touch /
+        # layout-grid editor) are built here and inserted into the columns.
+        self.skin_id_edit.textEdited.connect(self._on_skin_id_edited)
 
-        # ---- Two-column body ----
-        columns = QHBoxLayout()
-        columns.setSpacing(8)
-
-        left_w = QWidget()
-        left = QVBoxLayout(left_w)
-        left.setContentsMargins(0, 0, 0, 0)
-
-        right_w = QWidget()
-        right = QVBoxLayout(right_w)
-        right.setContentsMargins(0, 0, 0, 0)
-
-        columns.addWidget(left_w, stretch=2)
-        columns.addWidget(right_w, stretch=3)
-        root.addLayout(columns, stretch=1)
-
-        # ---- LEFT COLUMN ----
-        # Template row — pick a saved layout to auto-fill, or save the current
-        # configuration as a new template for reuse on other skins.
-        if self._db is not None:
-            left.addLayout(self._build_template_row())
-
-        # Skin ID / Name
-        form = QFormLayout()
-        self._skin_id_edit = QLineEdit()
-        self._skin_id_edit.setPlaceholderText("e.g. belly")
-        self._skin_id_edit.textEdited.connect(self._on_skin_id_edited)
-        self._name_edit = QLineEdit()
-        self._name_edit.setPlaceholderText("Display name (e.g. Belly)")
         # Skin type — indexes the hardcoded geometry registry (shape + sensor
         # coordinates) and the per-type touch-gesture model. Only the types of
-        # THIS robot kind are offered, so e.g. configuring a Tree never shows
-        # Turtle shapes. Geometry (shape) is driven by the chosen type — there
-        # is no separate freeform shape selector.
-        self._skin_type_combo = QComboBox()
-        from src.hardware.skin_geometry import skin_types_for
+        # THIS robot kind are offered. When the robot has exactly one type
+        # (Tree, Thymio) there is nothing to choose — preselect it, hide the row.
+        from src.hardware.skin_geometry import known_skin_variants, skin_types_for
         types = skin_types_for(self._robot_type)
         single_type = len(types) == 1
-        # When the robot has several skin types (Turtle), offer a choice with an
-        # opt-out. When it has exactly one (Tree, Thymio) there is nothing to
-        # choose — preselect it and hide the row below.
         if not single_type:
-            self._skin_type_combo.addItem("(none)", "")
+            self.skin_type_combo.addItem("(none)", "")
         for st in types:
-            self._skin_type_combo.addItem(st, st)
-        self._skin_type_combo.setToolTip(
-            "Skin type for this robot. Determines the shape and sensor layout "
-            "(from src/hardware/skin_geometry.py) and selects the touch-gesture "
-            "model."
-        )
-        self._skin_type_combo.currentIndexChanged.connect(
-            self._on_skin_type_changed)
+            self.skin_type_combo.addItem(st, st)
+        self.skin_type_combo.currentIndexChanged.connect(self._on_skin_type_changed)
         # Silicone variant — orthogonal to the shape (same shape, different
         # silicone format / chamber sizes). Fed to the touch ML as a feature.
-        self._skin_variant_combo = QComboBox()
-        from src.hardware.skin_geometry import known_skin_variants
-        self._skin_variant_combo.addItem("(none)", "")
+        self.skin_variant_combo.addItem("(none)", "")
         for sv in known_skin_variants():
-            self._skin_variant_combo.addItem(sv, sv)
-        self._skin_variant_combo.setToolTip(
-            "Silicone format of this skin (different chamber sizes per variant). "
-            "Used as a touch-gesture ML feature.")
-        form.addRow("Skin ID:",   self._skin_id_edit)
-        form.addRow("Name:",      self._name_edit)
-        form.addRow("Skin type:", self._skin_type_combo)
-        form.addRow("Silicone:",  self._skin_variant_combo)
+            self.skin_variant_combo.addItem(sv, sv)
         if single_type:
             try:
-                form.setRowVisible(self._skin_type_combo, False)
+                self.form.setRowVisible(self.skin_type_combo, False)
             except (AttributeError, TypeError):
-                self._skin_type_combo.setVisible(False)
-        left.addLayout(form)
+                self.skin_type_combo.setVisible(False)
 
-        # Chamber rows inside a scroll area
-        chambers_scroll = QScrollArea()
-        chambers_scroll.setWidgetResizable(True)
-        chambers_scroll.setMaximumHeight(160)
-        inner_w = QWidget()
-        self._rows_layout = QVBoxLayout(inner_w)
-        self._rows_layout.setContentsMargins(0, 0, 0, 0)
-        self._rows_layout.setSpacing(3)
-        chambers_scroll.setWidget(inner_w)
-        left.addWidget(QLabel("Chambers:"))
-        left.addWidget(chambers_scroll)
-
-        # Add chamber button
-        self._add_chamber_btn = QPushButton("+ Add Chamber")
-        self._add_chamber_btn.clicked.connect(self._on_add_chamber)
-        left.addWidget(self._add_chamber_btn)
-
-        # Touch group (node, sensor count, sensor→chamber mapping)
-        left.addWidget(self._build_touch_group())
-        left.addStretch()
+        # ---- LEFT COLUMN dynamic groups ----
+        # Template row — pick a saved layout to auto-fill, or save the current
+        # configuration as a new template. Inserted above the metadata form.
+        if self._db is not None:
+            self.left_layout.insertLayout(0, self._build_template_row())
+        # Touch group + trailing stretch, below the chambers.
+        self.left_layout.addWidget(self._build_touch_group())
+        self.left_layout.addStretch()
 
         # ---- RIGHT COLUMN ----
         # Layout / grid editor — tallest piece, gets its own column.
-        right.addWidget(self._build_layout_group(), stretch=1)
+        self.right_layout.addWidget(self._build_layout_group(), stretch=1)
 
-        # ---- Action buttons (full width, pinned at the bottom) ----
-        btn_row = QHBoxLayout()
-        self._test_btn   = QPushButton("Test Actuators")
-        self._calib_btn  = QPushButton("Calibrate Fill")
-        self._delete_btn = QPushButton("Delete Skin")
-        self._cancel_btn = QPushButton("Cancel")
-        self._save_btn   = QPushButton("Save")
-        self._test_btn.setEnabled(gateway.is_connected)
-        self._calib_btn.setEnabled(gateway.is_connected)
-        self._calib_btn.setToolTip(
-            "Measure this skin's chamber fill times against the pressure sensor.")
-        self._delete_btn.setVisible(not is_new)
-        btn_row.addWidget(self._test_btn)
-        btn_row.addWidget(self._calib_btn)
-        btn_row.addWidget(self._delete_btn)
-        btn_row.addStretch()
-        btn_row.addWidget(self._cancel_btn)
-        btn_row.addWidget(self._save_btn)
-        root.addLayout(btn_row)
+        # ---- Action buttons (defined in the .ui) ----
+        self.test_btn.setEnabled(gateway.is_connected)
+        self.calib_btn.setEnabled(gateway.is_connected)
+        self.delete_btn.setVisible(not is_new)
+        self.add_chamber_btn.clicked.connect(self._on_add_chamber)
 
         # Pre-populate from saved skin config.
         self._populate_from_cfg(self._load_skin_cfg())
 
-        self._test_btn.clicked.connect(self._on_test)
-        self._calib_btn.clicked.connect(self._on_calibrate)
-        self._delete_btn.clicked.connect(self._on_delete)
-        self._cancel_btn.clicked.connect(self.reject)
-        self._save_btn.clicked.connect(self._on_save)
+        self.test_btn.clicked.connect(self._on_test)
+        self.calib_btn.clicked.connect(self._on_calibrate)
+        self.delete_btn.clicked.connect(self._on_delete)
+        self.cancel_btn.clicked.connect(self.reject)
+        self.save_btn.clicked.connect(self._on_save)
 
     # ------------------------------------------------------------------
     # Pre-population (load saved skin into widgets)
@@ -305,19 +231,19 @@ class SkinConfigDialog(QDialog):
     def _populate_from_cfg(self, skin_cfg: dict) -> None:
         """Drive every widget from a saved skin entry. Split into focused
         helpers so ``__init__`` stays simple."""
-        self._skin_id_edit.setText(skin_cfg.get("skin_id", ""))
-        self._name_edit.setText(skin_cfg.get("name", ""))
+        self.skin_id_edit.setText(skin_cfg.get("skin_id", ""))
+        self.name_edit.setText(skin_cfg.get("name", ""))
         # Select the saved skin_type by data; its registry geometry then drives
         # the shape (via _on_skin_type_changed). Fall back to the stored shape
         # only when the skin has no (registered) type.
-        st_idx = self._skin_type_combo.findData(skin_cfg.get("skin_type", ""))
-        self._skin_type_combo.setCurrentIndex(st_idx if st_idx >= 0 else 0)
-        sv_idx = self._skin_variant_combo.findData(skin_cfg.get("skin_variant", ""))
-        self._skin_variant_combo.setCurrentIndex(sv_idx if sv_idx >= 0 else 0)
+        st_idx = self.skin_type_combo.findData(skin_cfg.get("skin_type", ""))
+        self.skin_type_combo.setCurrentIndex(st_idx if st_idx >= 0 else 0)
+        sv_idx = self.skin_variant_combo.findData(skin_cfg.get("skin_variant", ""))
+        self.skin_variant_combo.setCurrentIndex(sv_idx if sv_idx >= 0 else 0)
         self._populate_chambers(skin_cfg)
         touch_cfg = skin_cfg.get("touch") or {}
         self._populate_touch_header(touch_cfg)
-        if not self._skin_type_combo.currentData():
+        if not self.skin_type_combo.currentData():
             self._populate_shape(skin_cfg.get("shape", "rect"))
         else:
             self._on_skin_type_changed()
@@ -445,7 +371,7 @@ class SkinConfigDialog(QDialog):
         # Auto-fill skin_id only if the user hasn't typed one yet AND we're
         # creating a new skin (not editing an existing one).
         if self._skin_index < 0 and not self._skin_id_user_edited:
-            self._skin_id_edit.setText(self._next_skin_id_for(tpl))
+            self.skin_id_edit.setText(self._next_skin_id_for(tpl))
 
     def _next_skin_id_for(self, tpl: SkinTemplate) -> str:
         """Return ``{tpl.name}-{N}`` with N = (existing skins matching prefix) + 1."""
@@ -514,10 +440,16 @@ class SkinConfigDialog(QDialog):
         return []
 
     def _node_macs(self) -> list[str]:
-        return [n["mac"] for n in self._robot_nodes() if n.get("mac")]
+        # Chambers live only on actuator boards. Sensor-only boards
+        # (node_magnet_sensor) have nothing to inflate, so they must not
+        # be selectable as a chamber's node.
+        return [n["mac"] for n in self._robot_nodes()
+                if n.get("mac") and n.get("node_type") in _ACTUATOR_NODE_TYPES]
 
     def _node_max_slots(self) -> dict[str, int]:
-        return {n["mac"]: int(n.get("max_slots", 3)) for n in self._robot_nodes() if n.get("mac")}
+        return {n["mac"]: int(n.get("max_slots", 3))
+                for n in self._robot_nodes()
+                if n.get("mac") and n.get("node_type") in _ACTUATOR_NODE_TYPES}
 
     def _load_skin_cfg(self) -> dict:
         if self._skin_index < 0:
@@ -555,15 +487,15 @@ class SkinConfigDialog(QDialog):
         row = _ChamberRow(macs, max_slots, mac=mac, slot=slot, max_pressure=max_pressure)
         row.remove_btn.clicked.connect(lambda: self._remove_row(row))
         self._rows.append(row)
-        self._rows_layout.addWidget(row)
-        self._add_chamber_btn.setEnabled(len(self._rows) < _MAX_CHAMBERS)
+        self.rows_layout.addWidget(row)
+        self.add_chamber_btn.setEnabled(len(self._rows) < _MAX_CHAMBERS)
 
     def _remove_row(self, row: _ChamberRow) -> None:
         if row in self._rows:
             self._rows.remove(row)
-            self._rows_layout.removeWidget(row)
+            self.rows_layout.removeWidget(row)
             row.deleteLater()
-        self._add_chamber_btn.setEnabled(len(self._rows) < _MAX_CHAMBERS)
+        self.add_chamber_btn.setEnabled(len(self._rows) < _MAX_CHAMBERS)
 
     def _on_add_chamber(self) -> None:
         self._add_row()
@@ -737,7 +669,7 @@ class SkinConfigDialog(QDialog):
         """Drive the grid's outline + aspect ratio from the chosen skin type's
         registry geometry (square vs rectangle vs round/triangle/'D')."""
         from src.hardware.skin_geometry import geometry_for
-        geo = geometry_for(self._skin_type_combo.currentData())
+        geo = geometry_for(self.skin_type_combo.currentData())
         if geo is None:
             self._grid.set_geometry("rect", None)
             self._shape_rect_btn.setChecked(True)
@@ -836,7 +768,7 @@ class SkinConfigDialog(QDialog):
             QMessageBox.warning(self, "Test Actuators", "Configure at least one chamber first.")
             return
         from src.gui.test_actuators_dialog import TestActuatorsDialog
-        skin_id   = self._skin_id_edit.text().strip() or "preview"
+        skin_id   = self.skin_id_edit.text().strip() or "preview"
         chambers  = [{"mac": m, "slot": s} for m, s, _ in [r.get_values() for r in self._rows]]
         # TestActuatorsDialog expects the old skin_cfgs format; build a compatible dict
         skin_cfgs = [{"skin_id": skin_id, "slots": [c["slot"] for c in chambers]}]
@@ -856,7 +788,7 @@ class SkinConfigDialog(QDialog):
         are included — magnet/sensor nodes have nothing to inflate."""
         node_types = {n.get("mac"): n.get("node_type")
                       for n in self._robot_nodes()}
-        skin_id = self._skin_id_edit.text().strip() or "(unsaved)"
+        skin_id = self.skin_id_edit.text().strip() or "(unsaved)"
         chambers: list[dict] = []
         for row in self._rows:
             mac, slot, _max_p = row.get_values()
@@ -960,8 +892,8 @@ class SkinConfigDialog(QDialog):
         return reply == QMessageBox.StandardButton.Yes
 
     def _on_save(self) -> None:
-        skin_id = self._skin_id_edit.text().strip()
-        name    = self._name_edit.text().strip() or skin_id
+        skin_id = self.skin_id_edit.text().strip()
+        name    = self.name_edit.text().strip() or skin_id
 
         if not skin_id:
             QMessageBox.warning(self, _MISSING_FIELD_TITLE,
@@ -988,10 +920,10 @@ class SkinConfigDialog(QDialog):
                 del ch["max_pressure"]
 
         skin_entry: dict = {"skin_id": skin_id, "name": name, "chambers": chambers}
-        skin_type = self._skin_type_combo.currentData() or ""
+        skin_type = self.skin_type_combo.currentData() or ""
         if skin_type:
             skin_entry["skin_type"] = skin_type
-        skin_variant = self._skin_variant_combo.currentData() or ""
+        skin_variant = self.skin_variant_combo.currentData() or ""
         if skin_variant:
             skin_entry["skin_variant"] = skin_variant
         self._apply_layout_and_touch(skin_entry)

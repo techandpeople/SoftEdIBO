@@ -24,7 +24,7 @@ from collections import deque
 from typing import Any
 
 from PySide6.QtCore import QRect, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPaintEvent, QPen
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPaintEvent, QPen
 from PySide6.QtWidgets import QPushButton, QSizePolicy, QWidget
 
 from src.gui.skin_grid_editor import CHAMBER_PALETTE
@@ -34,7 +34,6 @@ logger = logging.getLogger(__name__)
 
 _EMPTY_BG         = QColor("#fdfefe")
 _CELL_PEN         = QColor("#bdc3c7")
-_LABEL_PEN        = QColor("#1c2833")
 _REGION_PEN       = QColor("#566573")  # outline of each chamber region
 _SENSOR_PULSE  = QColor("#f1c40f")  # active sensor highlight (yellow)
 _CHAMBER_PULSE = QColor("#3498db")  # touched chamber highlight (blue)
@@ -195,7 +194,12 @@ class SkinGridView(QWidget):
 
     def _paint_region(self, p: QPainter, ch_idx: int,
                       cells: list[tuple[int, int]]) -> None:
-        """Fill the region, draw its outline once, and place a single label."""
+        """Fill the region and draw its outline once.
+
+        No text label is drawn — the region simply fills with the chamber's
+        colour as it pressurises, mirroring the same chamber's fill bar in the
+        ChamberWidget below. This keeps the shape clear of the simulation
+        T-buttons, and the pressure % lives on the fill bar."""
         pressure = self._pressure_for(ch_idx)
         fill = self._tint(ch_idx, pressure)
 
@@ -207,41 +211,6 @@ class SkinGridView(QWidget):
         p.setPen(QPen(_REGION_PEN, 2))
         self._draw_region_outline(p, cells,
                                   self._chamber_cols, self._chamber_rows)
-
-        # Label centred on the region's bounding box.
-        ar, _ = self._centroid_cell(cells)
-        min_r = min(r for r, _ in cells)
-        max_r = max(r for r, _ in cells)
-        min_c = min(c for _, c in cells)
-        max_c = max(c for _, c in cells)
-        rect_tl = self._cell_rect(min_r, min_c,
-                                  self._chamber_cols, self._chamber_rows)
-        rect_br = self._cell_rect(max_r, max_c,
-                                  self._chamber_cols, self._chamber_rows)
-        cw = rect_br.width()
-        ch = rect_br.height()
-        label_x = rect_tl.x()
-        label_w = rect_br.x() + rect_br.width() - rect_tl.x()
-        label_y = self._cell_rect(ar, min_c,
-                                  self._chamber_cols, self._chamber_rows).y()
-        label_h = ch
-        if min_r <= ar - 1:
-            label_y -= ch // 2
-            label_h += ch // 2
-        if max_r >= ar + 1:
-            label_h += ch // 2
-        label_rect = QRect(label_x, label_y, label_w, label_h)
-
-        font = p.font()
-        font.setPointSizeF(max(7.0, min(cw, ch) * 0.32))
-        font.setWeight(QFont.Weight.Bold)
-        p.setFont(font)
-        p.setPen(_LABEL_PEN)
-        p.drawText(
-            label_rect,
-            Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextDontClip,
-            f"C{ch_idx}  {pressure}%",
-        )
 
     # ------------------------------------------------------------------
     # Sensor T buttons (simulation aid)
@@ -493,12 +462,6 @@ class SkinGridView(QWidget):
     def _pressure_for(self, ch_idx: int) -> int:
         ch = self._skin.chambers.get(ch_idx)
         return int(ch.pressure) if ch is not None else 0
-
-    @staticmethod
-    def _centroid_cell(cells: list[tuple[int, int]]) -> tuple[int, int]:
-        cy = sum(r for r, _ in cells) / len(cells)
-        cx = sum(c for _, c in cells) / len(cells)
-        return min(cells, key=lambda rc: (rc[0] - cy) ** 2 + (rc[1] - cx) ** 2)
 
     @staticmethod
     def _find_regions(grid: list[list[int]], rows: int, cols: int

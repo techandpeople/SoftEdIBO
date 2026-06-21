@@ -62,8 +62,13 @@ class SkinWidget(QGroupBox):
                     on_touch(lambda sensor_id, _raw: self._sensor_pulse.emit(sensor_id))
 
         # Live tuning panel for skins with 4-sensor quadrant touch detection.
+        # Keep it compact: it must NOT stretch to the (now wider) grid view's
+        # width — only the SkinGridView shape should scale up.
         if skin.has_touch_tracking:
-            outer.addWidget(TouchTuningPanel(skin))
+            tuning = TouchTuningPanel(skin)
+            tuning.setSizePolicy(QSizePolicy.Policy.Maximum,
+                                 QSizePolicy.Policy.Fixed)
+            outer.addWidget(tuning, alignment=Qt.AlignmentFlag.AlignCenter)
 
         # Chamber controls row (one ChamberWidget per AirChamber).
         cols = QHBoxLayout()

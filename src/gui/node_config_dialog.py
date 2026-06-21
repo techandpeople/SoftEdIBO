@@ -9,24 +9,10 @@ Node types and their default slot counts:
                               pressure/vacuum tanks via has_reservoirs)
 """
 
-from PySide6.QtWidgets import (
-    QCheckBox,
-    QComboBox,
-    QDialog,
-    QDialogButtonBox,
-    QDoubleSpinBox,
-    QFormLayout,
-    QGroupBox,
-    QLabel,
-    QLineEdit,
-    QMessageBox,
-    QPushButton,
-    QSpinBox,
-    QVBoxLayout,
-    QWidget,
-)
+from PySide6.QtWidgets import QDialog, QMessageBox, QWidget
 
 from src.config.settings import Settings
+from src.gui.ui_node_config_dialog import Ui_NodeConfigDialog
 
 _YAML_KEY = {"turtle": "turtles", "tree": "trees", "thymio": "thymios"}
 
@@ -37,7 +23,7 @@ NODE_TYPES: dict[str, int] = {
 }
 
 
-class NodeConfigDialog(QDialog):
+class NodeConfigDialog(QDialog, Ui_NodeConfigDialog):
     """Dialog for adding or editing a single node entry.
 
     Args:
@@ -60,6 +46,7 @@ class NodeConfigDialog(QDialog):
         prefill_mac: str = "",
     ):
         super().__init__(parent)
+        self.setupUi(self)
         self._robot_type  = robot_type
         self._robot_index = robot_index
         self._node_index  = node_index
@@ -67,113 +54,59 @@ class NodeConfigDialog(QDialog):
 
         is_new = node_index < 0
         self.setWindowTitle("Add Node" if is_new else "Configure Node")
-        self.setMinimumWidth(320)
-
-        layout = QVBoxLayout(self)
-        form   = QFormLayout()
-        layout.addLayout(form)
-
-        # MAC address
-        self._mac_edit = QLineEdit()
-        self._mac_edit.setPlaceholderText("AA:BB:CC:DD:EE:FF")
-        form.addRow("Node MAC:", self._mac_edit)
 
         # Node type dropdown
-        self._type_combo = QComboBox()
         for nt in NODE_TYPES:
-            self._type_combo.addItem(nt)
-        self._type_combo.currentTextChanged.connect(self._on_type_changed)
-        form.addRow("Node type:", self._type_combo)
+            self.type_combo.addItem(nt)
+        self.type_combo.currentTextChanged.connect(self._on_type_changed)
 
-        # Max slots spinbox
-        self._slots_spin = QSpinBox()
-        self._slots_spin.setRange(0, 64)
-        self._slots_spin.setSuffix(" slots")
-        self._slots_label = QLabel("Max slots:")
-        form.addRow(self._slots_label, self._slots_spin)
+        # Tank limit/target spinboxes live in the .ui (object name == config key).
+        self._tank_spins = {key: getattr(self, key) for key in self._TANK_KEYS}
 
-        # has_reservoirs checkbox (only meaningful for node_multiplexed)
-        self._reservoirs_chk = QCheckBox("Has shared pressure / vacuum reservoirs")
-        self._reservoirs_label = QLabel("Reservoirs:")
-        form.addRow(self._reservoirs_label, self._reservoirs_chk)
-        self._reservoirs_chk.toggled.connect(self._update_tank_visibility)
-
-        # Tank group — visible only when node_multiplexed + has_reservoirs
-        self._tank_group = self._build_tank_group()
-        layout.addWidget(self._tank_group)
-
-        # Note label
-        self._note_lbl = QLabel()
-        self._note_lbl.setWordWrap(True)
-        self._note_lbl.setStyleSheet("color: gray; font-size: 10px;")
-        layout.addWidget(self._note_lbl)
-
-        # Buttons
-        btn_layout = QVBoxLayout()
-        self._save_btn   = QPushButton("Save")
-        self._cancel_btn = QPushButton("Cancel")
-        self._delete_btn = QPushButton("Delete Node")
-        self._delete_btn.setVisible(not is_new)
-        btn_layout.addWidget(self._save_btn)
-        btn_layout.addWidget(self._cancel_btn)
-        btn_layout.addWidget(self._delete_btn)
-        layout.addLayout(btn_layout)
+        self.reservoirs_chk.toggled.connect(self._update_tank_visibility)
+        self.delete_btn.setVisible(not is_new)
 
         # Populate from existing config
         node_cfg = self._load_node_cfg()
-        self._mac_edit.setText(node_cfg.get("mac", "") or prefill_mac)
+        self.mac_edit.setText(node_cfg.get("mac", "") or prefill_mac)
         stored_type = node_cfg.get("node_type", "node_direct")
-        idx = self._type_combo.findText(stored_type)
+        idx = self.type_combo.findText(stored_type)
         if idx >= 0:
-            self._type_combo.setCurrentIndex(idx)
+            self.type_combo.setCurrentIndex(idx)
         stored_slots = node_cfg.get("max_slots", NODE_TYPES.get(stored_type, 3))
-        self._reservoirs_chk.setChecked(bool(node_cfg.get("has_reservoirs", False)))
+        self.reservoirs_chk.setChecked(bool(node_cfg.get("has_reservoirs", False)))
         for key, spin in self._tank_spins.items():
             if key in node_cfg:
                 spin.setValue(float(node_cfg[key]))
-        self._on_type_changed(self._type_combo.currentText())
-        if self._slots_spin.isEnabled():
-            self._slots_spin.setValue(int(stored_slots))
+        self._on_type_changed(self.type_combo.currentText())
+        if self.slots_spin.isEnabled():
+            self.slots_spin.setValue(int(stored_slots))
         self._update_note()
 
-        self._save_btn.clicked.connect(self._on_save)
-        self._cancel_btn.clicked.connect(self.reject)
-        self._delete_btn.clicked.connect(self._on_delete)
+        self.save_btn.clicked.connect(self._on_save)
+        self.cancel_btn.clicked.connect(self.reject)
+        self.delete_btn.clicked.connect(self._on_delete)
 
     # ------------------------------------------------------------------
     # Tank limit / target widgets
     # ------------------------------------------------------------------
 
-    # (name, attribute, default, kPa range)
+    # Config keys for the reservoir limit/target spinboxes; each matches the
+    # object name of a QDoubleSpinBox defined in the .ui (ranges/defaults there).
     # Hard caps mirror firmware's config::HARD_TANK_{MIN,MAX}_KPA (±80 kPa).
-    _TANK_FIELDS = (
-        ("Pressure tank min (kPa)",    "tank_pressure_min_kpa",      0.0, (-80.0, 80.0)),
-        ("Pressure tank max (kPa)",    "tank_pressure_max_kpa",     50.0, (-80.0, 80.0)),
-        ("Pressure tank target (kPa)", "tank_pressure_target_kpa",  25.0, (-80.0, 80.0)),
-        ("Vacuum tank min (kPa)",      "tank_vacuum_min_kpa",      -50.0, (-80.0, 80.0)),
-        ("Vacuum tank max (kPa)",      "tank_vacuum_max_kpa",        0.0, (-80.0, 80.0)),
-        ("Vacuum tank target (kPa)",   "tank_vacuum_target_kpa",   -25.0, (-80.0, 80.0)),
+    _TANK_KEYS = (
+        "tank_pressure_min_kpa",
+        "tank_pressure_max_kpa",
+        "tank_pressure_target_kpa",
+        "tank_vacuum_min_kpa",
+        "tank_vacuum_max_kpa",
+        "tank_vacuum_target_kpa",
     )
 
-    def _build_tank_group(self) -> QGroupBox:
-        group = QGroupBox("Reservoir limits (kPa)")
-        form = QFormLayout(group)
-        self._tank_spins: dict[str, QDoubleSpinBox] = {}
-        for label, key, default, (lo, hi) in self._TANK_FIELDS:
-            spin = QDoubleSpinBox()
-            spin.setRange(lo, hi)
-            spin.setDecimals(1)
-            spin.setSingleStep(0.5)
-            spin.setSuffix(" kPa")
-            spin.setValue(default)
-            form.addRow(label + ":", spin)
-            self._tank_spins[key] = spin
-        return group
-
     def _update_tank_visibility(self) -> None:
-        is_multiplexed = self._type_combo.currentText() == "node_multiplexed"
-        has_reservoirs = self._reservoirs_chk.isChecked()
-        self._tank_group.setVisible(is_multiplexed and has_reservoirs)
+        is_multiplexed = self.type_combo.currentText() == "node_multiplexed"
+        has_reservoirs = self.reservoirs_chk.isChecked()
+        self.tank_group.setVisible(is_multiplexed and has_reservoirs)
 
     def _apply_tank_fields(self, node_entry: dict, node_type: str) -> bool:
         """Validate + write the tank fields into ``node_entry``.
@@ -186,7 +119,7 @@ class NodeConfigDialog(QDialog):
                 node_entry.pop(key, None)
             return True
 
-        has_reservoirs = bool(self._reservoirs_chk.isChecked())
+        has_reservoirs = bool(self.reservoirs_chk.isChecked())
         node_entry["has_reservoirs"] = has_reservoirs
 
         if not has_reservoirs:
@@ -232,31 +165,31 @@ class NodeConfigDialog(QDialog):
 
     def _on_type_changed(self, node_type: str) -> None:
         if node_type == "node_direct":
-            self._slots_spin.setRange(3, 3)
-            self._slots_spin.setValue(3)
-            self._slots_spin.setEnabled(False)
-            self._reservoirs_chk.setChecked(False)
-            self._reservoirs_chk.setVisible(False)
-            self._reservoirs_label.setVisible(False)
+            self.slots_spin.setRange(3, 3)
+            self.slots_spin.setValue(3)
+            self.slots_spin.setEnabled(False)
+            self.reservoirs_chk.setChecked(False)
+            self.reservoirs_chk.setVisible(False)
+            self.reservoirs_label.setVisible(False)
         elif node_type == "node_magnet_sensor":
             # magnet sensor node: 4 fixed sensors, no chambers/reservoirs.
-            self._slots_spin.setRange(4, 4)
-            self._slots_spin.setValue(4)
-            self._slots_spin.setEnabled(False)
-            self._reservoirs_chk.setChecked(False)
-            self._reservoirs_chk.setVisible(False)
-            self._reservoirs_label.setVisible(False)
+            self.slots_spin.setRange(4, 4)
+            self.slots_spin.setValue(4)
+            self.slots_spin.setEnabled(False)
+            self.reservoirs_chk.setChecked(False)
+            self.reservoirs_chk.setVisible(False)
+            self.reservoirs_label.setVisible(False)
         else:
-            self._slots_spin.setRange(1, 16)
-            self._slots_spin.setEnabled(True)
-            self._slots_spin.setValue(NODE_TYPES.get(node_type, 12))
-            self._reservoirs_chk.setVisible(True)
-            self._reservoirs_label.setVisible(True)
+            self.slots_spin.setRange(1, 16)
+            self.slots_spin.setEnabled(True)
+            self.slots_spin.setValue(NODE_TYPES.get(node_type, 12))
+            self.reservoirs_chk.setVisible(True)
+            self.reservoirs_label.setVisible(True)
         self._update_tank_visibility()
         self._update_note()
 
     def _update_note(self) -> None:
-        nt = self._type_combo.currentText()
+        nt = self.type_combo.currentText()
         notes = {
             "node_direct": "3 chambers, direct ADC sensors, onboard pumps.",
             "node_multiplexed": (
@@ -270,16 +203,16 @@ class NodeConfigDialog(QDialog):
                 "chambers, no pumps."
             ),
         }
-        self._note_lbl.setText(notes.get(nt, ""))
+        self.note_lbl.setText(notes.get(nt, ""))
 
     # ------------------------------------------------------------------
     # Actions
     # ------------------------------------------------------------------
 
     def _on_save(self) -> None:
-        mac       = self._mac_edit.text().strip()
-        node_type = self._type_combo.currentText()
-        max_slots = 3 if node_type == "node_direct" else self._slots_spin.value()
+        mac       = self.mac_edit.text().strip()
+        node_type = self.type_combo.currentText()
+        max_slots = 3 if node_type == "node_direct" else self.slots_spin.value()
 
         if not mac:
             QMessageBox.warning(self, "Missing Field", "Node MAC cannot be empty.")

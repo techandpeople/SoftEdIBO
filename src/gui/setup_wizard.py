@@ -11,20 +11,25 @@ from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
     QLabel,
-    QPlainTextEdit,
-    QProgressBar,
     QPushButton,
-    QVBoxLayout,
     QWizard,
     QWizardPage,
 )
 
 from src.config.settings import Settings
 from src.gui.async_task import run_async
+from src.gui.ui_wizard_done_page import Ui_DonePage
+from src.gui.ui_wizard_flash_page import Ui_FlashPage
+from src.gui.ui_wizard_welcome_page import Ui_WelcomePage
 from src.hardware.serial_ports import list_esp32_ports
 
 SENTINEL_PATH: Path = Settings.ROOT / "data" / ".setup_done"
-SKIP_STEP_LABEL = "Skip this step"
+
+# Wizard page ids — used for nextId() branching off the welcome page's choice.
+PAGE_WELCOME = 0
+PAGE_GATEWAY = 1
+PAGE_NODE = 2
+PAGE_DONE = 3
 # Read-only bundled assets live in BUNDLE (_internal/ when frozen, repo root in dev)
 #
 # Gateway firmware — two board variants; each needs the matching esptool --chip.
@@ -118,24 +123,27 @@ def _list_ports() -> list[str]:
 # Pages
 # ------------------------------------------------------------------
 
-class WelcomePage(QWizardPage):
+class WelcomePage(QWizardPage, Ui_WelcomePage):
+    """Entry page: pick whether to flash the gateway, node(s), or both."""
+
     def __init__(self):
         super().__init__()
-        self.setTitle("Welcome to SoftEdIBO Setup")
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel(
-            "<p>This wizard will flash the firmware to:</p>"
-            "<ul>"
-            "<li>The <b>ESP-NOW gateway</b></li>"
-            "<li>Each <b>node</b> (<code>node_direct</code> or <code>node_multiplexed</code>)</li>"
-            "</ul>"
-            "<p>Connect each device via USB before the corresponding step.</p>"
-            "<p>You can re-run this wizard at any time from <b>Tools => Flash Firmware…</b></p>"
-        ))
-        layout.addStretch()
+        self.setupUi(self)
+
+    def flash_choice(self) -> str:
+        """Return the selected path: "gateway", "node", or "both"."""
+        if self.rb_gateway.isChecked():
+            return "gateway"
+        if self.rb_node.isChecked():
+            return "node"
+        return "both"
+
+    def nextId(self) -> int:
+        # Node-only jumps straight past the gateway page; the others start there.
+        return PAGE_NODE if self.flash_choice() == "node" else PAGE_GATEWAY
 
 
-class _FlashPage(QWizardPage):
+class _FlashPage(QWizardPage, Ui_FlashPage):
     """Base page for flashing a single firmware binary via esptool."""
 
     # Subclasses can set this to a substring that should be preferred when
@@ -145,49 +153,20 @@ class _FlashPage(QWizardPage):
     def __init__(self, title: str, subtitle: str, firmware_path: Path,
                  chip: str = "esp32"):
         super().__init__()
+        self.setupUi(self)
         self.setTitle(title)
         self.setSubTitle(subtitle)
         self._firmware = firmware_path
         self._chip = chip
         self._proc: QProcess | None = None
         self._done = False
-        self._skipped = False
 
-        layout = QVBoxLayout(self)
-
-        # Port row
-        port_row = QHBoxLayout()
-        port_row.addWidget(QLabel("Serial port:"))
-        self._port_combo = QComboBox()
-        self._port_combo.setMinimumWidth(180)
-        port_row.addWidget(self._port_combo)
-        refresh_btn = QPushButton("Refresh")
-        refresh_btn.clicked.connect(self._refresh_ports)
-        port_row.addWidget(refresh_btn)
-        port_row.addStretch()
-        layout.addLayout(port_row)
-
-        # Flash / Skip buttons (side by side)
-        btn_row = QHBoxLayout()
-        self._flash_btn = QPushButton("Flash Firmware")
-        self._flash_btn.clicked.connect(self._start_flash)
-        btn_row.addWidget(self._flash_btn)
-        self._skip_btn = QPushButton(SKIP_STEP_LABEL)
-        self._skip_btn.clicked.connect(self._toggle_skip)
-        btn_row.addWidget(self._skip_btn)
-        layout.addLayout(btn_row)
-
-        # Progress bar
-        self._progress = QProgressBar()
-        self._progress.setRange(0, 100)
-        self._progress.setValue(0)
-        layout.addWidget(self._progress)
-
-        # Log output
-        self._log = QPlainTextEdit()
-        self._log.setReadOnly(True)
-        self._log.setMaximumBlockCount(1000)
-        layout.addWidget(self._log)
+        # The static frame (port row, flash button, progress, log) lives in the
+        # .ui; subclasses add their selectors into ``extra_layout`` and
+        # ``extra_bottom_layout``.
+        self.log.setMaximumBlockCount(1000)
+        self.refresh_btn.clicked.connect(self._refresh_ports)
+        self.flash_btn.clicked.connect(self._start_flash)
 
         self._refresh_ports()
 
@@ -197,7 +176,7 @@ class _FlashPage(QWizardPage):
         self._refresh_ports()
 
     def _refresh_ports(self) -> None:
-        current = self._port_combo.currentText()
+        current = self.port_combo.currentText()
         # Port enumeration can stall briefly; keep the wizard responsive.
         run_async(
             _list_ports,
@@ -206,47 +185,39 @@ class _FlashPage(QWizardPage):
         )
 
     def _populate_ports(self, ports: list[str], current: str) -> None:
-        self._port_combo.clear()
+        self.port_combo.clear()
         for p in ports:
-            self._port_combo.addItem(p)
+            self.port_combo.addItem(p)
         # Restore previous selection if still present.
         if current in ports:
-            self._port_combo.setCurrentText(current)
+            self.port_combo.setCurrentText(current)
         elif self._preferred_port_hint:
             # Auto-select the first port whose name matches the hint (e.g. "ACM"
             # for the gateway's USB-JTAG device, "USB" for classic node UART).
             preferred = [p for p in ports if self._preferred_port_hint in p]
             if preferred:
-                self._port_combo.setCurrentText(preferred[0])
-
-    def _toggle_skip(self) -> None:
-        self._skipped = not self._skipped
-        self._skip_btn.setText("Don't skip" if self._skipped else SKIP_STEP_LABEL)
-        self._flash_btn.setEnabled(not self._skipped)
-        self.completeChanged.emit()
+                self.port_combo.setCurrentText(preferred[0])
 
     def _start_flash(self) -> None:
-        port = self._port_combo.currentText()
+        port = self.port_combo.currentText()
         if not port:
-            self._log.appendPlainText("No serial port selected.")
+            self.log.appendPlainText("No serial port selected.")
             return
 
         if not self._firmware.exists():
-            self._log.appendPlainText(
+            self.log.appendPlainText(
                 f"Firmware binary not found:\n  {self._firmware}\n\n"
                 f"Place the compiled {self._firmware.name} file there and try again."
             )
             return
 
-        self._flash_btn.setEnabled(False)
-        self._skipped = False
-        self._skip_btn.setText(SKIP_STEP_LABEL)
-        self._progress.setValue(0)
-        self._log.clear()
+        self.flash_btn.setEnabled(False)
+        self.progress.setValue(0)
+        self.log.clear()
         self._done = False
         self.completeChanged.emit()
 
-        self._log.appendPlainText(f"Flashing {self._firmware.name} to {port}…\n")
+        self.log.appendPlainText(f"Flashing {self._firmware.name} to {port}…\n")
 
         prog, args = _esptool_cmd(port, self._firmware, self._chip)
         self._proc = QProcess(self)
@@ -260,12 +231,12 @@ class _FlashPage(QWizardPage):
 
     def _parse_progress(self, raw: str) -> None:
         """Parse and display esptool output, updating the progress bar."""
-        self._log.appendPlainText(raw.rstrip())
+        self.log.appendPlainText(raw.rstrip())
         # Parse percentage from esptool output (both old and new formats)
         # Old: "Writing at 0x00000000... (42 %)"
         # New: "Writing at 0x00000000 [====] 42.0% 212992/516100 bytes..."
         for m in re.finditer(r'(\d+(?:\.\d+)?)\s*%', raw):
-            self._progress.setValue(int(float(m.group(1))))
+            self.progress.setValue(int(float(m.group(1))))
 
     def _on_output(self) -> None:
         if self._proc is None:
@@ -281,16 +252,16 @@ class _FlashPage(QWizardPage):
 
     def _on_finished(self, exit_code: int, _exit_status) -> None:
         if exit_code == 0:
-            self._progress.setValue(100)
-            self._log.appendPlainText("\nFlash completed successfully.")
+            self.progress.setValue(100)
+            self.log.appendPlainText("\nFlash completed successfully.")
             self._done = True
         else:
-            self._log.appendPlainText(f"\nFlash failed (exit code {exit_code}).")
-            self._flash_btn.setEnabled(True)
+            self.log.appendPlainText(f"\nFlash failed (exit code {exit_code}).")
+            self.flash_btn.setEnabled(True)
         self.completeChanged.emit()
 
     def isComplete(self) -> bool:
-        return self._done or self._skipped
+        return self._done
 
 
 class FlashGatewayPage(_FlashPage):
@@ -309,9 +280,7 @@ class FlashGatewayPage(_FlashPage):
             chip=first["chip"],
         )
 
-        layout: QVBoxLayout = self.layout()  # type: ignore[assignment]
-
-        # Gateway board selector — inserted above the port row.
+        # Gateway board selector — into the .ui's top extra_layout.
         board_row = QHBoxLayout()
         board_row.addWidget(QLabel("Gateway board:"))
         self._board_combo = QComboBox()
@@ -321,12 +290,19 @@ class FlashGatewayPage(_FlashPage):
         self._board_combo.currentTextChanged.connect(self._on_board_changed)
         board_row.addWidget(self._board_combo)
         board_row.addStretch()
-        layout.insertLayout(0, board_row)
+        self.extra_layout.addLayout(board_row)
 
     def _on_board_changed(self, label: str) -> None:
         variant = GATEWAY_FIRMWARES[label]
         self._firmware = variant["path"]
         self._chip = variant["chip"]
+
+    def nextId(self) -> int:
+        # Continue to the node page only when the user chose to flash both.
+        welcome = self.wizard().page(PAGE_WELCOME)
+        if isinstance(welcome, WelcomePage) and welcome.flash_choice() == "both":
+            return PAGE_NODE
+        return PAGE_DONE
 
 
 class FlashNodePage(_FlashPage):
@@ -343,9 +319,7 @@ class FlashNodePage(_FlashPage):
             NODE_FIRMWARES[first_label]["release"],
         )
 
-        layout: QVBoxLayout = self.layout()  # type: ignore[assignment]
-
-        # Node type selector — inserted at position 0 (above the port row)
+        # Node type selector — into the .ui's top extra_layout.
         type_row = QHBoxLayout()
         type_row.addWidget(QLabel("Node type:"))
         self._type_combo = QComboBox()
@@ -355,19 +329,19 @@ class FlashNodePage(_FlashPage):
         self._type_combo.currentTextChanged.connect(self._on_type_changed)
         type_row.addWidget(self._type_combo)
         type_row.addStretch()
-        layout.insertLayout(0, type_row)
+        self.extra_layout.addLayout(type_row)
 
         # Debug-build checkbox — switches to the firmware-debug.bin variant.
         self._debug_check = QCheckBox("Debug build (verbose Serial output)")
         self._debug_check.toggled.connect(self._update_firmware_path)
-        layout.insertWidget(1, self._debug_check)
+        self.extra_layout.addWidget(self._debug_check)
 
-        # "Flash another node" button — enabled after each successful flash
+        # "Flash another node" button — enabled after each successful flash,
+        # into the .ui's extra_bottom_layout (just above the log).
         self._another_btn = QPushButton("Flash Another Node")
         self._another_btn.clicked.connect(self._reset_for_another)
         self._another_btn.setEnabled(False)
-        # Insert before the log (last widget)
-        layout.insertWidget(layout.count() - 1, self._another_btn)
+        self.extra_bottom_layout.addWidget(self._another_btn)
 
     def _on_type_changed(self, _label: str) -> None:
         self._update_firmware_path()
@@ -383,27 +357,22 @@ class FlashNodePage(_FlashPage):
 
     def _reset_for_another(self) -> None:
         """Prepare for flashing the next node; keep _done=True so Next stays enabled."""
-        self._log.clear()
-        self._progress.setValue(0)
-        self._flash_btn.setEnabled(True)
+        self.log.clear()
+        self.progress.setValue(0)
+        self.flash_btn.setEnabled(True)
         self._another_btn.setEnabled(False)
         # _done remains True — user has already flashed at least one node
 
-    # isComplete inherited from _FlashPage: _done or _skipped
+    def nextId(self) -> int:
+        return PAGE_DONE
+
+    # isComplete inherited from _FlashPage: returns _done
 
 
-class DonePage(QWizardPage):
+class DonePage(QWizardPage, Ui_DonePage):
     def __init__(self):
         super().__init__()
-        self.setTitle("Setup Complete")
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel(
-            "<p>Setup is complete.</p>"
-            "<p>Click <b>Finish</b> to open the application.</p>"
-            "<p>You can re-flash firmware at any time from "
-            "<b>Tools => Flash Firmware…</b></p>"
-        ))
-        layout.addStretch()
+        self.setupUi(self)
 
     def initializePage(self) -> None:
         """Create the sentinel file the first time this page is shown."""
@@ -424,7 +393,8 @@ class SetupWizard(QWizard):
         self.setMinimumSize(660, 520)
         self.setWizardStyle(QWizard.WizardStyle.ModernStyle)
 
-        self.addPage(WelcomePage())
-        self.addPage(FlashGatewayPage())
-        self.addPage(FlashNodePage())
-        self.addPage(DonePage())
+        # Explicit ids so the welcome page can branch via nextId().
+        self.setPage(PAGE_WELCOME, WelcomePage())
+        self.setPage(PAGE_GATEWAY, FlashGatewayPage())
+        self.setPage(PAGE_NODE, FlashNodePage())
+        self.setPage(PAGE_DONE, DonePage())

@@ -12,12 +12,10 @@ from typing import Callable
 
 from PySide6.QtCore import QPointF, Qt, Signal
 from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPaintEvent, QPen
-from PySide6.QtWidgets import (
-    QGroupBox, QHBoxLayout, QLabel, QPushButton,
-    QSizePolicy, QVBoxLayout, QWidget,
-)
+from PySide6.QtWidgets import QGroupBox, QPushButton, QSizePolicy, QWidget
 
 from src.gui.led_animation import AnimationPattern, LedAnimator, apply_animation
+from src.gui.ui_led_ring_tester import Ui_LedRingTester
 
 _OFF_COLOR = QColor("#202020")
 
@@ -95,7 +93,7 @@ class LedRingWidget(QWidget):
                 return
 
 
-class LedRingTester(QGroupBox):
+class LedRingTester(QGroupBox, Ui_LedRingTester):
     """LED ring test: clickable ring + preset color/pattern buttons.
 
     ``send_cb(index, color_hex, pattern)`` is called on every change:
@@ -107,7 +105,8 @@ class LedRingTester(QGroupBox):
     def __init__(self, count: int,
                  send_cb: Callable[[int | None, str | None, str], None],
                  parent: QWidget | None = None) -> None:
-        super().__init__("LED ring test", parent)
+        super().__init__(parent)
+        self.setupUi(self)
         self._send = send_cb
         self._color = "#ff0000"
         self._pattern = AnimationPattern.SOLID
@@ -115,52 +114,31 @@ class LedRingTester(QGroupBox):
         self._animator = LedAnimator(interval_ms=100, max_steps=10, parent=self)
         self._animator.stepped.connect(self._on_animation_step)
 
-        main_layout = QHBoxLayout(self)
-
-        # Left side: controls
-        left_layout = QVBoxLayout()
-        left_layout.addWidget(QLabel("Select color & pattern:"))
-
-        # Color buttons
-        color_row = QHBoxLayout()
+        # Color buttons (data-driven) → into the .ui's color_row.
         for name, hex_color in _COLORS.items():
             btn = QPushButton(name)
             btn.clicked.connect(lambda checked=False, c=hex_color, n=name: self._set_color(c, n))
-            color_row.addWidget(btn)
-        color_row.addStretch()
-        left_layout.addLayout(color_row)
+            self.color_row.addWidget(btn)
+        self.color_row.addStretch()
 
-        # Pattern buttons
-        pattern_row = QHBoxLayout()
-        pattern_row.addWidget(QLabel("Pattern:"))
+        # Pattern buttons (data-driven) → into the .ui's pattern_row.
         for pattern in _PATTERNS:
             btn = QPushButton(pattern.capitalize())
             btn.clicked.connect(lambda checked=False, p=pattern: self._set_pattern(p))
             self._pattern_buttons[pattern] = btn
-            pattern_row.addWidget(btn)
-        pattern_row.addStretch()
-        left_layout.addLayout(pattern_row)
+            self.pattern_row.addWidget(btn)
+        self.pattern_row.addStretch()
 
-        # Control buttons
-        control_row = QHBoxLayout()
-        all_btn = QPushButton("Apply to All")
-        off_btn = QPushButton("Off")
-        all_btn.clicked.connect(self._on_apply_all)
-        off_btn.clicked.connect(self._on_off)
-        control_row.addWidget(all_btn)
-        control_row.addWidget(off_btn)
-        control_row.addStretch()
-        left_layout.addLayout(control_row)
+        # Static control buttons live in the .ui.
+        self.all_btn.clicked.connect(self._on_apply_all)
+        self.off_btn.clicked.connect(self._on_off)
 
-        left_layout.addWidget(QLabel("Click LED to set individually:"))
-        left_layout.addStretch()
-
-        # Right side: LED ring
+        # Right side: LED ring — custom QPainter widget, added next to the
+        # controls panel (count is a runtime arg so it can't live in the .ui).
         self._ring = LedRingWidget(count)
         self._ring.ledClicked.connect(self._on_led_clicked)
-
-        main_layout.addLayout(left_layout, 1)
-        main_layout.addWidget(self._ring, 1)
+        self.main_layout.addWidget(self._ring, 1)
+        self.main_layout.setStretch(0, 1)
 
     def _on_animation_step(self, step: int) -> None:
         """Callback when animation step changes."""

@@ -8,12 +8,12 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
 from src.data.models import ParticipantRecord, SessionAssignment
+from src.gui.ui_assignment_dialog import Ui_AssignmentDialog
 from src.robots.base_robot import BaseRobot
 
 
@@ -29,7 +29,7 @@ def _units_for_robot(robot: BaseRobot) -> list[str]:
     return [robot.robot_id]
 
 
-class AssignmentDialog(QDialog):
+class AssignmentDialog(QDialog, Ui_AssignmentDialog):
     """Let the operator assign robot units (skins / branches) to participants.
 
     For every selected robot a group box is shown.  Inside, each participant
@@ -53,8 +53,7 @@ class AssignmentDialog(QDialog):
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
-        self.setWindowTitle("Assign Robot Units to Participants")
-        self.setMinimumSize(560, 400)
+        self.setupUi(self)
 
         self._session_id = session_id
         self._robots = robots
@@ -68,35 +67,20 @@ class AssignmentDialog(QDialog):
         # _checks[robot_id][participant_id][unit_id] = QCheckBox
         self._checks: dict[str, dict[str, dict[str, QCheckBox]]] = {}
 
-        main_layout = QVBoxLayout(self)
-        main_layout.addWidget(
-            QLabel("Assign robot skins / branches to each participant.")
-        )
-
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        container = QWidget()
-        self._container_layout = QVBoxLayout(container)
-        scroll.setWidget(container)
-        main_layout.addWidget(scroll)
-
+        # The static frame (intro, scroll area, button box) lives in the .ui;
+        # the per-robot groups are built here into ``container_layout``.
         for robot in robots:
             units = _units_for_robot(robot)
             self._build_robot_group(robot, units)
 
-        self._container_layout.addStretch()
+        self.container_layout.addStretch()
 
-        btn_box = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok
-            | QDialogButtonBox.StandardButton.Cancel
-        )
-        btn_box.accepted.connect(self.accept)
-        btn_box.rejected.connect(self.reject)
-        skip_btn = btn_box.addButton(
+        self.button_box.accepted.connect(self.accept)
+        self.button_box.rejected.connect(self.reject)
+        skip_btn = self.button_box.addButton(
             "Skip (assign on touch)", QDialogButtonBox.ButtonRole.ResetRole
         )
         skip_btn.clicked.connect(self.accept)
-        main_layout.addWidget(btn_box)
 
     # ------------------------------------------------------------------
     # Building per-robot group
@@ -110,12 +94,12 @@ class AssignmentDialog(QDialog):
 
         if not units:
             group_layout.addWidget(QLabel("No assignable units on this robot."))
-            self._container_layout.addWidget(group)
+            self.container_layout.addWidget(group)
             return
 
         if not self._participants:
             group_layout.addWidget(QLabel("No participants selected."))
-            self._container_layout.addWidget(group)
+            self.container_layout.addWidget(group)
             return
 
         # Header row: unit labels
@@ -151,7 +135,7 @@ class AssignmentDialog(QDialog):
         btn_row.addWidget(clear_btn)
         group_layout.addLayout(btn_row)
 
-        self._container_layout.addWidget(group)
+        self.container_layout.addWidget(group)
 
     # ------------------------------------------------------------------
     # Auto-assignment

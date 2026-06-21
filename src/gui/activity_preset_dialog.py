@@ -22,15 +22,12 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDoubleSpinBox,
-    QFormLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
-    QScrollArea,
-    QSizePolicy,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -43,6 +40,7 @@ from src.activities import ACTIVITIES
 from src.activities.base_activity import BaseActivity, Param
 from src.data.database import Database
 from src.data.models import ActivityPreset
+from src.gui.ui_activity_preset_dialog import Ui_ActivityPresetDialog
 
 
 _NEW_LABEL = "(unsaved preset)"
@@ -168,79 +166,30 @@ class _SensorMap(QWidget):
             row_widget.deleteLater()
 
 
-class ActivityPresetDialog(QDialog):
+class ActivityPresetDialog(QDialog, Ui_ActivityPresetDialog):
     """Browse / edit / delete activity presets, stored in the DB."""
 
     def __init__(self, db: Database, parent: QWidget | None = None,
                  *, initial_activity: BaseActivity | None = None,
                  apply_on_close: bool = False) -> None:
         super().__init__(parent)
+        self.setupUi(self)
         self._db = db
         self._current_preset_id: str | None = None
         self._widgets: dict[str, QWidget] = {}
         self._initial_activity = initial_activity
         self._apply_on_close = apply_on_close
 
-        self.setWindowTitle("Activity Presets")
-        self.setMinimumSize(540, 600)
-
-        outer = QVBoxLayout(self)
-
-        # Activity + preset selectors --------------------------------------
-        top = QFormLayout()
-        self._activity_combo = QComboBox()
+        # The static frame lives in the .ui; the params form is rebuilt per
+        # activity into ``params_layout``.
         for activity in ACTIVITIES:
-            self._activity_combo.addItem(activity.name, userData=activity)
-        self._activity_combo.currentIndexChanged.connect(self._on_activity_changed)
-        top.addRow("Activity:", self._activity_combo)
-
-        preset_row = QHBoxLayout()
-        self._preset_combo = QComboBox()
-        self._preset_combo.setMinimumWidth(240)
-        self._preset_combo.currentIndexChanged.connect(self._on_preset_changed)
-        preset_row.addWidget(self._preset_combo, stretch=1)
-        self._new_btn = QPushButton("+ New")
-        self._new_btn.clicked.connect(self._on_new)
-        self._delete_btn = QPushButton("Delete")
-        self._delete_btn.clicked.connect(self._on_delete)
-        preset_row.addWidget(self._new_btn)
-        preset_row.addWidget(self._delete_btn)
-        top.addRow("Preset:", preset_row)
-
-        self._name_edit = QLineEdit()
-        self._name_edit.setPlaceholderText("e.g. Easy, Therapy v3, 1st grade…")
-        top.addRow("Name:", self._name_edit)
-
-        self._desc_edit = QLineEdit()
-        self._desc_edit.setPlaceholderText("Optional description")
-        top.addRow("Description:", self._desc_edit)
-
-        outer.addLayout(top)
-
-        # Params form (scrollable, rebuilt per activity) -------------------
-        outer.addWidget(QLabel("<b>Parameters</b>"))
-        self._params_container = QWidget()
-        self._params_layout = QFormLayout(self._params_container)
-        self._params_layout.setLabelAlignment(
-            self._params_layout.labelAlignment()
-        )
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setWidget(self._params_container)
-        scroll.setSizePolicy(QSizePolicy.Policy.Expanding,
-                             QSizePolicy.Policy.Expanding)
-        outer.addWidget(scroll, stretch=1)
-
-        # Bottom actions ---------------------------------------------------
-        btn_row = QHBoxLayout()
-        btn_row.addStretch()
-        self._save_btn = QPushButton("Save")
-        self._save_btn.clicked.connect(self._on_save)
-        self._close_btn = QPushButton("Close")
-        self._close_btn.clicked.connect(self._on_close)
-        btn_row.addWidget(self._save_btn)
-        btn_row.addWidget(self._close_btn)
-        outer.addLayout(btn_row)
+            self.activity_combo.addItem(activity.name, userData=activity)
+        self.activity_combo.currentIndexChanged.connect(self._on_activity_changed)
+        self.preset_combo.currentIndexChanged.connect(self._on_preset_changed)
+        self.new_btn.clicked.connect(self._on_new)
+        self.delete_btn.clicked.connect(self._on_delete)
+        self.save_btn.clicked.connect(self._on_save)
+        self.close_btn.clicked.connect(self._on_close)
 
         # Bootstrap selection — prefer the activity the caller asked for
         # (e.g. the one already picked in SessionSetupDialog) so the user
@@ -248,10 +197,10 @@ class ActivityPresetDialog(QDialog):
         if ACTIVITIES:
             start_idx = 0
             if self._initial_activity is not None:
-                pos = self._activity_combo.findText(self._initial_activity.name)
+                pos = self.activity_combo.findText(self._initial_activity.name)
                 if pos >= 0:
                     start_idx = pos
-            self._activity_combo.setCurrentIndex(start_idx)
+            self.activity_combo.setCurrentIndex(start_idx)
             if start_idx == 0:
                 # setCurrentIndex(0) when it was already 0 doesn't fire the
                 # signal — kick the rebuild manually.
@@ -268,7 +217,7 @@ class ActivityPresetDialog(QDialog):
         return self._db.get_activity_preset(self._current_preset_id)
 
     def _current_activity(self) -> BaseActivity | None:
-        return self._activity_combo.currentData()
+        return self.activity_combo.currentData()
 
     def _on_activity_changed(self, _index: int) -> None:
         """Rebuild the form and reload the preset list for the new activity."""
@@ -278,8 +227,8 @@ class ActivityPresetDialog(QDialog):
         self._rebuild_form(activity)
         self._reload_preset_list()
         # Select the first preset (if any) or fall back to defaults.
-        if self._preset_combo.count() > 1:
-            self._preset_combo.setCurrentIndex(1)  # 0 is the "(new)" sentinel
+        if self.preset_combo.count() > 1:
+            self.preset_combo.setCurrentIndex(1)  # 0 is the "(new)" sentinel
         else:
             self._on_preset_changed(0)
 
@@ -289,32 +238,32 @@ class ActivityPresetDialog(QDialog):
         activity = self._current_activity()
         if activity is None:
             return
-        preset_id = self._preset_combo.currentData()
+        preset_id = self.preset_combo.currentData()
         self._current_preset_id = preset_id
         if preset_id is None:
-            self._name_edit.setText("")
-            self._desc_edit.setText("")
+            self.name_edit.setText("")
+            self.desc_edit.setText("")
             self._fill_form({p.name: p.default for p in activity.all_params()})
-            self._delete_btn.setEnabled(False)
+            self.delete_btn.setEnabled(False)
             return
         preset = self._db.get_activity_preset(preset_id)
         if preset is None:
             return
-        self._name_edit.setText(preset.name)
-        self._desc_edit.setText(preset.description)
+        self.name_edit.setText(preset.name)
+        self.desc_edit.setText(preset.description)
         self._fill_form(preset.params)
-        self._delete_btn.setEnabled(True)
+        self.delete_btn.setEnabled(True)
 
     def _on_new(self) -> None:
         """Start an unsaved preset with the activity's defaults."""
-        self._preset_combo.setCurrentIndex(0)
-        self._name_edit.setFocus()
+        self.preset_combo.setCurrentIndex(0)
+        self.name_edit.setFocus()
 
     def _on_save(self) -> None:
         activity = self._current_activity()
         if activity is None:
             return
-        name = self._name_edit.text().strip()
+        name = self.name_edit.text().strip()
         if not name:
             QMessageBox.warning(self, "Missing name",
                                 "Give the preset a name before saving.")
@@ -328,7 +277,7 @@ class ActivityPresetDialog(QDialog):
             preset_id=preset_id,
             activity_name=activity.name,
             name=name,
-            description=self._desc_edit.text().strip(),
+            description=self.desc_edit.text().strip(),
             params=values,
             created_at=now,
             updated_at=now,
@@ -336,9 +285,9 @@ class ActivityPresetDialog(QDialog):
         self._db.save_activity_preset(preset)
         self._reload_preset_list()
         # Re-select the just-saved preset.
-        for i in range(self._preset_combo.count()):
-            if self._preset_combo.itemData(i) == preset_id:
-                self._preset_combo.setCurrentIndex(i)
+        for i in range(self.preset_combo.count()):
+            if self.preset_combo.itemData(i) == preset_id:
+                self.preset_combo.setCurrentIndex(i)
                 break
 
     def _on_close(self) -> None:
@@ -358,8 +307,8 @@ class ActivityPresetDialog(QDialog):
         self._db.delete_activity_preset(self._current_preset_id)
         self._current_preset_id = None
         self._reload_preset_list()
-        if self._preset_combo.count() > 1:
-            self._preset_combo.setCurrentIndex(1)
+        if self.preset_combo.count() > 1:
+            self.preset_combo.setCurrentIndex(1)
         else:
             self._on_preset_changed(0)
 
@@ -369,24 +318,24 @@ class ActivityPresetDialog(QDialog):
 
     def _reload_preset_list(self) -> None:
         activity = self._current_activity()
-        self._preset_combo.blockSignals(True)
-        self._preset_combo.clear()
-        self._preset_combo.addItem(_NEW_LABEL, userData=None)
+        self.preset_combo.blockSignals(True)
+        self.preset_combo.clear()
+        self.preset_combo.addItem(_NEW_LABEL, userData=None)
         if activity is not None:
             for p in self._db.get_activity_presets(activity.name):
-                self._preset_combo.addItem(f"{p.name} [{p.preset_id}]",
+                self.preset_combo.addItem(f"{p.name} [{p.preset_id}]",
                                            userData=p.preset_id)
-        self._preset_combo.blockSignals(False)
+        self.preset_combo.blockSignals(False)
 
     def _rebuild_form(self, activity: BaseActivity) -> None:
         """Drop and rebuild the param rows for ``activity``."""
-        while self._params_layout.rowCount():
-            self._params_layout.removeRow(0)
+        while self.params_layout.rowCount():
+            self.params_layout.removeRow(0)
         self._widgets.clear()
         for param in activity.all_params():
             widget = self._build_widget(param)
             widget.setToolTip(param.description or param.name)
-            self._params_layout.addRow(param.display_label() + ":", widget)
+            self.params_layout.addRow(param.display_label() + ":", widget)
             self._widgets[param.name] = widget
 
     def _fill_form(self, values: dict[str, Any]) -> None:
