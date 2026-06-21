@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>AssignmentDialog</class>
+ <widget class="QDialog" name="AssignmentDialog">
+  <property name="geometry">
+   <rect><x>0</x><y>0</y><width>560</width><height>400</height></rect>
+  </property>
+  <property name="windowTitle"><string>Assign Robot Units to Participants</string></property>
+  <property name="minimumSize">
+   <size><width>560</width><height>400</height></size>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <widget class="QLabel" name="intro_label">
+     <property name="text"><string>Assign robot skins / branches to each participant.</string></property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QScrollArea" name="scroll_area">
+     <property name="widgetResizable"><bool>true</bool></property>
+     <widget class="QWidget" name="container">
+      <layout class="QVBoxLayout" name="container_layout"/>
+     </widget>
+    </widget>
+   </item>
+   <item>
+    <widget class="QDialogButtonBox" name="button_box">
+     <property name="standardButtons"><set>QDialogButtonBox::Cancel|QDialogButtonBox::Ok</set></property>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

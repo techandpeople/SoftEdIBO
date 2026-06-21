@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>TrainTouchDialog</class>
+ <widget class="QDialog" name="TrainTouchDialog">
+  <property name="geometry">
+   <rect><x>0</x><y>0</y><width>840</width><height>620</height></rect>
+  </property>
+  <property name="windowTitle"><string>Touch Gestures — label &amp; train</string></property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <widget class="QLabel" name="intro_label">
+     <property name="wordWrap"><bool>true</bool></property>
+     <property name="text"><string>Add recordings (skin type is read from each recording), label each touch (auto-filled from live tags), then Train. One model is trained per skin type.</string></property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QSplitter" name="splitter">
+     <property name="orientation"><enum>Qt::Horizontal</enum></property>
+     <widget class="QWidget" name="left_panel">
+      <layout class="QVBoxLayout" name="left_layout">
+       <item>
+        <widget class="QLabel" name="recordings_label">
+         <property name="text"><string>Recordings:</string></property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QListWidget" name="rec_list"/>
+       </item>
+       <item>
+        <widget class="QPushButton" name="add_btn">
+         <property name="text"><string>Add recording…</string></property>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="right_panel">
+      <layout class="QVBoxLayout" name="right_layout">
+       <item>
+        <layout class="QHBoxLayout" name="type_row">
+         <item>
+          <widget class="QLabel" name="type_label">
+           <property name="text"><string>Skin type:</string></property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QComboBox" name="type_combo">
+           <property name="toolTip"><string>Auto-selected from the recording. Change it to (re)tag this recording or to target model import/export.</string></property>
+          </widget>
+         </item>
+         <item>
+          <spacer name="type_spacer">
+           <property name="orientation"><enum>Qt::Horizontal</enum></property>
+           <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+          </spacer>
+         </item>
+        </layout>
+       </item>
+       <item>
+        <widget class="QTableWidget" name="table">
+         <column><property name="text"><string>Source</string></property></column>
+         <column><property name="text"><string>Start (ms)</string></property></column>
+         <column><property name="text"><string>Dur (ms)</string></property></column>
+         <column><property name="text"><string>Group</string></property></column>
+         <column><property name="text"><string>Gesture</string></property></column>
+        </widget>
+       </item>
+       <item>
+        <layout class="QHBoxLayout" name="group_row">
+         <item>
+          <widget class="QPushButton" name="group_btn">
+           <property name="toolTip"><string>Merge the selected touches into one gesture (e.g. a double/triple tap) sharing one label.</string></property>
+           <property name="text"><string>Group selected</string></property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="ungroup_btn">
+           <property name="text"><string>Ungroup selected</string></property>
+          </widget>
+         </item>
+         <item>
+          <spacer name="group_spacer">
+           <property name="orientation"><enum>Qt::Horizontal</enum></property>
+           <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+          </spacer>
+         </item>
+        </layout>
+       </item>
+       <item>
+        <layout class="QHBoxLayout" name="csv_row">
+         <item>
+          <widget class="QPushButton" name="import_csv_btn">
+           <property name="text"><string>Import CSV…</string></property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="export_csv_btn">
+           <property name="text"><string>Export CSV…</string></property>
+          </widget>
+         </item>
+         <item>
+          <spacer name="csv_spacer">
+           <property name="orientation"><enum>Qt::Horizontal</enum></property>
+           <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+          </spacer>
+         </item>
+         <item>
+          <widget class="QPushButton" name="import_model_btn">
+           <property name="toolTip"><string>Copy a trained .joblib into this skin type's model slot.</string></property>
+           <property name="text"><string>Import model…</string></property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="export_model_btn">
+           <property name="toolTip"><string>Save the trained model for the selected skin type to a file.</string></property>
+           <property name="text"><string>Export model…</string></property>
+          </widget>
+         </item>
+        </layout>
+       </item>
+      </layout>
+     </widget>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="train_row">
+     <item>
+      <spacer name="train_spacer">
+       <property name="orientation"><enum>Qt::Horizontal</enum></property>
+       <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="QPushButton" name="train_btn">
+       <property name="text"><string>Train models</string></property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <widget class="QLabel" name="report_label">
+     <property name="text"><string>Report:</string></property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QPlainTextEdit" name="log">
+     <property name="maximumSize">
+      <size><width>16777215</width><height>150</height></size>
+     </property>
+     <property name="readOnly"><bool>true</bool></property>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

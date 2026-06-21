@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>DonePage</class>
+ <widget class="QWizardPage" name="DonePage">
+  <property name="title"><string>Setup Complete</string></property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <widget class="QLabel" name="done_label">
+     <property name="wordWrap"><bool>true</bool></property>
+     <property name="text"><string>&lt;p&gt;Setup is complete.&lt;/p&gt;&lt;p&gt;Click &lt;b&gt;Finish&lt;/b&gt; to open the application.&lt;/p&gt;&lt;p&gt;You can re-flash firmware at any time from &lt;b&gt;Tools =&gt; Flash Firmware…&lt;/b&gt;&lt;/p&gt;</string></property>
+    </widget>
+   </item>
+   <item>
+    <spacer name="done_spacer">
+     <property name="orientation"><enum>Qt::Vertical</enum></property>
+     <property name="sizeHint" stdset="0"><size><width>20</width><height>40</height></size></property>
+    </spacer>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
