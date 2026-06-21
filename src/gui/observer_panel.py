@@ -11,10 +11,12 @@ It also carries a **Marker** button that logs a ``marker`` event (with an
 optional note) — a single clapperboard click to align the event log with the
 observer's paper notes or any external clock.
 
-Pure-code widget (no .ui), built dynamically from the session's participant
-list and a configurable list of behavior codes. It only *emits* events via the
-``event`` signal; persistence is the SessionPanel's job, so this panel stays
-free of any database dependency.
+The static frame (intro label + marker button) lives in ``ui/observer_panel.ui``;
+the per-participant behavior-code boxes and the gesture row are built dynamically
+from the session's participant list and a configurable list of behavior codes
+into ``content_layout``. It only *emits* events via the ``event`` signal;
+persistence is the SessionPanel's job, so this panel stays free of any database
+dependency.
 """
 
 from __future__ import annotations
@@ -25,13 +27,12 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QInputDialog,
-    QLabel,
     QPushButton,
-    QVBoxLayout,
     QWidget,
 )
 
 from src.data.models import ParticipantRecord
+from src.gui.ui_observer_panel import Ui_ObserverPanel
 
 # Default behavior codes. Kept short and observable; the researcher can refine
 # them later (a future settings entry could make this list configurable without
@@ -46,7 +47,7 @@ DEFAULT_BEHAVIOR_CODES: tuple[str, ...] = (
 )
 
 
-class ObserverPanel(QWidget):
+class ObserverPanel(QWidget, Ui_ObserverPanel):
     """Floating panel of per-participant behavior-code buttons + a marker.
 
     Signals:
@@ -65,13 +66,8 @@ class ObserverPanel(QWidget):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent, Qt.WindowType.Window)
-        self.setWindowTitle("Observer — live coding")
+        self.setupUi(self)
         self._codes = tuple(behavior_codes)
-
-        root = QVBoxLayout(self)
-        root.addWidget(QLabel(
-            "Click a behavior as you observe it. Each click is timestamped "
-            "and logged to the session."))
 
         # One group box per participant, each with a grid of code buttons.
         for participant in participants:
@@ -85,7 +81,7 @@ class ObserverPanel(QWidget):
                     lambda _=False, pid=participant.participant_id, c=code:
                     self._emit_observation(pid, c))
                 grid.addWidget(btn, i // 3, i % 3)
-            root.addWidget(box)
+            self.content_layout.addWidget(box)
 
         # Touch-gesture labelling row — tags the touch happening *now* with a
         # gesture class, for the offline labeller (scripts/label_touches.py) to
@@ -100,15 +96,10 @@ class ObserverPanel(QWidget):
             btn.clicked.connect(lambda _=False, c=code: self._emit_gesture(c))
             gesture_row.addWidget(btn)
         gesture_row.addStretch(1)
-        root.addWidget(gesture_box)
+        self.content_layout.addWidget(gesture_box)
 
-        # Session-wide marker row.
-        marker_row = QHBoxLayout()
-        marker_btn = QPushButton("◉ Marker (sync note)")
-        marker_btn.clicked.connect(self._emit_marker)
-        marker_row.addWidget(marker_btn)
-        marker_row.addStretch(1)
-        root.addLayout(marker_row)
+        # Session-wide marker button (defined in the .ui).
+        self.marker_btn.clicked.connect(self._emit_marker)
 
     @staticmethod
     def _participant_label(participant: ParticipantRecord) -> str:

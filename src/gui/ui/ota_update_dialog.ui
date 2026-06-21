@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>OTAUpdateDialog</class>
+ <widget class="QDialog" name="OTAUpdateDialog">
+  <property name="geometry">
+   <rect><x>0</x><y>0</y><width>680</width><height>420</height></rect>
+  </property>
+  <property name="windowTitle"><string>Update Nodes (OTA)</string></property>
+  <property name="minimumSize">
+   <size><width>680</width><height>420</height></size>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <widget class="QLabel" name="instructions_label">
+     <property name="wordWrap"><bool>true</bool></property>
+     <property name="text"><string>Flash node firmware wirelessly through the gateway. The gateway must stay connected by USB; only the nodes are updated over the air.</string></property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QLabel" name="banner_label">
+     <property name="wordWrap"><bool>true</bool></property>
+     <property name="text"><string/></property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QCheckBox" name="debug_check">
+     <property name="text"><string>Debug build (verbose Serial output)</string></property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QTableWidget" name="table">
+     <column><property name="text"><string/></property></column>
+     <column><property name="text"><string>MAC</string></property></column>
+     <column><property name="text"><string>Type</string></property></column>
+     <column><property name="text"><string>Online</string></property></column>
+     <column><property name="text"><string>Progress</string></property></column>
+     <column><property name="text"><string>Status</string></property></column>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="button_row">
+     <item>
+      <widget class="QPushButton" name="select_all_btn">
+       <property name="text"><string>Select online</string></property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="button_spacer">
+       <property name="orientation"><enum>Qt::Horizontal</enum></property>
+       <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="QPushButton" name="flash_btn">
+       <property name="text"><string>Flash selected</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="close_btn">
+       <property name="text"><string>Close</string></property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

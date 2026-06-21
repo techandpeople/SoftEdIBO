@@ -4,27 +4,26 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
-    QDialogButtonBox,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
-    QScrollArea,
     QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
 from src.config.settings import Settings
+from src.gui.ui_robot_config_dialog import Ui_RobotConfigDialog
 from src.robots.base_robot import BaseRobot
 from src.robots.thymio.thymio_robot import ThymioRobot
 from src.robots.tree.tree_robot import TreeRobot
 from src.robots.turtle.turtle_robot import TurtleRobot
 
 
-class RobotConfigDialog(QDialog):
+class RobotConfigDialog(QDialog, Ui_RobotConfigDialog):
     """Dialog for editing a robot's hardware configuration and testing its actuators.
 
     The top section shows editable skin entries loaded from ``settings.yaml``
@@ -45,6 +44,7 @@ class RobotConfigDialog(QDialog):
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
+        self.setupUi(self)
         self._robot = robot
         self._settings = settings
 
@@ -53,20 +53,10 @@ class RobotConfigDialog(QDialog):
         self._thymio_entries: list[dict] = []
 
         self.setWindowTitle(f"Configure: {robot.name}")
-        self.setMinimumSize(660, 540)
+        self.intro_label.setText(f"<b>{type(robot).__name__}</b> — {robot.name}")
 
-        main_layout = QVBoxLayout(self)
-        main_layout.addWidget(
-            QLabel(f"<b>{type(robot).__name__}</b> — {robot.name}")
-        )
-
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        content = QWidget()
-        self._content_layout = QVBoxLayout(content)
-        scroll.setWidget(content)
-        main_layout.addWidget(scroll)
-
+        # The static frame (intro, scroll area, button box) lives in the .ui;
+        # the per-robot config groups are built here into ``content_layout``.
         if isinstance(robot, TurtleRobot):
             self._build_skin_config("turtle")
             self._build_test_section()
@@ -76,15 +66,10 @@ class RobotConfigDialog(QDialog):
         elif isinstance(robot, ThymioRobot):
             self._build_thymio_config()
 
-        self._content_layout.addStretch()
+        self.content_layout.addStretch()
 
-        btn_box = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Save
-            | QDialogButtonBox.StandardButton.Cancel
-        )
-        btn_box.accepted.connect(self._on_save)
-        btn_box.rejected.connect(self.reject)
-        main_layout.addWidget(btn_box)
+        self.button_box.accepted.connect(self._on_save)
+        self.button_box.rejected.connect(self.reject)
 
     # ------------------------------------------------------------------
     # Sequential actuator test
@@ -160,7 +145,7 @@ class RobotConfigDialog(QDialog):
         )
         config_layout.addWidget(add_skin_btn)
 
-        self._content_layout.addWidget(config_group)
+        self.content_layout.addWidget(config_group)
 
     def _add_skin_widgets(
         self, parent_layout: QVBoxLayout, skin_cfg: dict | None
@@ -258,7 +243,7 @@ class RobotConfigDialog(QDialog):
             )
             test_layout.addWidget(run_btn)
 
-        self._content_layout.addWidget(test_group)
+        self.content_layout.addWidget(test_group)
 
     # ------------------------------------------------------------------
     # Thymio config
@@ -278,7 +263,7 @@ class RobotConfigDialog(QDialog):
         )
         config_layout.addWidget(add_btn)
 
-        self._content_layout.addWidget(config_group)
+        self.content_layout.addWidget(config_group)
 
     def _add_thymio_widgets(
         self, parent_layout: QVBoxLayout, thymio_cfg: dict | None

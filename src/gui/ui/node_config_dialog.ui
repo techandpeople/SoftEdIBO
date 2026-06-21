@@ -3,15 +3,15 @@
  <class>NodeConfigDialog</class>
  <widget class="QDialog" name="NodeConfigDialog">
   <property name="geometry">
-   <rect><x>0</x><y>0</y><width>520</width><height>420</height></rect>
+   <rect><x>0</x><y>0</y><width>360</width><height>420</height></rect>
   </property>
   <property name="windowTitle"><string>Configure Node</string></property>
   <property name="minimumSize">
-   <size><width>520</width><height>360</height></size>
+   <size><width>320</width><height>0</height></size>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>
-    <layout class="QFormLayout" name="mac_form">
+    <layout class="QFormLayout" name="form">
      <item row="0" column="0">
       <widget class="QLabel" name="mac_label">
        <property name="text"><string>Node MAC:</string></property>
@@ -22,46 +22,144 @@
        <property name="placeholderText"><string>AA:BB:CC:DD:EE:FF</string></property>
       </widget>
      </item>
+     <item row="1" column="0">
+      <widget class="QLabel" name="type_label">
+       <property name="text"><string>Node type:</string></property>
+      </widget>
+     </item>
+     <item row="1" column="1">
+      <widget class="QComboBox" name="type_combo"/>
+     </item>
+     <item row="2" column="0">
+      <widget class="QLabel" name="slots_label">
+       <property name="text"><string>Max slots:</string></property>
+      </widget>
+     </item>
+     <item row="2" column="1">
+      <widget class="QSpinBox" name="slots_spin">
+       <property name="minimum"><number>0</number></property>
+       <property name="maximum"><number>64</number></property>
+       <property name="suffix"><string> slots</string></property>
+      </widget>
+     </item>
+     <item row="3" column="0">
+      <widget class="QLabel" name="reservoirs_label">
+       <property name="text"><string>Reservoirs:</string></property>
+      </widget>
+     </item>
+     <item row="3" column="1">
+      <widget class="QCheckBox" name="reservoirs_chk">
+       <property name="text"><string>Has shared pressure / vacuum reservoirs</string></property>
+      </widget>
+     </item>
     </layout>
    </item>
    <item>
-    <widget class="QGroupBox" name="chambers_group">
-     <property name="title"><string>Air Chambers (max 3)</string></property>
-     <layout class="QVBoxLayout" name="chambers_group_layout">
-      <item>
-       <widget class="QScrollArea" name="chambers_scroll">
-        <property name="widgetResizable"><bool>true</bool></property>
-        <widget class="QWidget" name="chambers_content">
-         <layout class="QVBoxLayout" name="chambers_vbox">
-          <property name="spacing"><number>4</number></property>
-         </layout>
-        </widget>
+    <widget class="QGroupBox" name="tank_group">
+     <property name="title"><string>Reservoir limits (kPa)</string></property>
+     <layout class="QFormLayout" name="tank_form">
+      <item row="0" column="0">
+       <widget class="QLabel" name="tank_pressure_min_label">
+        <property name="text"><string>Pressure tank min (kPa):</string></property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QDoubleSpinBox" name="tank_pressure_min_kpa">
+        <property name="decimals"><number>1</number></property>
+        <property name="minimum"><double>-80.000000000000000</double></property>
+        <property name="maximum"><double>80.000000000000000</double></property>
+        <property name="singleStep"><double>0.500000000000000</double></property>
+        <property name="suffix"><string> kPa</string></property>
+        <property name="value"><double>0.000000000000000</double></property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="tank_pressure_max_label">
+        <property name="text"><string>Pressure tank max (kPa):</string></property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QDoubleSpinBox" name="tank_pressure_max_kpa">
+        <property name="decimals"><number>1</number></property>
+        <property name="minimum"><double>-80.000000000000000</double></property>
+        <property name="maximum"><double>80.000000000000000</double></property>
+        <property name="singleStep"><double>0.500000000000000</double></property>
+        <property name="suffix"><string> kPa</string></property>
+        <property name="value"><double>50.000000000000000</double></property>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="tank_pressure_target_label">
+        <property name="text"><string>Pressure tank target (kPa):</string></property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="QDoubleSpinBox" name="tank_pressure_target_kpa">
+        <property name="decimals"><number>1</number></property>
+        <property name="minimum"><double>-80.000000000000000</double></property>
+        <property name="maximum"><double>80.000000000000000</double></property>
+        <property name="singleStep"><double>0.500000000000000</double></property>
+        <property name="suffix"><string> kPa</string></property>
+        <property name="value"><double>25.000000000000000</double></property>
+       </widget>
+      </item>
+      <item row="3" column="0">
+       <widget class="QLabel" name="tank_vacuum_min_label">
+        <property name="text"><string>Vacuum tank min (kPa):</string></property>
+       </widget>
+      </item>
+      <item row="3" column="1">
+       <widget class="QDoubleSpinBox" name="tank_vacuum_min_kpa">
+        <property name="decimals"><number>1</number></property>
+        <property name="minimum"><double>-80.000000000000000</double></property>
+        <property name="maximum"><double>80.000000000000000</double></property>
+        <property name="singleStep"><double>0.500000000000000</double></property>
+        <property name="suffix"><string> kPa</string></property>
+        <property name="value"><double>-50.000000000000000</double></property>
+       </widget>
+      </item>
+      <item row="4" column="0">
+       <widget class="QLabel" name="tank_vacuum_max_label">
+        <property name="text"><string>Vacuum tank max (kPa):</string></property>
+       </widget>
+      </item>
+      <item row="4" column="1">
+       <widget class="QDoubleSpinBox" name="tank_vacuum_max_kpa">
+        <property name="decimals"><number>1</number></property>
+        <property name="minimum"><double>-80.000000000000000</double></property>
+        <property name="maximum"><double>80.000000000000000</double></property>
+        <property name="singleStep"><double>0.500000000000000</double></property>
+        <property name="suffix"><string> kPa</string></property>
+        <property name="value"><double>0.000000000000000</double></property>
+       </widget>
+      </item>
+      <item row="5" column="0">
+       <widget class="QLabel" name="tank_vacuum_target_label">
+        <property name="text"><string>Vacuum tank target (kPa):</string></property>
+       </widget>
+      </item>
+      <item row="5" column="1">
+       <widget class="QDoubleSpinBox" name="tank_vacuum_target_kpa">
+        <property name="decimals"><number>1</number></property>
+        <property name="minimum"><double>-80.000000000000000</double></property>
+        <property name="maximum"><double>80.000000000000000</double></property>
+        <property name="singleStep"><double>0.500000000000000</double></property>
+        <property name="suffix"><string> kPa</string></property>
+        <property name="value"><double>-25.000000000000000</double></property>
        </widget>
       </item>
      </layout>
     </widget>
    </item>
    <item>
-    <layout class="QHBoxLayout" name="btn_row">
-     <item>
-      <widget class="QPushButton" name="delete_btn">
-       <property name="text"><string>Delete Node</string></property>
-       <property name="styleSheet"><string>color: #cc2222;</string></property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QPushButton" name="test_btn">
-       <property name="text"><string>Test Actuators</string></property>
-       <property name="enabled"><bool>false</bool></property>
-       <property name="toolTip"><string>Open test dialog (requires gateway connection)</string></property>
-      </widget>
-     </item>
-     <item>
-      <spacer name="btn_spacer">
-       <property name="orientation"><enum>Qt::Horizontal</enum></property>
-       <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
-      </spacer>
-     </item>
+    <widget class="QLabel" name="note_lbl">
+     <property name="wordWrap"><bool>true</bool></property>
+     <property name="styleSheet"><string>color: gray; font-size: 10px;</string></property>
+     <property name="text"><string/></property>
+    </widget>
+   </item>
+   <item>
+    <layout class="QVBoxLayout" name="btn_layout">
      <item>
       <widget class="QPushButton" name="save_btn">
        <property name="text"><string>Save</string></property>
@@ -71,6 +169,11 @@
      <item>
       <widget class="QPushButton" name="cancel_btn">
        <property name="text"><string>Cancel</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="delete_btn">
+       <property name="text"><string>Delete Node</string></property>
       </widget>
      </item>
     </layout>

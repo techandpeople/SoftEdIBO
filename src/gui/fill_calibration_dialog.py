@@ -28,11 +28,11 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
-    QScrollArea,
-    QVBoxLayout,
+    QSizePolicy,
     QWidget,
 )
 
+from src.gui.ui_fill_calibration_dialog import Ui_FillCalibrationDialog
 from src.hardware.fill_calibration import (
     MAX_FILL_MS,
     FillTimeCalibrator,
@@ -47,7 +47,7 @@ _MAX_DEFLATE_MS = 7000
 _TICK_MS = 100
 
 
-class FillCalibrationDialog(QDialog):
+class FillCalibrationDialog(QDialog, Ui_FillCalibrationDialog):
     """Calibrate per-chamber fill times against the pressure sensor."""
 
     # gateway read thread → GUI thread: (mac, chamber, pressure_pct)
@@ -60,9 +60,7 @@ class FillCalibrationDialog(QDialog):
                  parent: QWidget | None = None,
                  chambers: list[dict] | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Calibrate Fill Times")
-        self.resize(560, 420)
-        self.setMaximumWidth(720)
+        self.setupUi(self)
         self._settings = settings
         self._gateway = gateway
         self._active = True
@@ -77,47 +75,21 @@ class FillCalibrationDialog(QDialog):
         self._job: dict | None = None
         self._rows: dict[tuple[str, int], dict] = {}
 
-        root = QVBoxLayout(self)
-        intro = QLabel(
-            "Inflates each chamber from empty and times it to its max, using the "
-            "pressure sensor. The measured time is saved as the chamber's fill "
-            "time (used instead of live pressure control). Keep hands clear.")
-        intro.setWordWrap(True)   # wrap instead of forcing the dialog very wide
-        root.addWidget(intro)
-
+        # The static frame (intro, scroll area, buttons) lives in the .ui; the
+        # per-chamber rows are built here and added to ``rows_layout``.
         if not self._chambers:
-            root.addWidget(QLabel(
+            self.rows_layout.addWidget(QLabel(
                 "No actuator chambers configured. Add node_direct / "
                 "node_multiplexed chambers first."))
-            root.addStretch(1)
         else:
-            # Rows live in a scroll area so many chambers don't overflow the
-            # dialog — the buttons below stay pinned.
-            scroll = QScrollArea()
-            scroll.setWidgetResizable(True)
-            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-            inner = QWidget()
-            rows_layout = QVBoxLayout(inner)
-            rows_layout.setContentsMargins(0, 0, 0, 0)
             for ch in self._chambers:
-                rows_layout.addWidget(self._build_row(ch))
-            rows_layout.addStretch(1)
-            scroll.setWidget(inner)
-            root.addWidget(scroll, stretch=1)
+                self.rows_layout.addWidget(self._build_row(ch))
+        self.rows_layout.addStretch(1)
 
-        btns = QHBoxLayout()
-        self._all_btn = QPushButton("Calibrate all")
-        self._all_btn.setEnabled(bool(self._chambers) and gateway is not None)
-        self._all_btn.clicked.connect(self._calibrate_all)
-        stop = QPushButton("⏹ Stop")
-        stop.clicked.connect(self._stop)
-        self._save_btn = QPushButton("Save")
-        self._save_btn.clicked.connect(self._save)
-        btns.addWidget(self._all_btn)
-        btns.addWidget(stop)
-        btns.addStretch(1)
-        btns.addWidget(self._save_btn)
-        root.addLayout(btns)
+        self.all_btn.setEnabled(bool(self._chambers) and gateway is not None)
+        self.all_btn.clicked.connect(self._calibrate_all)
+        self.stop_btn.clicked.connect(self._stop)
+        self.save_btn.clicked.connect(self._save)
 
         self._tick = QTimer(self)
         self._tick.setInterval(_TICK_MS)
@@ -138,7 +110,11 @@ class FillCalibrationDialog(QDialog):
         h.setContentsMargins(0, 0, 0, 0)
         key = (ch["mac"], ch["slot"])
         name = QLabel(f"{ch['robot_id']}/{ch['skin_id']}  {ch['mac']} slot {ch['slot']}")
-        name.setMinimumWidth(280)
+        name.setToolTip(name.text())
+        name.setMinimumWidth(80)
+        # Ignored width policy lets the label shrink below its text (clipping its
+        # own text) so a narrow dialog never pushes the buttons off the row.
+        name.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         cur = ch["fill_time_ms"]
         result = QLabel(f"{cur} ms" if cur is not None else "—")
         # Fixed width (not just a minimum) so a wide value like the timeout text
@@ -152,8 +128,8 @@ class FillCalibrationDialog(QDialog):
         btn = QPushButton("Calibrate")
         btn.setEnabled(self._gateway is not None)
         btn.clicked.connect(lambda _=False, k=key: self._calibrate_one(k))
-        h.addWidget(name)
-        h.addWidget(bar, stretch=1)
+        h.addWidget(name, stretch=2)
+        h.addWidget(bar, stretch=3)
         h.addWidget(result)
         h.addWidget(btn)
         self._rows[key] = {"result": result, "bar": bar, "btn": btn, "cfg": ch}
@@ -242,7 +218,7 @@ class FillCalibrationDialog(QDialog):
             self._set_buttons_enabled(True)
 
     def _set_buttons_enabled(self, on: bool) -> None:
-        self._all_btn.setEnabled(on and bool(self._chambers))
+        self.all_btn.setEnabled(on and bool(self._chambers))
         for r in self._rows.values():
             r["btn"].setEnabled(on)
 

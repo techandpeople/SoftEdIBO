@@ -25,28 +25,22 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QFileDialog,
-    QHBoxLayout,
-    QLabel,
-    QListWidget,
     QMessageBox,
-    QPlainTextEdit,
-    QPushButton,
-    QSplitter,
     QTableWidget,
     QTableWidgetItem,
-    QVBoxLayout,
     QWidget,
 )
 
 from src.config.settings import Settings
 from src.gui.async_task import run_async
+from src.gui.ui_train_touch_dialog import Ui_TrainTouchDialog
 from src.ml import labeling
 from src.ml.gesture_taxonomy import GESTURE_CLASSES
 from src.ml.touch_classifier import model_path
 from src.hardware.skin_geometry import known_skin_types
 
 
-class TrainTouchDialog(QDialog):
+class TrainTouchDialog(QDialog, Ui_TrainTouchDialog):
     """Label recorded touch segments and train per-skin-type gesture models."""
 
     # Emitted from the training worker thread; delivered (queued) on the GUI
@@ -55,106 +49,34 @@ class TrainTouchDialog(QDialog):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Touch Gestures — label & train")
-        self.resize(840, 620)
+        self.setupUi(self)
         # recording path → list[LabelRow] (insertion order matches the list widget)
         self._recordings: dict[str, list[labeling.LabelRow]] = {}
 
-        root = QVBoxLayout(self)
-        root.addWidget(QLabel(
-            "Add recordings (skin type is read from each recording), label each "
-            "touch (auto-filled from live tags), then Train. One model is "
-            "trained per skin type."))
+        self.splitter.setSizes([240, 600])
 
-        split = QSplitter(Qt.Orientation.Horizontal)
-        root.addWidget(split, stretch=1)
-
-        # --- Left: recordings list ---
-        left = QWidget()
-        lv = QVBoxLayout(left)
-        lv.addWidget(QLabel("Recordings:"))
-        self._rec_list = QListWidget()
-        self._rec_list.currentRowChanged.connect(self._show_selected)
-        lv.addWidget(self._rec_list, stretch=1)
-        add_btn = QPushButton("Add recording…")
-        add_btn.clicked.connect(self._add_recording)
-        lv.addWidget(add_btn)
-        split.addWidget(left)
-
-        # --- Right: skin type + segment/label table + per-recording tools ---
-        right = QWidget()
-        rv = QVBoxLayout(right)
-
-        type_row = QHBoxLayout()
-        type_row.addWidget(QLabel("Skin type:"))
-        self._type_combo = QComboBox()
-        self._type_combo.addItem("", "")
+        # Skin type combo: blank entry + the known skin types.
+        self.type_combo.addItem("", "")
         for st in known_skin_types():
-            self._type_combo.addItem(st, st)
-        self._type_combo.setToolTip(
-            "Auto-selected from the recording. Change it to (re)tag this "
-            "recording or to target model import/export.")
-        self._type_combo.currentIndexChanged.connect(self._on_type_changed)
-        type_row.addWidget(self._type_combo)
-        type_row.addStretch(1)
-        rv.addLayout(type_row)
+            self.type_combo.addItem(st, st)
 
-        self._table = QTableWidget(0, 5)
-        self._table.setHorizontalHeaderLabels(
-            ["Source", "Start (ms)", "Dur (ms)", "Group", "Gesture"])
-        self._table.horizontalHeader().setStretchLastSection(True)
-        self._table.setSelectionBehavior(
-            QTableWidget.SelectionBehavior.SelectRows)
-        self._table.setSelectionMode(
-            QTableWidget.SelectionMode.ExtendedSelection)
-        rv.addWidget(self._table, stretch=1)
+        # Table behaviour not expressible in the .ui.
+        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
 
-        group_row = QHBoxLayout()
-        grp = QPushButton("Group selected")
-        grp.setToolTip("Merge the selected touches into one gesture "
-                       "(e.g. a double/triple tap) sharing one label.")
-        grp.clicked.connect(self._group_selected)
-        ungrp = QPushButton("Ungroup selected")
-        ungrp.clicked.connect(self._ungroup_selected)
-        group_row.addWidget(grp)
-        group_row.addWidget(ungrp)
-        group_row.addStretch(1)
-        rv.addLayout(group_row)
-
-        csv_row = QHBoxLayout()
-        imp = QPushButton("Import CSV…")
-        imp.clicked.connect(self._import_csv)
-        exp = QPushButton("Export CSV…")
-        exp.clicked.connect(self._export_csv)
-        csv_row.addWidget(imp)
-        csv_row.addWidget(exp)
-        csv_row.addStretch(1)
-        imp_model = QPushButton("Import model…")
-        imp_model.setToolTip("Copy a trained .joblib into this skin type's model slot.")
-        imp_model.clicked.connect(self._import_model)
-        exp_model = QPushButton("Export model…")
-        exp_model.setToolTip("Save the trained model for the selected skin type to a file.")
-        exp_model.clicked.connect(self._export_model)
-        csv_row.addWidget(imp_model)
-        csv_row.addWidget(exp_model)
-        rv.addLayout(csv_row)
-        split.addWidget(right)
-        split.setSizes([240, 600])
-
-        # --- Bottom: train + report ---
-        train_row = QHBoxLayout()
-        train_row.addStretch(1)
-        self._train_btn = QPushButton("Train models")
-        self._train_btn.clicked.connect(self._train)
-        train_row.addWidget(self._train_btn)
-        root.addLayout(train_row)
-
-        root.addWidget(QLabel("Report:"))
-        self._log = QPlainTextEdit()
-        self._log.setReadOnly(True)
-        self._log.setMaximumHeight(150)
-        root.addWidget(self._log)
-        self._train_log.connect(self._log.appendPlainText)
+        # Wiring.
+        self.rec_list.currentRowChanged.connect(self._show_selected)
+        self.add_btn.clicked.connect(self._add_recording)
+        self.type_combo.currentIndexChanged.connect(self._on_type_changed)
+        self.group_btn.clicked.connect(self._group_selected)
+        self.ungroup_btn.clicked.connect(self._ungroup_selected)
+        self.import_csv_btn.clicked.connect(self._import_csv)
+        self.export_csv_btn.clicked.connect(self._export_csv)
+        self.import_model_btn.clicked.connect(self._import_model)
+        self.export_model_btn.clicked.connect(self._export_model)
+        self.train_btn.clicked.connect(self._train)
+        self._train_log.connect(self.log.appendPlainText)
 
     # ------------------------------------------------------------------
     # Recordings
@@ -170,11 +92,11 @@ class TrainTouchDialog(QDialog):
         p = Path(path)
         # Parsing the .jsonl plus the optional DB lookup can stall on big
         # recordings, so load off the GUI thread and populate when it's ready.
-        self._log.appendPlainText(f"Loading {p.name}…")
+        self.log.appendPlainText(f"Loading {p.name}…")
         run_async(
             lambda: self._load_recording(p),
             on_done=lambda result, pp=path: self._on_recording_loaded(pp, *result),
-            on_error=lambda exc, pp=path: self._log.appendPlainText(
+            on_error=lambda exc, pp=path: self.log.appendPlainText(
                 f"Failed to load {Path(pp).name}: {exc}"),
             parent=self,
         )
@@ -201,24 +123,24 @@ class TrainTouchDialog(QDialog):
         # row→insertion-order mapping stays consistent.
         self._recordings[path] = rows
         types = sorted(set(source_types.values()))
-        self._rec_list.addItem(
+        self.rec_list.addItem(
             p.name + (f"  ({', '.join(types)})" if types else ""))
-        self._rec_list.setCurrentRow(self._rec_list.count() - 1)
+        self.rec_list.setCurrentRow(self.rec_list.count() - 1)
         n_auto = sum(1 for r in rows if r.label)
-        self._log.appendPlainText(
+        self.log.appendPlainText(
             f"Loaded {p.name}: {len(rows)} segments, {n_auto} auto-labelled "
             "from live tags"
             + (f"; skin type: {', '.join(types)}." if types
                else " (no skin type in header — pick one above)."))
 
     def _current_path(self) -> str | None:
-        row = self._rec_list.currentRow()
+        row = self.rec_list.currentRow()
         if row < 0 or row >= len(self._recordings):
             return None
         return list(self._recordings)[row]
 
     def _show_selected(self, _row: int) -> None:
-        self._table.setRowCount(0)
+        self.table.setRowCount(0)
         path = self._current_path()
         if path is None:
             return
@@ -230,10 +152,10 @@ class TrainTouchDialog(QDialog):
         """Reflect the recording's detected skin type in the combo (no re-tag)."""
         rows = self._recordings[path]
         types = sorted({r.skin_type for r in rows if r.skin_type})
-        self._type_combo.blockSignals(True)
-        i = self._type_combo.findData(types[0]) if types else 0
-        self._type_combo.setCurrentIndex(i if i >= 0 else 0)
-        self._type_combo.blockSignals(False)
+        self.type_combo.blockSignals(True)
+        i = self.type_combo.findData(types[0]) if types else 0
+        self.type_combo.setCurrentIndex(i if i >= 0 else 0)
+        self.type_combo.blockSignals(False)
 
     def _on_type_changed(self) -> None:
         """User picked a type — tag every row of the current recording with it.
@@ -243,19 +165,19 @@ class TrainTouchDialog(QDialog):
         path = self._current_path()
         if path is None:
             return
-        st = self._type_combo.currentData() or ""
+        st = self.type_combo.currentData() or ""
         for r in self._recordings[path]:
             r.skin_type = st
 
     def _add_table_row(self, lr: labeling.LabelRow) -> None:
-        row = self._table.rowCount()
-        self._table.insertRow(row)
+        row = self.table.rowCount()
+        self.table.insertRow(row)
         for col, text in enumerate((lr.source, f"{lr.start_ms:.0f}",
                                     f"{lr.duration_ms:.0f}",
                                     str(lr.group_id) if lr.group_id else "")):
             item = QTableWidgetItem(text)
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            self._table.setItem(row, col, item)
+            self.table.setItem(row, col, item)
         combo = QComboBox()
         combo.addItem("", "")
         for g in GESTURE_CLASSES:
@@ -265,14 +187,14 @@ class TrainTouchDialog(QDialog):
             combo.setCurrentIndex(i if i >= 0 else 0)
         combo.currentIndexChanged.connect(
             lambda _i, rw=row: self._on_label_edited(rw))
-        self._table.setCellWidget(row, 4, combo)
+        self.table.setCellWidget(row, 4, combo)
 
     def _on_label_edited(self, table_row: int) -> None:
         path = self._current_path()
         if path is None or table_row >= len(self._recordings[path]):
             return
         rows = self._recordings[path]
-        label = (self._table.cellWidget(table_row, 4).currentData() or "")
+        label = (self.table.cellWidget(table_row, 4).currentData() or "")
         rows[table_row].label = label
         # A label change on any member of a group applies to the whole group.
         gid = rows[table_row].group_id
@@ -284,7 +206,7 @@ class TrainTouchDialog(QDialog):
 
     def _set_combo_label(self, table_row: int, label: str) -> None:
         """Set a row's gesture combo without re-triggering label edits."""
-        combo = self._table.cellWidget(table_row, 4)
+        combo = self.table.cellWidget(table_row, 4)
         if combo is None:
             return
         combo.blockSignals(True)
@@ -297,7 +219,7 @@ class TrainTouchDialog(QDialog):
     # ------------------------------------------------------------------
 
     def _selected_rows(self) -> list[int]:
-        return sorted({idx.row() for idx in self._table.selectedIndexes()})
+        return sorted({idx.row() for idx in self.table.selectedIndexes()})
 
     def _group_selected(self) -> None:
         path = self._current_path()
@@ -315,8 +237,8 @@ class TrainTouchDialog(QDialog):
         for i in sel:
             rows[i].group_id = gid
             rows[i].label = label
-        self._show_selected(self._rec_list.currentRow())
-        self._log.appendPlainText(
+        self._show_selected(self.rec_list.currentRow())
+        self.log.appendPlainText(
             f"Grouped {len(sel)} touches as gesture #{gid}"
             + (f" ('{label}')." if label else " — pick a label for the group."))
 
@@ -327,7 +249,7 @@ class TrainTouchDialog(QDialog):
         rows = self._recordings[path]
         for i in self._selected_rows():
             rows[i].group_id = 0
-        self._show_selected(self._rec_list.currentRow())
+        self._show_selected(self.rec_list.currentRow())
 
     # ------------------------------------------------------------------
     # CSV import / export
@@ -350,8 +272,8 @@ class TrainTouchDialog(QDialog):
             if match:
                 r.label = match.label
                 r.group_id = match.group_id
-        self._show_selected(self._rec_list.currentRow())
-        self._log.appendPlainText(f"Imported labels from {Path(csv_path).name}.")
+        self._show_selected(self.rec_list.currentRow())
+        self.log.appendPlainText(f"Imported labels from {Path(csv_path).name}.")
 
     def _export_csv(self) -> None:
         path = self._current_path()
@@ -364,14 +286,14 @@ class TrainTouchDialog(QDialog):
         if not csv_path:
             return
         n = labeling.write_csv(self._recordings[path], Path(csv_path))
-        self._log.appendPlainText(f"Exported {n} labelled segments → {csv_path}")
+        self.log.appendPlainText(f"Exported {n} labelled segments → {csv_path}")
 
     # ------------------------------------------------------------------
     # Trained-model import / export
     # ------------------------------------------------------------------
 
     def _current_skin_type(self) -> str:
-        return self._type_combo.currentData() or ""
+        return self.type_combo.currentData() or ""
 
     def _export_model(self) -> None:
         """Save the trained model for the selected skin type to a chosen file."""
@@ -390,7 +312,7 @@ class TrainTouchDialog(QDialog):
             return
         import shutil
         shutil.copyfile(src, dst)
-        self._log.appendPlainText(f"Exported model ({skin_type}) → {dst}")
+        self.log.appendPlainText(f"Exported model ({skin_type}) → {dst}")
 
     def _import_model(self) -> None:
         """Copy a chosen .joblib into the selected skin type's model slot."""
@@ -413,7 +335,7 @@ class TrainTouchDialog(QDialog):
         import shutil
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src, dst)
-        self._log.appendPlainText(
+        self.log.appendPlainText(
             f"Imported model for {skin_type} ← {Path(src).name}")
 
     # ------------------------------------------------------------------
@@ -431,8 +353,8 @@ class TrainTouchDialog(QDialog):
                 self, "Train", "Label at least some segments first.")
             return
         from src.ml.training import train_models
-        self._log.appendPlainText("\nTraining…")
-        self._train_btn.setEnabled(False)
+        self.log.appendPlainText("\nTraining…")
+        self.train_btn.setEnabled(False)
         # Training (scikit-learn cross-validation) takes seconds; run it on a
         # worker thread so the dialog stays responsive. ``on_log`` fires on that
         # worker thread, so route it through the ``_train_log`` signal.
@@ -447,18 +369,18 @@ class TrainTouchDialog(QDialog):
 
     def _on_train_done(self, report) -> None:
         trained = sum(1 for r in report.results if r.trained)
-        self._log.appendPlainText(
+        self.log.appendPlainText(
             f"\nDone. {trained}/{len(report.results)} model(s) trained.")
-        self._train_btn.setEnabled(True)
+        self.train_btn.setEnabled(True)
 
     def _on_train_error(self, exc: Exception) -> None:
         from src.ml.training import MLNotInstalled
         if isinstance(exc, MLNotInstalled):
-            self._log.appendPlainText(str(exc))
+            self.log.appendPlainText(str(exc))
             QMessageBox.warning(
                 self, "scikit-learn not installed",
                 "Training needs the optional ML dependencies.\n\n"
                 "Install them with:\n    pip install -e '.[ml]'")
         else:
-            self._log.appendPlainText(f"Training failed: {exc}")
-        self._train_btn.setEnabled(True)
+            self.log.appendPlainText(f"Training failed: {exc}")
+        self.train_btn.setEnabled(True)
