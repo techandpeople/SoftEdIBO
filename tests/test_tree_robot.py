@@ -10,14 +10,22 @@ def _make_tree():
     type(gateway).is_connected = PropertyMock(return_value=True)
     gateway.send.return_value = True
 
+    node_configs = [
+        {"mac": "AA:BB:CC:DD:EE:20", "node_type": "node_direct", "max_slots": 3},
+    ]
+    skin_configs = [
+        {"skin_id": "branch-0", "name": "Branch 0", "chambers": [
+            {"mac": "AA:BB:CC:DD:EE:20", "slot": 0, "max_pressure": 8.0}]},
+        {"skin_id": "branch-1", "name": "Branch 1", "chambers": [
+            {"mac": "AA:BB:CC:DD:EE:20", "slot": 1, "max_pressure": 8.0}]},
+        {"skin_id": "branch-2", "name": "Branch 2", "chambers": [
+            {"mac": "AA:BB:CC:DD:EE:20", "slot": 2, "max_pressure": 8.0}]},
+    ]
     tree = TreeRobot(
         robot_id="tree-1",
         gateway=gateway,
-        skin_configs=[
-            {"skin_id": "branch-0", "mac": "AA:BB:CC:DD:EE:20", "slots": [0]},
-            {"skin_id": "branch-1", "mac": "AA:BB:CC:DD:EE:20", "slots": [1]},
-            {"skin_id": "branch-2", "mac": "AA:BB:CC:DD:EE:20", "slots": [2]},
-        ],
+        node_configs=node_configs,
+        skin_configs=skin_configs,
     )
     return tree, gateway
 

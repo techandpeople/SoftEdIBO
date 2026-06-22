@@ -27,10 +27,10 @@
    <widget class="QMenu" name="menuTools">
     <property name="title"><string>Tools</string></property>
     <addaction name="actionFlashFirmware"/>
-    <addaction name="actionCheckForUpdates"/>
    </widget>
    <widget class="QMenu" name="menuHelp">
     <property name="title"><string>Help</string></property>
+    <addaction name="actionCheckForUpdates"/>
     <addaction name="actionAbout"/>
    </widget>
    <addaction name="menuEdit"/>

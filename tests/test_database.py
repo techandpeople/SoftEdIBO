@@ -63,6 +63,7 @@ def test_log_and_get_events(db):
         timestamp=datetime.now(),
     )
     db.log_event(event)
+    db.flush_events()  # events are written asynchronously
 
     events = db.get_session_events("test-002")
     assert len(events) == 1

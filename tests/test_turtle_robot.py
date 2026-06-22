@@ -10,12 +10,25 @@ def _make_turtle():
     type(gateway).is_connected = PropertyMock(return_value=True)
     gateway.send.return_value = True
 
-    skin_configs = [
-        {"skin_id": "skin_full", "mac": "AA:BB:CC:DD:EE:01", "slots": [0, 1, 2]},
-        {"skin_id": "skin_small_a", "mac": "AA:BB:CC:DD:EE:02", "slots": [0]},
-        {"skin_id": "skin_small_b", "mac": "AA:BB:CC:DD:EE:02", "slots": [1, 2]},
+    node_configs = [
+        {"mac": "AA:BB:CC:DD:EE:01", "node_type": "node_direct", "max_slots": 3},
+        {"mac": "AA:BB:CC:DD:EE:02", "node_type": "node_direct", "max_slots": 3},
     ]
-    turtle = TurtleRobot("turtle-1", gateway, skin_configs)
+    skin_configs = [
+        {"skin_id": "skin_full", "name": "Full", "chambers": [
+            {"mac": "AA:BB:CC:DD:EE:01", "slot": 0, "max_pressure": 8.0},
+            {"mac": "AA:BB:CC:DD:EE:01", "slot": 1, "max_pressure": 8.0},
+            {"mac": "AA:BB:CC:DD:EE:01", "slot": 2, "max_pressure": 8.0},
+        ]},
+        {"skin_id": "skin_small_a", "name": "Small A", "chambers": [
+            {"mac": "AA:BB:CC:DD:EE:02", "slot": 0, "max_pressure": 8.0},
+        ]},
+        {"skin_id": "skin_small_b", "name": "Small B", "chambers": [
+            {"mac": "AA:BB:CC:DD:EE:02", "slot": 1, "max_pressure": 8.0},
+            {"mac": "AA:BB:CC:DD:EE:02", "slot": 2, "max_pressure": 8.0},
+        ]},
+    ]
+    turtle = TurtleRobot("turtle-1", gateway, node_configs, skin_configs)
     return turtle, gateway
 
 
@@ -47,12 +60,12 @@ def test_turtle_status_data():
     assert len(data["skins"]) == 3
 
 
-def test_small_skins_share_esp32():
+def test_small_skins_share_node():
     turtle, _ = _make_turtle()
     skin_a = turtle.skins["skin_small_a"]
     skin_b = turtle.skins["skin_small_b"]
-    # Both skins share the same ESP32
-    assert skin_a.esp32_mac == skin_b.esp32_mac == "AA:BB:CC:DD:EE:02"
-    # But use different slots
-    assert list(skin_a.chambers.keys()) == [0]
-    assert list(skin_b.chambers.keys()) == [1, 2]
+    # Both skins live on the same node (single-node-per-skin invariant)…
+    assert skin_a.node_macs == skin_b.node_macs == ["AA:BB:CC:DD:EE:02"]
+    # …but cover a different number of chambers.
+    assert skin_a.chamber_count == 1
+    assert skin_b.chamber_count == 2
