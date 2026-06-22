@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>ChamberWidget</class>
+ <widget class="QWidget" name="ChamberWidget">
+  <property name="maximumSize">
+   <size><width>50</width><height>16777215</height></size>
+  </property>
+  <property name="whatsThis">
+   <string>One air chamber of the skin. Shows its live pressure and lets you inflate or deflate it by hand for testing.</string>
+  </property>
+  <layout class="QVBoxLayout" name="layout">
+   <property name="spacing"><number>1</number></property>
+   <property name="leftMargin"><number>2</number></property>
+   <property name="topMargin"><number>2</number></property>
+   <property name="rightMargin"><number>2</number></property>
+   <property name="bottomMargin"><number>2</number></property>
+   <item>
+    <widget class="PressureBar" name="bar" native="true">
+     <property name="whatsThis"><string>Live pressure of this chamber. The fill level is the current pressure; the marker line is the target the controller is driving towards.</string></property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QLabel" name="slot_lbl">
+     <property name="whatsThis"><string>Chamber slot number on its node, matching the slot in the skin layout.</string></property>
+     <property name="styleSheet"><string notr="true">font-size: 9px;</string></property>
+     <property name="text"><string>#0</string></property>
+     <property name="alignment"><set>Qt::AlignCenter</set></property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QLabel" name="pressure_lbl">
+     <property name="whatsThis"><string>Current pressure / target pressure, as a percent of this chamber's maximum.</string></property>
+     <property name="styleSheet"><string notr="true">font-size: 9px;</string></property>
+     <property name="text"><string>0/0</string></property>
+     <property name="alignment"><set>Qt::AlignCenter</set></property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QLabel" name="state_lbl">
+     <property name="whatsThis"><string>What the chamber is doing now: IDLE (holding), INFLATE (filling) or DEFLATE (venting).</string></property>
+     <property name="styleSheet"><string notr="true">font-size: 9px;</string></property>
+     <property name="text"><string>IDLE</string></property>
+     <property name="alignment"><set>Qt::AlignCenter</set></property>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="btn_row">
+     <property name="spacing"><number>1</number></property>
+     <item>
+      <widget class="QPushButton" name="deflate_btn">
+       <property name="whatsThis"><string>Deflate this chamber by one step (lower the target pressure).</string></property>
+       <property name="minimumSize"><size><width>16</width><height>18</height></size></property>
+       <property name="maximumSize"><size><width>16</width><height>18</height></size></property>
+       <property name="text"><string>-</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="inflate_btn">
+       <property name="whatsThis"><string>Inflate this chamber by one step (raise the target pressure).</string></property>
+       <property name="minimumSize"><size><width>16</width><height>18</height></size></property>
+       <property name="maximumSize"><size><width>16</width><height>18</height></size></property>
+       <property name="text"><string>+</string></property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>PressureBar</class>
+   <extends>QWidget</extends>
+   <header>src.gui.monitor.pressure_bar</header>
+   <container>1</container>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>
