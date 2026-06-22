@@ -24,6 +24,12 @@ namespace fill_control {
 // pressure cutoff is the independent backstop.
 constexpr uint32_t MAX_FILL_MS = 5000;
 
+// Hard ceiling for a single deflate. Deflate drives an ACTIVE vacuum pump and
+// the gauge pressure sensor is blind below atmosphere (reads 0), so on the
+// vacuum side there is no closed-loop cutoff — this time cap is the only
+// sensor-independent backstop. Armed on every beginDeflate (see deflateUntil).
+constexpr uint32_t MAX_DEFLATE_MS = 5000;
+
 // Idle leak maintenance tuning.
 constexpr float    LEAK_MARGIN_KPA   = 0.5f;   // top up only after this much droop
 constexpr float    MAINTAIN_MIN_KPA  = 0.5f;   // don't maintain near-empty chambers
@@ -33,6 +39,13 @@ constexpr uint8_t  DROOP_DEBOUNCE    = 2;      // consecutive droop checks befor
 // millis() deadline for a time-based fill (0 = pressure-based / disabled).
 inline uint32_t fillUntil(uint32_t fill_ms) {
     return fill_ms ? millis() + min(fill_ms, MAX_FILL_MS) : 0;
+}
+
+// millis() deadline for an active deflate. Unlike fillUntil this is ALWAYS armed
+// (deflate_ms == 0 falls back to the hard MAX_DEFLATE_MS cap), because pressure
+// cannot bound the vacuum side.
+inline uint32_t deflateUntil(uint32_t deflate_ms = 0) {
+    return millis() + (deflate_ms ? min(deflate_ms, MAX_DEFLATE_MS) : MAX_DEFLATE_MS);
 }
 
 // Close any chamber whose time-based fill window elapsed, recording the achieved
@@ -46,6 +59,22 @@ void fillTimeTick(Chamber* st, const float* kpa, int n, uint32_t now,
         if (isInflating(ch) && ch.fill_until_ms != 0
             && (int32_t)(now - ch.fill_until_ms) >= 0) {
             stopHold(i, kpa[i]);
+        }
+    }
+}
+
+// Close any chamber whose deflate deadline elapsed. Mirrors fillTimeTick but for
+// DEFLATING chambers; nothing is recorded to hold (the chamber is being emptied).
+// Reuses the chamber's fill_until_ms field as the actuation deadline (a chamber
+// is only ever INFLATING xor DEFLATING).
+template<typename Chamber, typename IsDeflating, typename Stop>
+void deflateTimeTick(Chamber* st, int n, uint32_t now,
+                     IsDeflating isDeflating, Stop stop) {
+    for (int i = 0; i < n; i++) {
+        Chamber& ch = st[i];
+        if (isDeflating(ch) && ch.fill_until_ms != 0
+            && (int32_t)(now - ch.fill_until_ms) >= 0) {
+            stop(i);
         }
     }
 }

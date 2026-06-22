@@ -77,6 +77,16 @@ inline void fillTimeTick(uint32_t now) {
         });
 }
 
+// Close any chamber whose deflate time window has elapsed. Deflate valves
+// against the vacuum tank (active suction) and the gauge sensor is blind below
+// atmosphere, so this time cap is the only sensor-independent backstop.
+inline void deflateTimeTick(uint32_t now) {
+    fill_control::deflateTimeTick(
+        state, MAX_CHAMBERS, now,
+        [](const Chamber& ch) { return ch.state == DEFLATING; },
+        [](int i) { stop(i); });
+}
+
 inline void maintainTick(uint32_t now) {
     static uint32_t last = 0;
     fill_control::maintainTick(
@@ -87,12 +97,15 @@ inline void maintainTick(uint32_t now) {
         });
 }
 
-inline void beginDeflate(int n, float target_kpa) {
+// ``deflate_ms`` bounds the active vacuum valving in time; 0 falls back to the
+// hard MAX_DEFLATE_MS cap. Always armed — the gauge sensor cannot bound vacuum.
+inline void beginDeflate(int n, float target_kpa, uint32_t deflate_ms = 0) {
     target_kpa = max(state[n].min_kpa, min(target_kpa, state[n].max_kpa));
     if (state[n].state == DEFLATING && state[n].target_kpa == target_kpa) return;
-    state[n].state      = DEFLATING;
-    state[n].target_kpa = target_kpa;
-    state[n].since_ms   = millis();
+    state[n].state         = DEFLATING;
+    state[n].target_kpa    = target_kpa;
+    state[n].since_ms      = millis();
+    state[n].fill_until_ms = fill_control::deflateUntil(deflate_ms);
     pca_valves::setChamberValve(n, false, true);   // deflate open, inflate closed
 }
 
