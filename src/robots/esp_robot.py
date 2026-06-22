@@ -28,6 +28,7 @@ from src.robots._robot_builder import (
     build_reservoirs,
     build_skins,
     configure_multiplexed_nodes,
+    set_pump_counts,
 )
 from src.robots.base_robot import BaseRobot, RobotStatus
 
@@ -69,6 +70,7 @@ class EspRobot(BaseRobot):
             self._controllers: dict[str, ESP32Controller] = {
                 n["mac"]: ESP32Controller(n["mac"], gateway) for n in nodes
             }
+            set_pump_counts(nodes, self._controllers)
             configure_multiplexed_nodes(nodes, self._controllers)
             self._skins: dict[str, Skin] = build_skins(skins, self._controllers)
             self._reservoirs: dict[str, AirReservoir] = build_reservoirs(

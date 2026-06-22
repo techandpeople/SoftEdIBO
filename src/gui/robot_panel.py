@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from src.config.settings import Settings
+from src.gui.async_task import run_async
 from src.gui.ui_robot_panel import Ui_RobotPanel
 from src.hardware.espnow_gateway import ESPNowGateway
 from src.hardware.serial_ports import list_esp32_ports
@@ -30,11 +31,12 @@ from src.robots.base_robot import BaseRobot
 
 _YAML_KEY = {"turtle": "turtles", "tree": "trees", "thymio": "thymios"}
 
-# Known node types and their default slot counts.
+# Known node types and their default slot counts (fallback only — each node
+# stores its own ``max_slots`` in settings.yaml).
 NODE_TYPES: dict[str, int] = {
-    "standard":  3,
-    "mux":       8,
-    "reservoir": 0,   # reservoir nodes have no user-addressable slots
+    "node_direct":      3,
+    "node_multiplexed": 12,
+    "node_magnet_sensor":         4,
 }
 
 
@@ -53,10 +55,11 @@ class RobotPanel(QWidget, Ui_RobotPanel):
     robot_configured = Signal()
     gateway_changed  = Signal(bool)
 
-    def __init__(self, gateway: ESPNowGateway, settings: Settings):
+    def __init__(self, gateway: ESPNowGateway, settings: Settings, db=None):
         super().__init__()
         self._gateway  = gateway
         self._settings = settings
+        self._db       = db
         self._robots: list[BaseRobot] = []
 
         self.setupUi(self)
@@ -109,6 +112,23 @@ class RobotPanel(QWidget, Ui_RobotPanel):
         self._robots = robots
         self._refresh_all_trees()
 
+    def sync_gateway_ui(self) -> None:
+        """Reflect the gateway's current connection state in this panel.
+
+        Called when the connection was made/dropped outside this panel (e.g.
+        startup auto-connect), so the button/label/trees stay consistent.
+        """
+        if self._gateway.is_connected:
+            port = self._gateway._port
+            self.gateway_status_label.setText(f"Connected ({port})")
+            self.connect_btn.setText("Disconnect")
+            self.scan_btn.setEnabled(True)
+        else:
+            self.gateway_status_label.setText("Disconnected")
+            self.connect_btn.setText("Connect")
+            self.scan_btn.setEnabled(False)
+        self._refresh_all_trees()
+
     # ------------------------------------------------------------------
     # Gateway
     # ------------------------------------------------------------------
@@ -119,7 +139,15 @@ class RobotPanel(QWidget, Ui_RobotPanel):
             or self.port_combo.currentText()
             or self._settings.gateway_port
         )
-        esp_ports = list_esp32_ports()
+        # Enumerating serial ports can take a moment on Linux (sysfs/udev walk),
+        # so do it off the GUI thread and populate the combo when it returns.
+        run_async(
+            list_esp32_ports,
+            on_done=lambda ports, cur=current: self._populate_ports(ports, cur),
+            parent=self,
+        )
+
+    def _populate_ports(self, esp_ports, current) -> None:
         self.port_combo.clear()
         if not esp_ports:
             default_port = "COM3" if sys.platform == "win32" else "/dev/ttyUSB0"
@@ -151,23 +179,55 @@ class RobotPanel(QWidget, Ui_RobotPanel):
             baud = int(self.baud_rate_combo.currentText())
             self._gateway._port      = port
             self._gateway._baud_rate = baud
-            if self._gateway.connect():
-                self.gateway_status_label.setText(f"Connected ({port})")
-                self.connect_btn.setText("Disconnect")
-                self.scan_btn.setEnabled(True)
-                self.gateway_changed.emit(True)
-                self._settings.data.setdefault("gateway", {})
-                self._settings.data["gateway"]["serial_port"] = port
-                self._settings.data["gateway"]["baud_rate"]   = baud
-                self._settings.save()
-            else:
-                self.gateway_status_label.setText(f"Connection failed ({port})")
+            # Opening the serial port blocks while the driver/USB enumerates, so
+            # do it off the GUI thread to keep the window responsive.
+            self.connect_btn.setEnabled(False)
+            self.gateway_status_label.setText(f"Connecting ({port})…")
+            run_async(
+                self._gateway.connect,
+                on_done=lambda ok, p=port, b=baud: self._on_connect_result(ok, p, b),
+                on_error=lambda _exc, p=port: self._on_connect_result(False, p, 0),
+                parent=self,
+            )
+
+    def _on_connect_result(self, ok: bool, port: str, baud: int) -> None:
+        """GUI-thread handler for the async gateway connect result."""
+        self.connect_btn.setEnabled(True)
+        if not ok:
+            self.gateway_status_label.setText(f"Connection failed ({port})")
+            return
+        self.gateway_status_label.setText(f"Connected ({port})")
+        self.connect_btn.setText("Disconnect")
+        self.scan_btn.setEnabled(True)
+        self.gateway_changed.emit(True)
+        self._settings.data.setdefault("gateway", {})
+        self._settings.data["gateway"]["serial_port"] = port
+        self._settings.data["gateway"]["baud_rate"]   = baud
+        self._settings.save()
+
+    def start_scan(self, on_done=None) -> None:
+        """Broadcast a node scan and refresh after ~2 s — non-blocking.
+
+        ``on_done`` (optional) is invoked once the scan window closes, so callers
+        (e.g. the add-node flow) can act on a fresh ``known_macs`` without
+        freezing the UI.
+        """
+        if not self._gateway.is_connected:
+            if on_done is not None:
+                on_done()
+            return
+        self._gateway.scan()
+        QTimer.singleShot(2000, lambda: self._scan_finished(on_done))
+
+    def _scan_finished(self, on_done=None) -> None:
+        self._on_scan_done()
+        if on_done is not None:
+            on_done()
 
     def _on_scan(self) -> None:
         self.scan_btn.setEnabled(False)
         self.scan_btn.setText("Scanning…")
-        self._gateway.scan()
-        QTimer.singleShot(2000, self._on_scan_done)
+        self.start_scan()
 
     def _on_scan_done(self) -> None:
         self.scan_btn.setEnabled(True)
@@ -363,6 +423,14 @@ class RobotPanel(QWidget, Ui_RobotPanel):
     # ------------------------------------------------------------------
 
     def _on_add_node(self, robot_type: str, robot_index: int) -> None:
+        # Auto-scan first so the discovered-node list is fresh, without blocking
+        # the UI; the picker opens once the scan window closes.
+        if self._gateway.is_connected and not self._gateway.known_macs:
+            self.start_scan(lambda: self._show_add_node(robot_type, robot_index))
+        else:
+            self._show_add_node(robot_type, robot_index)
+
+    def _show_add_node(self, robot_type: str, robot_index: int) -> None:
         prefill_mac = ""
         known = self._gateway.known_macs
         if known:
@@ -413,6 +481,7 @@ class RobotPanel(QWidget, Ui_RobotPanel):
             skin_index=skin_index,
             settings=self._settings,
             gateway=self._gateway,
+            db=self._db,
             parent=self,
         )
         if dlg.exec() == QDialog.DialogCode.Accepted:

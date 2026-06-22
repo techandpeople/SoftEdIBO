@@ -1,5 +1,6 @@
 """Session control panel for managing study sessions."""
 
+import logging
 from datetime import datetime
 
 from PySide6.QtCore import QTimer, Signal
@@ -18,6 +19,10 @@ from src.gui.touch_assignment_panel import TouchAssignmentPanel
 from src.gui.ui_session_panel import Ui_SessionPanel
 from src.robots.base_robot import BaseRobot
 
+logger = logging.getLogger(__name__)
+
+_LAST_ASSIGNMENTS_FILE = "last_assignments.json"
+
 
 class SessionPanel(QWidget, Ui_SessionPanel):
     """Panel that shows the active session state and session controls.
@@ -33,12 +38,17 @@ class SessionPanel(QWidget, Ui_SessionPanel):
     session_finished = Signal()
     session_started = Signal(str)   # emits session_id
     session_stopped = Signal()
+    reload_requested = Signal()     # ask the app to rebuild robots (e.g. after calibration)
 
-    def __init__(self, db: Database):
+    def __init__(self, db: Database, gateway=None):
         super().__init__()
         self.setupUi(self)
 
         self._db = db
+        # Optional ESP-NOW gateway — only used to record raw sensor streams of a
+        # real session. None in tests / headless contexts (then no recording).
+        self._gateway = gateway
+        self._stream_recorder = None   # StreamRecorder | None, active during a session
         self._available_robots: list[BaseRobot] = []
         self._current_record: SessionRecord | None = None
         self._current_activity: BaseActivity | None = None
@@ -47,6 +57,7 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         self._session_participants: list[ParticipantRecord] = []
         self._pending_touches: list[tuple[str, int]] = []  # (skin_id, chamber_id) waiting for assignment
         self._assignment_panel: TouchAssignmentPanel | None = None
+        self._observer_panel = None   # ObserverPanel | None, opened during a session
 
         self.new_session_btn.clicked.connect(self._open_setup_dialog)
         self.pause_btn.clicked.connect(self._on_pause)
@@ -119,7 +130,7 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         ))
         self.session_started.emit(record.session_id)
 
-        last_path = Settings.ROOT / "data" / "last_assignments.json"
+        last_path = Settings.ROOT / "data" / _LAST_ASSIGNMENTS_FILE
         last_data = last_asgn.load(last_path)
         if last_data and last_data.get("session_id") == record.session_id:
             ids = set(last_data.get("robot_ids", []))
@@ -128,11 +139,18 @@ class SessionPanel(QWidget, Ui_SessionPanel):
             session_robots = []
         self._current_activity = get_activity(record.activity_name)
         if self._current_activity is not None:
+            if last_data:
+                self._current_activity.simulation_mode = last_data.get("simulation_mode", False)
             session_robots = self._current_activity.prepare_robots(session_robots)
         self._monitor.set_robots(session_robots)
+        sim = self._current_activity.simulation_mode if self._current_activity else False
+        self._start_recording(record.session_id, True, sim, session_robots)
+        if self._current_activity is not None:
+            self._start_activity(self._current_activity, record.session_id, session_robots)
         self._build_skin_participant_map(record.session_id)
         self._session_participants = list(participants)
         self._open_assignment_panel(session_robots)
+        self._open_observer_panel()
 
     def _open_setup_dialog(self) -> None:
         """Open the session setup dialog and start a new session."""
@@ -148,8 +166,24 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         if not session_id or activity is None:
             return
 
+        # Per-session simulation toggle from the setup dialog. Set BEFORE
+        # ``prepare_robots`` so the default in BaseActivity sees it.
+        activity.simulation_mode = dialog.simulation_mode
+
+        # On real hardware, warn if any selected chamber has no calibrated fill
+        # time (it would fall back to pressure-based fill). Offer to calibrate now.
+        if not activity.simulation_mode and not self._check_fill_times(robots):
+            return
+
+        # Apply the chosen ActivityPreset (if any) so the activity's
+        # tunable params reflect the user's selection. With no preset,
+        # ``param_values`` stays at the PARAMS / SIM_PARAMS defaults.
+        preset = dialog.selected_preset
+        if preset is not None:
+            activity.apply_preset(preset.params)
+
         # Open assignment dialog if there are robots and participants to assign
-        last_path = Settings.ROOT / "data" / "last_assignments.json"
+        last_path = Settings.ROOT / "data" / _LAST_ASSIGNMENTS_FILE
         assignments = []
         if robots and participants:
             last_data = last_asgn.load(last_path)
@@ -177,12 +211,13 @@ class SessionPanel(QWidget, Ui_SessionPanel):
             [p.participant_id for p in participants],
             assignments,
             session_id=session_id,
+            simulation_mode=activity.simulation_mode,
         )
 
         start_time = datetime.now()
         self._current_record = SessionRecord(
             session_id=session_id,
-            activity_name=activity.name,
+            activity_name=activity.display_name,
             start_time=start_time,
         )
         self._db.save_session(self._current_record)
@@ -207,7 +242,7 @@ class SessionPanel(QWidget, Ui_SessionPanel):
             if participants else "none"
         )
         self.session_id_label.setText(session_id)
-        self.activity_label.setText(activity.name)
+        self.activity_label.setText(activity.display_name)
         self.robots_label.setText(robot_names)
         self.participants_label.setText(participant_names)
         self.status_label.setText("Status: Running")
@@ -220,8 +255,120 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         self._session_participants = list(participants)
         self.session_started.emit(session_id)
         self._monitor.set_robots(robots)
+        self._start_recording(session_id, dialog.record_streams,
+                              activity.simulation_mode, robots)
+        self._start_activity(activity, session_id, robots)
         self._build_skin_participant_map(session_id)
         self._open_assignment_panel(robots)
+        self._open_observer_panel()
+
+    def _start_activity(self, activity: BaseActivity, session_id: str,
+                        robots: list[BaseRobot]) -> None:
+        """Set up and start the activity so it subscribes to controller events
+        (e.g. ``on_magnet``) and drives its state machine. Without this the
+        activity never reacts to touches — real or simulated."""
+        from src.core.session import Session
+        from src.data.event_logger import EventLogger
+        try:
+            session = Session(session_id, activity)
+            activity.event_logger = EventLogger(self._db, session_id)
+            activity.setup(session, robots)
+            activity.start()
+        except Exception:   # noqa: BLE001 — surface but don't crash the GUI
+            logger.exception("Failed to start activity %s", activity.name)
+
+    def _check_fill_times(self, robots: list[BaseRobot]) -> bool:
+        """Warn when a selected chamber has no calibrated fill time.
+
+        Returns True to proceed with the session (calibrated, or the operator
+        chose to start anyway with the pressure-based fallback), False to abort
+        (the operator opened the calibration tool instead)."""
+        from src.hardware.fill_calibration import chambers_missing_fill_time
+        selected = {r.robot_id for r in robots}
+        missing = [c for c in chambers_missing_fill_time(Settings().data)
+                   if c["robot_id"] in selected]
+        if not missing:
+            return True
+        reply = QMessageBox.question(
+            self, "Fill times not calibrated",
+            f"{len(missing)} chamber(s) have no calibrated fill time and will "
+            "use pressure-based fill.\n\nCalibrate them now?\n"
+            "(Choose No to start the session anyway.)",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            | QMessageBox.StandardButton.Cancel)
+        if reply == QMessageBox.StandardButton.Cancel:
+            return False
+        if reply == QMessageBox.StandardButton.No:
+            return True                      # start anyway (pressure-based)
+        # Yes → calibrate now; reload robots afterwards and let the operator
+        # restart the session so the new fill times take effect.
+        from src.gui.fill_calibration_dialog import FillCalibrationDialog
+        dlg = FillCalibrationDialog(Settings(), self._gateway, parent=self,
+                                    chambers=missing)
+        dlg.saved.connect(self.reload_requested.emit)
+        dlg.exec()
+        return False
+
+    def _start_recording(self, session_id: str, enabled: bool,
+                         simulation: bool, robots: list[BaseRobot]) -> None:
+        """Start recording sensor streams for this session, if enabled.
+
+        On real hardware it taps the gateway; in simulation it taps each skin's
+        simulated magnet sensor (touches there don't go through the gateway).
+        The recorder is kept on ``self`` so the gateway's WeakMethod
+        subscription stays alive."""
+        if not enabled:
+            return
+        from src.config.settings import Settings
+        from src.data.stream_recorder import StreamRecorder
+        path = Settings().recordings_dir / f"{session_id}.jsonl"
+        try:
+            gateway = None if simulation else self._gateway
+            types, variants = self._magnet_skin_types(robots)
+            recorder = StreamRecorder(
+                path, session_id=session_id, gateway=gateway,
+                skin_types=types, skin_variants=variants)
+            recorder.start()
+            if simulation:
+                for robot in robots:
+                    for skin in getattr(robot, "skins", {}).values():
+                        tc = getattr(skin, "touch_controller", None)
+                        if tc is not None:
+                            recorder.attach_magnet(tc)
+            self._stream_recorder = recorder
+        except Exception:   # noqa: BLE001 — recording must never break a session
+            logger.exception("Failed to start stream recording for %s", session_id)
+
+    @staticmethod
+    def _magnet_skin_types(
+            robots: list[BaseRobot]) -> tuple[dict[str, str], dict[str, str]]:
+        """``({touch_source: skin_type}, {touch_source: skin_variant})`` for
+        every touch-capable skin.
+
+        Keyed by the *source* each magnet board actually stamps on its messages
+        — a real board's MAC, or a simulated board's ``sim:`` id — so the
+        recording header maps cleanly onto the recorded ``source`` field. Stored
+        so the Touch Gestures dialog is self-describing and auto-selects the
+        skin type per recording, without re-tagging."""
+        skin_types: dict[str, str] = {}
+        skin_variants: dict[str, str] = {}
+        for robot in robots:
+            for skin in getattr(robot, "skins", {}).values():
+                tc = getattr(skin, "touch_controller", None)
+                st = getattr(skin, "skin_type", "")
+                source = getattr(tc, "source_id", None) or getattr(
+                    tc, "mac_address", None)
+                if source and st:
+                    skin_types[source] = st
+                    variant = getattr(skin, "skin_variant", "")
+                    if variant:
+                        skin_variants[source] = variant
+        return skin_types, skin_variants
+
+    def _stop_recording(self) -> None:
+        if self._stream_recorder is not None:
+            self._stream_recorder.stop()
+            self._stream_recorder = None
 
     def _build_skin_participant_map(self, session_id: str) -> None:
         """Build a skin_id → participant_id lookup from session assignments."""
@@ -313,6 +460,41 @@ class SessionPanel(QWidget, Ui_SessionPanel):
                 remaining.append((sk, ch))
         self._pending_touches = remaining
 
+    def _open_observer_panel(self) -> None:
+        """Open the live behavioral-coding panel for the session's participants.
+
+        No participants → nothing to code, so the panel is skipped. Events the
+        observer taps are logged via :meth:`_on_observer_event`."""
+        if self._observer_panel is not None:
+            self._observer_panel.close()
+            self._observer_panel = None
+        if not self._session_participants:
+            return
+        from src.gui.observer_panel import ObserverPanel
+        panel = ObserverPanel(self._session_participants, parent=self)
+        panel.event.connect(self._on_observer_event)
+        panel.show()
+        self._observer_panel = panel
+
+    def _on_observer_event(self, type_: str, action: str,
+                           target: str, metadata: str) -> None:
+        """Persist a live-coded observation / marker to the session timeline.
+
+        ``target`` is the participant_id for behavior codes (empty for a
+        session-wide marker); we store it both as the event ``target`` and as
+        ``participant_id`` so per-child queries work without a join."""
+        if self._current_record is None:
+            return
+        self._db.log_event(InteractionEvent(
+            session_id=self._current_record.session_id,
+            participant_id=target or "system",
+            type=type_,
+            action=action,
+            target=target,
+            timestamp=datetime.now(),
+            metadata=metadata,
+        ))
+
     def _on_skin_touch_skipped(self, skin_id: str) -> None:
         """Called when the operator skips the first queued touch for a skin."""
         if self._current_record is None:
@@ -384,7 +566,7 @@ class SessionPanel(QWidget, Ui_SessionPanel):
             self._skin_robot[s] for s in self._skin_participant if s in self._skin_robot
         })
         participant_ids = [p.participant_id for p in self._session_participants]
-        last_path = Settings.ROOT / "data" / "last_assignments.json"
+        last_path = Settings.ROOT / "data" / _LAST_ASSIGNMENTS_FILE
         last_asgn.save(last_path, robot_ids, participant_ids, final_assignments, session_id)
 
     def _on_stop(self) -> None:
@@ -403,6 +585,8 @@ class SessionPanel(QWidget, Ui_SessionPanel):
             self._flush_last_assignments(self._current_record.session_id)
             self._current_record = None
 
+        self._stop_recording()
+
         self.session_id_label.setText("—")
         self.activity_label.setText("—")
         self.robots_label.setText("—")
@@ -415,11 +599,16 @@ class SessionPanel(QWidget, Ui_SessionPanel):
 
         if self._current_activity is not None:
             self._current_activity.stop()
+            self._current_activity.event_logger = None
             self._current_activity = None
 
         if self._assignment_panel is not None:
             self._assignment_panel.close()
             self._assignment_panel = None
+
+        if self._observer_panel is not None:
+            self._observer_panel.close()
+            self._observer_panel = None
 
         self.session_finished.emit()
         self.session_stopped.emit()

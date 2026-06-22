@@ -7,6 +7,9 @@ SoftEdIBO controls soft robots equipped with inflatable air chambers.
 Participants interact by touching the robots, which respond through inflation and deflation.
 The system supports multiple robot types (Turtle, Tree, Thymio) and activity modes.
 
+> **Running a study?** See [SETUP.md](SETUP.md) for skin/sensor setup, magnet
+> polarity, touch calibration, and the gesture-training workflow.
+
 ---
 
 ## Hardware requirements
@@ -21,13 +24,15 @@ The system supports multiple robot types (Turtle, Tree, Thymio) and activity mod
 | XGZP6847A pressure sensor | 1 per chamber | Analog output (0-3.3 V) |
 | Solenoid valves | 2 per chamber | Inflate + deflate via ULN2803A |
 
-Flash the [gateway firmware](firmware/gateway/) to the USB-connected ESP32.
-For each node, choose one of the two firmware targets:
+Flash the [gateway firmware](firmware/gateway/) to the USB-connected board —
+two variants are built: **Seeed XIAO ESP32-C6** (ESP-IDF) and the classic
+**ESP32-WROOM-32** (Arduino). For each node, choose the matching firmware target:
 
 | Firmware | Path | When to use |
 |----------|------|-------------|
-| `node_direct` (`release` / `debug`) | [firmware/node_direct/](firmware/node_direct/) | Direct board (fixed 3 chambers) |
-| `node_multiplexed` (`release` / `debug`) | [firmware/node_multiplexed/](firmware/node_multiplexed/) | Multiplexed board (default 12 chambers, runtime configurable; tanks optional) |
+| `node_actuator` env `direct` / `direct_debug` | [firmware/node_actuator/](firmware/node_actuator/) | Direct board (fixed 3 chambers) |
+| `node_actuator` env `multiplexed` / `multiplexed_debug` | [firmware/node_actuator/](firmware/node_actuator/) | Multiplexed board (default 12 chambers, runtime configurable; tanks optional) |
+| `node_magnet_sensor` | [firmware/node_magnet_sensor/](firmware/node_magnet_sensor/) | 4× MLX90393 magnetic touch board (`node_magnet_sensor` protocol) |
 
 ---
 
@@ -55,7 +60,15 @@ SessionPanel
           - **Reservoir** is an optional per-robot shared air tank (pressure or vacuum). For `node_multiplexed` with `has_reservoirs: true`, pressure and vacuum reservoirs are internal to the same MAC.
 - **Pressure** is expressed as **0-100 %** of the maximum pressure configured on each node.
 - **Per-chamber max pressure** is set in `settings.yaml` and enforced both in the app and on the ESP32 (hardware safety — survives app crashes).
-          - **Pressure sensing** uses the XGZP6847A datasheet transfer function (see [pressure.h](firmware/node_direct/src/pressure.h)).
+          - **Pressure sensing** uses the XGZP6847A datasheet transfer function (see [pressure.h](firmware/common/pressure.h)).
+
+**Touch sensing (optional).** A skin may reference a `node_magnet_sensor` (4-sensor magnet sensor/touch board) via its `touch:` block — see [firmware/PROTOCOL.md](firmware/PROTOCOL.md). The activity-time view (`SkinGridView`) overlays a pulsing yellow outline on the active sensor cells so the operator sees where each touch lands relative to the chamber regions.
+
+**Skin geometry by type.** Each skin sets a `skin_type` (e.g. `turtle_square`, `tree_round`, `thymio`) whose **shape and sensor coordinates** are hardcoded in [`src/hardware/skin_geometry.py`](src/hardware/skin_geometry.py). The skin dialog offers only the current robot's types and draws the real outline/aspect (square, rectangle, round, triangle, Thymio "D") — editor and activity view share the masks in [`src/gui/skin_shapes.py`](src/gui/skin_shapes.py). The legacy paint-grid editor still applies to skins without a `skin_type`.
+
+**Sensor stream recording + touch-gesture ML.** A session can record every sensor message to `data/recordings/<id>.jsonl` (toggle in the setup dialog — no video). Those recordings, plus gestures tagged live in the observer panel, feed a **per-`skin_type`, coordinate-free** touch-gesture classifier (tap / press / stroke / squeeze). `scikit-learn` is the optional `ml` extra; the classifier is inert without a trained model. See [docs/TOUCH_ML.md](docs/TOUCH_ML.md).
+
+See [docs/ACTIVITIES.md](docs/ACTIVITIES.md) for the broader behavior-framework plan.
 
 ---
 
@@ -67,7 +80,7 @@ SessionPanel
 curl -fsSL https://raw.githubusercontent.com/techandpeople/SoftEdIBO/master/install.sh | bash
 ```
 
-This will download the latest release, install it to `/opt/SoftEdIBO/`, create a `softedibo` command in your PATH, and add a desktop entry to the application menu.
+This will download the latest release, install it to `~/.local/opt/SoftEdIBO/`, create a `softedibo` command in `~/.local/bin/`, and add a desktop entry to the application menu.
 
 **Nightly build** (latest commit on `master`):
 
@@ -78,7 +91,7 @@ curl -fsSL https://raw.githubusercontent.com/techandpeople/SoftEdIBO/master/inst
 **Uninstall:**
 
 ```bash
-softedibo --uninstall 2>/dev/null || /opt/SoftEdIBO/install.sh --uninstall
+softedibo --uninstall
 ```
 
 > **First time with USB?** After installing, run:
@@ -154,17 +167,25 @@ levels are always written to `data/softedibo.log` (rotating, 2 MB x 3 backups).
 ### Firmware
 
 ```bash
-# Gateway
-cd firmware/gateway && pio run --target upload
+# Gateway — pick your board (both speak the same protocol)
+cd firmware/gateway && pio run -e seeed_xiao_esp32c6 --target upload   # XIAO ESP32-C6 (ESP-IDF)
+cd firmware/gateway && pio run -e esp32dev           --target upload   # ESP32-WROOM-32 (Arduino)
 
-# Direct node
-cd firmware/node_direct && pio run -e release --target upload
+# Actuator nodes (one project, env per variant)
+cd firmware/node_actuator && pio run -e direct      --target upload
+cd firmware/node_actuator && pio run -e multiplexed --target upload
 
-# Multiplexed node
-cd firmware/node_multiplexed && pio run -e release --target upload
+# Sensor node (4x MLX90393 touch board)
+cd firmware/node_magnet_sensor && pio run --target upload
 ```
 
 Requires [PlatformIO](https://platformio.org/).
+
+> **Updating nodes later:** once a node has been cable-flashed once with the
+> current partition table, you can reflash it wirelessly via **Tools → Update
+> Nodes (OTA)…** in the app — it streams the bundled firmware to the node over
+> ESP-NOW through the connected gateway (no cable, no WiFi). See
+> [firmware/gateway/README.md](firmware/gateway/README.md#ota-firmware-update-over-esp-now).
 
 The CI pipeline automatically selects the firmware environment:
 - **Nightly** (push to `master`) → node debug build
@@ -182,17 +203,24 @@ The CI pipeline automatically selects the firmware environment:
 
 | Path | Description |
 |------|-------------|
-| `src/hardware/skin.py` | Skin model — groups 1-3 AirChambers on one ESP32 node |
+| `src/hardware/skin.py` | Skin model — groups 1-3 AirChambers on one ESP32 node; `skin_type` + `geometry` |
+| `src/hardware/skin_geometry.py` | Hardcoded skin-geometry registry (shape + sensor coords) keyed by `skin_type` |
 | `src/hardware/air_chamber.py` | AirChamber model — pressure 0-100 %, configurable max |
 | `src/hardware/esp32_controller.py` | Real hardware controller (via ESP-NOW gateway) |
 | `src/hardware/simulated_controller.py` | Mock controller for simulation mode |
+| `src/data/stream_recorder.py` | Per-session JSONL recorder of all gateway sensor messages |
+| `src/data/export.py` | Session CSV export with robot/participant attribution |
+| `src/ml/` | Touch-gesture pipeline (segmenter, features, classifier) — see [docs/TOUCH_ML.md](docs/TOUCH_ML.md) |
+| `src/gui/skin_shapes.py` | Shared skin-outline masks (round/triangle/thymio) + aspect ratio |
 | `src/robots/` | TurtleRobot, TreeRobot, ThymioRobot, SimulatedRobot |
-| `src/activities/` | Activity registry + GroupTouch + SimulationActivity |
+| `src/activities/` | Activity registry + GroupTouch + OrganSwap |
 | `src/gui/monitor/` | Live pressure monitor widgets |
+| `scripts/label_touches.py` / `scripts/train_touch_model.py` | Offline touch-gesture labelling + training (`.[ml]` extra) |
 | `src/log.py` | Centralized logging setup (console + rotating file) |
 | `config/settings.yaml` | Robot and hardware configuration |
-| `firmware/gateway/` | Gateway ESP32 firmware |
-| `firmware/node_direct/` | node_direct firmware (3 chambers, GPIO valves + own pumps) |
-| `firmware/node_multiplexed/` | node_multiplexed firmware (multiplexed valves + runtime sizing, optional tanks) |
-| `firmware/node_direct/src/pins.h` | node_direct pin definitions |
-| `firmware/node_multiplexed/src/pins.h` | node_multiplexed pin definitions |
+| `firmware/gateway/` | Gateway firmware (ESP-IDF, Seeed XIAO ESP32-C6) |
+| `firmware/common/` | Shared firmware headers (`se_espnow.h`, units/pressure/dbg/cmd_queue) |
+| `firmware/node_actuator/` | Actuator nodes — `direct` + `multiplexed` variants (build-flag envs) |
+| `firmware/node_magnet_sensor/` | Sensor node — 4× MLX90393 touch board (`node_magnet_sensor` protocol) |
+| `firmware/node_actuator/src/direct/pins.h` | node_direct pin definitions |
+| `firmware/node_actuator/src/multiplexed/pins.h` | node_multiplexed pin definitions |

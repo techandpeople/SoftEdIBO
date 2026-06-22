@@ -1,7 +1,5 @@
 """Tests for the ESP-NOW gateway module."""
 
-from unittest.mock import MagicMock, patch
-
 from src.hardware.espnow_gateway import ESPNowGateway
 
 
@@ -16,8 +14,17 @@ def test_send_fails_when_not_connected():
     assert result is False
 
 
-def test_on_message_registers_callback():
+class _Sink:
+    def cb(self, data):  # bound method — on_message stores a weakref.WeakMethod
+        pass
+
+
+def test_on_message_registers_and_removes_callback():
     gateway = ESPNowGateway("/dev/ttyUSB0")
-    callback = MagicMock()
-    gateway.on_message(callback)
-    assert callback in gateway._callbacks
+    sink = _Sink()
+    gateway.on_message(sink.cb)
+    # Callbacks are held as weakrefs; resolve them to compare.
+    assert any(wr() == sink.cb for wr in gateway._callbacks)
+
+    gateway.remove_message_callback(sink.cb)
+    assert all(wr() != sink.cb for wr in gateway._callbacks)

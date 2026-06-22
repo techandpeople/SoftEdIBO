@@ -23,7 +23,7 @@ class RobotMonitorWidget(QGroupBox):
 
     def __init__(self, robot: BaseRobot) -> None:
         super().__init__(robot.robot_id)
-        self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         self._robot = robot
         self._skin_widgets: list[SkinWidget] = []
         self._tank_widgets: list[TankWidget] = []
