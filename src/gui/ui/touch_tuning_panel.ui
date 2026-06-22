@@ -1,0 +1,164 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>TouchTuningPanel</class>
+ <widget class="QGroupBox" name="TouchTuningPanel">
+  <property name="title">
+   <string>Touch tuning</string>
+  </property>
+  <property name="whatsThis">
+   <string>Live tuning for this skin's 4-sensor quadrant touch detection. Adjust per-quadrant thresholds and hysteresis, re-zero the sensors, or enable the node's adaptive baseline. Changes are runtime-only — copy good values into the skin's touch: block to keep them.</string>
+  </property>
+  <property name="styleSheet">
+   <string notr="true">QDoubleSpinBox { min-width: 56px; }</string>
+  </property>
+  <layout class="QGridLayout" name="gridLayout">
+   <property name="leftMargin"><number>4</number></property>
+   <property name="topMargin"><number>2</number></property>
+   <property name="rightMargin"><number>4</number></property>
+   <property name="bottomMargin"><number>2</number></property>
+   <property name="horizontalSpacing"><number>4</number></property>
+   <property name="verticalSpacing"><number>1</number></property>
+   <item row="0" column="0">
+    <widget class="QLabel" name="q0_label">
+     <property name="text"><string>Q1 (TL)</string></property>
+     <property name="alignment"><set>Qt::AlignHCenter|Qt::AlignVCenter</set></property>
+    </widget>
+   </item>
+   <item row="0" column="1">
+    <widget class="QLabel" name="q1_label">
+     <property name="text"><string>Q2 (TR)</string></property>
+     <property name="alignment"><set>Qt::AlignHCenter|Qt::AlignVCenter</set></property>
+    </widget>
+   </item>
+   <item row="0" column="2">
+    <widget class="QLabel" name="q2_label">
+     <property name="text"><string>Q3 (BL)</string></property>
+     <property name="alignment"><set>Qt::AlignHCenter|Qt::AlignVCenter</set></property>
+    </widget>
+   </item>
+   <item row="0" column="3">
+    <widget class="QLabel" name="q3_label">
+     <property name="text"><string>Q4 (BR)</string></property>
+     <property name="alignment"><set>Qt::AlignHCenter|Qt::AlignVCenter</set></property>
+    </widget>
+   </item>
+   <item row="1" column="0">
+    <widget class="QDoubleSpinBox" name="thr0">
+     <property name="toolTip"><string>Activation threshold for Q1 (TL) in μT.
+Set above resting value and below touch peak.
+Re-zero sensors first so rest values are near 0.</string></property>
+     <property name="decimals"><number>0</number></property>
+     <property name="maximum"><double>2000.000000000000000</double></property>
+     <property name="singleStep"><double>10.000000000000000</double></property>
+     <property name="suffix"><string> μT</string></property>
+    </widget>
+   </item>
+   <item row="1" column="1">
+    <widget class="QDoubleSpinBox" name="thr1">
+     <property name="toolTip"><string>Activation threshold for Q2 (TR) in μT.
+Set above resting value and below touch peak.
+Re-zero sensors first so rest values are near 0.</string></property>
+     <property name="decimals"><number>0</number></property>
+     <property name="maximum"><double>2000.000000000000000</double></property>
+     <property name="singleStep"><double>10.000000000000000</double></property>
+     <property name="suffix"><string> μT</string></property>
+    </widget>
+   </item>
+   <item row="1" column="2">
+    <widget class="QDoubleSpinBox" name="thr2">
+     <property name="toolTip"><string>Activation threshold for Q3 (BL) in μT.
+Set above resting value and below touch peak.
+Re-zero sensors first so rest values are near 0.</string></property>
+     <property name="decimals"><number>0</number></property>
+     <property name="maximum"><double>2000.000000000000000</double></property>
+     <property name="singleStep"><double>10.000000000000000</double></property>
+     <property name="suffix"><string> μT</string></property>
+    </widget>
+   </item>
+   <item row="1" column="3">
+    <widget class="QDoubleSpinBox" name="thr3">
+     <property name="toolTip"><string>Activation threshold for Q4 (BR) in μT.
+Set above resting value and below touch peak.
+Re-zero sensors first so rest values are near 0.</string></property>
+     <property name="decimals"><number>0</number></property>
+     <property name="maximum"><double>2000.000000000000000</double></property>
+     <property name="singleStep"><double>10.000000000000000</double></property>
+     <property name="suffix"><string> μT</string></property>
+    </widget>
+   </item>
+   <item row="2" column="0" colspan="4">
+    <layout class="QHBoxLayout" name="bottom_row">
+     <property name="spacing"><number>4</number></property>
+     <item>
+      <widget class="QLabel" name="hyst_label">
+       <property name="text"><string>Hysteresis:</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QDoubleSpinBox" name="hyst_spin">
+       <property name="toolTip"><string>Schmitt-trigger drop-out margin (μT).
+A sensor deactivates at (threshold − hysteresis), preventing flicker.</string></property>
+       <property name="decimals"><number>0</number></property>
+       <property name="maximum"><double>500.000000000000000</double></property>
+       <property name="singleStep"><double>5.000000000000000</double></property>
+       <property name="suffix"><string> μT</string></property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="bottom_spacer">
+       <property name="orientation"><enum>Qt::Horizontal</enum></property>
+       <property name="sizeHint" stdset="0"><size><width>10</width><height>0</height></size></property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="QPushButton" name="apply_btn">
+       <property name="toolTip"><string>Send configure to the touch node
+(fullscale_mt=1000, act_threshold=0.3)</string></property>
+       <property name="text"><string>Apply to node</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="rebaseline_btn">
+       <property name="toolTip"><string>Tell the touch node to recapture its baseline (ESP-NOW rebaseline)</string></property>
+       <property name="text"><string>Re-zero sensors</string></property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item row="3" column="0" colspan="4">
+    <layout class="QHBoxLayout" name="adaptive_row">
+     <property name="spacing"><number>4</number></property>
+     <item>
+      <widget class="QCheckBox" name="adaptive_chk">
+       <property name="whatsThis"><string>Lets the touch node keep tracking slow drift in the magnetic field — e.g. a chamber inflating under the magnet — so it does not read as a false touch. Frozen per-sensor while that sensor is active, so real touches survive. Leave off until actuation contamination is confirmed.</string></property>
+       <property name="toolTip"><string>Send configure adaptive_baseline to the touch node.
+Frozen per-sensor while that sensor is active, so touches survive.
+tau is the drift time constant in ms (larger = slower tracking).</string></property>
+       <property name="text"><string>Adaptive baseline (track slow drift)</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QDoubleSpinBox" name="tau_spin">
+       <property name="whatsThis"><string>Time constant (tau) of the adaptive baseline, in milliseconds. Larger values track drift more slowly, so brief touches are less likely to be absorbed; smaller values follow faster actuation but risk eating slow presses.</string></property>
+       <property name="toolTip"><string>Adaptive-baseline time constant (tau).</string></property>
+       <property name="decimals"><number>0</number></property>
+       <property name="minimum"><double>200.000000000000000</double></property>
+       <property name="maximum"><double>20000.000000000000000</double></property>
+       <property name="singleStep"><double>500.000000000000000</double></property>
+       <property name="value"><double>2000.000000000000000</double></property>
+       <property name="suffix"><string> ms</string></property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="adaptive_spacer">
+       <property name="orientation"><enum>Qt::Horizontal</enum></property>
+       <property name="sizeHint" stdset="0"><size><width>10</width><height>0</height></size></property>
+      </spacer>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
