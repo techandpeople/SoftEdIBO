@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMessageBox,
     QPushButton,
     QRadioButton,
@@ -34,20 +35,30 @@ from PySide6.QtWidgets import (
 )
 
 from src.config.settings import Settings
+from src.core import skin_config as skincfg
 from src.data.models import SkinTemplate
+from src.gui.organ_shape_editor import OrganShapeEditor
 from src.gui.skin_grid_editor import SkinGridEditor
+from src.gui.skin_shapes import ORGAN_SHAPES
 from src.gui.ui_skin_config_dialog import Ui_SkinConfigDialog
 from src.hardware.espnow_gateway import ESPNowGateway
+from src.hardware.skin_geometry import max_organs_for
 
-_YAML_KEY = {"turtle": "turtles", "tree": "trees", "thymio": "thymios"}
-_DEFAULT_MAX_KPA   = 8.0
-_MAX_ALLOWED_KPA   = 12.0
-_CONFIRM_DELTA     = 2.0
-_MAX_CHAMBERS      = 3
+# User-facing labels for the organ shape picker.
+_ORGAN_SHAPE_LABELS = {
+    "ellipse": "Ellipse",
+    "rect": "Rectangle",
+    "rect_round": "Rectangle (rounded)",
+    "triangle": "Triangle",
+    "triangle_round": "Triangle (rounded)",
+}
+
+# Domain rules (node lookup, validation, persistence) live in src.core.skin_config;
+# these aliases keep the dialog terse while single-sourcing the values there.
+_DEFAULT_MAX_KPA   = skincfg.DEFAULT_MAX_KPA
+_MAX_ALLOWED_KPA   = skincfg.MAX_ALLOWED_KPA
+_MAX_CHAMBERS      = skincfg.MAX_CHAMBERS
 _NONE_LABEL        = "(none)"
-# Node types that actually own chambers (can inflate/deflate). Sensor-only
-# boards (node_magnet_sensor) are excluded from chamber selection.
-_ACTUATOR_NODE_TYPES = ("node_direct", "node_multiplexed")
 _MISSING_FIELD_TITLE = "Missing Field"
 
 
@@ -208,6 +219,7 @@ class SkinConfigDialog(QDialog, Ui_SkinConfigDialog):
         # ---- RIGHT COLUMN ----
         # Layout / grid editor — tallest piece, gets its own column.
         self.right_layout.addWidget(self._build_layout_group(), stretch=1)
+        self.right_layout.addWidget(self._build_organ_group())
 
         # ---- Action buttons (defined in the .ui) ----
         self.test_btn.setEnabled(gateway.is_connected)
@@ -232,7 +244,6 @@ class SkinConfigDialog(QDialog, Ui_SkinConfigDialog):
         """Drive every widget from a saved skin entry. Split into focused
         helpers so ``__init__`` stays simple."""
         self.skin_id_edit.setText(skin_cfg.get("skin_id", ""))
-        self.name_edit.setText(skin_cfg.get("name", ""))
         # Select the saved skin_type by data; its registry geometry then drives
         # the shape (via _on_skin_type_changed). Fall back to the stored shape
         # only when the skin has no (registered) type.
@@ -250,6 +261,8 @@ class SkinConfigDialog(QDialog, Ui_SkinConfigDialog):
         self._populate_dims(skin_cfg.get("grid") or {}, touch_cfg.get("grid"))
         self._grid.set_chamber_grid(skin_cfg.get("chamber_grid"))
         self._grid.set_sensor_grid(touch_cfg.get("sensor_grid"))
+        self._organ_editor.set_organs(skin_cfg.get("organs"))
+        self._sync_organ_geometry()
         self._rebuild_palette()
 
     def _populate_chambers(self, skin_cfg: dict) -> None:
@@ -374,20 +387,11 @@ class SkinConfigDialog(QDialog, Ui_SkinConfigDialog):
             self.skin_id_edit.setText(self._next_skin_id_for(tpl))
 
     def _next_skin_id_for(self, tpl: SkinTemplate) -> str:
-        """Return ``{tpl.name}-{N}`` with N = (existing skins matching prefix) + 1."""
-        prefix = (tpl.name or tpl.template_id).strip().lower().replace(" ", "_") or "skin"
+        """Return ``{tpl.name}-{N}`` with N one past the highest existing match."""
         siblings = self._sibling_skins() + ([] if self._skin_index < 0
                                             else [self._load_skin_cfg()])
-        used_nums: list[int] = []
-        for sk in siblings:
-            sid = str(sk.get("skin_id", "")).lower()
-            if sid.startswith(prefix + "-"):
-                try:
-                    used_nums.append(int(sid.rsplit("-", 1)[1]))
-                except ValueError:
-                    pass
-        n = (max(used_nums) + 1) if used_nums else 1
-        return f"{prefix}-{n}"
+        ids = [sk.get("skin_id", "") for sk in siblings]
+        return skincfg.next_skin_id(tpl.name or tpl.template_id, ids)
 
     def _on_save_template(self) -> None:
         if self._db is None:
@@ -433,42 +437,29 @@ class SkinConfigDialog(QDialog, Ui_SkinConfigDialog):
     # ------------------------------------------------------------------
 
     def _robot_nodes(self) -> list[dict]:
-        robots = self._settings.data.get("robots", {})
-        robots_list = robots.get(_YAML_KEY[self._robot_type], [])
-        if 0 <= self._robot_index < len(robots_list):
-            return robots_list[self._robot_index].get("nodes", [])
-        return []
+        return skincfg.robot_nodes(
+            self._settings.data, self._robot_type, self._robot_index)
 
     def _node_macs(self) -> list[str]:
         # Chambers live only on actuator boards. Sensor-only boards
         # (node_magnet_sensor) have nothing to inflate, so they must not
         # be selectable as a chamber's node.
-        return [n["mac"] for n in self._robot_nodes()
-                if n.get("mac") and n.get("node_type") in _ACTUATOR_NODE_TYPES]
+        return skincfg.actuator_macs(
+            self._settings.data, self._robot_type, self._robot_index)
 
     def _node_max_slots(self) -> dict[str, int]:
-        return {n["mac"]: int(n.get("max_slots", 3))
-                for n in self._robot_nodes()
-                if n.get("mac") and n.get("node_type") in _ACTUATOR_NODE_TYPES}
+        return skincfg.node_max_slots(
+            self._settings.data, self._robot_type, self._robot_index)
 
     def _load_skin_cfg(self) -> dict:
-        if self._skin_index < 0:
-            return {}
-        robots = self._settings.data.get("robots", {})
-        robots_list = robots.get(_YAML_KEY[self._robot_type], [])
-        if 0 <= self._robot_index < len(robots_list):
-            skins = robots_list[self._robot_index].get("skins", [])
-            if 0 <= self._skin_index < len(skins):
-                return skins[self._skin_index]
-        return {}
+        return skincfg.load_skin_cfg(
+            self._settings.data, self._robot_type, self._robot_index,
+            self._skin_index)
 
     def _sibling_skins(self) -> list[dict]:
-        robots = self._settings.data.get("robots", {})
-        robots_list = robots.get(_YAML_KEY[self._robot_type], [])
-        if not (0 <= self._robot_index < len(robots_list)):
-            return []
-        all_skins = robots_list[self._robot_index].get("skins", [])
-        return [sc for i, sc in enumerate(all_skins) if i != self._skin_index]
+        return skincfg.sibling_skins(
+            self._settings.data, self._robot_type, self._robot_index,
+            self._skin_index)
 
     # ------------------------------------------------------------------
     # Chamber rows
@@ -506,8 +497,8 @@ class SkinConfigDialog(QDialog, Ui_SkinConfigDialog):
     # ------------------------------------------------------------------
 
     def _magnet_macs(self) -> list[str]:
-        return [n["mac"] for n in self._robot_nodes()
-                if n.get("node_type") == "node_magnet_sensor" and n.get("mac")]
+        return skincfg.magnet_macs(
+            self._settings.data, self._robot_type, self._robot_index)
 
     def _build_touch_group(self) -> QGroupBox:
         group = QGroupBox("Touch sensors (optional)")
@@ -635,6 +626,118 @@ class SkinConfigDialog(QDialog, Ui_SkinConfigDialog):
         self._shape_round_btn.toggled.connect(self._on_shape_changed)
         return group
 
+    def _build_organ_group(self) -> QGroupBox:
+        """Editor for the pluggable organ shapes drawn on this skin (hospital
+        study). Each shape is one organ with a good/bad resistance; the live
+        view colours them green/red/absent from the measured resistance."""
+        group = QGroupBox("Organs (optional)")
+        group.setWhatsThis(
+            "Define the pluggable organs shown on this skin. Add a shape per "
+            "organ, drag it where the physical organ sits, and set the "
+            "resistance of its good and bad variants. During an Organ Swap "
+            "activity each shape is filled green (good), red (bad) or left "
+            "empty (absent), inferred from the skin's organ-circuit resistance. "
+            "Choose good/bad resistances that are well separated so the parallel "
+            "totals of different organ combinations don't overlap.")
+        v = QVBoxLayout(group)
+
+        controls = QHBoxLayout()
+        controls.addWidget(QLabel("Shape:"))
+        self._organ_shape_combo = QComboBox()
+        for shape in ORGAN_SHAPES:
+            self._organ_shape_combo.addItem(_ORGAN_SHAPE_LABELS.get(shape, shape),
+                                            shape)
+        self._organ_shape_combo.setWhatsThis("Shape used when adding a new organ.")
+        controls.addWidget(self._organ_shape_combo, stretch=1)
+        self._add_organ_btn = QPushButton("+ Add organ")
+        self._add_organ_btn.setWhatsThis("Add an organ of the selected shape.")
+        self._add_organ_btn.clicked.connect(self._on_add_organ)
+        controls.addWidget(self._add_organ_btn)
+        self._remove_organ_btn = QPushButton("Remove")
+        self._remove_organ_btn.setWhatsThis("Remove the selected organ.")
+        self._remove_organ_btn.clicked.connect(
+            lambda: self._organ_editor.remove_selected())
+        controls.addWidget(self._remove_organ_btn)
+        v.addLayout(controls)
+
+        self._organ_editor = OrganShapeEditor()
+        self._organ_editor.selection_changed.connect(self._on_organ_selected)
+        # Re-evaluate the add-button cap whenever organs are added/removed.
+        self._organ_editor.changed.connect(self._refresh_organ_cap)
+        v.addWidget(self._organ_editor, stretch=1)
+
+        # Per-organ fields for the current selection.
+        self._organ_form = QFormLayout()
+        self._organ_id_edit = QLineEdit()
+        self._organ_id_edit.setWhatsThis("Identifier of this organ (e.g. liver).")
+        self._organ_id_edit.editingFinished.connect(self._on_organ_field_changed)
+        self._organ_good_spin = self._make_ohm_spin(
+            "Resistance read when the GOOD variant of this organ is plugged in.")
+        self._organ_bad_spin = self._make_ohm_spin(
+            "Resistance read when the BAD variant of this organ is plugged in.")
+        self._organ_good_spin.valueChanged.connect(self._on_organ_field_changed)
+        self._organ_bad_spin.valueChanged.connect(self._on_organ_field_changed)
+        self._organ_form.addRow("Organ ID:", self._organ_id_edit)
+        self._organ_form.addRow("Good (Ω):", self._organ_good_spin)
+        self._organ_form.addRow("Bad (Ω):", self._organ_bad_spin)
+        v.addLayout(self._organ_form)
+        self._set_organ_form_enabled(False)
+        return group
+
+    @staticmethod
+    def _make_ohm_spin(whats_this: str) -> QDoubleSpinBox:
+        spin = QDoubleSpinBox()
+        spin.setRange(0.0, 1_000_000.0)
+        spin.setDecimals(0)
+        spin.setSingleStep(100.0)
+        spin.setWhatsThis(whats_this)
+        return spin
+
+    def _on_add_organ(self) -> None:
+        cap = max_organs_for(self.skin_type_combo.currentData())
+        if len(self._organ_editor.organs()) >= cap:
+            QMessageBox.information(
+                self, "Organ limit",
+                f"This skin type allows at most {cap} organ(s).")
+            return
+        shape = self._organ_shape_combo.currentData()
+        organ_id = self._next_organ_id()
+        self._organ_editor.add_organ(shape, organ_id)
+
+    def _next_organ_id(self) -> str:
+        existing = {o.get("id") for o in self._organ_editor.organs()}
+        i = 1
+        while f"organ-{i}" in existing:
+            i += 1
+        return f"organ-{i}"
+
+    def _on_organ_selected(self, index: int) -> None:
+        organ = self._organ_editor.selected_organ()
+        self._set_organ_form_enabled(organ is not None)
+        if organ is None:
+            return
+        for w in (self._organ_id_edit, self._organ_good_spin, self._organ_bad_spin):
+            w.blockSignals(True)
+        self._organ_id_edit.setText(str(organ.get("id", "")))
+        self._organ_good_spin.setValue(float(organ.get("good_ohm", 0) or 0))
+        self._organ_bad_spin.setValue(float(organ.get("bad_ohm", 0) or 0))
+        for w in (self._organ_id_edit, self._organ_good_spin, self._organ_bad_spin):
+            w.blockSignals(False)
+
+    def _on_organ_field_changed(self, *_args) -> None:
+        if self._organ_editor.selected_organ() is None:
+            return
+        self._organ_editor.update_selected(
+            id=self._organ_id_edit.text().strip(),
+            good_ohm=self._organ_good_spin.value(),
+            bad_ohm=self._organ_bad_spin.value(),
+        )
+
+    def _set_organ_form_enabled(self, enabled: bool) -> None:
+        for w in (self._organ_id_edit, self._organ_good_spin,
+                  self._organ_bad_spin, self._remove_organ_btn):
+            w.setEnabled(enabled)
+
     def _on_dims_changed(self, _value: int) -> None:
         """Spinbox edited → resize the layer currently being edited."""
         layer = "chamber" if self._mode_chamber.isChecked() else "sensor"
@@ -664,6 +767,7 @@ class SkinConfigDialog(QDialog, Ui_SkinConfigDialog):
     def _on_shape_changed(self, _checked: bool) -> None:
         shape = "round" if self._shape_round_btn.isChecked() else "rect"
         self._grid.set_shape(shape)
+        self._sync_organ_geometry()
 
     def _on_skin_type_changed(self, _index: int = 0) -> None:
         """Drive the grid's outline + aspect ratio from the chosen skin type's
@@ -675,6 +779,7 @@ class SkinConfigDialog(QDialog, Ui_SkinConfigDialog):
             self._shape_rect_btn.setChecked(True)
             self._sensor_count_spin.setEnabled(True)   # legacy skin: editable
             self._sensor_count_spin.setToolTip("")
+            self._sync_organ_geometry()
             return
         self._grid.set_geometry(geo.shape, geo.size_mm)
         # Sensor count is a registry constant for this type — show it, read-only.
@@ -687,6 +792,26 @@ class SkinConfigDialog(QDialog, Ui_SkinConfigDialog):
             self._shape_round_btn.setChecked(True)
         else:
             self._shape_rect_btn.setChecked(True)
+        self._sync_organ_geometry()
+
+    def _sync_organ_geometry(self) -> None:
+        """Mirror the skin's outline + aspect ratio onto the organ editor and
+        update the add-button against the skin type's organ cap."""
+        if not hasattr(self, "_organ_editor"):
+            return
+        from src.hardware.skin_geometry import geometry_for
+        skin_type = self.skin_type_combo.currentData()
+        geo = geometry_for(skin_type)
+        if geo is not None:
+            self._organ_editor.set_geometry(geo.shape, geo.size_mm)
+        else:
+            self._organ_editor.set_geometry(self._grid.shape(), None)
+        self._refresh_organ_cap()
+
+    def _refresh_organ_cap(self) -> None:
+        """Enable 'Add organ' only while under the skin type's organ cap."""
+        cap = max_organs_for(self.skin_type_combo.currentData())
+        self._add_organ_btn.setEnabled(len(self._organ_editor.organs()) < cap)
 
     def _apply_layout_and_touch(self, skin_entry: dict) -> None:
         """Persist grid + touch fields onto ``skin_entry`` (only when used)."""
@@ -820,40 +945,29 @@ class SkinConfigDialog(QDialog, Ui_SkinConfigDialog):
     def _collect_chambers(self) -> list[dict] | None:
         """Read each chamber row into a list of dicts. Returns None and
         warns if any row is missing its MAC."""
-        chambers: list[dict] = []
-        for row in self._rows:
-            mac, slot, max_p = row.get_values()
-            if not mac:
-                QMessageBox.warning(
-                    self, _MISSING_FIELD_TITLE,
-                    "Each chamber must have a node MAC selected.",
-                )
-                return None
-            chambers.append({"mac": mac, "slot": slot, "max_pressure": max_p})
+        chambers = [{"mac": m, "slot": s, "max_pressure": p}
+                    for m, s, p in (row.get_values() for row in self._rows)]
+        if skincfg.find_missing_mac(chambers):
+            QMessageBox.warning(
+                self, _MISSING_FIELD_TITLE,
+                "Each chamber must have a node MAC selected.",
+            )
+            return None
         return chambers
 
     def _validate_no_duplicate_chambers(self, chambers: list[dict]) -> bool:
-        seen: set[tuple[str, int]] = set()
-        for ch in chambers:
-            key = (ch["mac"], ch["slot"])
-            if key in seen:
-                QMessageBox.warning(
-                    self, "Duplicate Chamber",
-                    f"Slot {ch['slot']} on {ch['mac']} is used more than "
-                    "once in this skin.",
-                )
-                return False
-            seen.add(key)
+        dup = skincfg.find_duplicate(chambers)
+        if dup is not None:
+            QMessageBox.warning(
+                self, "Duplicate Chamber",
+                f"Slot {dup['slot']} on {dup['mac']} is used more than "
+                "once in this skin.",
+            )
+            return False
         return True
 
     def _validate_no_sibling_conflicts(self, chambers: list[dict]) -> bool:
-        used_by_siblings = {
-            (ch.get("mac"), ch.get("slot"))
-            for sk in self._sibling_skins()
-            for ch in sk.get("chambers", [])
-        }
-        conflicts = [ch for ch in chambers
-                     if (ch["mac"], ch["slot"]) in used_by_siblings]
+        conflicts = skincfg.sibling_conflicts(chambers, self._sibling_skins())
         if not conflicts:
             return True
         parts = [f"{c['mac']} #{c['slot']}" for c in conflicts]
@@ -866,22 +980,13 @@ class SkinConfigDialog(QDialog, Ui_SkinConfigDialog):
 
     def _confirm_large_pressure_change(self, chambers: list[dict]) -> bool:
         """Warn the user when any chamber's max_pressure shifted by more
-        than ``_CONFIRM_DELTA``. Returns False if they cancel."""
-        prev_cfg = self._load_skin_cfg()
-        prev_chs = {(c.get("mac"), c.get("slot")): c
-                    for c in prev_cfg.get("chambers", [])}
-        big_changes: list[str] = []
-        for ch in chambers:
-            key = (ch["mac"], ch["slot"])
-            old_max = float(prev_chs.get(key, {}).get(
-                "max_pressure", _DEFAULT_MAX_KPA))
-            if abs(ch["max_pressure"] - old_max) >= _CONFIRM_DELTA:
-                big_changes.append(
-                    f"{ch['mac']} #{ch['slot']}: "
-                    f"{old_max:.1f} → {ch['max_pressure']:.1f} kPa"
-                )
-        if not big_changes:
+        than the confirm delta. Returns False if they cancel."""
+        prev_chambers = self._load_skin_cfg().get("chambers", [])
+        changes = skincfg.large_pressure_changes(chambers, prev_chambers)
+        if not changes:
             return True
+        big_changes = [f"{c.mac} #{c.slot}: {c.old_kpa:.1f} → {c.new_kpa:.1f} kPa"
+                       for c in changes]
         reply = QMessageBox.question(
             self, "Confirm Large Pressure Change",
             "Large max-pressure change detected:\n"
@@ -893,7 +998,6 @@ class SkinConfigDialog(QDialog, Ui_SkinConfigDialog):
 
     def _on_save(self) -> None:
         skin_id = self.skin_id_edit.text().strip()
-        name    = self.name_edit.text().strip() or skin_id
 
         if not skin_id:
             QMessageBox.warning(self, _MISSING_FIELD_TITLE,
@@ -914,32 +1018,16 @@ class SkinConfigDialog(QDialog, Ui_SkinConfigDialog):
         if not self._confirm_large_pressure_change(chambers):
             return
 
-        # Only store max_pressure when it differs from the default
-        for ch in chambers:
-            if abs(ch["max_pressure"] - _DEFAULT_MAX_KPA) < 1e-9:
-                del ch["max_pressure"]
-
-        skin_entry: dict = {"skin_id": skin_id, "name": name, "chambers": chambers}
         skin_type = self.skin_type_combo.currentData() or ""
-        if skin_type:
-            skin_entry["skin_type"] = skin_type
         skin_variant = self.skin_variant_combo.currentData() or ""
-        if skin_variant:
-            skin_entry["skin_variant"] = skin_variant
+        skin_entry = skincfg.build_skin_entry(
+            skin_id, chambers, skin_type, skin_variant)
         self._apply_layout_and_touch(skin_entry)
+        skincfg.apply_organs(skin_entry, self._organ_editor.organs())
 
-        data = self._settings.data
-        robots_list = (
-            data.setdefault("robots", {})
-            .setdefault(_YAML_KEY[self._robot_type], [])
-        )
-        if 0 <= self._robot_index < len(robots_list):
-            skins = robots_list[self._robot_index].setdefault("skins", [])
-            if self._skin_index < 0:
-                skins.append(skin_entry)
-            else:
-                skins[self._skin_index] = skin_entry
-
+        skincfg.save_skin_entry(
+            self._settings.data, self._robot_type, self._robot_index,
+            self._skin_index, skin_entry)
         self._settings.save()
         self.accept()
 
@@ -950,13 +1038,8 @@ class SkinConfigDialog(QDialog, Ui_SkinConfigDialog):
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
-        robots_list = (
-            self._settings.data.get("robots", {})
-            .get(_YAML_KEY[self._robot_type], [])
-        )
-        if 0 <= self._robot_index < len(robots_list):
-            skins = robots_list[self._robot_index].get("skins", [])
-            if 0 <= self._skin_index < len(skins):
-                skins.pop(self._skin_index)
+        skincfg.delete_skin(
+            self._settings.data, self._robot_type, self._robot_index,
+            self._skin_index)
         self._settings.save()
         self.accept()
