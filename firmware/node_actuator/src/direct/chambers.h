@@ -130,6 +130,19 @@ inline void fillTimeTick(uint32_t now) {
         });
 }
 
+// Close any chamber whose deflate time window has elapsed (the active vacuum
+// pump's only sensor-independent backstop). Call every loop().
+inline void deflateTimeTick(uint32_t now) {
+    fill_control::deflateTimeTick(
+        state, NUM_CHAMBERS, now,
+        [](const Chamber& ch) { return ch.state == DEFLATING; },
+        [](int i) {
+            DBG_PRINT("DEFLATE ch=%d done (time)\n", i);
+            stop(i);
+            recalcPumps();
+        });
+}
+
 inline void maintainTick(uint32_t now) {
     static uint32_t last = 0;
     fill_control::maintainTick(
@@ -141,13 +154,17 @@ inline void maintainTick(uint32_t now) {
         });
 }
 
-inline void beginDeflate(int n, float target_kpa) {
+// ``deflate_ms`` bounds the active vacuum pump in time; 0 falls back to the hard
+// MAX_DEFLATE_MS cap. The deadline is ALWAYS armed because the gauge sensor is
+// blind below atmosphere, so pressure can't stop a runaway deflate into vacuum.
+inline void beginDeflate(int n, float target_kpa, uint32_t deflate_ms = 0) {
     target_kpa = max(state[n].min_kpa, min(target_kpa, state[n].max_kpa));
     if (state[n].state == DEFLATING && state[n].target_kpa == target_kpa) return;
     setValve(n, 0, false);              // close inflate before opening deflate
-    state[n].state      = DEFLATING;
-    state[n].target_kpa = target_kpa;
-    state[n].since_ms   = millis();
+    state[n].state         = DEFLATING;
+    state[n].target_kpa    = target_kpa;
+    state[n].since_ms      = millis();
+    state[n].fill_until_ms = fill_control::deflateUntil(deflate_ms);
     setValve(n, 1, true);
     recalcPumps();
 }
