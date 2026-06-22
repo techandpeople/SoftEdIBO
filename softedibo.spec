@@ -13,25 +13,25 @@
 #     config/
 #       settings.yaml
 #     firmware/
-#       gateway/firmware.bin
-#       node_direct/firmware-release.bin
-#       node_direct/firmware-debug.bin
-#       node_multiplexed/firmware-release.bin
-#       node_multiplexed/firmware-debug.bin
+#       gateway/firmware.bin                         (ESP32-C6, ESP-IDF)
+#       gateway/firmware-esp32.bin                   (ESP32-WROOM, Arduino)
+#       node_actuator/firmware-direct-release.bin
+#       node_actuator/firmware-direct-debug.bin
+#       node_actuator/firmware-multiplexed-release.bin
+#       node_actuator/firmware-multiplexed-debug.bin
+#       node_magnet_sensor/firmware-release.bin             (MLX90393 touch board)
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 block_cipher = None
 
 # ---------------------------------------------------------------------------
-# Hidden imports shared by both Analysis calls
+# Excludes
 # ---------------------------------------------------------------------------
+# Shared by both Analysis calls — pure bloat neither executable ever needs.
 COMMON_EXCLUDES = [
     "tkinter",
     "matplotlib",
-    "numpy",
-    "scipy",
-    "pandas",
     "PIL",
     "IPython",
     "jupyter",
@@ -40,6 +40,11 @@ COMMON_EXCLUDES = [
     "MySQLdb",     # MySQL backend
     "psycopg2",    # PostgreSQL backend (not installed in the frozen bundle)
 ]
+
+# The standalone esptool executable does no ML — keep it lean by stripping the
+# numeric stack there. The main app DOES use it (touch-gesture classifier:
+# numpy / scipy / scikit-learn / joblib), so those must NOT be excluded from it.
+ESPTOOL_EXCLUDES = COMMON_EXCLUDES + ["numpy", "scipy", "pandas"]
 
 # ---------------------------------------------------------------------------
 # 1. Main application
@@ -51,10 +56,12 @@ main_a = Analysis(
     datas=[
         ("config/", "config/"),
         ("firmware/gateway/firmware.bin",                 "firmware/gateway"),
-        ("firmware/node_direct/firmware-release.bin",     "firmware/node_direct"),
-        ("firmware/node_direct/firmware-debug.bin",       "firmware/node_direct"),
-        ("firmware/node_multiplexed/firmware-release.bin", "firmware/node_multiplexed"),
-        ("firmware/node_multiplexed/firmware-debug.bin",   "firmware/node_multiplexed"),
+        ("firmware/gateway/firmware-esp32.bin",           "firmware/gateway"),
+        ("firmware/node_actuator/firmware-direct-release.bin",      "firmware/node_actuator"),
+        ("firmware/node_actuator/firmware-direct-debug.bin",        "firmware/node_actuator"),
+        ("firmware/node_actuator/firmware-multiplexed-release.bin", "firmware/node_actuator"),
+        ("firmware/node_actuator/firmware-multiplexed-debug.bin",   "firmware/node_actuator"),
+        ("firmware/node_magnet_sensor/firmware-release.bin",               "firmware/node_magnet_sensor"),
     ],
     hiddenimports=[
         *collect_submodules("src"),
@@ -62,6 +69,13 @@ main_a = Analysis(
         "serial.tools.list_ports",
         "PySide6.QtSvg",
         "PySide6.QtXml",
+        # Touch-gesture ML stack (lazily imported in src/ml/training.py).
+        # scikit-learn pulls these in but the lazy imports can dodge static
+        # analysis, so name them explicitly.
+        *collect_submodules("sklearn"),
+        "joblib",
+        "numpy",
+        "scipy",
     ],
     hookspath=[],
     hooksconfig={},
@@ -110,7 +124,7 @@ esptool_a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=COMMON_EXCLUDES,
+    excludes=ESPTOOL_EXCLUDES,
     cipher=block_cipher,
     noarchive=False,
 )

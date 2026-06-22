@@ -199,3 +199,22 @@ class TestDataPanel:
         panel = DataPanel(db)
         qtbot.addWidget(panel)
         assert panel.sessions_table.item(0, 0).text() == "s01"
+
+
+# ---------------------------------------------------------------------------
+# ObserverPanel
+# ---------------------------------------------------------------------------
+
+class TestObserverPanel:
+    def test_emits_observer_event_per_participant(self, qtbot):
+        from src.data.models import ParticipantRecord
+        from src.gui.observer_panel import ObserverPanel
+
+        participants = [ParticipantRecord("P1", "Ana"), ParticipantRecord("P2", "Bea")]
+        panel = ObserverPanel(participants)
+        qtbot.addWidget(panel)
+
+        captured = []
+        panel.event.connect(lambda *a: captured.append(a))
+        panel._emit_observation("P1", "watches")
+        assert captured == [("observer", "watches", "P1", "")]

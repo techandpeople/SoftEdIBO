@@ -1,6 +1,5 @@
 """Data visualization panel for reviewing session data."""
 
-import csv
 from pathlib import Path
 
 from PySide6.QtCore import QStandardPaths
@@ -13,6 +12,7 @@ from PySide6.QtWidgets import (
 )
 
 from src.data.database import Database
+from src.data.export import SessionExporter
 from src.gui.ui_data_panel import Ui_DataPanel
 
 
@@ -28,6 +28,7 @@ class DataPanel(QWidget, Ui_DataPanel):
         self.setupUi(self)
 
         self._db = db
+        self._exporter = SessionExporter(db)
 
         for table in (self.sessions_table, self.events_table):
             h = table.horizontalHeader()
@@ -100,29 +101,10 @@ class DataPanel(QWidget, Ui_DataPanel):
         if not path:
             return
 
-        session = next(
-            (s for s in self._db.get_all_sessions() if s.session_id == session_id), None
-        )
-        events = self._db.get_session_events(session_id)
-        with open(path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f)
-            writer.writerow(["session_id", "activity", "start", "end",
-                             "timestamp", "participant_id", "type", "action", "target", "metadata"])
-            for event in events:
-                writer.writerow([
-                    session_id,
-                    activity,
-                    session.start_time.isoformat(timespec="seconds") if session else "",
-                    session.end_time.isoformat(timespec="seconds") if session and session.end_time else "",
-                    event.timestamp.isoformat(timespec="seconds"),
-                    event.participant_id,
-                    event.type,
-                    event.action,
-                    event.target,
-                    event.metadata,
-                ])
-
-        QMessageBox.information(self, "Export", f"Exported to {path}")
+        # Flush pending async writes so freshly-logged events are included.
+        self._db.flush_events()
+        rows = self._exporter.export_session(session_id, path)
+        QMessageBox.information(self, "Export", f"Exported {rows} events to {path}")
 
     def _on_export_all(self) -> None:
         """Export all sessions and their events to a CSV file."""
@@ -133,24 +115,6 @@ class DataPanel(QWidget, Ui_DataPanel):
         if not path:
             return
 
-        sessions = self._db.get_all_sessions()
-        with open(path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f)
-            writer.writerow(["session_id", "activity", "start", "end",
-                             "timestamp", "participant_id", "type", "action", "target", "metadata"])
-            for session in sessions:
-                for event in self._db.get_session_events(session.session_id):
-                    writer.writerow([
-                        session.session_id,
-                        session.activity_name,
-                        session.start_time.isoformat(timespec="seconds"),
-                        session.end_time.isoformat(timespec="seconds") if session.end_time else "",
-                        event.timestamp.isoformat(timespec="seconds"),
-                        event.participant_id,
-                        event.type,
-                        event.action,
-                        event.target,
-                        event.metadata,
-                    ])
-
-        QMessageBox.information(self, "Export", f"Exported to {path}")
+        self._db.flush_events()
+        rows = self._exporter.export_all(path)
+        QMessageBox.information(self, "Export", f"Exported {rows} events to {path}")

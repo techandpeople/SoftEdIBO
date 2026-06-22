@@ -4,6 +4,7 @@ import logging
 from typing import Any, Callable
 
 from src.hardware.espnow_gateway import ESPNowGateway
+from src.hardware.fill_scaling import FillLoadTracker
 
 logger = logging.getLogger(__name__)
 
@@ -14,10 +15,19 @@ class ESP32Controller:
     def __init__(self, mac_address: str, gateway: ESPNowGateway):
         self.mac_address = mac_address
         self._gateway = gateway
+        # Shared per-node fill-load tracker: every Skin on this node consults it
+        # to scale calibrated fill times for concurrent inflation (pumps are
+        # shared per node). ``pump_count`` is set by the robot builder.
+        self.fill_load = FillLoadTracker()
         self._last_status: dict[str, Any] = {}
         self._touch_callbacks:    list[Callable[[int, int], None]] = []
         self._pressure_callbacks: list[Callable[[int, int], None]] = []
         self._tank_pressure_callbacks: list[Callable[[str, int], None]] = []
+        self._magnet_callbacks: list[Callable[[dict[str, Any]], None]] = []
+        self._organ_callbacks: list[Callable[[float, int], None]] = []
+        # Latest magnet sensor geometry, captured from a `node_magnet_sensor_ready` boot announce.
+        # Shape: {"sensors": N, "magnets": M, "variant": str|None, "geometry": {...}}.
+        self._magnet_geometry: dict[str, Any] | None = None
 
         self._gateway.on_message(self._handle_message)
 
@@ -30,8 +40,18 @@ class ESP32Controller:
         """Send a command to this ESP32 node."""
         return self._gateway.send(self.mac_address, command, **kwargs)
 
-    def inflate(self, chamber: int, delta: int = 10) -> bool:
-        """Inflate a chamber by delta % of its max pressure (0-100)."""
+    def inflate(self, chamber: int, delta: int = 10,
+                ms: int | None = None) -> bool:
+        """Inflate a chamber by delta % of its max pressure (0-100).
+
+        When ``ms`` is given, the node inflates for that many milliseconds
+        (time-based fill from a calibrated ``fill_time_ms``) instead of closing
+        the loop on the pressure sensor; the firmware still caps at 5 s and at
+        the chamber's HARD_MAX pressure.
+        """
+        if ms is not None:
+            return self.send_command("inflate", chamber=chamber, delta=delta,
+                                     ms=int(ms))
         return self.send_command("inflate", chamber=chamber, delta=delta)
 
     def deflate(self, chamber: int, delta: int = 10) -> bool:
@@ -75,6 +95,7 @@ class ESP32Controller:
         tank_vacuum_max_kpa: float | None = None,
         tank_vacuum_target_kpa: float | None = None,
         pump_groups: dict[str, list[int]] | None = None,
+        organ_channels: list[int] | None = None,
     ) -> bool:
         """Configure a multiplexed node at runtime.
 
@@ -98,6 +119,8 @@ class ESP32Controller:
                 (kPa, typically negative). Firmware clamps it inside [min, max].
             pump_groups: Optional explicit mapping, e.g.
                 ``{"pressure":[1,3], "vacuum":[2,4]}``.
+            organ_channels: Mux channels carrying organ+cover circuits; the
+                index in this list becomes the ``slot`` in organ broadcasts.
         """
         payload: dict[str, Any] = {"num_chambers": int(num_chambers)}
         if pump_inflate_count is not None:
@@ -118,6 +141,8 @@ class ESP32Controller:
             payload["tank_vacuum_target_kpa"] = float(tank_vacuum_target_kpa)
         if pump_groups:
             payload["pump_groups"] = pump_groups
+        if organ_channels:
+            payload["organ_channels"] = [int(c) for c in organ_channels]
         return self.send_command("configure", **payload)
 
     def debug(self) -> bool:
@@ -127,6 +152,24 @@ class ESP32Controller:
     def calibrate_sensor(self, sensor_id: int) -> bool:
         """Request sensor calibration on the ESP32."""
         return self.send_command("calibrate_sensor", sensor=sensor_id)
+
+    def set_led(self, color: str, pattern: str = "solid",
+                period_ms: int = 0, count: int | None = None,
+                index: int | None = None) -> bool:
+        """Drive the node's WS2812 LED ring.
+
+        color:   "#RRGGBB". pattern: "off" | "solid" | "blink" | "pulse".
+        period_ms/count: animation timing (whole-ring patterns only).
+        index:   when given, set just that pixel (solid); otherwise the whole
+                 ring. Per-pixel is used by the LED test panel.
+        """
+        kwargs: dict[str, Any] = {"color": color, "pattern": pattern,
+                                  "period_ms": int(period_ms)}
+        if count is not None:
+            kwargs["count"] = int(count)
+        if index is not None:
+            kwargs["index"] = int(index)
+        return self.send_command("set_led", **kwargs)
 
     def on_touch(self, callback: Callable[[int, int], None]) -> None:
         """Register a callback for touch sensor events.
@@ -152,27 +195,79 @@ class ESP32Controller:
         """
         self._tank_pressure_callbacks.append(callback)
 
+    @property
+    def magnet_geometry(self) -> dict[str, Any] | None:
+        """Last magnet sensor geometry captured from `node_magnet_sensor_ready` (None if never seen).
+
+        Contains the fields the firmware announced at boot: ``sensors``,
+        ``magnets``, ``variant``, and ``geometry`` (with ``sensors`` /
+        ``magnets`` coordinate arrays).
+        """
+        return self._magnet_geometry
+
+    def on_magnet(self, callback: Callable[[dict[str, Any]], None]) -> None:
+        """Register a callback for magnet sensor (`type:"magnet"`) messages from this node.
+
+        Args:
+            callback: Called with the full message dict (raw, mag, adj, act, …)
+                as sent by the firmware. The ``source`` MAC added by the gateway
+                is preserved.
+        """
+        self._magnet_callbacks.append(callback)
+
+    def on_organ(self, callback: Callable[[float, int], None]) -> None:
+        """Register a callback for organ-resistance (`type:"organ"`) messages.
+
+        Args:
+            callback: Called with ``(resistance_ohm, slot)``. The resistance
+                is the total of the organ network in ohms; an open circuit
+                (silicone cover off) is delivered as ``float("inf")``. ``slot``
+                is 0 on direct nodes; multiplexed nodes report one slot per
+                configured organ circuit (``configure`` ``organ_channels``).
+        """
+        self._organ_callbacks.append(callback)
+
     def get_last_status(self) -> dict[str, Any]:
         """Get the last known status of this ESP32 node."""
         return self._last_status.copy()
 
+    @staticmethod
+    def _call_callbacks(callbacks: list, *args: Any) -> None:
+        """Call each callback, pruning any whose Qt signal source has been deleted."""
+        dead: list[int] = []
+        for i, callback in enumerate(callbacks):
+            try:
+                callback(*args)
+            except RuntimeError:
+                dead.append(i)
+        for i in reversed(dead):
+            callbacks.pop(i)
+
     def _dispatch_touch(self, data: dict[str, Any]) -> None:
         sensor_id = data.get("sensor", 0)
         raw_value = data.get("value", 0)
-        for callback in self._touch_callbacks:
-            callback(sensor_id, raw_value)
+        self._call_callbacks(self._touch_callbacks, sensor_id, raw_value)
 
     def _dispatch_chamber_pressure(self, data: dict[str, Any]) -> None:
         chamber_id = int(data["chamber"])
         pressure = int(data["pressure"])
-        for callback in self._pressure_callbacks:
-            callback(chamber_id, pressure)
+        self._call_callbacks(self._pressure_callbacks, chamber_id, pressure)
 
     def _dispatch_tank_pressure(self, data: dict[str, Any]) -> None:
         kind = str(data["kind"])
         pressure = int(data["pressure"])
-        for callback in self._tank_pressure_callbacks:
-            callback(kind, pressure)
+        self._call_callbacks(self._tank_pressure_callbacks, kind, pressure)
+
+    def _dispatch_magnet(self, data: dict[str, Any]) -> None:
+        self._call_callbacks(self._magnet_callbacks, data)
+
+    def _dispatch_organ(self, data: dict[str, Any]) -> None:
+        if data.get("open"):
+            resistance = float("inf")
+        else:
+            resistance = float(data.get("resistance_ohm", -1.0))
+        slot = int(data.get("slot", 0))
+        self._call_callbacks(self._organ_callbacks, resistance, slot)
 
     def _handle_message(self, data: dict[str, Any]) -> None:
         """Process incoming messages, filtering for this node's MAC."""
@@ -183,6 +278,15 @@ class ESP32Controller:
             if data.get("type") == "debug":
                 logger.info("Debug from %s: %s", self.mac_address, data)
 
+            elif data.get("status") == "node_magnet_sensor_ready":
+                # Cache the magnet sensor board's self-described geometry so subscribers
+                # (skin grid panels, calibration UI, …) can read it later.
+                self._magnet_geometry = {
+                    k: data[k] for k in ("sensors", "magnets", "variant", "geometry")
+                    if k in data
+                }
+                logger.info("magnet sensor ready from %s: %s", self.mac_address, self._magnet_geometry)
+
             elif data.get("type") == "touch":
                 self._dispatch_touch(data)
 
@@ -191,6 +295,12 @@ class ESP32Controller:
 
             elif data.get("type") == "tank_status" and "kind" in data and "pressure" in data:
                 self._dispatch_tank_pressure(data)
+
+            elif data.get("type") == "magnet":
+                self._dispatch_magnet(data)
+
+            elif data.get("type") == "organ":
+                self._dispatch_organ(data)
 
     def __repr__(self) -> str:
         return f"ESP32Controller(mac={self.mac_address!r})"

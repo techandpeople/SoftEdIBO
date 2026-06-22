@@ -1,0 +1,8 @@
+# SoftEdIBO gateway — ESP-IDF defaults (XIAO ESP32-C6).
+#
+# The firmware owns the USB-Serial/JTAG peripheral directly via the
+# usb_serial_jtag driver, so disable the IDF console to avoid contention on it.
+CONFIG_ESP_CONSOLE_NONE=y
+
+# Single-app layout — the gateway has no OTA/data partitions.
+CONFIG_PARTITION_TABLE_SINGLE_APP=y

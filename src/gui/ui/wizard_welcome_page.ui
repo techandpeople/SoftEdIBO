@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>WelcomePage</class>
+ <widget class="QWizardPage" name="WelcomePage">
+  <property name="title"><string>Welcome to SoftEdIBO Setup</string></property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <widget class="QLabel" name="welcome_label">
+     <property name="wordWrap"><bool>true</bool></property>
+     <property name="text"><string>&lt;p&gt;This wizard flashes firmware over USB. Choose what you want to flash:&lt;/p&gt;&lt;p&gt;You can re-run this wizard at any time from &lt;b&gt;Tools =&gt; Flash Firmware…&lt;/b&gt;&lt;/p&gt;</string></property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="choice_group">
+     <property name="title"><string>What do you want to flash?</string></property>
+     <layout class="QVBoxLayout" name="choice_layout">
+      <item>
+       <widget class="QRadioButton" name="rb_both">
+        <property name="text"><string>Gateway and node(s)  (flash the gateway, then one or more nodes)</string></property>
+        <property name="checked"><bool>true</bool></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QRadioButton" name="rb_gateway">
+        <property name="text"><string>Gateway only  (the ESP-NOW gateway board)</string></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QRadioButton" name="rb_node">
+        <property name="text"><string>Node(s) only  (node_direct, node_multiplexed or node_magnet_sensor)</string></property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <spacer name="welcome_spacer">
+     <property name="orientation"><enum>Qt::Vertical</enum></property>
+     <property name="sizeHint" stdset="0"><size><width>20</width><height>40</height></size></property>
+    </spacer>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

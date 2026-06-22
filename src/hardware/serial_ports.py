@@ -24,7 +24,13 @@ def _is_esp32_port(p) -> bool:
     if p.vid in _ESP32_VIDS:
         return True
     desc = (p.description or "").lower()
-    return any(kw in desc for kw in _ESP32_DESC_KEYWORDS)
+    if any(kw in desc for kw in _ESP32_DESC_KEYWORDS):
+        return True
+    # ttyUSB* on Linux are always USB-serial bridges; include them as fallback
+    # when the driver doesn't expose VID (p.vid is None).
+    if sys.platform != "win32" and p.device and "ttyUSB" in p.device:
+        return True
+    return False
 
 
 def list_esp32_ports():

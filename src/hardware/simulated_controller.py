@@ -1,45 +1,81 @@
-"""SimulatedController — mock ESP32 controller for the Simulation activity.
+"""SimulatedController — mock chamber actuator for simulation.
 
-Accepts inflate/deflate commands and animates pressure locally,
-firing pressure callbacks exactly as real hardware would.
-This makes the widget layer completely hardware-agnostic.
+Pure **chamber actuation**: accepts inflate / deflate / set_pressure commands
+(the *targets*) and animates the chamber pressure locally toward them at a
+configurable rate, firing ``on_pressure`` callbacks exactly as real hardware
+would report back the *actual* pressure. This lets the widget / activity layer
+stay hardware-agnostic — swap in an ``ESP32Controller`` and behaviour is
+identical.
 
-Session-level concerns (pause, freeze) are handled by SimulatedRobot,
-not here. This class is a dumb hardware mock.
+Touch / magnet sensor sensing lives in :class:`~src.hardware.simulated_magnet_sensor.SimulatedMagnetSensor`,
+not here, so the two hardware roles (sense vs actuate) stay separate.
+
+Session-level concerns (pause, freeze) are handled by SimulatedRobot.
 """
 
 from __future__ import annotations
 
-from typing import Callable
+import logging
+from typing import Any, Callable
 
 from PySide6.QtCore import QObject, QTimer
 
-from src.hardware.touch_sensor import SensorType, TouchSensor
+logger = logging.getLogger(__name__)
+
+# Defaults for the tunable simulation knobs. Each ``SimulatedController``
+# overrides these from the activity's ``sim_params`` dict when constructed.
+# The rate models the pump speed — real motors differ, so it is configurable.
+_DEFAULT_INFLATE_PCT_PER_S = 33    # → step ~3 every 100 ms tick
+_DEFAULT_DEFLATE_PCT_PER_S = 33
+
+# Internal tick cadence — fixed at 100 ms. The configurable speeds set the
+# step size per tick so the user can dial the rate without changing the timer.
+_TICK_MS = 100
 
 
 class SimulatedController(QObject):
-    """Mock ESP32 controller — responds to inflate/deflate with local pressure animation."""
+    """Mock chamber actuator — animates pressure toward targets at a set rate."""
 
-    _SIM_STEP = 10    # % per tick (300 ms → ~6%/tick)
-    _TICK_MS  = 300
-    _RAMP_STEP_MS   = 50   # target ramp step interval
-    _RAMP_TARGET_STEP = 5   # % per ramp step
-    _TOUCH_INFLATE_MULTIPLIER = 1  # deflate starts after hold_ms × this + 300 ms
-
-    def __init__(self, mac_address: str, parent: QObject | None = None) -> None:
+    def __init__(
+        self,
+        mac_address: str,
+        parent: QObject | None = None,
+        *,
+        sim_params: dict[str, Any] | None = None,
+    ) -> None:
         super().__init__(parent)
         self.mac_address = mac_address
+        # Interface parity with ESP32Controller — Skin consults ``fill_load`` to
+        # scale calibrated fill times. The simulation ignores the resulting
+        # ``ms`` (it models pressure directly), but the attribute must exist.
+        from src.hardware.fill_scaling import FillLoadTracker
+        self.fill_load = FillLoadTracker()
         self._targets:  dict[int, int] = {}
         self._current:  dict[int, int] = {}
         self._max_pressures: dict[int, float] = {}
         self._pressure_callbacks: list[Callable[[int, int], None]] = []
         self._target_callbacks:   list[Callable[[int, int], None]] = []
-        self._touch_callbacks:    list[Callable[[int, int], None]] = []
-        self._touch_sensors:      dict[int, TouchSensor] = {}
-        self._ramp_timers:        dict[int, QTimer] = {}
+        self._organ_callbacks:    list[Callable[[float, int], None]] = []
+        # Simulated organ networks per slot: None = open circuit (cover off).
+        self._organ_resistance: dict[int, float | None] = {}
+
+        # Tunable knobs from the activity preset (Param defaults in
+        # BaseActivity.SIM_PARAMS). Values converted from "%/s" to per-tick
+        # step sizes so the fixed-rate timer can stay simple. The deflate /
+        # inflate rates model real pumps — slower or faster motors — and are
+        # configurable so simulation matches the eventual hardware.
+        params = sim_params or {}
+        self._inflate_step = max(1, round(int(
+            params.get("sim_inflate_speed_pct_per_s",
+                       _DEFAULT_INFLATE_PCT_PER_S)
+        ) * _TICK_MS / 1000))
+        self._deflate_step = max(1, round(int(
+            params.get("sim_deflate_speed_pct_per_s",
+                       _DEFAULT_DEFLATE_PCT_PER_S)
+        ) * _TICK_MS / 1000))
 
         self._timer = QTimer(self)
-        self._timer.setInterval(self._TICK_MS)
+        self._timer.setInterval(_TICK_MS)
         self._timer.timeout.connect(self._tick)
 
     def set_max_pressure(self, chamber: int, max_p: float) -> None:
@@ -50,8 +86,12 @@ class SimulatedController(QObject):
     def is_connected(self) -> bool:
         return True
 
-    def inflate(self, chamber: int, delta: int = 10) -> bool:
-        """Inflate by delta % (relative to current target)."""
+    def inflate(self, chamber: int, delta: int = 10,
+                ms: int | None = None) -> bool:
+        """Inflate by delta % (relative to current target).
+
+        ``ms`` (time-based fill on real hardware) is accepted for interface
+        parity and ignored — the simulation models pressure directly."""
         self._current.setdefault(chamber, 0)
         base = self._targets.get(chamber, self._current[chamber])
         new_target = min(100, base + delta)
@@ -87,7 +127,6 @@ class SimulatedController(QObject):
 
     def hold(self, chamber: int) -> bool:
         """Freeze this chamber at its current pressure."""
-        self._cancel_ramp(chamber)
         current = self._current.get(chamber, 0)
         self._targets[chamber] = current
         for cb in self._target_callbacks:
@@ -112,95 +151,50 @@ class SimulatedController(QObject):
         """Register callback fired whenever a target pressure changes (chamber_id, target)."""
         self._target_callbacks.append(callback)
 
-    def on_touch(self, callback: Callable[[int, int], None]) -> None:
-        self._touch_callbacks.append(callback)
+    def on_organ(self, callback: Callable[[float, int], None]) -> None:
+        """Register a callback for simulated organ-resistance readings.
 
-    def fire_touch(self, sensor_id: int, raw_value: int) -> None:
-        """Simulate a touch sensor reading, firing callbacks if state changes."""
-        if sensor_id not in self._touch_sensors:
-            self._touch_sensors[sensor_id] = TouchSensor(
-                sensor_id=sensor_id,
-                sensor_type=SensorType.CAPACITIVE_COPPER,
-                esp32_mac=self.mac_address,
-                pin=sensor_id,
-            )
-        sensor = self._touch_sensors[sensor_id]
-        if sensor.update(raw_value):
-            for cb in self._touch_callbacks:
-                cb(sensor_id, raw_value)
+        Same contract as ``ESP32Controller.on_organ``: called with
+        ``(resistance_ohm, slot)``; ``float("inf")`` when the cover is off.
+        """
+        self._organ_callbacks.append(callback)
 
-    def simulate_touch_press(self, chamber_id: int) -> None:
-        """Start a gradual inflate ramp while touch is held."""
-        self._cancel_ramp(chamber_id)
+    def sim_set_organ(self, resistance_ohm: float | None, slot: int = 0) -> None:
+        """Drive a simulated organ circuit from the GUI / tests.
 
-        timer = QTimer(self)
-        timer.setInterval(self._RAMP_STEP_MS)
-        self._ramp_timers[chamber_id] = timer
+        ``None`` simulates the cover being off (open circuit); a float is the
+        total parallel resistance of the plugged-in organs with the cover on.
+        Fires ``on_organ`` callbacks exactly like real hardware would.
+        """
+        self._organ_resistance[slot] = resistance_ohm
+        value = float("inf") if resistance_ohm is None else float(resistance_ohm)
+        for cb in self._organ_callbacks:
+            cb(value, slot)
 
-        def _press_tick() -> None:
-            if self._targets.get(chamber_id, 0) >= 100:
-                timer.stop()
-                self._ramp_timers.pop(chamber_id, None)
-                return
-            self.inflate(chamber_id, self._RAMP_TARGET_STEP)
-
-        timer.timeout.connect(_press_tick)
-        timer.start()
-
-    def simulate_touch_release(self, chamber_id: int, hold_ms: int) -> None:
-        """Stop the inflate ramp and schedule a gradual deflate ramp after a delay."""
-        self._cancel_ramp(chamber_id)
-
-        delay = hold_ms * self._TOUCH_INFLATE_MULTIPLIER + 300
-        delay_timer = QTimer(self)
-        delay_timer.setSingleShot(True)
-        delay_timer.setInterval(delay)
-        delay_timer.timeout.connect(lambda: self._start_deflate_ramp(chamber_id))
-        self._ramp_timers[chamber_id] = delay_timer
-        delay_timer.start()
+    def set_led(self, color: str, pattern: str = "solid",
+                period_ms: int = 0, count: int | None = None) -> bool:
+        """No-op shim — simulation has no WS2818 strip but activities call
+        this on enter/exit so we accept and log to keep the code paths
+        symmetric with real hardware."""
+        logger.debug("SIM set_led(%s, pattern=%s, period=%dms, count=%s)",
+                     color, pattern, period_ms, count)
+        return True
 
     def stop_all(self) -> None:
-        """Stop all active timers (animation + ramps). Call on cleanup or pause."""
+        """Stop the animation timer. Call on cleanup or pause."""
         self._timer.stop()
-        for t in list(self._ramp_timers.values()):
-            t.stop()
-        self._ramp_timers.clear()
-
-    def _cancel_ramp(self, chamber_id: int) -> None:
-        """Cancel any ramp (inflate, deflate, or delay) for a single chamber."""
-        old = self._ramp_timers.pop(chamber_id, None)
-        if old is not None:
-            old.stop()
-
-    def _start_deflate_ramp(self, chamber_id: int) -> None:
-        """Start a per-chamber timer that steps target down by _RAMP_TARGET_STEP each tick."""
-        self._cancel_ramp(chamber_id)
-
-        timer = QTimer(self)
-        timer.setInterval(self._RAMP_STEP_MS)
-        self._ramp_timers[chamber_id] = timer
-
-        def _ramp_tick() -> None:
-            if self._targets.get(chamber_id, 0) <= 0:
-                timer.stop()
-                self._ramp_timers.pop(chamber_id, None)
-                return
-            self.deflate(chamber_id, self._RAMP_TARGET_STEP)
-
-        timer.timeout.connect(_ramp_tick)
-        timer.start()
 
     def _tick(self) -> None:
         still_moving = False
-        for chamber_id, target in list(self._targets.items()):
+        for chamber_id, target in self._targets.items():
             current = self._current.get(chamber_id, 0)
             if current == target:
                 continue
             still_moving = True
             if current < target:
-                new_val = min(target, current + self._SIM_STEP)
+                new_val = min(target, current + self._inflate_step)
             else:
-                new_val = max(target, current - self._SIM_STEP)
+                new_val = max(target, current - self._deflate_step)
             self._current[chamber_id] = new_val
             for cb in self._pressure_callbacks:
                 cb(chamber_id, new_val)
