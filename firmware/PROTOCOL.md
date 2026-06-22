@@ -32,8 +32,8 @@ Each command is sent on the serial line as
 | `cmd` | Fields | Notes |
 |---|---|---|
 | `ping` | — | `target:"FF:FF:FF:FF:FF:FF"` does a broadcast scan |
-| `inflate` | `chamber`, `delta` (0–100 %) | |
-| `deflate` | `chamber`, `delta` (0–100 %) | |
+| `inflate` | `chamber`, `delta` (0–100 %), `ms`? | `ms>0` = time-based fill (calibrated), clamped to `MAX_FILL_MS` (5 s); `delta` ignored in that branch |
+| `deflate` | `chamber`, `delta` (0–100 %), `ms`? | Always time-capped by `MAX_DEFLATE_MS` (5 s); `ms` (clamped) overrides the default cap |
 | `set_pressure` | `chamber`, `value` (0–100 %) | |
 | `set_max_pressure` | `chamber`, `value` (kPa) | Stored on the chamber until reboot |
 | `set_min_pressure` | `chamber`, `value` (kPa) | |
@@ -54,7 +54,7 @@ runtime `set_tank_pressure` command; re-send `configure` to change them.
 | `cmd` | Fields | Notes |
 |---|---|---|
 | `rebaseline` | — | Re-zero (recapture the baseline of) all magnetic sensors |
-| `configure` | `fullscale_mt`, `act_threshold` | Tune `adj` normalisation scale + activation level (both optional) |
+| `configure` | `fullscale_mt`, `act_threshold`, `adaptive_baseline`, `baseline_tau_ms` | Tune `adj` scale + activation level; opt-in adaptive baseline (tracks slow drift, frozen per-sensor while active). All optional |
 
 ### Multiplexed-node only
 
