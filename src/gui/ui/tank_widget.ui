@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>TankWidget</class>
+ <widget class="QGroupBox" name="TankWidget">
+  <property name="maximumSize">
+   <size><width>60</width><height>16777215</height></size>
+  </property>
+  <property name="title">
+   <string>Pressure</string>
+  </property>
+  <property name="whatsThis">
+   <string>A shared reservoir tank on a multiplexed node. Pumps keep it filled; chambers inflate/deflate by valving against it. The pressure tank holds positive air; the vacuum tank holds negative pressure for deflation.</string>
+  </property>
+  <layout class="QVBoxLayout" name="layout">
+   <property name="spacing"><number>1</number></property>
+   <property name="leftMargin"><number>2</number></property>
+   <property name="topMargin"><number>2</number></property>
+   <property name="rightMargin"><number>2</number></property>
+   <property name="bottomMargin"><number>2</number></property>
+   <item>
+    <widget class="TankBar" name="bar" native="true">
+     <property name="whatsThis"><string>Live tank level as a percent of its target. Pumps switch on when it drops below target and off once refilled.</string></property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QLabel" name="pressure_lbl">
+     <property name="whatsThis"><string>Current tank pressure as a percent of its configured target.</string></property>
+     <property name="styleSheet"><string notr="true">font-size: 9px;</string></property>
+     <property name="text"><string>0%</string></property>
+     <property name="alignment"><set>Qt::AlignCenter</set></property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QLabel" name="state_lbl">
+     <property name="whatsThis"><string>Pump state for this tank: PUMP (actively refilling) or OFF (at target).</string></property>
+     <property name="styleSheet"><string notr="true">font-size: 9px;</string></property>
+     <property name="text"><string>OFF</string></property>
+     <property name="alignment"><set>Qt::AlignCenter</set></property>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>TankBar</class>
+   <extends>QWidget</extends>
+   <header>src.gui.monitor.tank_bar</header>
+   <container>1</container>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>
