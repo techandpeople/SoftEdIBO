@@ -31,8 +31,20 @@ ESP-NOW/MAC/radio plumbing and the common helpers come from `firmware/common`
 - `se_espnow.h` — ESP-NOW init, peers, send, gateway-MAC tracking (also used by
   the gateway and node_magnet_sensor).
 - `units.h`, `pressure.h`, `dbg.h`, `cmd_queue.h` — shared by both variants.
+- `fill_control.h` — shared fill/deflate **safety policy** (time caps + idle leak
+  maintenance) so the two boards can't drift.
 
 Variant-specific modules (`pins.h`, `chambers.h`, `commands.h`, `mux.h`,
 `pca_valves.h`, `pumps.h`, `config.h`) live under each `src/<variant>/` folder.
 
 See [../PROTOCOL.md](../PROTOCOL.md) for the ESP-NOW command/status protocol.
+
+## Fill / deflate safety
+
+`inflate`/`deflate` take `{chamber, delta, ms}`. `ms>0` = time-based actuation
+(calibrated; bypasses the laggy gauge sensor). Safety caps: inflate `MAX_FILL_MS`
+(5 s, time-based) + `max_kpa` cutoff; **deflate `MAX_DEFLATE_MS` (5 s, always
+armed)** — the deflate pump is active suction and the gauge sensor is blind below
+atmosphere, so time is the only sensor-independent backstop. Both also have
+`HARD_MAX/MIN_KPA` (±12, manual path) and a 10 s actuation watchdog. Full model:
+[../../docs/PRESSURE_AND_FILL_SAFETY.md](../../docs/PRESSURE_AND_FILL_SAFETY.md).

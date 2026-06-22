@@ -43,12 +43,20 @@ S2→Q3 (bottom-left), S3→Q4 (bottom-right)** — matches the PC `QuadrantDete
 {"cmd":"ping"}                                  // -> {"type":"pong"}
 {"cmd":"rebaseline"}                            // re-zero all sensors now
 {"cmd":"configure","fullscale_mt":30,"act_threshold":0.2}
+{"cmd":"configure","adaptive_baseline":true,"baseline_tau_ms":2000}
 ```
 
 ### Baseline (auto-zero)
 Each sensor is auto-zeroed at boot by averaging the first 70 reads. Re-zero at
 runtime with `{"cmd":"rebaseline"}` (e.g. after the silicone settles, or if the
 board was touched during boot). Streaming pauses until the baseline is ready.
+
+**Adaptive baseline (opt-in).** `{"cmd":"configure","adaptive_baseline":true,
+"baseline_tau_ms":2000}` makes the baseline keep tracking slow drift after boot —
+e.g. a chamber inflating under the magnet — so it isn't read as a touch. Frozen
+per-sensor while that sensor is active (real touches survive); EWMA uses the real
+elapsed time, so it's immune to ESP-NOW jitter. Off by default — only enable once
+a coupling sweep confirms actuation contamination. See `docs/TOUCH_COUPLING.md`.
 
 ## Build & flash
 ```bash
