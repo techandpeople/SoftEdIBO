@@ -214,6 +214,7 @@ void parseAndQueue(const uint8_t* data, int len) {
         c.type = cmd_queue::CMD_DEFLATE;
         c.chamber = doc["chamber"] | -1;
         c.param = doc["delta"] | 10;
+        c.fill_ms = doc["ms"] | 0;
     } else if (strcmp(cmd, "set_pressure") == 0) {
         c.type = cmd_queue::CMD_SET_PRESSURE;
         c.chamber = doc["chamber"] | -1;
@@ -421,7 +422,7 @@ void processCommand(const cmd_queue::Cmd& c) {
     case CMD_DEFLATE: {
         float delta  = (ch.max_kpa - ch.min_kpa) * constrain(c.param, 0, 100) / 100.0f;
         float target = max(chambers::cachedKpa[n] - delta, ch.min_kpa);
-        chambers::beginDeflate(n, target);
+        chambers::beginDeflate(n, target, c.fill_ms);
         break;
     }
     case CMD_SET_PRESSURE: {
@@ -683,6 +684,7 @@ void loop() {
     // ---- Time-based fill cutoff (calibrated fill_time; every loop, not gated
     //      by the slow mux pressure cadence) ----
     if (!manualActive) chambers::fillTimeTick(now);
+    if (!manualActive) chambers::deflateTimeTick(now);
 
     // ---- Idle leak maintenance: top up a drooping held chamber (self-throttled) ----
     if (!manualActive) chambers::maintainTick(now);

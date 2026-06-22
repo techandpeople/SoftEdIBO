@@ -121,6 +121,7 @@ void loop() {
 
     // ---- Time-based fill cutoff (calibrated fill_time; checked every loop) ----
     chambers::fillTimeTick(now);
+    chambers::deflateTimeTick(now);
 
     // ---- Idle leak maintenance: top up a drooping held chamber (self-throttled) ----
     chambers::maintainTick(now);
