@@ -62,6 +62,7 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         self.new_session_btn.clicked.connect(self._open_setup_dialog)
         self.pause_btn.clicked.connect(self._on_pause)
         self.stop_btn.clicked.connect(self._on_stop)
+        self.observer_btn.clicked.connect(self._show_observer_panel)
 
         self._monitor = RobotMonitorPanel()
         self._monitor.touch_event.connect(self._on_touch_event)
@@ -114,12 +115,12 @@ class SessionPanel(QWidget, Ui_SessionPanel):
 
         self.session_id_label.setText(record.session_id)
         self.activity_label.setText(record.activity_name)
-        self.robots_label.setText("—")
         self.participants_label.setText(participant_names)
         self.status_label.setText("Status: Running (resumed)")
         self.new_session_btn.setEnabled(False)
         self.pause_btn.setEnabled(True)
         self.stop_btn.setEnabled(True)
+        self.observer_btn.setEnabled(bool(participants))
 
         self._db.log_event(InteractionEvent(
             session_id=record.session_id,
@@ -142,6 +143,10 @@ class SessionPanel(QWidget, Ui_SessionPanel):
             if last_data:
                 self._current_activity.simulation_mode = last_data.get("simulation_mode", False)
             session_robots = self._current_activity.prepare_robots(session_robots)
+        robot_names = (
+            ", ".join(r.robot_id for r in session_robots) if session_robots else "none"
+        )
+        self.robots_label.setText(robot_names)
         self._monitor.set_robots(session_robots)
         sim = self._current_activity.simulation_mode if self._current_activity else False
         self._start_recording(record.session_id, True, sim, session_robots)
@@ -249,6 +254,7 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         self.new_session_btn.setEnabled(False)
         self.pause_btn.setEnabled(True)
         self.stop_btn.setEnabled(True)
+        self.observer_btn.setEnabled(bool(participants))
 
         self._current_activity = activity
         robots = activity.prepare_robots(robots)
@@ -274,8 +280,27 @@ class SessionPanel(QWidget, Ui_SessionPanel):
             activity.event_logger = EventLogger(self._db, session_id)
             activity.setup(session, robots)
             activity.start()
+            self._wire_organ_views(activity)
         except Exception:   # noqa: BLE001 — surface but don't crash the GUI
             logger.exception("Failed to start activity %s", activity.name)
+
+    def _wire_organ_views(self, activity: BaseActivity) -> None:
+        """Route an organ-aware activity's per-skin updates to the monitor's
+        organ display (the skin grid view overlays the organs), so the GUI
+        mirrors each organ's status + the LED light. ``update_state`` is
+        thread-safe (queued signal), so the activity may fire it from the
+        gateway thread."""
+        add_listener = getattr(activity, "add_view_listener", None)
+        if add_listener is None:
+            return
+
+        def _on_update(skin_id: str, state: str, led_color: str,
+                       verdicts: dict) -> None:
+            view = self._monitor.organ_view_for(skin_id)
+            if view is not None:
+                view.update_state(state, led_color, verdicts)
+
+        add_listener(_on_update)
 
     def _check_fill_times(self, robots: list[BaseRobot]) -> bool:
         """Warn when a selected chamber has no calibrated fill time.
@@ -412,7 +437,7 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         all_skins: list[tuple[str, str]] = []
         for robot in robots:
             for skin in getattr(robot, "skins", {}).values():
-                all_skins.append((skin.skin_id, skin.name))
+                all_skins.append((skin.skin_id, skin.skin_id))
                 self._skin_robot[skin.skin_id] = robot.robot_id
 
         if not all_skins:
@@ -459,6 +484,19 @@ class SessionPanel(QWidget, Ui_SessionPanel):
             else:
                 remaining.append((sk, ch))
         self._pending_touches = remaining
+
+    def _show_observer_panel(self) -> None:
+        """Reopen the live-coding window (from the Live Coding button).
+
+        Reuses the existing panel if it is still around — even if the user
+        closed (hid) its window — so observations keep flowing to the same
+        session; only creates a fresh one when there is none."""
+        if self._observer_panel is None:
+            self._open_observer_panel()
+            return
+        self._observer_panel.show()
+        self._observer_panel.raise_()
+        self._observer_panel.activateWindow()
 
     def _open_observer_panel(self) -> None:
         """Open the live behavioral-coding panel for the session's participants.
@@ -596,6 +634,7 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         self.pause_btn.setText("Pause")
         self.pause_btn.setEnabled(False)
         self.stop_btn.setEnabled(False)
+        self.observer_btn.setEnabled(False)
 
         if self._current_activity is not None:
             self._current_activity.stop()

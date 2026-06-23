@@ -141,13 +141,12 @@ def test_delete_skin():
 
 def test_apply_organs_writes_and_drops():
     entry: dict = {"skin_id": "x"}
-    organs = [{"id": "liver", "shape": "ellipse", "rect": [0.1, 0.1, 0.3, 0.3],
-               "good_ohm": 1500, "bad_ohm": 4700}]
+    organs = [{"id": "organ-1", "good_ohm": 1500, "bad_ohm": 4700}]
     skincfg.apply_organs(entry, organs)
     assert entry["organs"] == organs
     # Mutating the source list must not affect the stored copy.
     organs[0]["id"] = "changed"
-    assert entry["organs"][0]["id"] == "liver"
+    assert entry["organs"][0]["id"] == "organ-1"
     # Empty list removes the key.
     skincfg.apply_organs(entry, [])
     assert "organs" not in entry

@@ -37,11 +37,13 @@
     <layout class="QHBoxLayout" name="button_row">
      <item>
       <widget class="QPushButton" name="all_btn">
+       <property name="whatsThis"><string>Run the timing sweep for every chamber in turn. Each is inflated from empty to its max while the sensor times it. Keep hands clear during the run.</string></property>
        <property name="text"><string>Calibrate all</string></property>
       </widget>
      </item>
      <item>
       <widget class="QPushButton" name="stop_btn">
+       <property name="whatsThis"><string>Abort the current calibration immediately and vent the chambers.</string></property>
        <property name="text"><string>⏹ Stop</string></property>
       </widget>
      </item>
@@ -53,6 +55,7 @@
      </item>
      <item>
       <widget class="QPushButton" name="save_btn">
+       <property name="whatsThis"><string>Store the measured fill times into the skin so the activity can use timed filling instead of live pressure control.</string></property>
        <property name="text"><string>Save</string></property>
       </widget>
      </item>

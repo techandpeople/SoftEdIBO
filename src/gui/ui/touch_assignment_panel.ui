@@ -11,6 +11,7 @@
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>
     <widget class="QScrollArea" name="skin_scroll">
+     <property name="whatsThis"><string>The skins waiting to be matched to physical hardware. Touch a skin on the robot and it is assigned to the highlighted entry here, so the layout lines up with the real boards.</string></property>
      <property name="maximumHeight">
       <number>200</number>
      </property>

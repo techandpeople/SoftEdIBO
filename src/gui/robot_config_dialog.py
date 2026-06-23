@@ -234,7 +234,7 @@ class RobotConfigDialog(QDialog, Ui_RobotConfigDialog):
                 slots = sorted(skin.chambers)
                 slot_str = ", ".join(f"Slot {s}" for s in slots)
                 test_layout.addWidget(
-                    QLabel(f"  {skin.name}: {slot_str}")
+                    QLabel(f"  {skin.skin_id}: {slot_str}")
                 )
 
             run_btn = QPushButton("Test Actuators")

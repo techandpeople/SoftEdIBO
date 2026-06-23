@@ -71,6 +71,14 @@ class RobotMonitorPanel(QWidget):
         if robots:
             self._timer.start()
 
+    def organ_view_for(self, skin_id: str):
+        """The organ display (grid view) for a skin across all robots, or None."""
+        for rw in self._robot_widgets:
+            view = rw.organ_view_for(skin_id)
+            if view is not None:
+                return view
+        return None
+
     def set_paused(self, paused: bool) -> None:
         """Enable or disable all interactive buttons in the monitor."""
         for rw in self._robot_widgets:

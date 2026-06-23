@@ -48,6 +48,13 @@ class RobotMonitorWidget(QGroupBox):
         if not skins and not self._tank_widgets:
             layout.addWidget(QLabel(f"{robot.robot_id} — nothing configured"))
 
+    def organ_view_for(self, skin_id: str):
+        """The organ display (grid view) of a skin on this robot, or None."""
+        for sw in self._skin_widgets:
+            if sw.skin_id == skin_id:
+                return sw.organ_view
+        return None
+
     def tick(self) -> None:
         fn = getattr(self._robot, "tick", None)
         if fn is not None:

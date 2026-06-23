@@ -20,6 +20,7 @@
     <layout class="QHBoxLayout" name="marker_row">
      <item>
       <widget class="QPushButton" name="marker_btn">
+       <property name="whatsThis"><string>Drop a timestamped marker into the session log — handy to line up your notes with an external video or to flag a moment of interest.</string></property>
        <property name="text"><string>◉ Marker (sync note)</string></property>
       </widget>
      </item>
@@ -29,10 +30,22 @@
        <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
       </spacer>
      </item>
+     <item>
+      <widget class="HelpButton" name="help_btn">
+       <property name="whatsThis"><string>Toggle help mode for this window — hover any control to see what it does.</string></property>
+      </widget>
+     </item>
     </layout>
    </item>
   </layout>
  </widget>
+ <customwidgets>
+  <customwidget>
+   <class>HelpButton</class>
+   <extends>QToolButton</extends>
+   <header>src.gui.help_mode</header>
+  </customwidget>
+ </customwidgets>
  <resources/>
  <connections/>
 </ui>

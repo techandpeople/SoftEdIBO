@@ -16,6 +16,7 @@ Layout:
 
 from __future__ import annotations
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QButtonGroup,
     QComboBox,
@@ -25,7 +26,6 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QMessageBox,
     QPushButton,
     QRadioButton,
@@ -37,21 +37,10 @@ from PySide6.QtWidgets import (
 from src.config.settings import Settings
 from src.core import skin_config as skincfg
 from src.data.models import SkinTemplate
-from src.gui.organ_shape_editor import OrganShapeEditor
 from src.gui.skin_grid_editor import SkinGridEditor
-from src.gui.skin_shapes import ORGAN_SHAPES
 from src.gui.ui_skin_config_dialog import Ui_SkinConfigDialog
 from src.hardware.espnow_gateway import ESPNowGateway
 from src.hardware.skin_geometry import max_organs_for
-
-# User-facing labels for the organ shape picker.
-_ORGAN_SHAPE_LABELS = {
-    "ellipse": "Ellipse",
-    "rect": "Rectangle",
-    "rect_round": "Rectangle (rounded)",
-    "triangle": "Triangle",
-    "triangle_round": "Triangle (rounded)",
-}
 
 # Domain rules (node lookup, validation, persistence) live in src.core.skin_config;
 # these aliases keep the dialog terse while single-sourcing the values there.
@@ -60,6 +49,8 @@ _MAX_ALLOWED_KPA   = skincfg.MAX_ALLOWED_KPA
 _MAX_CHAMBERS      = skincfg.MAX_CHAMBERS
 _NONE_LABEL        = "(none)"
 _MISSING_FIELD_TITLE = "Missing Field"
+# Silicone variant that carries pluggable organs (organ editor gated on it).
+_ORGAN_VARIANT     = "organ"
 
 
 class _ChamberRow(QWidget):
@@ -137,6 +128,49 @@ class _ChamberRow(QWidget):
             self._slot_spin.setValue(0)
 
 
+class _OrganRow(QWidget):
+    """One organ row: a number label + good/bad resistance spinboxes + remove."""
+
+    removed = Signal(object)   # emits self
+
+    def __init__(self, number: int, good_ohm: float, bad_ohm: float,
+                 parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        hbox = QHBoxLayout(self)
+        hbox.setContentsMargins(0, 0, 0, 0)
+        self._num_label = QLabel()
+        hbox.addWidget(self._num_label)
+        hbox.addWidget(QLabel("Good Ω:"))
+        self._good_spin = self._ohm_spin(
+            good_ohm, "Resistance when the GOOD variant of this organ is on.")
+        hbox.addWidget(self._good_spin)
+        hbox.addWidget(QLabel("Bad Ω:"))
+        self._bad_spin = self._ohm_spin(
+            bad_ohm, "Resistance when the BAD variant of this organ is on.")
+        hbox.addWidget(self._bad_spin)
+        self._remove_btn = QPushButton("✕")
+        self._remove_btn.setFixedSize(24, 24)
+        self._remove_btn.clicked.connect(lambda: self.removed.emit(self))
+        hbox.addWidget(self._remove_btn)
+        self.set_number(number)
+
+    @staticmethod
+    def _ohm_spin(value: float, whats_this: str) -> QDoubleSpinBox:
+        spin = QDoubleSpinBox()
+        spin.setRange(0.0, 1_000_000.0)
+        spin.setDecimals(0)
+        spin.setSingleStep(100.0)
+        spin.setValue(value)
+        spin.setWhatsThis(whats_this)
+        return spin
+
+    def set_number(self, number: int) -> None:
+        self._num_label.setText(f"Organ {number}:")
+
+    def values(self) -> tuple[float, float]:
+        return self._good_spin.value(), self._bad_spin.value()
+
+
 class SkinConfigDialog(QDialog, Ui_SkinConfigDialog):
     """Dialog for adding or editing a single skin entry.
 
@@ -201,6 +235,9 @@ class SkinConfigDialog(QDialog, Ui_SkinConfigDialog):
         self.skin_variant_combo.addItem("(none)", "")
         for sv in known_skin_variants():
             self.skin_variant_combo.addItem(sv, sv)
+        # Organs only exist on the "organ" silicone variant — gate the organ
+        # editor on it (the other variants have no pluggable organ slots).
+        self.skin_variant_combo.currentIndexChanged.connect(self._on_variant_changed)
         if single_type:
             try:
                 self.form.setRowVisible(self.skin_type_combo, False)
@@ -219,7 +256,8 @@ class SkinConfigDialog(QDialog, Ui_SkinConfigDialog):
         # ---- RIGHT COLUMN ----
         # Layout / grid editor — tallest piece, gets its own column.
         self.right_layout.addWidget(self._build_layout_group(), stretch=1)
-        self.right_layout.addWidget(self._build_organ_group())
+        self._organ_group = self._build_organ_group()
+        self.right_layout.addWidget(self._organ_group)
 
         # ---- Action buttons (defined in the .ui) ----
         self.test_btn.setEnabled(gateway.is_connected)
@@ -261,8 +299,9 @@ class SkinConfigDialog(QDialog, Ui_SkinConfigDialog):
         self._populate_dims(skin_cfg.get("grid") or {}, touch_cfg.get("grid"))
         self._grid.set_chamber_grid(skin_cfg.get("chamber_grid"))
         self._grid.set_sensor_grid(touch_cfg.get("sensor_grid"))
-        self._organ_editor.set_organs(skin_cfg.get("organs"))
+        self._load_organs(skin_cfg.get("organs"))
         self._sync_organ_geometry()
+        self._on_variant_changed()
         self._rebuild_palette()
 
     def _populate_chambers(self, skin_cfg: dict) -> None:
@@ -627,116 +666,85 @@ class SkinConfigDialog(QDialog, Ui_SkinConfigDialog):
         return group
 
     def _build_organ_group(self) -> QGroupBox:
-        """Editor for the pluggable organ shapes drawn on this skin (hospital
-        study). Each shape is one organ with a good/bad resistance; the live
-        view colours them green/red/absent from the measured resistance."""
+        """Simple list of the pluggable organs on this skin (hospital study):
+        one row per organ with its good/bad resistance. The monitor shows each
+        organ as a numbered dot (green=good, red=bad, empty=absent) beside the
+        skin grid. Only the organ silicone variant has organs."""
         group = QGroupBox("Organs (optional)")
         group.setWhatsThis(
-            "Define the pluggable organs shown on this skin. Add a shape per "
-            "organ, drag it where the physical organ sits, and set the "
-            "resistance of its good and bad variants. During an Organ Swap "
-            "activity each shape is filled green (good), red (bad) or left "
-            "empty (absent), inferred from the skin's organ-circuit resistance. "
-            "Choose good/bad resistances that are well separated so the parallel "
-            "totals of different organ combinations don't overlap.")
+            "List the pluggable organs on this skin — one row per organ with the "
+            "resistance of its good and bad variants. In the monitor each organ "
+            "shows as a numbered dot (green = good, red = bad, empty = absent), "
+            "inferred from the skin's organ-circuit resistance. Choose good/bad "
+            "resistances well separated so different organ combinations don't "
+            "overlap. Available only on the 'organ' skin variant.")
         v = QVBoxLayout(group)
+        v.addWidget(QLabel(
+            "<i>Each organ is a numbered dot in the monitor: "
+            "green = good, red = bad, empty outline = absent.</i>"))
 
-        controls = QHBoxLayout()
-        controls.addWidget(QLabel("Shape:"))
-        self._organ_shape_combo = QComboBox()
-        for shape in ORGAN_SHAPES:
-            self._organ_shape_combo.addItem(_ORGAN_SHAPE_LABELS.get(shape, shape),
-                                            shape)
-        self._organ_shape_combo.setWhatsThis("Shape used when adding a new organ.")
-        controls.addWidget(self._organ_shape_combo, stretch=1)
+        self._organ_rows: list[_OrganRow] = []
+        self._organ_rows_layout = QVBoxLayout()
+        v.addLayout(self._organ_rows_layout)
+
         self._add_organ_btn = QPushButton("+ Add organ")
-        self._add_organ_btn.setWhatsThis("Add an organ of the selected shape.")
+        self._add_organ_btn.setWhatsThis("Add another organ to this skin.")
         self._add_organ_btn.clicked.connect(self._on_add_organ)
-        controls.addWidget(self._add_organ_btn)
-        self._remove_organ_btn = QPushButton("Remove")
-        self._remove_organ_btn.setWhatsThis("Remove the selected organ.")
-        self._remove_organ_btn.clicked.connect(
-            lambda: self._organ_editor.remove_selected())
-        controls.addWidget(self._remove_organ_btn)
-        v.addLayout(controls)
-
-        self._organ_editor = OrganShapeEditor()
-        self._organ_editor.selection_changed.connect(self._on_organ_selected)
-        # Re-evaluate the add-button cap whenever organs are added/removed.
-        self._organ_editor.changed.connect(self._refresh_organ_cap)
-        v.addWidget(self._organ_editor, stretch=1)
-
-        # Per-organ fields for the current selection.
-        self._organ_form = QFormLayout()
-        self._organ_id_edit = QLineEdit()
-        self._organ_id_edit.setWhatsThis("Identifier of this organ (e.g. liver).")
-        self._organ_id_edit.editingFinished.connect(self._on_organ_field_changed)
-        self._organ_good_spin = self._make_ohm_spin(
-            "Resistance read when the GOOD variant of this organ is plugged in.")
-        self._organ_bad_spin = self._make_ohm_spin(
-            "Resistance read when the BAD variant of this organ is plugged in.")
-        self._organ_good_spin.valueChanged.connect(self._on_organ_field_changed)
-        self._organ_bad_spin.valueChanged.connect(self._on_organ_field_changed)
-        self._organ_form.addRow("Organ ID:", self._organ_id_edit)
-        self._organ_form.addRow("Good (Ω):", self._organ_good_spin)
-        self._organ_form.addRow("Bad (Ω):", self._organ_bad_spin)
-        v.addLayout(self._organ_form)
-        self._set_organ_form_enabled(False)
+        v.addWidget(self._add_organ_btn)
         return group
-
-    @staticmethod
-    def _make_ohm_spin(whats_this: str) -> QDoubleSpinBox:
-        spin = QDoubleSpinBox()
-        spin.setRange(0.0, 1_000_000.0)
-        spin.setDecimals(0)
-        spin.setSingleStep(100.0)
-        spin.setWhatsThis(whats_this)
-        return spin
 
     def _on_add_organ(self) -> None:
         cap = max_organs_for(self.skin_type_combo.currentData())
-        if len(self._organ_editor.organs()) >= cap:
+        if len(self._organ_rows) >= cap:
             QMessageBox.information(
                 self, "Organ limit",
                 f"This skin type allows at most {cap} organ(s).")
             return
-        shape = self._organ_shape_combo.currentData()
-        organ_id = self._next_organ_id()
-        self._organ_editor.add_organ(shape, organ_id)
+        self._add_organ_row()
 
-    def _next_organ_id(self) -> str:
-        existing = {o.get("id") for o in self._organ_editor.organs()}
-        i = 1
-        while f"organ-{i}" in existing:
-            i += 1
-        return f"organ-{i}"
+    def _add_organ_row(self, good_ohm: float = 1500.0,
+                       bad_ohm: float = 4700.0) -> None:
+        row = _OrganRow(len(self._organ_rows) + 1, good_ohm, bad_ohm)
+        row.removed.connect(self._remove_organ_row)
+        self._organ_rows.append(row)
+        self._organ_rows_layout.addWidget(row)
+        self._refresh_organ_cap()
 
-    def _on_organ_selected(self, index: int) -> None:
-        organ = self._organ_editor.selected_organ()
-        self._set_organ_form_enabled(organ is not None)
-        if organ is None:
+    def _remove_organ_row(self, row: "_OrganRow") -> None:
+        if row not in self._organ_rows:
             return
-        for w in (self._organ_id_edit, self._organ_good_spin, self._organ_bad_spin):
-            w.blockSignals(True)
-        self._organ_id_edit.setText(str(organ.get("id", "")))
-        self._organ_good_spin.setValue(float(organ.get("good_ohm", 0) or 0))
-        self._organ_bad_spin.setValue(float(organ.get("bad_ohm", 0) or 0))
-        for w in (self._organ_id_edit, self._organ_good_spin, self._organ_bad_spin):
-            w.blockSignals(False)
+        self._organ_rows.remove(row)
+        self._organ_rows_layout.removeWidget(row)
+        row.deleteLater()
+        for i, r in enumerate(self._organ_rows):
+            r.set_number(i + 1)
+        self._refresh_organ_cap()
 
-    def _on_organ_field_changed(self, *_args) -> None:
-        if self._organ_editor.selected_organ() is None:
-            return
-        self._organ_editor.update_selected(
-            id=self._organ_id_edit.text().strip(),
-            good_ohm=self._organ_good_spin.value(),
-            bad_ohm=self._organ_bad_spin.value(),
-        )
+    def _load_organs(self, organs: list[dict] | None) -> None:
+        """Replace the organ rows from a saved skin entry."""
+        for row in list(self._organ_rows):
+            self._remove_organ_row(row)
+        for o in organs or []:
+            self._add_organ_row(float(o.get("good_ohm", 0) or 0),
+                                float(o.get("bad_ohm", 0) or 0))
 
-    def _set_organ_form_enabled(self, enabled: bool) -> None:
-        for w in (self._organ_id_edit, self._organ_good_spin,
-                  self._organ_bad_spin, self._remove_organ_btn):
-            w.setEnabled(enabled)
+    def _organs_from_rows(self) -> list[dict]:
+        """Collect the organ rows as ``{id, good_ohm, bad_ohm}`` (id = order)."""
+        out: list[dict] = []
+        for i, row in enumerate(self._organ_rows):
+            good, bad = row.values()
+            out.append({"id": f"organ-{i + 1}",
+                        "good_ohm": good, "bad_ohm": bad})
+        return out
+
+    def _on_variant_changed(self, _index: int = 0) -> None:
+        """Organs only exist on the ``organ`` silicone variant — enable the
+        organ list only then."""
+        is_organ = self.skin_variant_combo.currentData() == _ORGAN_VARIANT
+        self._organ_group.setEnabled(is_organ)
+        self._organ_group.setToolTip(
+            "" if is_organ
+            else "Organs are only available on the 'organ' skin variant.")
 
     def _on_dims_changed(self, _value: int) -> None:
         """Spinbox edited → resize the layer currently being edited."""
@@ -795,23 +803,15 @@ class SkinConfigDialog(QDialog, Ui_SkinConfigDialog):
         self._sync_organ_geometry()
 
     def _sync_organ_geometry(self) -> None:
-        """Mirror the skin's outline + aspect ratio onto the organ editor and
-        update the add-button against the skin type's organ cap."""
-        if not hasattr(self, "_organ_editor"):
-            return
-        from src.hardware.skin_geometry import geometry_for
-        skin_type = self.skin_type_combo.currentData()
-        geo = geometry_for(skin_type)
-        if geo is not None:
-            self._organ_editor.set_geometry(geo.shape, geo.size_mm)
-        else:
-            self._organ_editor.set_geometry(self._grid.shape(), None)
-        self._refresh_organ_cap()
+        """Refresh the add-button against the skin type's organ cap (the cap
+        depends on the skin type, which may change after the rows are built)."""
+        if hasattr(self, "_add_organ_btn"):
+            self._refresh_organ_cap()
 
     def _refresh_organ_cap(self) -> None:
         """Enable 'Add organ' only while under the skin type's organ cap."""
         cap = max_organs_for(self.skin_type_combo.currentData())
-        self._add_organ_btn.setEnabled(len(self._organ_editor.organs()) < cap)
+        self._add_organ_btn.setEnabled(len(self._organ_rows) < cap)
 
     def _apply_layout_and_touch(self, skin_entry: dict) -> None:
         """Persist grid + touch fields onto ``skin_entry`` (only when used)."""
@@ -1023,7 +1023,9 @@ class SkinConfigDialog(QDialog, Ui_SkinConfigDialog):
         skin_entry = skincfg.build_skin_entry(
             skin_id, chambers, skin_type, skin_variant)
         self._apply_layout_and_touch(skin_entry)
-        skincfg.apply_organs(skin_entry, self._organ_editor.organs())
+        # Organs are only meaningful on the organ variant; drop them otherwise.
+        organs = self._organs_from_rows() if skin_variant == _ORGAN_VARIANT else []
+        skincfg.apply_organs(skin_entry, organs)
 
         skincfg.save_skin_entry(
             self._settings.data, self._robot_type, self._robot_index,

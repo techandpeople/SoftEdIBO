@@ -14,6 +14,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QGroupBox, QHBoxLayout, QSizePolicy, QVBoxLayout
 
 from src.gui.monitor.chamber_widget import ChamberWidget
+from src.gui.monitor.organ_panel import OrganPanel
 from src.gui.monitor.skin_grid_view import SkinGridView
 from src.gui.monitor.touch_tuning_panel import TouchTuningPanel
 from src.hardware.skin import Skin
@@ -27,11 +28,13 @@ class SkinWidget(QGroupBox):
     _touch_log    = Signal(int, str)       # thread-safe bridge → touch_event log
 
     def __init__(self, skin: Skin) -> None:
-        super().__init__(skin.name)
+        super().__init__(skin.skin_id)
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         self._skin_id = skin.skin_id
+        self._has_organs = bool(getattr(skin, "organs", None))
         self._chamber_widgets: list[ChamberWidget] = []
         self._grid_view: SkinGridView | None = None
+        self._organ_panel: OrganPanel | None = None
 
         # Bubble skin sensor touches up as touch_event so the session panel logs
         # them. The Skin's TouchEventRouter fires on the gateway thread, so hop
@@ -43,10 +46,13 @@ class SkinWidget(QGroupBox):
         outer.setContentsMargins(2, 2, 2, 2)
         outer.setSpacing(2)
 
-        # Spatial view (only when the skin has a configured chamber_grid).
+        # Top row: spatial grid view (chambers) and, beside it, the organ
+        # status panel (numbered dots + LED light) when the skin has organs.
+        top = QHBoxLayout()
+        top.setSpacing(6)
         if skin.chamber_grid:
             self._grid_view = SkinGridView(skin)
-            outer.addWidget(self._grid_view, alignment=Qt.AlignmentFlag.AlignCenter)
+            top.addWidget(self._grid_view, alignment=Qt.AlignmentFlag.AlignCenter)
             # Mirror real-hardware touch events as yellow pulses on the grid.
             # Use a Signal bridge so the gateway thread never calls Qt directly.
             touch_ctrl = getattr(skin, "touch_controller", None)
@@ -60,6 +66,11 @@ class SkinWidget(QGroupBox):
                         Qt.ConnectionType.QueuedConnection,
                     )
                     on_touch(lambda sensor_id, _raw: self._sensor_pulse.emit(sensor_id))
+        if self._has_organs:
+            self._organ_panel = OrganPanel(skin)
+            top.addWidget(self._organ_panel, alignment=Qt.AlignmentFlag.AlignTop)
+        if self._grid_view is not None or self._organ_panel is not None:
+            outer.addLayout(top)
 
         # Live tuning panel for skins with 4-sensor quadrant touch detection.
         # Keep it compact: it must NOT stretch to the (now wider) grid view's
@@ -92,6 +103,16 @@ class SkinWidget(QGroupBox):
         the chamber's cells (simulation T-button, or hardware tap)."""
         if action == "press" and self._grid_view is not None:
             self._grid_view.pulse_chamber(chamber_id)
+
+    @property
+    def skin_id(self) -> str:
+        return self._skin_id
+
+    @property
+    def organ_view(self) -> OrganPanel | None:
+        """The organ status panel (numbered dots + LED) for this skin, or None
+        when the skin has no organs."""
+        return self._organ_panel
 
     def set_paused(self, paused: bool) -> None:
         for cw in self._chamber_widgets:

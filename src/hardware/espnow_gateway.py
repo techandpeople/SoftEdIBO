@@ -30,6 +30,9 @@ class ESPNowGateway:
         self._read_thread: threading.Thread | None = None
         # WeakMethod refs so old controllers are GC'd after robot reconfiguration.
         self._callbacks: list[weakref.ref] = []
+        # Strong refs to raw serial taps (e.g. the serial monitor). Held strongly
+        # because the consumer deregisters explicitly when it closes.
+        self._raw_callbacks: list[Callable[[str, str], None]] = []
         self._logged_disconnected = False
         self._known_macs: set[str] = set()
 
@@ -84,12 +87,30 @@ class ESPNowGateway:
 
         message = {"target": target_mac, "cmd": command, **kwargs}
         try:
-            line = json.dumps(message) + "\n"
-            self._serial.write(line.encode("utf-8"))
+            line = json.dumps(message)
+            self._serial.write((line + "\n").encode("utf-8"))
             logger.debug("Sent to %s: %s", target_mac, command)
+            self._emit_raw("tx", line)
             return True
         except serial.SerialException:
             logger.exception("Failed to send command to %s", target_mac)
+            return False
+
+    def send_raw(self, text: str) -> bool:
+        """Write a raw line to the gateway serial port.
+
+        Used by the serial monitor to send arbitrary commands the structured
+        :meth:`send` API can't express. A trailing newline is added if missing.
+        """
+        if not self.is_connected:
+            return False
+        line = text if text.endswith("\n") else text + "\n"
+        try:
+            self._serial.write(line.encode("utf-8"))
+            self._emit_raw("tx", line.rstrip("\n"))
+            return True
+        except serial.SerialException:
+            logger.exception("Failed to send raw serial line")
             return False
 
     def scan(self) -> None:
@@ -110,10 +131,33 @@ class ESPNowGateway:
             wr for wr in self._callbacks if wr() is not None and wr() != callback
         ]
 
+    def on_raw(self, callback: Callable[[str, str], None]) -> None:
+        """Register a tap for raw serial traffic.
+
+        ``callback(direction, text)`` is invoked for every complete line, where
+        ``direction`` is ``"rx"`` (from the gateway) or ``"tx"`` (sent by us).
+        RX callbacks fire on the serial read thread, so consumers that touch the
+        GUI must marshal to the GUI thread (e.g. via a Qt signal).
+        """
+        self._raw_callbacks.append(callback)
+
+    def remove_raw_callback(self, callback: Callable[[str, str], None]) -> None:
+        """Deregister a tap previously passed to :meth:`on_raw`."""
+        if callback in self._raw_callbacks:
+            self._raw_callbacks.remove(callback)
+
+    def _emit_raw(self, direction: str, text: str) -> None:
+        for cb in list(self._raw_callbacks):
+            try:
+                cb(direction, text)
+            except Exception:
+                logger.exception("Raw serial tap callback failed")
+
     def _dispatch_line(self, raw: bytes) -> None:
         """Parse one complete line and fan it out to registered callbacks."""
         if not raw.strip():
             return
+        self._emit_raw("rx", raw.decode("utf-8", errors="replace").rstrip("\r\n"))
         try:
             data = json.loads(raw.decode("utf-8").strip())
         except (json.JSONDecodeError, UnicodeDecodeError):

@@ -5,7 +5,7 @@ import os
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QApplication,
@@ -23,6 +23,7 @@ from src.updater import AppUpdater
 from src.data.database import Database
 from src.gui.async_task import run_async
 from src.gui.data_panel import DataPanel
+from src.gui.help_mode import HelpButton
 from src.gui.home_panel import HomePanel
 from src.gui.participant_panel import ParticipantPanel
 from src.gui.robot_panel import RobotPanel
@@ -107,6 +108,11 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.actionCalibrateFill = QAction("Calibrate Fill Times…", self)
         self.actionCalibrateFill.triggered.connect(self._open_fill_calibration)
         self.menuTools.addAction(self.actionCalibrateFill)
+
+        # "?" help-mode toggle in the menu-bar corner — hover any field to see
+        # what it does. Reusable across windows (see src/gui/help_mode.py).
+        self._help_button = HelpButton(self)
+        self.menubar.setCornerWidget(self._help_button, Qt.TopRightCorner)
 
         # Track whether a session is live so OTA can refuse mid-actuation.
         self._session_active = False
