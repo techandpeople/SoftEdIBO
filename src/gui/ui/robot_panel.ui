@@ -9,9 +9,11 @@
    <item>
     <widget class="QGroupBox" name="gateway_group">
      <property name="title"><string>ESP-NOW Gateway</string></property>
+     <property name="whatsThis"><string>The USB gateway board that bridges this PC to the wireless nodes over ESP-NOW. Connect it before configuring robots or starting a session.</string></property>
      <layout class="QHBoxLayout" name="gateway_layout">
       <item>
        <widget class="QComboBox" name="port_combo">
+        <property name="whatsThis"><string>Serial port the gateway board is plugged into. Use the ↺ button to rescan if it is missing.</string></property>
         <property name="minimumWidth"><number>140</number></property>
        </widget>
       </item>
@@ -24,6 +26,7 @@
       </item>
       <item>
        <widget class="QComboBox" name="baud_rate_combo">
+        <property name="whatsThis"><string>Serial speed for the gateway link. Must match the firmware (921600 for the current gateway). Change only if you know the board uses a different rate.</string></property>
         <item><property name="text"><string>9600</string></property></item>
         <item><property name="text"><string>57600</string></property></item>
         <item><property name="text"><string>115200</string></property></item>
@@ -43,13 +46,21 @@
       </item>
       <item>
        <widget class="QPushButton" name="connect_btn">
+        <property name="whatsThis"><string>Open (or close) the serial link to the gateway on the selected port. Most other actions stay disabled until this succeeds.</string></property>
         <property name="text"><string>Connect</string></property>
        </widget>
       </item>
       <item>
        <widget class="QPushButton" name="scan_btn">
+        <property name="whatsThis"><string>Ask the gateway which nodes are reachable over ESP-NOW right now. Use it to confirm a board is powered and in range before assigning it to a robot.</string></property>
         <property name="text"><string>Scan Nodes</string></property>
         <property name="enabled"><bool>false</bool></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="serial_monitor_btn">
+        <property name="whatsThis"><string>Open a raw serial debugging terminal showing live traffic to and from the gateway, with an input box for sending arbitrary lines.</string></property>
+        <property name="text"><string>Serial Monitor…</string></property>
        </widget>
       </item>
      </layout>
@@ -58,6 +69,7 @@
    <item>
     <widget class="QGroupBox" name="turtle_group">
      <property name="title"><string>Turtles</string></property>
+     <property name="whatsThis"><string>Configured Turtle robots and their skins/nodes. Expand a robot to edit its skins, or use the row actions to test and configure it.</string></property>
      <layout class="QVBoxLayout" name="turtle_layout">
       <item>
        <widget class="QTreeWidget" name="turtle_tree">
@@ -69,6 +81,7 @@
       </item>
       <item>
        <widget class="QPushButton" name="add_turtle_btn">
+        <property name="whatsThis"><string>Create a new Turtle robot and open its configuration to add skins and nodes.</string></property>
         <property name="text"><string>+ Add Robot</string></property>
        </widget>
       </item>
@@ -78,6 +91,7 @@
    <item>
     <widget class="QGroupBox" name="tree_group">
      <property name="title"><string>Trees</string></property>
+     <property name="whatsThis"><string>Configured Tree robots and their skins/nodes. Expand a robot to edit its skins, or use the row actions to test and configure it.</string></property>
      <layout class="QVBoxLayout" name="tree_layout">
       <item>
        <widget class="QTreeWidget" name="tree_tree">
@@ -89,6 +103,7 @@
       </item>
       <item>
        <widget class="QPushButton" name="add_tree_btn">
+        <property name="whatsThis"><string>Create a new Tree robot and open its configuration to add skins and nodes.</string></property>
         <property name="text"><string>+ Add Robot</string></property>
        </widget>
       </item>
@@ -98,6 +113,7 @@
    <item>
     <widget class="QGroupBox" name="thymio_group">
      <property name="title"><string>Thymios</string></property>
+     <property name="whatsThis"><string>Configured Thymio robots. Expand a robot to edit its skins, or use the row actions to test and configure it.</string></property>
      <layout class="QVBoxLayout" name="thymio_layout">
       <item>
        <widget class="QTreeWidget" name="thymio_tree">
@@ -109,6 +125,7 @@
       </item>
       <item>
        <widget class="QPushButton" name="add_thymio_btn">
+        <property name="whatsThis"><string>Create a new Thymio robot and open its configuration.</string></property>
         <property name="text"><string>+ Add Thymio</string></property>
        </widget>
       </item>

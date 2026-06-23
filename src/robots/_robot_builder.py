@@ -124,7 +124,7 @@ def build_skins(
     Args:
         skin_configs:  List of skin dicts::
 
-            [{"skin_id": "belly", "name": "Belly",
+            [{"skin_id": "belly",
               "chambers": [{"mac": "AA:BB:...", "slot": 0, "max_pressure": 8.0}, ...]},
              ...]
 
@@ -181,13 +181,13 @@ def _build_one_skin(skin_cfg: dict[str, Any],
     return Skin(
         skin_id=skin_id,
         chamber_inputs=chamber_inputs,
-        name=skin_cfg.get("name"),
         grid=skin_cfg.get("grid"),
         chamber_grid=skin_cfg.get("chamber_grid"),
         touch=skin_cfg.get("touch"),
         touch_controller=touch_ctrl,
         shape=skin_cfg.get("shape", "rect"),
         organ=skin_cfg.get("organ"),
+        organs=skin_cfg.get("organs"),
         skin_type=skin_cfg.get("skin_type", ""),
         skin_variant=skin_cfg.get("skin_variant", ""),
     )

@@ -24,11 +24,13 @@
    </item>
    <item>
     <widget class="QCheckBox" name="debug_check">
+     <property name="whatsThis"><string>Flash the debug firmware instead of the release build. Debug adds verbose Serial logging; use it for troubleshooting, the release build for normal use.</string></property>
      <property name="text"><string>Debug build (verbose Serial output)</string></property>
     </widget>
    </item>
    <item>
     <widget class="QTableWidget" name="table">
+     <property name="whatsThis"><string>Configured nodes and whether each is reachable over ESP-NOW. Tick the ones to update; Progress and Status fill in during flashing. Only online nodes can be flashed.</string></property>
      <column><property name="text"><string/></property></column>
      <column><property name="text"><string>MAC</string></property></column>
      <column><property name="text"><string>Type</string></property></column>
@@ -41,6 +43,7 @@
     <layout class="QHBoxLayout" name="button_row">
      <item>
       <widget class="QPushButton" name="select_all_btn">
+       <property name="whatsThis"><string>Tick every node currently shown as online.</string></property>
        <property name="text"><string>Select online</string></property>
       </widget>
      </item>
@@ -52,6 +55,7 @@
      </item>
      <item>
       <widget class="QPushButton" name="flash_btn">
+       <property name="whatsThis"><string>Start the over-the-air update for the ticked nodes. Keep the gateway connected and the nodes powered until it finishes — interrupting a flash can brick a node.</string></property>
        <property name="text"><string>Flash selected</string></property>
       </widget>
      </item>

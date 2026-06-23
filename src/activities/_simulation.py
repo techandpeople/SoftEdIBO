@@ -24,9 +24,9 @@ def wrap_robots_in_simulation(
 ) -> list[BaseRobot]:
     """Return a list of SimulatedRobot mirroring each input robot.
 
-    Skin layouts (``grid`` / ``chamber_grid`` / ``touch``) are forwarded so
-    the activity-time view (``SkinGridView``) renders the same chamber zones
-    in simulation as on real hardware.
+    Skin layouts (``grid`` / ``chamber_grid`` / ``touch`` / ``organs``) are
+    forwarded so the activity-time view (``SkinGridView``) renders the same
+    chamber zones + organ shapes in simulation as on real hardware.
 
     ``sim_params`` is the activity's live ``param_values`` (or the subset that
     starts with ``sim_``). When given, the relevant keys are forwarded to
@@ -41,13 +41,13 @@ def wrap_robots_in_simulation(
         skin_configs = [
             {
                 "skin_id":      skin.skin_id,
-                "name":         skin.name,
                 "chambers":     skin.chamber_defs,
                 "grid":         skin.grid,
                 "chamber_grid": skin.chamber_grid,
                 "touch":        skin.touch,
                 "shape":        skin.shape,
                 "organ":        getattr(skin, "organ", None),
+                "organs":       getattr(skin, "organs", None),
                 "skin_type":    getattr(skin, "skin_type", ""),
                 "skin_variant": getattr(skin, "skin_variant", ""),
             }

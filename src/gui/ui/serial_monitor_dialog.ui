@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>SerialMonitorDialog</class>
+ <widget class="QDialog" name="SerialMonitorDialog">
+  <property name="geometry">
+   <rect><x>0</x><y>0</y><width>640</width><height>460</height></rect>
+  </property>
+  <property name="windowTitle"><string>Serial Monitor</string></property>
+  <property name="whatsThis"><string>Live view of the raw serial traffic to and from the ESP-NOW gateway. Incoming gateway lines are shown as received; lines you send are echoed with a » marker. Type a raw line below and press Enter to send it — useful for poking the gateway with commands the structured UI can't express.</string></property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <widget class="QPlainTextEdit" name="output">
+     <property name="whatsThis"><string>Raw serial log. « lines come from the gateway, » lines were sent by this app.</string></property>
+     <property name="readOnly"><bool>true</bool></property>
+     <property name="lineWrapMode"><enum>QPlainTextEdit::NoWrap</enum></property>
+     <property name="maximumBlockCount"><number>5000</number></property>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="input_row">
+     <item>
+      <widget class="QLineEdit" name="input_edit">
+       <property name="whatsThis"><string>Raw line to send to the gateway. A newline is appended automatically. Example: {"target":"FF:FF:FF:FF:FF:FF","cmd":"ping"}</string></property>
+       <property name="placeholderText"><string>Type a raw line and press Enter…</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="send_btn">
+       <property name="whatsThis"><string>Send the typed line to the gateway over serial.</string></property>
+       <property name="text"><string>Send</string></property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="control_row">
+     <item>
+      <widget class="QLabel" name="status_label">
+       <property name="text"><string>Disconnected</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QCheckBox" name="autoscroll_check">
+       <property name="whatsThis"><string>Keep the view pinned to the newest line as data arrives.</string></property>
+       <property name="text"><string>Auto-scroll</string></property>
+       <property name="checked"><bool>true</bool></property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="control_spacer">
+       <property name="orientation"><enum>Qt::Horizontal</enum></property>
+       <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="QPushButton" name="clear_btn">
+       <property name="whatsThis"><string>Clear the log view. Does not affect the gateway.</string></property>
+       <property name="text"><string>Clear</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="close_btn">
+       <property name="text"><string>Close</string></property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

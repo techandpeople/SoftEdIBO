@@ -15,6 +15,7 @@
      </item>
      <item>
       <widget class="QComboBox" name="port_combo">
+       <property name="whatsThis"><string>Serial port of the board being flashed over USB. Plug the board in and press Refresh if it is missing.</string></property>
        <property name="minimumSize">
         <size><width>180</width><height>0</height></size>
        </property>
@@ -37,6 +38,7 @@
     <layout class="QHBoxLayout" name="btn_row">
      <item>
       <widget class="QPushButton" name="flash_btn">
+       <property name="whatsThis"><string>Write the firmware to the board over USB. Do not unplug it until the log reports success. Progress and output appear below.</string></property>
        <property name="text"><string>Flash Firmware</string></property>
       </widget>
      </item>

@@ -17,6 +17,7 @@
    </item>
    <item>
     <widget class="QScrollArea" name="scroll_area">
+     <property name="whatsThis"><string>Map each robot unit (a Turtle's skin or a Tree's branch) to the participant responsible for it, so recorded events are attributed to the right child.</string></property>
      <property name="widgetResizable"><bool>true</bool></property>
      <widget class="QWidget" name="container">
       <layout class="QVBoxLayout" name="container_layout"/>
