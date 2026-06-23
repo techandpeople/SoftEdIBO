@@ -170,19 +170,13 @@ def test_matcher_per_organ_falls_back_to_aggregate_without_catalogue():
     assert matcher.is_cured(510.0)
 
 
-def test_matcher_from_params_uses_organ_swap_defaults():
-    from src.activities.organ_swap import OrganSwapActivity
-    activity = OrganSwapActivity()
-    matcher = OrganMatcher.from_params(activity.param_values)
-    assert matcher.is_cured(952.4)
-
-
 # ---------------------------------------------------------------------------
 # OrganSwapActivity state machine + event logging
 # ---------------------------------------------------------------------------
 
 class _FakeSkin:
-    def __init__(self, skin_id="skin-1", controller=None, organ=None):
+    def __init__(self, skin_id="skin-1", controller=None, organ=None,
+                 organs=None):
         self.skin_id = skin_id
         self.chambers = {0: object(), 1: object()}
         self.pressures: list[tuple[int, int]] = []
@@ -190,6 +184,7 @@ class _FakeSkin:
         self.touch_controller = None
         self._ctrl = controller
         self.organ = organ
+        self.organs = organs or []
 
     def set_pressure(self, chamber_id, value):
         self.pressures.append((chamber_id, value))
@@ -213,8 +208,14 @@ def _make_activity():
     from src.core.session import Session
 
     ctrl = _StubController()
-    robot = _FakeRobot(ctrl)
+    # Cure decisions read the organ shapes (good/bad resistance) off the SKIN.
+    skin = _FakeSkin("skin-1", controller=ctrl,
+                     organs=[{"id": "o1", "good_ohm": 1500, "bad_ohm": 4700}])
+    robot = _FakeRobot(ctrl, skins=[skin])
     activity = OrganSwapActivity()
+    activity.apply_preset({"cure_good_organ_count": 1,
+                           "cure_requires_no_bad": True,
+                           "cured_tolerance_ohm": 80.0})
     activity.event_logger = MagicMock()
     activity._setup(Session("S001", activity), [robot])
     return activity, ctrl, robot, (STATE_SICK, STATE_OPEN, STATE_CURED)
@@ -229,13 +230,13 @@ def test_organ_swap_transitions_sick_open_cured():
     # Entering OPEN deflates the patient
     assert (0, 0) in robot.skins["skin-1"].pressures
 
-    ctrl.fire(4700.0)                # cover on, wrong organ
+    ctrl.fire(4700.0)                # cover on, BAD organ
     assert activity.robot_state(robot.robot_id) == sick
 
     ctrl.fire(float("inf"))          # try again
     assert activity.robot_state(robot.robot_id) == open_
 
-    ctrl.fire(952.4)                 # correct organs + cover on
+    ctrl.fire(1500.0)                # GOOD organ + cover on
     assert activity.robot_state(robot.robot_id) == cured
 
 
@@ -253,6 +254,44 @@ def test_organ_swap_logs_behavioral_events():
     assert ("activity", "state", robot.robot_id) in calls
 
 
+def test_organ_swap_per_organ_count_mode_and_view_updates():
+    """per_organ_count: cure once enough good organs are present, and push a
+    per-organ verdict to view listeners (the GUI organ display)."""
+    from src.activities.organ_swap import (
+        STATE_CURED, STATE_SICK, OrganSwapActivity,
+    )
+    from src.core.session import Session
+
+    organs = [
+        {"id": "liver", "good_ohm": 1500, "bad_ohm": 4700},
+        {"id": "heart", "good_ohm": 2200, "bad_ohm": 5600},
+        {"id": "lung",  "good_ohm": 3300, "bad_ohm": 6800},
+    ]
+    ctrl = _StubController()
+    skin = _FakeSkin("skin-1", controller=ctrl, organs=organs)
+    robot = _FakeRobot(ctrl, skins=[skin])
+
+    activity = OrganSwapActivity()
+    activity.apply_preset({"cure_good_organ_count": 3,
+                           "cure_requires_no_bad": True,
+                           "cured_tolerance_ohm": 80.0})
+    activity.event_logger = MagicMock()
+    updates: list[tuple] = []
+    activity.add_view_listener(lambda *a: updates.append(a))
+    activity._setup(Session("S001", activity), [robot])
+
+    # Two good + one bad → not enough good AND a bad present → still sick.
+    ctrl.fire(OrganMatcher.parallel_resistance([1500, 2200, 6800]))
+    assert activity.robot_state(robot.robot_id) == STATE_SICK
+    assert updates[-1][0] == "skin-1"
+    assert updates[-1][3] == {"liver": "good", "heart": "good", "lung": "bad"}
+
+    # All three good → cured.
+    ctrl.fire(OrganMatcher.parallel_resistance([1500, 2200, 3300]))
+    assert activity.robot_state(robot.robot_id) == STATE_CURED
+    assert updates[-1][3] == {"liver": "good", "heart": "good", "lung": "good"}
+
+
 def test_organ_swap_force_state_accepts_open():
     activity, _, robot, (_, open_, _) = _make_activity()
     activity.force_state(robot.robot_id, open_)
@@ -268,11 +307,15 @@ def test_organ_swap_per_branch_patients():
     from src.core.session import Session
 
     ctrl = _StubController()
-    branch_a = _FakeSkin("branch-a", controller=ctrl, organ={"slot": 0})
-    branch_b = _FakeSkin("branch-b", controller=ctrl, organ={"slot": 1})
+    organs = [{"id": "o", "good_ohm": 1500, "bad_ohm": 4700}]
+    branch_a = _FakeSkin("branch-a", controller=ctrl, organ={"slot": 0},
+                         organs=organs)
+    branch_b = _FakeSkin("branch-b", controller=ctrl, organ={"slot": 1},
+                         organs=organs)
     robot = _FakeRobot(ctrl, skins=[branch_a, branch_b])
 
     activity = OrganSwapActivity()
+    activity.apply_preset({"cure_good_organ_count": 1})
     activity.event_logger = MagicMock()
     activity._setup(Session("S001", activity), [robot])
 
@@ -282,9 +325,9 @@ def test_organ_swap_per_branch_patients():
     assert activity.robot_state(pid_b) == STATE_SICK
 
     # Curing branch A (slot 0) must not affect branch B (slot 1).
-    ctrl.fire(952.4, slot=0)
+    ctrl.fire(1500.0, slot=0)
     assert activity.robot_state(pid_a) == STATE_CURED
     assert activity.robot_state(pid_b) == STATE_SICK
 
-    ctrl.fire(952.4, slot=1)
+    ctrl.fire(1500.0, slot=1)
     assert activity.robot_state(pid_b) == STATE_CURED

@@ -9,6 +9,7 @@
    <item>
     <widget class="QGroupBox" name="sessions_group">
      <property name="title"><string>Past Sessions</string></property>
+     <property name="whatsThis"><string>All recorded sessions. Select one to see its events below and to export it.</string></property>
      <layout class="QVBoxLayout" name="sessions_layout">
       <item>
        <widget class="QTableWidget" name="sessions_table">
@@ -32,6 +33,7 @@
    <item>
     <widget class="QGroupBox" name="events_group">
      <property name="title"><string>Events</string></property>
+     <property name="whatsThis"><string>Timeline of what happened in the selected session: who did what, on which robot and target, with any extra metadata.</string></property>
      <layout class="QVBoxLayout" name="events_layout">
       <item>
        <widget class="QTableWidget" name="events_table">
@@ -63,11 +65,13 @@
      </item>
      <item>
       <widget class="QPushButton" name="export_btn">
+       <property name="whatsThis"><string>Save the selected session's events to a CSV file.</string></property>
        <property name="text"><string>Export Session to CSV</string></property>
       </widget>
      </item>
      <item>
       <widget class="QPushButton" name="export_all_btn">
+       <property name="whatsThis"><string>Save every recorded session to a single CSV file.</string></property>
        <property name="text"><string>Export All Sessions to CSV</string></property>
       </widget>
      </item>

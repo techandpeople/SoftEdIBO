@@ -114,6 +114,17 @@ def needs_setup() -> bool:
     return not SENTINEL_PATH.exists()
 
 
+def mark_setup_done() -> None:
+    """Create the sentinel so the first-run wizard is not shown again.
+
+    Called both when the wizard finishes and when it is skipped/cancelled —
+    the hardware may already be flashed, and the wizard stays reachable from
+    the Tools menu for re-flashing later.
+    """
+    SENTINEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+    SENTINEL_PATH.touch()
+
+
 def _list_ports() -> list[str]:
     """Return serial port names for ESP32 devices (all COM* on Windows)."""
     return [p.device for p in list_esp32_ports()]
@@ -376,8 +387,7 @@ class DonePage(QWizardPage, Ui_DonePage):
 
     def initializePage(self) -> None:
         """Create the sentinel file the first time this page is shown."""
-        SENTINEL_PATH.parent.mkdir(parents=True, exist_ok=True)
-        SENTINEL_PATH.touch()
+        mark_setup_done()
 
 
 # ------------------------------------------------------------------

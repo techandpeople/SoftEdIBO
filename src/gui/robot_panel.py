@@ -78,6 +78,7 @@ class RobotPanel(QWidget, Ui_RobotPanel):
         self.refresh_ports_btn.clicked.connect(self._refresh_ports)
         self.connect_btn.clicked.connect(self._on_gateway_connect)
         self.scan_btn.clicked.connect(self._on_scan)
+        self.serial_monitor_btn.clicked.connect(self._on_serial_monitor)
 
         self.add_turtle_btn.clicked.connect(lambda: self._on_add_robot("turtle"))
         self.add_tree_btn.clicked.connect(lambda: self._on_add_robot("tree"))
@@ -228,6 +229,11 @@ class RobotPanel(QWidget, Ui_RobotPanel):
         self.scan_btn.setEnabled(False)
         self.scan_btn.setText("Scanning…")
         self.start_scan()
+
+    def _on_serial_monitor(self) -> None:
+        """Open a raw serial debugging terminal for the gateway link."""
+        from src.gui.serial_monitor_dialog import SerialMonitorDialog
+        SerialMonitorDialog(self._gateway, parent=self).exec()
 
     def _on_scan_done(self) -> None:
         self.scan_btn.setEnabled(True)

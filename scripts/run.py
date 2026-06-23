@@ -30,7 +30,7 @@ setup_logging(console_level=logging.DEBUG if _debug else logging.WARNING)
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from src.gui.setup_wizard import SetupWizard, needs_setup
+from src.gui.setup_wizard import SetupWizard, mark_setup_done, needs_setup
 
 
 def _fatal(msg: str) -> None:
@@ -50,9 +50,12 @@ def main():
 
     if needs_setup():
         try:
-            wizard = SetupWizard()
-            if not wizard.exec():
-                sys.exit(0)
+            # Cancelling/skipping the wizard is a valid choice — the hardware
+            # may have been flashed on a previous run. Start the app normally
+            # instead of quitting, and mark setup done so it does not nag on
+            # every launch (the wizard stays reachable from the Tools menu).
+            SetupWizard().exec()
+            mark_setup_done()
         except Exception:
             _fatal(f"Error in setup wizard:\n\n{traceback.format_exc()}")
 

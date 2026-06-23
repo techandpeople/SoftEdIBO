@@ -18,6 +18,7 @@
    </item>
    <item>
     <widget class="QScrollArea" name="chambers_scroll">
+     <property name="whatsThis"><string>One row per chamber. Use the inflate/deflate controls to drive each chamber by hand and confirm the wiring matches the layout. Keep hands clear of the actuators.</string></property>
      <property name="widgetResizable"><bool>true</bool></property>
      <property name="visible"><bool>false</bool></property>
      <widget class="QWidget" name="chambers_content">

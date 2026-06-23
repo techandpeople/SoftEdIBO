@@ -36,7 +36,6 @@ class Skin:
         self,
         skin_id: str,
         chamber_inputs: list[dict[str, Any]],
-        name: str | None = None,
         *,
         grid: dict[str, int] | None = None,
         chamber_grid: list[list[int]] | None = None,
@@ -44,6 +43,7 @@ class Skin:
         touch_controller: Any = None,
         shape: str = "rect",
         organ: dict[str, Any] | None = None,
+        organs: list[dict[str, Any]] | None = None,
         skin_type: str = "",
         skin_variant: str = "",
     ):
@@ -51,7 +51,6 @@ class Skin:
             raise ValueError(f"Skin {skin_id!r} has no chambers")
 
         self.skin_id = skin_id
-        self.name = name or skin_id
 
         # Layout descriptors — see SkinGridEditor for the grid format.
         # ``shape``: "rect" or "round" (round skins mask off-circle cells).
@@ -75,6 +74,12 @@ class Skin:
         # defaults to this skin's chamber node. Skins without this block share
         # their robot's single circuit (Turtle / Thymio) or have none.
         self.organ = organ
+        # ``organs``: list of pluggable organ SHAPES displayed on this skin,
+        # each ``{"id": str, "shape": str, "rect": [x, y, w, h] (normalised
+        # 0..1), "good_ohm": float, "bad_ohm": float}``. Distinct from
+        # ``organ`` above (the electrical circuit): ``organs`` is what the GUI
+        # draws and the OrganResolver decomposes from the circuit's reading.
+        self.organs: list[dict[str, Any]] = list(organs or [])
         # ``skin_type``: stable identity of this skin's TYPE (e.g.
         # "turtle_square"). Indexes the hardcoded geometry registry
         # (src/hardware/skin_geometry.py) — used by the GUI to render the skin
@@ -98,30 +103,7 @@ class Skin:
         # local_idx → calibrated fill time (ms) or None (pressure-based)
         self._fill_times: dict[int, int | None] = {}
 
-        for local_idx, inp in enumerate(chamber_inputs):
-            if inp["controller"] is not self._ctrl:
-                raise ValueError(
-                    f"Skin {skin_id!r}: all chambers must share one controller "
-                    f"(got {inp['controller'].mac_address!r} vs {self.mac!r}). "
-                    "With node_direct (3 chambers) and node_multiplexed (12 chambers) "
-                    "a single skin always fits inside one node."
-                )
-
-            node_slot    = int(inp["node_slot"])
-            max_pressure = float(inp.get("max_pressure", 8.0))
-            min_pressure = float(inp.get("min_pressure", 0.0))
-
-            fill_time = inp.get("fill_time_ms")
-            self._fill_times[local_idx] = int(fill_time) if fill_time else None
-            self._slots.append(node_slot)
-            self._reverse[node_slot] = local_idx
-            self._chambers[local_idx] = AirChamber(
-                chamber_id=local_idx,
-                esp32_mac=self.mac,
-                max_pressure=max_pressure,
-            )
-            # Stash min_pressure on the AirChamber for serialisation (chamber_defs).
-            self._chambers[local_idx].min_pressure = min_pressure  # type: ignore[attr-defined]
+        self._build_chambers(chamber_inputs)
 
         # One callback registration for the whole skin.
         self._ctrl.on_pressure(self._on_pressure)
@@ -129,15 +111,7 @@ class Skin:
         if on_target is not None:
             on_target(self._on_target)
 
-        # Push per-chamber max + min pressure to the firmware so they survive PC crashes.
-        set_max = getattr(self._ctrl, "set_max_pressure", None)
-        set_min = getattr(self._ctrl, "set_min_pressure", None)
-        for local_idx, slot in enumerate(self._slots):
-            ch = self._chambers[local_idx]
-            if set_max is not None:
-                set_max(slot, ch.max_pressure)
-            if set_min is not None:
-                set_min(slot, getattr(ch, "min_pressure", 0.0))
+        self._push_pressure_limits()
 
         # Touch position tracking (if touch sensing is configured)
         self._touch_position_tracker = None
@@ -151,6 +125,48 @@ class Skin:
         self._touch_router = TouchEventRouter.from_touch_config(
             touch, len(self._chambers), name=self.skin_id)
         self._touch_router.attach(touch_controller)
+
+    # ------------------------------------------------------------------
+    # Construction helpers
+    # ------------------------------------------------------------------
+
+    def _build_chambers(self, chamber_inputs: list[dict[str, Any]]) -> None:
+        """Create one AirChamber per input, recording slot/index maps and fill
+        times. All chambers must share this skin's single controller."""
+        for local_idx, inp in enumerate(chamber_inputs):
+            if inp["controller"] is not self._ctrl:
+                raise ValueError(
+                    f"Skin {self.skin_id!r}: all chambers must share one "
+                    f"controller (got {inp['controller'].mac_address!r} vs "
+                    f"{self.mac!r}). With node_direct (3 chambers) and "
+                    "node_multiplexed (12 chambers) a single skin always fits "
+                    "inside one node."
+                )
+            node_slot = int(inp["node_slot"])
+            fill_time = inp.get("fill_time_ms")
+            self._fill_times[local_idx] = int(fill_time) if fill_time else None
+            self._slots.append(node_slot)
+            self._reverse[node_slot] = local_idx
+            ch = AirChamber(
+                chamber_id=local_idx,
+                esp32_mac=self.mac,
+                max_pressure=float(inp.get("max_pressure", 8.0)),
+            )
+            # Stash min_pressure on the AirChamber for serialisation (chamber_defs).
+            ch.min_pressure = float(inp.get("min_pressure", 0.0))  # type: ignore[attr-defined]
+            self._chambers[local_idx] = ch
+
+    def _push_pressure_limits(self) -> None:
+        """Push each chamber's max + min pressure to the firmware so they
+        survive a PC crash mid-session (no-op for controllers lacking setters)."""
+        set_max = getattr(self._ctrl, "set_max_pressure", None)
+        set_min = getattr(self._ctrl, "set_min_pressure", None)
+        for local_idx, slot in enumerate(self._slots):
+            ch = self._chambers[local_idx]
+            if set_max is not None:
+                set_max(slot, ch.max_pressure)
+            if set_min is not None:
+                set_min(slot, getattr(ch, "min_pressure", 0.0))
 
     # ------------------------------------------------------------------
     # Properties

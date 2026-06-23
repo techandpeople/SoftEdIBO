@@ -25,7 +25,6 @@ robots:
 #           tank_vacuum_target_kpa: -25.0  # operational set-point (defaults to (min+max)/2)
 #       skins:
 #         - skin_id: belly
-#           name: Belly
 #           # Skin type — picks the hardcoded geometry (shape + sensor
 #           # coordinates) from src/hardware/skin_geometry.py and the per-type
 #           # touch-gesture model. Offered (filtered by robot) in the skin
@@ -78,7 +77,6 @@ robots:
 #           has_reservoirs: false
 #       skins:
 #         - skin_id: trunk
-#           name: Trunk
 #           chambers:
 #             - {mac: "AA:BB:CC:DD:EE:02", slot: 0, max_pressure: 8.0}
 database:

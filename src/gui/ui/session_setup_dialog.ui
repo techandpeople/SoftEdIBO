@@ -18,6 +18,7 @@
       </item>
       <item row="0" column="1">
        <widget class="QLineEdit" name="session_id_input">
+        <property name="whatsThis"><string>Auto-generated unique ID for this session. Read-only; used to label the recorded data.</string></property>
         <property name="readOnly"><bool>true</bool></property>
        </widget>
       </item>
@@ -27,7 +28,9 @@
        </widget>
       </item>
       <item row="1" column="1">
-       <widget class="QComboBox" name="activity_combo"/>
+       <widget class="QComboBox" name="activity_combo">
+        <property name="whatsThis"><string>The activity to run this session. It decides which robot type is required and how chambers and touches behave (e.g. Group Touch, Organ Swap).</string></property>
+       </widget>
       </item>
       <item row="2" column="0">
        <widget class="QLabel" name="label_robot_type">
@@ -45,6 +48,7 @@
    <item>
     <widget class="QGroupBox" name="robots_group">
      <property name="title"><string>Select robots</string></property>
+     <property name="whatsThis"><string>Pick which connected robots take part. Only robots matching the activity's robot type are listed; select one or several.</string></property>
      <layout class="QVBoxLayout" name="robots_layout">
       <item>
        <widget class="QLabel" name="no_robots_label">
@@ -66,6 +70,7 @@
    <item>
     <widget class="QGroupBox" name="participants_group">
      <property name="title"><string>Participants</string></property>
+     <property name="whatsThis"><string>Tick the participants taking part in this session. Manage the list in the Participants tab; the session data is linked to whoever you select here.</string></property>
      <layout class="QVBoxLayout" name="participants_layout">
       <item>
        <widget class="QLabel" name="no_participants_label">

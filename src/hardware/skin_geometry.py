@@ -170,6 +170,21 @@ def known_skin_types() -> list[str]:
     return sorted(SKIN_GEOMETRIES)
 
 
+# Max pluggable organ shapes a skin type may carry (hospital study). Turtle puts
+# all organs on the central square; each Tree branch holds a single organ. Types
+# absent here default to ``DEFAULT_MAX_ORGANS``.
+DEFAULT_MAX_ORGANS = 3
+MAX_ORGANS_BY_TYPE: dict[str, int] = {
+    "turtle_square": 3,
+    "tree_round": 1,
+}
+
+
+def max_organs_for(skin_type: str | None) -> int:
+    """How many organ shapes a skin of this type may define."""
+    return MAX_ORGANS_BY_TYPE.get(skin_type or "", DEFAULT_MAX_ORGANS)
+
+
 # --- Silicone variants ----------------------------------------------------
 # Orthogonal to skin_type (the shape): the same shape is cast in several
 # silicone formats with different chamber sizes. Referenced across the app

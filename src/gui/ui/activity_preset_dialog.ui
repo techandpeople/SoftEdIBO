@@ -18,7 +18,9 @@
       </widget>
      </item>
      <item row="0" column="1">
-      <widget class="QComboBox" name="activity_combo"/>
+      <widget class="QComboBox" name="activity_combo">
+       <property name="whatsThis"><string>Which activity these presets belong to. Each activity has its own set of saved parameter presets.</string></property>
+      </widget>
      </item>
      <item row="1" column="0">
       <widget class="QLabel" name="preset_label">
@@ -29,6 +31,7 @@
       <layout class="QHBoxLayout" name="preset_row">
        <item>
         <widget class="QComboBox" name="preset_combo">
+         <property name="whatsThis"><string>A saved bundle of parameter values for this activity. Pick one to load its values below, or create a new one to tune a fresh set.</string></property>
          <property name="minimumSize">
           <size><width>240</width><height>0</height></size>
          </property>
@@ -36,11 +39,13 @@
        </item>
        <item>
         <widget class="QPushButton" name="new_btn">
+         <property name="whatsThis"><string>Create a new preset, starting from the current values.</string></property>
          <property name="text"><string>+ New</string></property>
         </widget>
        </item>
        <item>
         <widget class="QPushButton" name="delete_btn">
+         <property name="whatsThis"><string>Delete the selected preset.</string></property>
          <property name="text"><string>Delete</string></property>
         </widget>
        </item>
@@ -75,6 +80,7 @@
    </item>
    <item>
     <widget class="QScrollArea" name="scroll_area">
+     <property name="whatsThis"><string>The tunable parameters for this activity (speeds, thresholds, durations…). Edit them, then Save to store them in the selected preset.</string></property>
      <property name="sizePolicy">
       <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
        <horstretch>0</horstretch>

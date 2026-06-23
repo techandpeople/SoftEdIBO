@@ -17,6 +17,7 @@
    </item>
    <item>
     <widget class="QScrollArea" name="scroll_area">
+     <property name="whatsThis"><string>The skins that make up this robot. Add, remove or edit skins here; each skin binds chambers on a node to a layout. Saving writes the robot to settings.yaml.</string></property>
      <property name="widgetResizable"><bool>true</bool></property>
      <widget class="QWidget" name="content">
       <layout class="QVBoxLayout" name="content_layout"/>

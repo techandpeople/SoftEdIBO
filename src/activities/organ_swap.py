@@ -23,8 +23,10 @@ Responsibilities are split across collaborators:
 
 - :class:`~src.hardware.organ_sensor.OrganSensor` — turns the raw controller
   readings into cover / resistance events.
-- :class:`~src.activities.organ_matching.OrganMatcher` — decides whether a
-  resistance means "cured" (aggregate or per-organ catalogue decomposition).
+- :class:`~src.activities.organ_resolver.OrganResolver` — infers each organ's
+  status (good / bad / absent) from the circuit resistance, using the organ
+  shapes + resistances defined on the SKIN. This class then cures once enough
+  organs are good (the configured count / no-bad rule).
 - This class — per-patient state machine, LED / chamber reactions, and
   behavioral event logging via ``BaseActivity.log_event``.
 
@@ -45,7 +47,7 @@ from typing import TYPE_CHECKING, Any
 from PySide6.QtCore import QObject, QTimer
 
 from src.activities.base_activity import BaseActivity, Param
-from src.activities.organ_matching import OrganMatcher
+from src.activities.organ_resolver import OrganResolver
 from src.hardware.organ_sensor import OrganSensor
 from src.robots.base_robot import BaseRobot
 
@@ -78,41 +80,31 @@ class OrganSwapActivity(BaseActivity):
 
     PARAMS = (
         # --- Cure condition ---
+        # The organs themselves (shape + good/bad resistance) are defined on the
+        # SKIN (skin config dialog), not here — these params only tune the cure
+        # BEHAVIOUR, so organ identity lives in exactly one place.
         Param(
-            name="organ_readout_mode",
-            type="enum", default="aggregate",
-            choices=("aggregate", "per_organ"),
-            label="Organ readout mode",
-            description="aggregate: trust the total resistance vs a target. "
-                        "per_organ: decompose the total into known organs via "
-                        "1/Rtot = Σ 1/Ri (PC-side, against the catalogue).",
+            name="cure_good_organ_count",
+            type="int", default=3, min=1, max=12,
+            label="Good organs to cure",
+            description="How many of the skin's organs must be the GOOD variant "
+                        "before the patient is cured.",
         ),
         Param(
-            name="cured_total_resistance_ohm",
-            type="float", default=952.4, min=0.0, max=1_000_000.0,
-            label="Cured total resistance (Ω)",
-            description="Aggregate mode: total resistance read by the firmware "
-                        "when all required organs are correctly plugged in "
-                        "(e.g. liver_good=1500 ∥ heart_good=2200 ∥ "
-                        "lung_good=3300 ≈ 952.4 Ω).",
+            name="cure_requires_no_bad",
+            type="bool", default=True,
+            label="Cure requires no bad organ",
+            description="When on, any BAD organ still plugged in keeps the "
+                        "patient sick even if enough good organs are present.",
         ),
         Param(
             name="cured_tolerance_ohm",
             type="float", default=80.0, min=0.0, max=10_000.0,
-            label="Cured tolerance (±Ω)",
-            description="How far the measured total can drift from the cured "
-                        "value before the robot reverts to 'sick'.",
-        ),
-        Param(
-            name="organ_catalogue",
-            type="json",
-            default={"liver_good": 1500, "heart_good": 2200, "lung_good": 3300,
-                     "liver_bad":  4700, "heart_bad":  5600, "lung_bad":  6800},
-            label="Organ catalogue",
-            description="per_organ mode: {organ_id: resistance_ohm} of every "
-                        "organ the operator might plug in. The PC enumerates "
-                        "subsets and picks the combination whose parallel "
-                        "resistance matches the measured total.",
+            label="Organ match tolerance (±Ω)",
+            description="How close the measured circuit resistance must be to a "
+                        "candidate organ combination for it to count. Pick "
+                        "good/bad resistances (on the skin) separated by more "
+                        "than this so combinations don't overlap.",
         ),
         # --- Sick-state look & feel ---
         Param(
@@ -194,8 +186,13 @@ class OrganSwapActivity(BaseActivity):
         self._state: dict[str, str] = {}
         self._cured_at: dict[str, float] = {}
         self._last_resistance: dict[str, float] = {}
-        # Cure decision logic, built from the preset params in _setup.
-        self._matcher: OrganMatcher | None = None
+        # Per-patient OrganResolver (per_organ_count mode + the GUI display):
+        # decomposes the circuit reading into a per-organ good/bad/absent verdict.
+        self._resolvers: dict[str, OrganResolver] = {}
+        self._verdicts: dict[str, dict[str, str]] = {}
+        # GUI observers: cb(skin_id, state, led_color, verdicts) on every state
+        # or verdict change, so the monitor can mirror the organs + LED light.
+        self._view_listeners: list[Any] = []
         # Periodic driver for breathing + idle "pant". Started in ``start``,
         # paused/stopped via the BaseActivity lifecycle.
         self._tick_owner: QObject | None = None
@@ -215,12 +212,14 @@ class OrganSwapActivity(BaseActivity):
 
     def _setup(self, session: "Session", robots: list[BaseRobot]) -> None:
         self._robots = robots
-        self._matcher = OrganMatcher.from_params(self.param_values)
         for robot in robots:
             for patient in self._build_patients(robot):
                 self._patients[patient.patient_id] = patient
                 self._state[patient.patient_id] = STATE_SICK
                 self._last_resistance[patient.patient_id] = float("inf")
+                resolver = self._build_resolver(patient)
+                if resolver is not None:
+                    self._resolvers[patient.patient_id] = resolver
                 for skin in patient.skins:
                     self._skin_patient[skin.skin_id] = patient.patient_id
             self._subscribe_touch(robot)
@@ -270,6 +269,9 @@ class OrganSwapActivity(BaseActivity):
         self._state.clear()
         self._cured_at.clear()
         self._last_resistance.clear()
+        self._resolvers.clear()
+        self._verdicts.clear()
+        self._view_listeners.clear()
         logger.info("OrganSwap stopped")
 
     def get_state(self) -> dict[str, Any]:
@@ -281,6 +283,13 @@ class OrganSwapActivity(BaseActivity):
     # ------------------------------------------------------------------
     # Operator hooks (useful for the preset editor / debug panel)
     # ------------------------------------------------------------------
+
+    def add_view_listener(self, callback: Any) -> None:
+        """Register ``cb(skin_id, state, led_color, verdicts)`` — fired on every
+        state or per-organ verdict change so the GUI can mirror the organs and
+        the LED 'background light'. Verdicts is ``{organ_id: good|bad|absent}``
+        restricted to the skin's own organs."""
+        self._view_listeners.append(callback)
 
     def force_state(self, patient_id: str, state: str) -> None:
         """Set a patient's state from outside (debug button or scripted demo).
@@ -338,6 +347,42 @@ class OrganSwapActivity(BaseActivity):
                 "activity", "state", target=patient.patient_id,
                 metadata=json.dumps({"from": prev, "to": state}),
             )
+        self._fire_view_update(patient)
+
+    def _state_color(self, state: str) -> str:
+        """The configurable LED colour for a state (mirrored as the GUI light)."""
+        if state == STATE_CURED:
+            return self.param_values["cured_color"]
+        if state == STATE_OPEN:
+            return self.param_values["open_color"]
+        return self.param_values["sick_color"]
+
+    def _build_resolver(self, patient: _Patient) -> OrganResolver | None:
+        """OrganResolver for a patient from the union of its skins' organ
+        shapes, or None when the patient has no organs to decompose."""
+        organs = [o for skin in patient.skins
+                  for o in getattr(skin, "organs", [])]
+        if not organs:
+            return None
+        tol = float(self.param_values["cured_tolerance_ohm"])
+        return OrganResolver.from_organ_configs(organs, tol)
+
+    def _fire_view_update(self, patient: _Patient) -> None:
+        """Push the patient's current state + per-organ verdicts to the GUI.
+        Fired once per skin that carries organs, with only that skin's verdicts."""
+        if not self._view_listeners:
+            return
+        state = self._state.get(patient.patient_id, STATE_SICK)
+        color = self._state_color(state)
+        verdicts = self._verdicts.get(patient.patient_id, {})
+        for skin in patient.skins:
+            organs = getattr(skin, "organs", None)
+            if not organs:
+                continue
+            ids = {str(o.get("id")) for o in organs}
+            sub = {k: v for k, v in verdicts.items() if k in ids}
+            for cb in self._view_listeners:
+                cb(skin.skin_id, state, color, sub)
 
     def _on_tick(self) -> None:
         """Periodic driver — runs every 60 ms. Per-patient:
@@ -444,8 +489,14 @@ class OrganSwapActivity(BaseActivity):
                        target=patient.patient_id)
         if not closed:
             self._last_resistance[patient.patient_id] = float("inf")
+            # Cover off → open circuit → every organ reads absent; clear the
+            # display before showing the 'surgery' (open) light.
+            self._verdicts[patient.patient_id] = dict.fromkeys(
+                self._verdicts.get(patient.patient_id, {}), "absent")
             if self._state.get(patient.patient_id) != STATE_OPEN:
                 self._enter_state(patient, STATE_OPEN)
+            else:
+                self._fire_view_update(patient)
         else:
             self._evaluate(patient, sensor.resistance_ohm)
 
@@ -458,10 +509,26 @@ class OrganSwapActivity(BaseActivity):
     def _evaluate(self, patient: _Patient, resistance_ohm: float) -> None:
         """Re-run the cure decision and transition if needed."""
         self._last_resistance[patient.patient_id] = float(resistance_ohm)
-        cured = self._matcher is not None and self._matcher.is_cured(resistance_ohm)
+        resolver = self._resolvers.get(patient.patient_id)
+        if resolver is not None:
+            self._verdicts[patient.patient_id] = resolver.resolve(resistance_ohm)
+        cured = self._is_cured(patient)
         target = STATE_CURED if cured else STATE_SICK
         if self._state.get(patient.patient_id) != target:
-            self._enter_state(patient, target)
+            self._enter_state(patient, target)   # also fires the view update
+        else:
+            self._fire_view_update(patient)      # verdicts may have changed
+
+    def _is_cured(self, patient: _Patient) -> bool:
+        """Cured when enough organs resolve to GOOD (optionally with no BAD organ
+        still plugged in). Organ identity/resistances come from the skin; this
+        only applies the configured count + no-bad rule."""
+        verdicts = self._verdicts.get(patient.patient_id, {})
+        if (self.param_values.get("cure_requires_no_bad")
+                and OrganResolver.any_bad(verdicts)):
+            return False
+        need = int(self.param_values["cure_good_organ_count"])
+        return OrganResolver.good_count(verdicts) >= need
 
     def _on_magnet(self, skin, data: dict[str, Any]) -> None:
         """Route this **skin's** magnet sensor activations to its chamber actions.

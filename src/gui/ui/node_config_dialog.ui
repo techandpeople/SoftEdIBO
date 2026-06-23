@@ -19,6 +19,7 @@
      </item>
      <item row="0" column="1">
       <widget class="QLineEdit" name="mac_edit">
+       <property name="whatsThis"><string>The node's ESP-NOW MAC address. This is how the gateway addresses the board; it must match the MAC the firmware prints on boot.</string></property>
        <property name="placeholderText"><string>AA:BB:CC:DD:EE:FF</string></property>
       </widget>
      </item>
@@ -28,7 +29,9 @@
       </widget>
      </item>
      <item row="1" column="1">
-      <widget class="QComboBox" name="type_combo"/>
+      <widget class="QComboBox" name="type_combo">
+       <property name="whatsThis"><string>Board type: node_direct (3 chambers, onboard pumps), node_multiplexed (up to 12 chambers, optional shared tanks) or node_magnet_sensor (4 touch sensors, no actuation). Sets the slot count and which firmware to flash.</string></property>
+      </widget>
      </item>
      <item row="2" column="0">
       <widget class="QLabel" name="slots_label">
@@ -37,6 +40,7 @@
      </item>
      <item row="2" column="1">
       <widget class="QSpinBox" name="slots_spin">
+       <property name="whatsThis"><string>How many chamber slots this node exposes. Fixed for node_direct (3) and node_magnet_sensor (4); up to 16 for node_multiplexed (default 12).</string></property>
        <property name="minimum"><number>0</number></property>
        <property name="maximum"><number>64</number></property>
        <property name="suffix"><string> slots</string></property>
@@ -49,6 +53,7 @@
      </item>
      <item row="3" column="1">
       <widget class="QCheckBox" name="reservoirs_chk">
+       <property name="whatsThis"><string>Only for node_multiplexed. Tick if the board has the shared pressure + vacuum tanks driven by onboard pumps. When off, chambers are valved directly and the reservoir limits below are ignored.</string></property>
        <property name="text"><string>Has shared pressure / vacuum reservoirs</string></property>
       </widget>
      </item>
@@ -57,6 +62,7 @@
    <item>
     <widget class="QGroupBox" name="tank_group">
      <property name="title"><string>Reservoir limits (kPa)</string></property>
+     <property name="whatsThis"><string>Operating band for the shared tanks (node_multiplexed with reservoirs). Pressure tank is positive kPa; vacuum tank is negative (min = deepest vacuum, max = closest to atmosphere). Target is the set-point the pumps maintain.</string></property>
      <layout class="QFormLayout" name="tank_form">
       <item row="0" column="0">
        <widget class="QLabel" name="tank_pressure_min_label">
@@ -65,6 +71,7 @@
       </item>
       <item row="0" column="1">
        <widget class="QDoubleSpinBox" name="tank_pressure_min_kpa">
+        <property name="whatsThis"><string>Lowest the pressure tank is allowed to fall to before pumps must refill it.</string></property>
         <property name="decimals"><number>1</number></property>
         <property name="minimum"><double>-80.000000000000000</double></property>
         <property name="maximum"><double>80.000000000000000</double></property>
@@ -80,6 +87,7 @@
       </item>
       <item row="1" column="1">
        <widget class="QDoubleSpinBox" name="tank_pressure_max_kpa">
+        <property name="whatsThis"><string>Hard ceiling for the pressure tank; pumps never push it past this (firmware caps at 80 kPa).</string></property>
         <property name="decimals"><number>1</number></property>
         <property name="minimum"><double>-80.000000000000000</double></property>
         <property name="maximum"><double>80.000000000000000</double></property>
@@ -95,6 +103,7 @@
       </item>
       <item row="2" column="1">
        <widget class="QDoubleSpinBox" name="tank_pressure_target_kpa">
+        <property name="whatsThis"><string>Operating set-point the pumps maintain for the pressure tank. Should sit between min and max.</string></property>
         <property name="decimals"><number>1</number></property>
         <property name="minimum"><double>-80.000000000000000</double></property>
         <property name="maximum"><double>80.000000000000000</double></property>
@@ -110,6 +119,7 @@
       </item>
       <item row="3" column="1">
        <widget class="QDoubleSpinBox" name="tank_vacuum_min_kpa">
+        <property name="whatsThis"><string>Deepest vacuum allowed (most negative kPa). The pump stops pulling past this.</string></property>
         <property name="decimals"><number>1</number></property>
         <property name="minimum"><double>-80.000000000000000</double></property>
         <property name="maximum"><double>80.000000000000000</double></property>
@@ -125,6 +135,7 @@
       </item>
       <item row="4" column="1">
        <widget class="QDoubleSpinBox" name="tank_vacuum_max_kpa">
+        <property name="whatsThis"><string>Shallowest vacuum (closest to atmosphere, near 0). Pumps refill once the tank rises above this.</string></property>
         <property name="decimals"><number>1</number></property>
         <property name="minimum"><double>-80.000000000000000</double></property>
         <property name="maximum"><double>80.000000000000000</double></property>
@@ -140,6 +151,7 @@
       </item>
       <item row="5" column="1">
        <widget class="QDoubleSpinBox" name="tank_vacuum_target_kpa">
+        <property name="whatsThis"><string>Operating set-point for the vacuum tank (negative kPa), between min and max.</string></property>
         <property name="decimals"><number>1</number></property>
         <property name="minimum"><double>-80.000000000000000</double></property>
         <property name="maximum"><double>80.000000000000000</double></property>
@@ -162,6 +174,7 @@
     <layout class="QVBoxLayout" name="btn_layout">
      <item>
       <widget class="QPushButton" name="save_btn">
+       <property name="whatsThis"><string>Write this node to settings.yaml. Multiplexed nodes are re-sent their configure command so the firmware tank targets match.</string></property>
        <property name="text"><string>Save</string></property>
        <property name="default"><bool>true</bool></property>
       </widget>
@@ -173,6 +186,7 @@
      </item>
      <item>
       <widget class="QPushButton" name="delete_btn">
+       <property name="whatsThis"><string>Remove this node from the configuration. Skins that reference it will need re-pointing to another node.</string></property>
        <property name="text"><string>Delete Node</string></property>
       </widget>
      </item>

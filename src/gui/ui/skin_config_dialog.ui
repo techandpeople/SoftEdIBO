@@ -34,35 +34,26 @@
           </item>
           <item row="0" column="1">
            <widget class="QLineEdit" name="skin_id_edit">
+            <property name="whatsThis"><string>Unique identifier for this skin, used in settings.yaml and to route touches/activities. Lowercase, no spaces (e.g. belly).</string></property>
             <property name="placeholderText"><string>e.g. belly</string></property>
            </widget>
           </item>
           <item row="1" column="0">
-           <widget class="QLabel" name="name_label">
-            <property name="text"><string>Name:</string></property>
-           </widget>
-          </item>
-          <item row="1" column="1">
-           <widget class="QLineEdit" name="name_edit">
-            <property name="placeholderText"><string>Display name (e.g. Belly)</string></property>
-           </widget>
-          </item>
-          <item row="2" column="0">
            <widget class="QLabel" name="skin_type_label">
             <property name="text"><string>Skin type:</string></property>
            </widget>
           </item>
-          <item row="2" column="1">
+          <item row="1" column="1">
            <widget class="QComboBox" name="skin_type_combo">
             <property name="toolTip"><string>Skin type for this robot. Determines the shape and sensor layout (from src/hardware/skin_geometry.py) and selects the touch-gesture model.</string></property>
            </widget>
           </item>
-          <item row="3" column="0">
+          <item row="2" column="0">
            <widget class="QLabel" name="skin_variant_label">
             <property name="text"><string>Silicone:</string></property>
            </widget>
           </item>
-          <item row="3" column="1">
+          <item row="2" column="1">
            <widget class="QComboBox" name="skin_variant_combo">
             <property name="toolTip"><string>Silicone format of this skin (different chamber sizes per variant). Used as a touch-gesture ML feature.</string></property>
            </widget>
@@ -71,6 +62,7 @@
         </item>
         <item>
          <widget class="QLabel" name="chambers_label">
+          <property name="whatsThis"><string>The chambers that make up this skin. Each row binds a node slot to a max/min pressure and an optional fill time. The live layout preview is on the right.</string></property>
           <property name="text"><string>Chambers:</string></property>
          </widget>
         </item>
@@ -93,6 +85,7 @@
         </item>
         <item>
          <widget class="QPushButton" name="add_chamber_btn">
+          <property name="whatsThis"><string>Add a new chamber row to this skin. Set its node slot and pressure limits, then place it in the layout on the right.</string></property>
           <property name="text"><string>+ Add Chamber</string></property>
          </widget>
         </item>
@@ -115,6 +108,7 @@
     <layout class="QHBoxLayout" name="btn_row">
      <item>
       <widget class="QPushButton" name="test_btn">
+       <property name="whatsThis"><string>Open the actuator tester to inflate/deflate each chamber of this skin and confirm the wiring matches the layout.</string></property>
        <property name="text"><string>Test Actuators</string></property>
       </widget>
      </item>
@@ -126,6 +120,7 @@
      </item>
      <item>
       <widget class="QPushButton" name="delete_btn">
+       <property name="whatsThis"><string>Remove this skin from the configuration. Does not touch the node hardware; other skins on the same node are unaffected.</string></property>
        <property name="text"><string>Delete Skin</string></property>
       </widget>
      </item>
@@ -142,6 +137,7 @@
      </item>
      <item>
       <widget class="QPushButton" name="save_btn">
+       <property name="whatsThis"><string>Write this skin to settings.yaml. Pressure limits are pushed to the node so chambers stay protected even if the PC disconnects.</string></property>
        <property name="text"><string>Save</string></property>
       </widget>
      </item>
