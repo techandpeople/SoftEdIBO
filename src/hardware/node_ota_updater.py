@@ -58,7 +58,12 @@ class NodeOTAUpdater:
     WINDOW = 8           # max chunks in flight
     ACK_TIMEOUT = 0.4    # seconds before retransmitting an unacked chunk
     MAX_RETRIES = 8      # per-chunk retransmit attempts before aborting
-    READY_TIMEOUT = 5.0  # seconds to wait for ota_ready / ota_done
+    READY_TIMEOUT = 5.0  # seconds to wait for ota_ready
+    # The end phase needs more slack: the node verifies the MD5, then emits a
+    # burst of ota_done frames (~0.5 s) before rebooting. ESP-NOW relay latency
+    # plus that burst can exceed READY_TIMEOUT, so give it a wider window before
+    # declaring a (false) timeout.
+    DONE_TIMEOUT = 12.0  # seconds to wait for ota_done after ota_end
 
     def __init__(
         self,
@@ -201,7 +206,7 @@ class NodeOTAUpdater:
         self._terminal = None
         self._event.clear()
         self._gateway.send(self._mac, "ota_end")
-        ok, msg = self._wait_terminal({"done"}, self.READY_TIMEOUT, "ota_end")
+        ok, msg = self._wait_terminal({"done"}, self.DONE_TIMEOUT, "ota_end")
         if not ok:
             return False, msg
         if self._on_progress:
