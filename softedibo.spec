@@ -14,6 +14,8 @@
 #       settings.yaml
 #     firmware/
 #       gateway/firmware.bin                         (ESP32-C6, ESP-IDF)
+#       gateway/firmware-s3.bin                      (ESP32-S3, ESP-IDF)
+#       gateway/firmware-s3-ap.bin                   (ESP32-S3 + SoftAP, ESP-IDF)
 #       gateway/firmware-esp32.bin                   (ESP32-WROOM, Arduino)
 #       node_actuator/firmware-direct-release.bin
 #       node_actuator/firmware-direct-debug.bin
@@ -56,6 +58,8 @@ main_a = Analysis(
     datas=[
         ("config/", "config/"),
         ("firmware/gateway/firmware.bin",                 "firmware/gateway"),
+        ("firmware/gateway/firmware-s3.bin",              "firmware/gateway"),
+        ("firmware/gateway/firmware-s3-ap.bin",           "firmware/gateway"),
         ("firmware/gateway/firmware-esp32.bin",           "firmware/gateway"),
         ("firmware/node_actuator/firmware-direct-release.bin",      "firmware/node_actuator"),
         ("firmware/node_actuator/firmware-direct-debug.bin",        "firmware/node_actuator"),

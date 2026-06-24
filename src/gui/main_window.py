@@ -101,6 +101,10 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.actionUpdateNodesOTA.triggered.connect(self._open_ota_dialog)
         self.menuTools.addAction(self.actionUpdateNodesOTA)
 
+        self.actionGatewayAP = QAction("Gateway WiFi AP…", self)
+        self.actionGatewayAP.triggered.connect(self._open_gateway_ap)
+        self.menuTools.addAction(self.actionGatewayAP)
+
         self.actionTrainTouch = QAction("Touch Gestures…", self)
         self.actionTrainTouch.triggered.connect(self._open_train_touch)
         self.menuTools.addAction(self.actionTrainTouch)
@@ -238,6 +242,12 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             session_active=self._session_active, parent=self,
         )
         dlg.exec()
+
+    def _open_gateway_ap(self) -> None:
+        """Tools => Gateway WiFi AP… — name/password of the SoftAP the gateway
+        broadcasts for the Thymios (access-point firmware build only)."""
+        from src.gui.gateway_ap_dialog import GatewayApDialog
+        GatewayApDialog(self._gateway, parent=self).exec()
 
     def _open_train_touch(self) -> None:
         """Tools => Train Touch Models… — train per-skin-type gesture models

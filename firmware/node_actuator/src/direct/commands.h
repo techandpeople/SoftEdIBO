@@ -6,6 +6,7 @@
 #include "cmd_queue.h"
 #include "chambers.h"
 #include "leds.h"
+#include "magnet.h"
 #include "pins.h"
 #include "units.h"
 #include "dbg.h"
@@ -186,6 +187,10 @@ inline void parseAndQueue(const uint8_t* data, int len) {
         else          leds::set(r, g, b, leds::patternFromStr(pat), period, count);
         return;
     }
+    // ---- Magnet/touch board commands (handled inline, not queued) ----
+    // Match what the PC's touch tuning panel sends; no-ops if no sensors wired.
+    else if (strcmp(cmd, "rebaseline") == 0) { magnet::resetBaseline();   return; }
+    else if (strcmp(cmd, "configure") == 0)  { magnet::applyConfigure(doc); return; }
     else return;
 
     if (!push(c)) {
