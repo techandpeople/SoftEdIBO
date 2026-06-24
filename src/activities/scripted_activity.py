@@ -1,0 +1,481 @@
+"""ScriptedActivity — runtime for the declarative behaviour engine.
+
+Interprets a behaviour *spec* (see :mod:`src.activities.catalog`) as a
+per-unit finite state machine. A **unit** is one skin: it owns its chambers,
+its node's LED ring, and its touch board, so every skin of a robot runs the
+spec independently (the Thymio has one skin/3 chambers; a Turtle several).
+
+Each state runs a **program** (its ``do`` steps) as a cooperatively-scheduled
+sequence: instantaneous verbs apply at once, while ``wait`` / ``wait_for_touch``
+suspend the sequence until satisfied. This is what makes hand-authored
+sequences like "inflate 1, wait, deflate 1, inflate 2 …" express literally.
+Transitions are re-checked every tick; the first whose ``when`` condition is
+true switches the unit's state (time- and/or touch-driven).
+
+The activity is hardware-agnostic: it drives skins via the same ``inflate`` /
+``set_pressure`` / ``set_led(_halves)`` slice that real and simulated
+controllers both expose, so a whole session can be rehearsed in simulation.
+"""
+
+from __future__ import annotations
+
+import logging
+import random
+import time
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Generator
+
+from PySide6.QtCore import QObject, QTimer
+
+from src.activities import catalog
+from src.activities.base_activity import BaseActivity
+from src.robots.base_robot import BaseRobot
+
+if TYPE_CHECKING:
+    from src.core.session import Session
+
+logger = logging.getLogger(__name__)
+
+# Cooperative scheduler cadence. 50 ms is smooth enough for LED/chamber
+# changes while leaving the GUI thread idle between ticks.
+_TICK_MS = 50
+
+# A suspended step yields one of these tokens to the driver:
+#   ("ms", duration)        — resume after duration ms
+#   ("touch", chamber|None) — resume on the next touch (of that chamber)
+WaitToken = tuple
+
+
+@dataclass
+class _Unit:
+    """One skin running the spec independently."""
+    unit_id: str
+    robot: BaseRobot
+    skin: Any
+    ctrl: Any
+    chambers: list[int]
+    state: str = ""
+    state_entered: float = 0.0
+    touch_count: int = 0
+    touch_seq: int = 0
+    touch_seq_by_chamber: dict[int, int] = field(default_factory=dict)
+    active_touch: set[int] = field(default_factory=set)
+    # Body program: a generator yielding WaitTokens, plus the wait it is
+    # currently blocked on (None = ready to advance).
+    runner: Generator | None = None
+    wait: tuple | None = None
+    # One-shot generators spawned by on_touch handlers, advanced alongside body.
+    aux: list[tuple[Generator, tuple | None]] = field(default_factory=list)
+
+
+class ScriptedActivity(BaseActivity):
+    """Run a declarative behaviour spec against any robot."""
+
+    robot_type = BaseRobot
+
+    def __init__(self, name: str, description: str, spec: dict[str, Any]):
+        super().__init__(name=name, description=description)
+        catalog.validate_spec(spec)
+        self._spec = spec
+        self._states: dict[str, Any] = spec["states"]
+        self._initial: str = spec["initial"]
+        self._units: dict[str, _Unit] = {}
+        self._tick_owner: QObject | None = None
+        self._tick: QTimer | None = None
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+
+    def _setup(self, session: "Session", robots: list[BaseRobot]) -> None:
+        self._units.clear()
+        for robot in robots:
+            for skin in getattr(robot, "skins", {}).values():
+                ctrl = getattr(skin, "_ctrl", None)
+                unit = _Unit(
+                    unit_id=f"{robot.robot_id}/{skin.skin_id}",
+                    robot=robot, skin=skin, ctrl=ctrl,
+                    chambers=sorted(skin.chambers.keys()),
+                )
+                self._units[unit.unit_id] = unit
+                self._subscribe_touch(unit)
+        logger.info("ScriptedActivity %r set up: %d units",
+                    self.name, len(self._units))
+
+    def start(self) -> None:
+        for unit in self._units.values():
+            self._enter_state(unit, self._initial)
+        self._tick_owner = QObject()
+        self._tick = QTimer(self._tick_owner)
+        self._tick.setInterval(_TICK_MS)
+        self._tick.timeout.connect(self._on_tick)
+        self._tick.start()
+        logger.info("ScriptedActivity %r started", self.name)
+
+    def pause(self) -> None:
+        if self._tick is not None:
+            self._tick.stop()
+
+    def resume(self) -> None:
+        if self._tick is not None:
+            self._tick.start()
+
+    def stop(self) -> None:
+        if self._tick is not None:
+            self._tick.stop()
+            self._tick = None
+        self._tick_owner = None
+        for unit in self._units.values():
+            set_led = getattr(unit.ctrl, "set_led", None)
+            if set_led is not None:
+                try:
+                    set_led("#000000", pattern="off", period_ms=0)
+                except Exception:   # noqa: BLE001
+                    logger.exception("set_led off failed on %s", unit.unit_id)
+        self._units.clear()
+        logger.info("ScriptedActivity %r stopped", self.name)
+
+    def get_state(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "states": {u.unit_id: u.state for u in self._units.values()},
+        }
+
+    def force_state(self, unit_id: str, state: str) -> None:
+        """Jump a unit to a state (debug / scripted demo)."""
+        unit = self._units.get(unit_id)
+        if unit is not None and state in self._states:
+            self._enter_state(unit, state)
+
+    def unit_state(self, unit_id: str) -> str:
+        unit = self._units.get(unit_id)
+        return unit.state if unit is not None else ""
+
+    # ------------------------------------------------------------------
+    # State machine
+    # ------------------------------------------------------------------
+
+    def _enter_state(self, unit: _Unit, state: str) -> None:
+        prev = unit.state
+        unit.state = state
+        unit.state_entered = time.monotonic()
+        unit.touch_count = 0
+        unit.aux.clear()
+        body = self._states.get(state, {}).get("do", [])
+        unit.runner = self._run_steps(unit, body, {})
+        unit.wait = None
+        if prev != state:
+            logger.info("Scripted %s: %s → %s", unit.unit_id, prev, state)
+            self.log_event("activity", "state", target=unit.unit_id,
+                           metadata=f'{{"from": "{prev}", "to": "{state}"}}')
+        # Run the body's first slice immediately so on-enter visuals (LED) show
+        # without waiting a tick.
+        self._advance(unit)
+
+    def _on_tick(self) -> None:
+        for unit in self._units.values():
+            if self._check_transitions(unit):
+                continue                       # state changed; body restarted
+            self._advance(unit)
+            self._advance_aux(unit)
+
+    def _check_transitions(self, unit: _Unit) -> bool:
+        for tr in self._states.get(unit.state, {}).get("transitions", []) or []:
+            when = tr.get("when", {"always": True})
+            if self._eval_cond(unit, when):
+                self._enter_state(unit, tr["to"])
+                return True
+        return False
+
+    def _eval_cond(self, unit: _Unit, cond: dict) -> bool:
+        """Evaluate a single-key condition dict (see :mod:`catalog`)."""
+        if not isinstance(cond, dict) or not cond:
+            return False
+        name = next(iter(cond))
+        val = cond[name]
+        name = catalog.COND_ALIASES.get(name, name)
+        if name == "elapsed_ms":
+            ms = val.get("ms", val) if isinstance(val, dict) else val
+            return (time.monotonic() - unit.state_entered) * 1000 >= int(ms)
+        if name == "touch_count":
+            need = val.get("min", val) if isinstance(val, dict) else val
+            return unit.touch_count >= int(need)
+        if name == "any":
+            return any(self._eval_cond(unit, c) for c in (val or []))
+        if name == "all":
+            return all(self._eval_cond(unit, c) for c in (val or []))
+        if name == "not":
+            return not self._eval_cond(unit, val)
+        if name == "always":
+            return bool(val)
+        return False
+
+    # ------------------------------------------------------------------
+    # Cooperative scheduler
+    # ------------------------------------------------------------------
+
+    def _advance(self, unit: _Unit) -> None:
+        """Step the body generator past any satisfied wait."""
+        if unit.runner is None:
+            return
+        if unit.wait is not None and not self._wait_done(unit, unit.wait):
+            return
+        unit.wait = None
+        try:
+            token = next(unit.runner)
+        except StopIteration:
+            unit.runner = None
+            return
+        except Exception:   # noqa: BLE001 — a bad step shouldn't kill the tick
+            logger.exception("ScriptedActivity step failed on %s", unit.unit_id)
+            unit.runner = None
+            return
+        unit.wait = self._arm_wait(unit, token)
+
+    def _advance_aux(self, unit: _Unit) -> None:
+        survivors: list[tuple[Generator, tuple | None]] = []
+        for gen, wait in unit.aux:
+            if wait is not None and not self._wait_done(unit, wait):
+                survivors.append((gen, wait))
+                continue
+            try:
+                token = next(gen)
+            except StopIteration:
+                continue
+            except Exception:   # noqa: BLE001
+                logger.exception("on_touch step failed on %s", unit.unit_id)
+                continue
+            survivors.append((gen, self._arm_wait(unit, token)))
+        unit.aux = survivors
+
+    def _arm_wait(self, unit: _Unit, token: WaitToken) -> tuple:
+        """Turn a yielded wait token into a (kind, key, threshold) the driver
+        polls. ``ms`` → deadline timestamp; ``touch`` → the touch counter the
+        wait must see exceeded (whole-unit or per-chamber)."""
+        kind = token[0]
+        if kind == "ms":
+            return ("ms", None, time.monotonic() + token[1] / 1000.0)
+        ch = token[1]
+        if ch is None:
+            return ("touch", None, unit.touch_seq)
+        ch = int(ch)
+        return ("touch", ch, unit.touch_seq_by_chamber.get(ch, 0))
+
+    def _wait_done(self, unit: _Unit, wait: tuple) -> bool:
+        kind, ch, threshold = wait
+        if kind == "ms":
+            return time.monotonic() >= threshold
+        if ch is None:
+            return unit.touch_seq > threshold
+        return unit.touch_seq_by_chamber.get(ch, 0) > threshold
+
+    # ------------------------------------------------------------------
+    # Step execution (generators)
+    # ------------------------------------------------------------------
+
+    def _run_steps(self, unit: _Unit, steps: list, ctx: dict
+                   ) -> Generator:
+        for step in steps or []:
+            yield from self._run_step(unit, step, ctx)
+
+    def _run_step(self, unit: _Unit, step: dict, ctx: dict) -> Generator:
+        if not isinstance(step, dict) or not step:
+            return
+        verb = next(iter(step))
+        params = step[verb]
+        if not isinstance(params, dict):
+            params = {"_value": params}
+
+        if verb == "wait":
+            yield ("ms", int(params.get("ms", params.get("_value", 0))))
+        elif verb == "wait_for_touch":
+            yield ("touch", self._resolve_chamber(unit, params, ctx))
+        elif verb == "sequence":
+            yield from self._run_steps(unit, params.get("do", []), ctx)
+        elif verb == "repeat":
+            yield from self._run_repeat(unit, params, ctx)
+        elif verb == "for_each_chamber":
+            for c in unit.chambers:
+                yield from self._run_steps(unit, params.get("do", []),
+                                           {**ctx, "chamber": c})
+        elif verb == "beat":
+            yield from self._run_beat(unit, params)
+        else:
+            self._apply_action(unit, verb, params, ctx)
+            # instantaneous — no yield
+
+    def _run_repeat(self, unit: _Unit, params: dict, ctx: dict) -> Generator:
+        body = params.get("do", [])
+        forever = bool(params.get("forever")) or \
+            params.get("times", params.get("_value")) in ("forever", None)
+        if forever:
+            while True:
+                yield from self._run_steps(unit, body, ctx)
+                yield ("ms", 0)   # guarantees a yield so a wait-less body
+                                  # can't spin forever inside one tick
+        else:
+            for _ in range(int(params.get("times", params.get("_value", 1)))):
+                yield from self._run_steps(unit, body, ctx)
+
+    def _run_beat(self, unit: _Unit, params: dict) -> Generator:
+        """One heartbeat cycle. Authors wrap this in 'repeat forever'."""
+        mode = params.get("mode", "sync")
+        pct = int(params.get("pct", 60))
+        pct2 = int(params.get("pct2", 20))
+        period = max(100, int(params.get("period_ms", 2000)))
+        chambers = list(unit.chambers)
+        if not chambers:
+            yield ("ms", period)
+            return
+
+        if mode in ("sequential", "random"):
+            order = chambers[:]
+            if mode == "random":
+                random.shuffle(order)
+            slot = max(50, period // (2 * len(order)))
+            for c in order:
+                self._set_pressure(unit, c, pct)
+                yield ("ms", slot)
+                self._set_pressure(unit, c, 0)
+                yield ("ms", slot)
+        elif mode == "aligned":
+            n_aligned = max(0, min(len(chambers), int(params.get("aligned", 2))))
+            for i, c in enumerate(chambers):
+                self._set_pressure(unit, c, pct if i < n_aligned else pct2)
+            yield ("ms", period // 2)
+            for c in chambers:
+                self._set_pressure(unit, c, 0)
+            yield ("ms", period - period // 2)
+        else:  # sync
+            for c in chambers:
+                self._set_pressure(unit, c, pct)
+            yield ("ms", period // 2)
+            for c in chambers:
+                self._set_pressure(unit, c, 0)
+            yield ("ms", period - period // 2)
+
+    # ------------------------------------------------------------------
+    # Instantaneous actions
+    # ------------------------------------------------------------------
+
+    def _apply_action(self, unit: _Unit, verb: str, params: dict,
+                      ctx: dict) -> None:
+        if verb == "set_led":
+            self._set_led(unit, params.get("color", "#000000"),
+                          params.get("pattern", "solid"),
+                          int(params.get("period_ms", 0)))
+        elif verb == "set_led_halves":
+            colors = params.get("colors", params.get("_value", []))
+            self._set_led_halves(unit, list(colors))
+        elif verb in ("inflate", "set_pressure"):
+            self._set_pressure(unit, self._resolve_chamber(unit, params, ctx),
+                               int(params.get("pct", 60 if verb == "inflate" else 0)))
+        elif verb in ("deflate", "wrinkle"):
+            self._set_pressure(unit, self._resolve_chamber(unit, params, ctx), 0)
+        elif verb == "stop":
+            for c in unit.chambers:
+                hold = getattr(unit.skin, "hold", None)
+                if hold is not None:
+                    hold(c)
+        elif verb == "log":
+            logger.info("Scripted %s: %s", unit.unit_id,
+                        params.get("message", params.get("_value", "")))
+
+    # ------------------------------------------------------------------
+    # Hardware helpers
+    # ------------------------------------------------------------------
+
+    def _set_pressure(self, unit: _Unit, chamber, pct: int) -> None:
+        pct = max(0, min(100, int(pct)))
+        try:
+            if chamber == "all" or chamber is None:
+                unit.skin.set_pressure(None, pct)
+            else:
+                unit.skin.set_pressure(int(chamber), pct)
+        except (TypeError, ValueError):
+            logger.debug("set_pressure(%s, %s) ignored on %s",
+                         chamber, pct, unit.unit_id)
+
+    def _set_led(self, unit: _Unit, color: str, pattern: str,
+                 period_ms: int) -> None:
+        set_led = getattr(unit.ctrl, "set_led", None)
+        if set_led is None:
+            return
+        try:
+            set_led(color, pattern=pattern, period_ms=period_ms)
+        except Exception:   # noqa: BLE001
+            logger.exception("set_led failed on %s", unit.unit_id)
+
+    def _set_led_halves(self, unit: _Unit, colors: list[str]) -> None:
+        if not colors:
+            return
+        halves = getattr(unit.ctrl, "set_led_halves", None)
+        if halves is not None:
+            try:
+                halves(colors)
+                return
+            except Exception:   # noqa: BLE001
+                logger.exception("set_led_halves failed on %s", unit.unit_id)
+        # Fallback: a controller without the helper at least shows one colour.
+        self._set_led(unit, colors[0], "solid", 0)
+
+    @staticmethod
+    def _resolve_chamber(unit: _Unit, params: dict, ctx: dict):
+        val = params.get("chamber", params.get("_value"))
+        if val in (None, "current", "c"):
+            return ctx.get("chamber", unit.chambers[0] if unit.chambers else 0)
+        if val == "all":
+            return "all"
+        try:
+            return int(val)
+        except (TypeError, ValueError):
+            return ctx.get("chamber")
+
+    # ------------------------------------------------------------------
+    # Touch input
+    # ------------------------------------------------------------------
+
+    def _subscribe_touch(self, unit: _Unit) -> None:
+        tc = getattr(unit.skin, "touch_controller", None)
+        on_magnet = getattr(tc, "on_magnet", None) if tc is not None else None
+        if on_magnet is not None:
+            on_magnet(lambda data, u=unit: self._on_magnet(u, data))
+
+    def _on_magnet(self, unit: _Unit, data: dict[str, Any]) -> None:
+        active = data.get("act") or []
+        if not isinstance(active, list):
+            return
+        new_set = {int(s) for s in active
+                   if str(s).lstrip("-").isdigit()}
+        mapping = self._touch_mapping(unit.skin)
+        for sensor_idx in new_set - unit.active_touch:      # newly pressed
+            self._on_press(unit, mapping, sensor_idx)
+        unit.active_touch = new_set
+
+    def _on_press(self, unit: _Unit, mapping: dict, sensor_idx: int) -> None:
+        unit.touch_count += 1
+        unit.touch_seq += 1
+        ch = mapping.get(str(sensor_idx), mapping.get(sensor_idx))
+        if ch is not None:
+            try:
+                ch = int(ch)
+                unit.touch_seq_by_chamber[ch] = \
+                    unit.touch_seq_by_chamber.get(ch, 0) + 1
+            except (TypeError, ValueError):
+                pass
+        # Spawn the state's on_touch handler, if any, to run concurrently.
+        handler = self._states.get(unit.state, {}).get("on_touch")
+        if handler:
+            gen = self._run_steps(unit, handler,
+                                  {"chamber": ch if ch is not None else None})
+            unit.aux.append((gen, None))
+
+    @staticmethod
+    def _touch_mapping(skin) -> dict:
+        touch = getattr(skin, "touch", None) or {}
+        mapping = touch.get("sensor_to_chamber")
+        if isinstance(mapping, dict) and mapping:
+            return mapping
+        # 1:1 fallback
+        n = min(len(skin.chambers), touch.get("sensor_count", len(skin.chambers)))
+        return {str(i): i for i in range(n)}

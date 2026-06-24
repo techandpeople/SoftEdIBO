@@ -52,6 +52,9 @@ class SimulatedController(QObject):
         self.fill_load = FillLoadTracker()
         self._targets:  dict[int, int] = {}
         self._current:  dict[int, int] = {}
+        # Latched emergency-stop: while True, actuation commands are ignored
+        # (mirrors the firmware's latched stop) until resume() re-arms.
+        self._stopped = False
         self._max_pressures: dict[int, float] = {}
         self._pressure_callbacks: list[Callable[[int, int], None]] = []
         self._target_callbacks:   list[Callable[[int, int], None]] = []
@@ -92,6 +95,8 @@ class SimulatedController(QObject):
 
         ``ms`` (time-based fill on real hardware) is accepted for interface
         parity and ignored — the simulation models pressure directly."""
+        if self._stopped:
+            return False
         self._current.setdefault(chamber, 0)
         base = self._targets.get(chamber, self._current[chamber])
         new_target = min(100, base + delta)
@@ -104,6 +109,8 @@ class SimulatedController(QObject):
 
     def deflate(self, chamber: int, delta: int = 10) -> bool:
         """Deflate by delta % (relative to current target)."""
+        if self._stopped:
+            return False
         self._current.setdefault(chamber, 0)
         base = self._targets.get(chamber, self._current[chamber])
         new_target = max(0, base - delta)
@@ -116,6 +123,8 @@ class SimulatedController(QObject):
 
     def set_pressure(self, chamber: int, value: int) -> bool:
         """Set absolute target pressure (clamped to chamber limits)."""
+        if self._stopped:
+            return False
         value = max(0, min(100, value))
         self._current.setdefault(chamber, 0)
         self._targets[chamber] = value
@@ -180,9 +189,34 @@ class SimulatedController(QObject):
                      color, pattern, period_ms, count)
         return True
 
+    def set_led_halves(self, colors: list[str], led_count: int = 24,
+                       pattern: str = "solid") -> bool:
+        """No-op shim mirroring :meth:`ESP32Controller.set_led_halves` so the
+        behaviour engine drives simulation and hardware through one code path.
+        Stores the last colours so a monitor view could reflect them."""
+        self._led_halves = list(colors)
+        logger.debug("SIM set_led_halves(%s)", colors)
+        return True
+
     def stop_all(self) -> None:
         """Stop the animation timer. Call on cleanup or pause."""
         self._timer.stop()
+
+    def emergency_stop(self) -> bool:
+        """Latch all actuation off: freeze every chamber and ignore commands until resume()."""
+        self._stopped = True
+        self._timer.stop()
+        # Freeze targets at the current level so nothing drifts after re-arm.
+        for chamber, current in self._current.items():
+            self._targets[chamber] = current
+            for cb in self._target_callbacks:
+                cb(chamber, current)
+        return True
+
+    def resume(self) -> bool:
+        """Re-arm after :meth:`emergency_stop` so actuation commands are accepted again."""
+        self._stopped = False
+        return True
 
     def _tick(self) -> None:
         still_moving = False

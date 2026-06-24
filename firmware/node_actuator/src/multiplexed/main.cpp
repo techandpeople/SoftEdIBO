@@ -29,6 +29,10 @@ using se::node::gatewayMac;
 using se::node::gatewayKnown;
 bool configured = false;
 
+// Emergency stop: when latched, loop() forces pumps off + valves closed and
+// skips all autonomous control until a "resume" command clears it.
+bool emergencyStopped = false;
+
 // Organ channels arrive inside `configure` but are applied from loop() (not
 // the ESP-NOW receive task) so organ::tick never races a reconfiguration.
 int pendingOrganCh[organ::MAX_ORGANS] = {};
@@ -230,6 +234,10 @@ void parseAndQueue(const uint8_t* data, int len) {
     } else if (strcmp(cmd, "hold") == 0) {
         c.type = cmd_queue::CMD_HOLD;
         c.chamber = doc["chamber"] | -1;
+    } else if (strcmp(cmd, "stop") == 0) {
+        c.type = cmd_queue::CMD_STOP;
+    } else if (strcmp(cmd, "resume") == 0) {
+        c.type = cmd_queue::CMD_RESUME;
     } else if (strcmp(cmd, "valve_manual") == 0) {
         c.type = cmd_queue::CMD_VALVE_MANUAL;
         c.chamber = doc["chamber"] | -1;
@@ -347,6 +355,15 @@ void manualClearAll() {
     manualActive = false;
 }
 
+// Emergency stop — slam everything off immediately. loop() keeps it that way
+// (and skips all control) while emergencyStopped is set.
+void emergencyStopAll() {
+    pumps::stopAll();
+    pca_valves::closeAllValves();
+    manualClearAll();
+    for (int i = 0; i < MAX_CHAMBERS; i++) chambers::stop(i);
+}
+
 void processCommand(const cmd_queue::Cmd& c) {
     using namespace cmd_queue;
 
@@ -354,6 +371,10 @@ void processCommand(const cmd_queue::Cmd& c) {
         sendPong();
         return;
     }
+
+    // Emergency stop / re-arm — works regardless of configured/error state.
+    if (c.type == CMD_STOP)   { emergencyStopped = true;  emergencyStopAll(); return; }
+    if (c.type == CMD_RESUME) { emergencyStopped = false; return; }
 
 #ifdef DEBUG_BUILD
     if (c.type == CMD_DEBUG) {
@@ -661,7 +682,10 @@ void loop() {
         processCommand(c);
     }
 
-    if (config::state.error || !config::state.ready || !configured) {
+    // Emergency stop or any not-ready state: keep everything off and skip all
+    // control. Commands (incl. "resume") were already drained above, so the
+    // node can be re-armed.
+    if (emergencyStopped || config::state.error || !config::state.ready || !configured) {
         pumps::stopAll();
         pca_valves::closeAllValves();
         delay(5);

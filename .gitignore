@@ -55,3 +55,8 @@ firmware/**/libdeps/
 firmware/**/.pioenvs/
 firmware/*/firmware*.bin
 firmware/*/compile_commands.json
+
+# Vendored Blockly for the Behaviour Editor (fetch via scripts/fetch_blockly.sh).
+# Editor falls back to the CDN when absent; bundle/CI can vendor it on demand.
+src/gui/blockly/blockly.min.js
+src/gui/blockly/media/

@@ -64,6 +64,24 @@ class ActivityPreset:
 
 
 @dataclass
+class DeclarativeActivity:
+    """A behaviour spec authored as data (not Python).
+
+    The ``spec`` is the declarative state machine interpreted by
+    :class:`~src.activities.scripted_activity.ScriptedActivity` (see
+    :mod:`src.activities.catalog` for its shape). Authored by hand today and
+    by the Blockly block editor later — the editor compiles its blocks down to
+    this same spec, so nothing of the editor is needed at session time.
+    """
+    activity_id: str = ""                         # "DA001", "DA002", ...
+    name: str = ""                                # human-readable
+    description: str = ""
+    spec: dict[str, Any] = field(default_factory=dict)
+    created_at: datetime = field(default_factory=datetime.now)
+    updated_at: datetime = field(default_factory=datetime.now)
+
+
+@dataclass
 class SkinTemplate:
     """Reusable skin layout template — shared across skins of any robot.
 

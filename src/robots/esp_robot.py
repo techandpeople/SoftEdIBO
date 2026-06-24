@@ -122,6 +122,20 @@ class EspRobot(BaseRobot):
             for local_idx in skin.chambers:
                 skin.hold(local_idx)
 
+    def emergency_stop(self) -> None:
+        """Latch every node OFF — all pumps off, all valves closed.
+
+        Sent to each controller directly (not per chamber) so the nodes drop
+        all actuation and the firmware holds the safe state even if the link
+        drops afterwards. Re-arm with :meth:`rearm`.
+        """
+        for ctrl in self._controllers.values():
+            ctrl.emergency_stop()
+
+    def rearm(self) -> None:
+        for ctrl in self._controllers.values():
+            ctrl.resume()
+
     # ------------------------------------------------------------------
     # Commanding
     # ------------------------------------------------------------------
