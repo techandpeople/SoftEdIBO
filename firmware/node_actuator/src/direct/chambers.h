@@ -256,6 +256,31 @@ inline void manualSafetyTick(uint32_t now) {
 }
 
 // ---------------------------------------------------------------------------
+// Emergency stop — latch every actuator OFF until explicitly re-armed.
+//
+// ``stopped`` is checked by loop(): while set, all autonomous ticks and new
+// actuation commands are skipped, so nothing can re-open a valve or spin a
+// pump. emergencyStopAll() also slams the hardware off immediately so the stop
+// takes effect within the same command, not on the next tick.
+// ---------------------------------------------------------------------------
+
+inline bool stopped = false;
+
+inline void emergencyStopAll() {
+    // Pumps off.
+    ledcWrite(PUMP1_LEDC_CH, 0);
+    ledcWrite(PUMP2_LEDC_CH, 0);
+    // All valves closed + clear any manual override.
+    for (int i = 0; i < NUM_CHAMBERS * 2; i++) {
+        manualValveOn[i] = false;
+        manualValveTs[i] = 0;
+    }
+    manualPumpOn[0] = manualPumpOn[1] = false;
+    manualPumpTs[0] = manualPumpTs[1] = 0;
+    for (int n = 0; n < NUM_CHAMBERS; n++) stop(n);   // closes both valves, resets state
+}
+
+// ---------------------------------------------------------------------------
 // Setup all chamber I/O. Call once from setup().
 // ---------------------------------------------------------------------------
 

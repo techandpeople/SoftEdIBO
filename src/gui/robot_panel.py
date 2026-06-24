@@ -26,6 +26,7 @@ from src.config.settings import Settings
 from src.gui.async_task import run_async
 from src.gui.ui_robot_panel import Ui_RobotPanel
 from src.hardware.espnow_gateway import ESPNowGateway
+from src.hardware.latency_monitor import LatencyMonitor
 from src.hardware.serial_ports import list_esp32_ports
 from src.robots.base_robot import BaseRobot
 
@@ -54,6 +55,13 @@ class RobotPanel(QWidget, Ui_RobotPanel):
 
     robot_configured = Signal()
     gateway_changed  = Signal(bool)
+    # Thread-safe bridge: LatencyMonitor reports on the gateway's serial thread,
+    # so its callback emits this signal to hop onto the GUI thread before the
+    # tree is touched. ``object`` carries the RTT (float ms, or None when stale).
+    _latency_update  = Signal(str, object)   # (mac, rtt_ms)
+
+    # How often each known node is pinged for a fresh latency reading.
+    _LATENCY_POLL_MS = 3000
 
     def __init__(self, gateway: ESPNowGateway, settings: Settings, db=None):
         super().__init__()
@@ -61,6 +69,9 @@ class RobotPanel(QWidget, Ui_RobotPanel):
         self._settings = settings
         self._db       = db
         self._robots: list[BaseRobot] = []
+        # MAC -> node tree items currently shown, so a latency update can repaint
+        # just that row instead of rebuilding the whole tree.
+        self._node_items: dict[str, list[QTreeWidgetItem]] = {}
 
         self.setupUi(self)
 
@@ -105,6 +116,16 @@ class RobotPanel(QWidget, Ui_RobotPanel):
 
         self._refresh_ports()
 
+        # Round-trip latency to each node, shown in the node rows' right column.
+        self._latency = LatencyMonitor(self._gateway)
+        self._latency.on_update(self._latency_update.emit)   # serial thread -> GUI thread
+        self._latency_update.connect(self._on_latency_update)
+        self._latency_timer = QTimer(self)
+        self._latency_timer.setInterval(self._LATENCY_POLL_MS)
+        self._latency_timer.timeout.connect(self._poll_latency)
+        if self._gateway.is_connected:
+            self._latency_timer.start()
+
     # ------------------------------------------------------------------
     # Public
     # ------------------------------------------------------------------
@@ -124,11 +145,78 @@ class RobotPanel(QWidget, Ui_RobotPanel):
             self.gateway_status_label.setText(f"Connected ({port})")
             self.connect_btn.setText("Disconnect")
             self.scan_btn.setEnabled(True)
+            self._set_latency_polling(True)
         else:
             self.gateway_status_label.setText("Disconnected")
             self.connect_btn.setText("Connect")
             self.scan_btn.setEnabled(False)
+            self._set_latency_polling(False)
         self._refresh_all_trees()
+
+    # ------------------------------------------------------------------
+    # Node latency
+    # ------------------------------------------------------------------
+
+    def _set_latency_polling(self, on: bool) -> None:
+        """Start/stop periodic node pinging; clears readings when stopping."""
+        if on:
+            if not self._latency_timer.isActive():
+                self._latency_timer.start()
+            self._poll_latency()   # don't wait a full interval for the first reading
+        else:
+            self._latency_timer.stop()
+            self._latency.reset()
+
+    def _poll_latency(self) -> None:
+        """Ping every configured node and expire any that stopped replying."""
+        if not self._gateway.is_connected:
+            return
+        for mac in self._configured_macs():
+            self._latency.ping(mac)
+        self._latency.sweep()
+
+    def _configured_macs(self) -> set[str]:
+        """Every node MAC declared across all robots in settings."""
+        return {
+            node.get("mac", "")
+            for robots in self._settings.data.get("robots", {}).values()
+            for robot in robots
+            for node in robot.get("nodes", [])
+            if node.get("mac")
+        }
+
+    def _init_latency_cell(self, node_item: QTreeWidgetItem, mac: str, online: bool) -> None:
+        """Set the node row's latency cell and register it for live updates."""
+        text, color = self._latency_text(self._latency.latency_ms(mac) if online else None)
+        node_item.setText(1, text)
+        node_item.setForeground(1, color)
+        node_item.setTextAlignment(
+            1, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        node_item.setToolTip(
+            1, "Round-trip latency to this node over ESP-NOW "
+               "(ping/pong, refreshed every few seconds). “—” means no reply."
+        )
+        if mac:
+            self._node_items.setdefault(mac, []).append(node_item)
+
+    def _on_latency_update(self, mac: str, rtt_ms: float | None) -> None:
+        """GUI-thread slot: repaint the latency cell of every row for ``mac``."""
+        text, color = self._latency_text(rtt_ms)
+        for item in self._node_items.get(mac, []):
+            item.setText(1, text)
+            item.setForeground(1, color)
+
+    @staticmethod
+    def _latency_text(rtt_ms: float | None) -> tuple[str, QColor]:
+        """Map a round-trip time to its cell text and colour."""
+        if rtt_ms is None:
+            return "—", QColor("#888888")
+        if rtt_ms < 100:
+            return f"{rtt_ms:.0f} ms", QColor("#2a9d2a")
+        if rtt_ms < 300:
+            return f"{rtt_ms:.0f} ms", QColor("#cc8800")
+        return f"{rtt_ms:.0f} ms", QColor("#cc2222")
 
     # ------------------------------------------------------------------
     # Gateway
@@ -173,6 +261,7 @@ class RobotPanel(QWidget, Ui_RobotPanel):
             self.gateway_status_label.setText("Disconnected")
             self.connect_btn.setText("Connect")
             self.scan_btn.setEnabled(False)
+            self._set_latency_polling(False)
             self._refresh_all_trees()
             self.gateway_changed.emit(False)
         else:
@@ -200,6 +289,7 @@ class RobotPanel(QWidget, Ui_RobotPanel):
         self.gateway_status_label.setText(f"Connected ({port})")
         self.connect_btn.setText("Disconnect")
         self.scan_btn.setEnabled(True)
+        self._set_latency_polling(True)
         self.gateway_changed.emit(True)
         self._settings.data.setdefault("gateway", {})
         self._settings.data["gateway"]["serial_port"] = port
@@ -251,6 +341,7 @@ class RobotPanel(QWidget, Ui_RobotPanel):
     def _refresh_all_trees(self) -> None:
         known      = self._gateway.known_macs if self._gateway.is_connected else frozenset()
         robot_data = self._settings.data.get("robots", {})
+        self._node_items.clear()
         self._fill_tree(self.turtle_tree, "turtle", robot_data.get("turtles", []), known)
         self._fill_tree(self.tree_tree,   "tree",   robot_data.get("trees",   []), known)
         self._fill_tree(self.thymio_tree, "thymio", robot_data.get("thymios", []), known)
@@ -323,6 +414,9 @@ class RobotPanel(QWidget, Ui_RobotPanel):
                     "item_type":   "node",
                     "node_index":  node_index,
                 })
+                # Right-hand column shows this node's round-trip latency, kept up
+                # to date by _on_latency_update via the _node_items map.
+                self._init_latency_cell(node_item, mac, online)
                 robot_item.addChild(node_item)
 
             # --- Skin children ---

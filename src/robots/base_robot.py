@@ -66,5 +66,15 @@ class BaseRobot(ABC):
     def resume(self) -> None:
         """Allow new commands after a pause. Override if needed."""
 
+    def emergency_stop(self) -> None:
+        """Immediately halt all actuation — pumps off, valves closed.
+
+        Stronger than :meth:`pause`: it kills the pumps too and latches the
+        robot's nodes off until :meth:`rearm`. Override for hardware robots.
+        """
+
+    def rearm(self) -> None:
+        """Re-enable actuation after an :meth:`emergency_stop`. Override if needed."""
+
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(id={self.robot_id!r}, status={self._status.value})"

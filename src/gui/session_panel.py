@@ -138,7 +138,7 @@ class SessionPanel(QWidget, Ui_SessionPanel):
             session_robots = [r for r in self._available_robots if r.robot_id in ids]
         else:
             session_robots = []
-        self._current_activity = get_activity(record.activity_name)
+        self._current_activity = get_activity(record.activity_name, self._db)
         if self._current_activity is not None:
             if last_data:
                 self._current_activity.simulation_mode = last_data.get("simulation_mode", False)
@@ -574,6 +574,45 @@ class SessionPanel(QWidget, Ui_SessionPanel):
                 participant_id="system",
                 type="session",
                 action=action,
+                timestamp=datetime.now(),
+            ))
+
+    def emergency_stop(self) -> None:
+        """Freeze the running activity so it stops issuing actuation commands.
+
+        Called by the app-wide emergency stop. Leaves the session open but
+        forces it into the paused state — the activity is resumed only when the
+        operator deliberately re-arms (see :meth:`emergency_rearm`).
+        """
+        if self._current_activity is None:
+            return
+        self._current_activity.pause()
+        self._monitor.set_paused(True)
+        self.pause_btn.setText("Resume")
+        self.status_label.setText("Status: EMERGENCY STOP")
+        if self._current_record is not None:
+            self._db.log_event(InteractionEvent(
+                session_id=self._current_record.session_id,
+                participant_id="system",
+                type="session",
+                action="emergency_stop",
+                timestamp=datetime.now(),
+            ))
+
+    def emergency_rearm(self) -> None:
+        """Resume the activity after an :meth:`emergency_stop` re-arm."""
+        if self._current_activity is None:
+            return
+        self._current_activity.resume()
+        self._monitor.set_paused(False)
+        self.pause_btn.setText("Pause")
+        self.status_label.setText("Status: Running")
+        if self._current_record is not None:
+            self._db.log_event(InteractionEvent(
+                session_id=self._current_record.session_id,
+                participant_id="system",
+                type="session",
+                action="resume",
                 timestamp=datetime.now(),
             ))
 
