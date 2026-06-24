@@ -33,6 +33,7 @@
 #include "chambers.h"
 #include "leds.h"
 #include "organ.h"
+#include "magnet.h"
 #include "cmd_queue.h"
 #include "commands.h"
 #include "dbg.h"
@@ -70,6 +71,7 @@ void setup() {
     chambers::hardware_init();
     leds::hardware_init();
     organ::hardware_init();
+    magnet::hardware_init();   // optional MLX90393 touch board (auto-detected)
 
     if (!se::begin(onReceived)) {
         LOG("{\"error\":\"esp_now_init_failed\"}\n");
@@ -98,6 +100,18 @@ void loop() {
     cmd_queue::Cmd c;
     while (cmd_queue::pop(c))
         commands::process(c);
+
+    // ---- Emergency stop: keep everything off, skip all actuation control ----
+    // Commands (incl. "resume") are still processed above, so re-arming works.
+    if (chambers::stopped) {
+        chambers::emergencyStopAll();
+        if (now - lastStatusMs >= STATUS_REPORT_MS) {
+            lastStatusMs = now;
+            for (int i = 0; i < NUM_CHAMBERS; i++)
+                commands::sendStatus(i, chambers::cachedKpa[i]);
+        }
+        return;
+    }
 
     // ---- Pressure read + safety stop ----
     if (now - lastPressureMs >= PRESSURE_CHECK_MS) {
@@ -134,6 +148,9 @@ void loop() {
 
     // ---- Organ + cover sensing (broadcasts on change + heartbeat) ----
     organ::tick(now);
+
+    // ---- Magnet/touch sensing (streams ~28 Hz; no-op if no sensors) ----
+    magnet::tick(now);
 
     // ---- Status broadcast ----
     if (now - lastStatusMs >= STATUS_REPORT_MS) {

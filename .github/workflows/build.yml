@@ -71,6 +71,8 @@ jobs:
         with:
           path: |
             firmware/gateway/firmware.bin
+            firmware/gateway/firmware-s3.bin
+            firmware/gateway/firmware-s3-ap.bin
             firmware/gateway/firmware-esp32.bin
             firmware/node_actuator/firmware-direct-release.bin
             firmware/node_actuator/firmware-direct-debug.bin
@@ -105,6 +107,8 @@ jobs:
         run: |
           mkdir -p firmware-binaries
           cp firmware/gateway/firmware.bin                       firmware-binaries/gateway-c6.bin
+          cp firmware/gateway/firmware-s3.bin                    firmware-binaries/gateway-s3.bin
+          cp firmware/gateway/firmware-s3-ap.bin                 firmware-binaries/gateway-s3-ap.bin
           cp firmware/gateway/firmware-esp32.bin                 firmware-binaries/gateway-esp32.bin
           cp firmware/node_actuator/firmware-direct-release.bin       firmware-binaries/node_direct-release.bin
           cp firmware/node_actuator/firmware-direct-debug.bin         firmware-binaries/node_direct-debug.bin
@@ -127,6 +131,8 @@ jobs:
           name: firmware-tree
           path: |
             firmware/gateway/firmware.bin
+            firmware/gateway/firmware-s3.bin
+            firmware/gateway/firmware-s3-ap.bin
             firmware/gateway/firmware-esp32.bin
             firmware/node_actuator/firmware-direct-release.bin
             firmware/node_actuator/firmware-direct-debug.bin
@@ -318,7 +324,7 @@ jobs:
             **Linux:** `chmod +x SoftEdIBO-x86_64.AppImage && ./SoftEdIBO-x86_64.AppImage`
             **Windows:** extract `SoftEdIBO-windows-x64.zip` and run `SoftEdIBO.exe`
 
-            **Firmware** (`firmware.zip`): two gateway variants (C6 + WROOM), release/debug for both actuator node types, and the sensor node.
+            **Firmware** (`firmware.zip`): gateway variants (C6, S3, S3+AP, WROOM), release/debug for both actuator node types, and the sensor node.
             Flash with `esptool.py --chip esp32 write_flash 0x0 <bin>`.
 
   # -----------------------------------------------------------------------
@@ -393,6 +399,8 @@ jobs:
 
             | File | Node type | Description |
             |------|-----------|-------------|
+            | `gateway-s3.bin` | Gateway | USB–ESP-NOW bridge, **Seeed XIAO ESP32-S3** (ESP-IDF, recommended) |
+            | `gateway-s3-ap.bin` | Gateway | Same S3 build + **WiFi access point** for Thymio robots (`-DGATEWAY_AP`) |
             | `gateway-c6.bin` | Gateway | USB–ESP-NOW bridge, **Seeed XIAO ESP32-C6** (ESP-IDF) |
             | `gateway-esp32.bin` | Gateway | USB–ESP-NOW bridge, **classic ESP32-WROOM** (Arduino) |
             | `node_direct-release.bin` | `node_direct` | 3 chambers, direct sensors/valves, onboard pumps |
@@ -401,6 +409,7 @@ jobs:
             | `node_multiplexed-debug.bin` | `node_multiplexed` | Same as above with Serial logs (`DEBUG_BUILD`) |
             | `node_magnet_sensor.bin` | `node_magnet_sensor` | 4× MLX90393 magnetic touch board (node_magnet_sensor protocol) |
 
-            > **Note:** pick the gateway bin for your board. The C6 flashes at
-            > `0x0` (`esptool.py --chip esp32c6 write_flash 0x0 gateway-c6.bin`);
+            > **Note:** pick the gateway bin for your board. The S3 flashes with
+            > `--chip esp32s3` and the C6 with `--chip esp32c6` (both at `0x0`,
+            > e.g. `esptool.py --chip esp32s3 write_flash 0x0 gateway-s3.bin`);
             > the WROOM and all node bins flash with `--chip esp32` at `0x0`.

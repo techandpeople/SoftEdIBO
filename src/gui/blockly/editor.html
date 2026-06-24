@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<!--
+  Block editor for the SoftEdIBO behaviour engine (Tools => Behaviour Editor…).
+
+  Scratch-like authoring: drag blocks to build a behaviour, which compiles to
+  the declarative spec interpreted by ScriptedActivity (src/activities/
+  scripted_activity.py). The editor (Blockly) is only ever loaded inside this
+  dialog — never during a session.
+
+  Python talks to this page only through three global functions, called via
+  QWebEngineView.page().runJavaScript:
+    getSpec()        -> JSON string of {initial, states, _blockly}
+    loadSpec(json)   -> restore a saved behaviour into the workspace
+    newWorkspace()   -> reset to one empty phase
+
+  Blockly is loaded from a vendored copy (./blockly.min.js) when present, else
+  from the unpkg CDN. Run scripts/fetch_blockly.sh to vendor it for offline use.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Behaviour Editor</title>
+  <style>
+    html, body { margin: 0; height: 100%; font-family: sans-serif; }
+    #blocklyDiv { position: absolute; top: 0; left: 0; right: 0; bottom: 0; }
+    #error { padding: 16px; color: #b00; display: none; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <div id="blocklyDiv"></div>
+  <div id="error"></div>
+  <xml id="toolbox" style="display:none">
+    <category name="Phases" colour="290">
+      <block type="se_behaviour"></block>
+      <block type="se_state"></block>
+      <block type="se_transition"></block>
+    </category>
+    <category name="Actions" colour="230">
+      <block type="se_set_led"></block>
+      <block type="se_set_led_halves"></block>
+      <block type="se_beat"></block>
+      <block type="se_inflate"></block>
+      <block type="se_deflate"></block>
+      <block type="se_set_pressure"></block>
+      <block type="se_wrinkle"></block>
+      <block type="se_stop"></block>
+    </category>
+    <category name="Control" colour="120">
+      <block type="se_wait"></block>
+      <block type="se_wait_for_touch"></block>
+      <block type="se_repeat"></block>
+      <block type="se_for_each"></block>
+    </category>
+    <category name="Conditions" colour="20">
+      <block type="se_elapsed"></block>
+      <block type="se_touch_count"></block>
+      <block type="se_any"></block>
+      <block type="se_all"></block>
+      <block type="se_not"></block>
+      <block type="se_always"></block>
+    </category>
+  </xml>
+
+  <script>
+    // ---- Load Blockly: vendored first, CDN fallback --------------------
+    function loadScript(src, onload, onerror) {
+      var s = document.createElement('script');
+      s.src = src; s.onload = onload; s.onerror = onerror;
+      document.head.appendChild(s);
+    }
+    loadScript('./blockly.min.js', init, function () {
+      loadScript('https://unpkg.com/blockly/blockly.min.js', init, function () {
+        var e = document.getElementById('error');
+        e.style.display = 'block';
+        e.textContent = 'Could not load Blockly.\n\nYou appear to be offline. '
+          + 'Run scripts/fetch_blockly.sh once (with internet) to vendor it, '
+          + 'then reopen the editor.';
+      });
+    });
+
+    var workspace = null;
+
+    function init() {
+      if (workspace) return;            // both loaders fired — ignore the 2nd
+      // Blockly needs a "media" folder (sprites for the trashcan/zoom/dropdown
+      // icons + click/delete sounds). Use a vendored ./media/ when present
+      // (offline), else the CDN — otherwise those assets 404 ("Failed to
+      // fetch") and the icons go missing. Probe a sprite to decide.
+      resolveMedia(function (media) {
+        if (workspace) return;
+        defineBlocks();
+        workspace = Blockly.inject('blocklyDiv', {
+          media: media,
+          toolbox: document.getElementById('toolbox'),
+          trashcan: true,
+          zoom: { controls: true, wheel: true, startScale: 0.9 },
+          grid: { spacing: 20, length: 3, colour: '#eee', snap: true },
+        });
+        newWorkspace();
+      });
+    }
+
+    function resolveMedia(cb) {
+      // Probe the vendored icon sheet (Blockly 13 ships sprites.svg). Present
+      // => use the offline copy; absent => fall back to the CDN media folder.
+      var img = new Image();
+      img.onload = function () { cb('./media/'); };
+      img.onerror = function () { cb('https://unpkg.com/blockly/media/'); };
+      img.src = './media/sprites.svg';
+    }
+
+    // ---- Block definitions --------------------------------------------
+    function defineBlocks() {
+      var CH = [['current', 'current'], ['all', 'all'],
+                ['0', '0'], ['1', '1'], ['2', '2'], ['3', '3']];
+      Blockly.defineBlocksWithJsonArray([
+        { type: 'se_behaviour',
+          message0: 'behaviour — starts at the first phase %1',
+          args0: [{ type: 'input_statement', name: 'STATES', check: 'State' }],
+          colour: 290, tooltip: 'Root of a behaviour. Stack phases inside.' },
+
+        { type: 'se_state',
+          message0: 'phase %1', args0: [{ type: 'field_input', name: 'NAME', text: 'phase1' }],
+          message1: 'do %1', args1: [{ type: 'input_statement', name: 'DO', check: 'Step' }],
+          message2: 'on touch %1', args2: [{ type: 'input_statement', name: 'ONTOUCH', check: 'Step' }],
+          message3: 'transitions %1', args3: [{ type: 'input_statement', name: 'TRANSITIONS', check: 'Transition' }],
+          previousStatement: 'State', nextStatement: 'State', colour: 290,
+          tooltip: 'One phase: actions to run, an optional touch reaction, and transitions out.' },
+
+        { type: 'se_transition',
+          message0: 'go to phase %1 when %2',
+          args0: [{ type: 'field_input', name: 'TO', text: 'phase2' },
+                  { type: 'input_value', name: 'WHEN', check: 'Cond' }],
+          previousStatement: 'Transition', nextStatement: 'Transition', colour: 20,
+          tooltip: 'Move to another phase when the condition becomes true.' },
+
+        // --- actions ---
+        { type: 'se_set_led',
+          message0: 'set LED colour %1 pattern %2 period(ms) %3',
+          args0: [{ type: 'field_input', name: 'COLOR', text: '#8e44ad' },
+                  { type: 'field_dropdown', name: 'PATTERN',
+                    options: [['solid', 'solid'], ['pulse', 'pulse'], ['blink', 'blink'], ['off', 'off']] },
+                  { type: 'field_number', name: 'PERIOD', value: 0, min: 0 }],
+          previousStatement: 'Step', nextStatement: 'Step', colour: 230 },
+
+        { type: 'se_set_led_halves',
+          message0: 'set LED half %1 half %2',
+          args0: [{ type: 'field_input', name: 'C1', text: '#8e44ad' },
+                  { type: 'field_input', name: 'C2', text: '#f1c40f' }],
+          previousStatement: 'Step', nextStatement: 'Step', colour: 230,
+          tooltip: 'Split the ring into two colours (e.g. half purple, half yellow).' },
+
+        { type: 'se_beat',
+          message0: 'beat %1 peak %2 %% other %3 %% aligned %4 period(ms) %5',
+          args0: [{ type: 'field_dropdown', name: 'MODE',
+                    options: [['all together', 'sync'], ['one at a time', 'sequential'],
+                              ['random', 'random'], ['aligned/misaligned', 'aligned']] },
+                  { type: 'field_number', name: 'PCT', value: 60, min: 0, max: 100 },
+                  { type: 'field_number', name: 'PCT2', value: 20, min: 0, max: 100 },
+                  { type: 'field_number', name: 'ALIGNED', value: 2, min: 0 },
+                  { type: 'field_number', name: 'PERIOD', value: 2000, min: 100 }],
+          previousStatement: 'Step', nextStatement: 'Step', colour: 230,
+          tooltip: 'One heartbeat cycle. Wrap in "repeat forever" for a continuous beat.' },
+
+        { type: 'se_inflate',
+          message0: 'inflate chamber %1 to %2 %%',
+          args0: [{ type: 'field_dropdown', name: 'CHAMBER', options: CH },
+                  { type: 'field_number', name: 'PCT', value: 60, min: 0, max: 100 }],
+          previousStatement: 'Step', nextStatement: 'Step', colour: 230 },
+
+        { type: 'se_deflate',
+          message0: 'deflate chamber %1',
+          args0: [{ type: 'field_dropdown', name: 'CHAMBER', options: CH }],
+          previousStatement: 'Step', nextStatement: 'Step', colour: 230 },
+
+        { type: 'se_set_pressure',
+          message0: 'set chamber %1 to %2 %%',
+          args0: [{ type: 'field_dropdown', name: 'CHAMBER', options: CH },
+                  { type: 'field_number', name: 'PCT', value: 0, min: 0, max: 100 }],
+          previousStatement: 'Step', nextStatement: 'Step', colour: 230 },
+
+        { type: 'se_wrinkle',
+          message0: 'wrinkle chamber %1 (vacuum)',
+          args0: [{ type: 'field_dropdown', name: 'CHAMBER', options: CH }],
+          previousStatement: 'Step', nextStatement: 'Step', colour: 230 },
+
+        { type: 'se_stop',
+          message0: 'hold all chambers',
+          previousStatement: 'Step', nextStatement: 'Step', colour: 230 },
+
+        // --- control ---
+        { type: 'se_wait',
+          message0: 'wait %1 ms', args0: [{ type: 'field_number', name: 'MS', value: 500, min: 0 }],
+          previousStatement: 'Step', nextStatement: 'Step', colour: 120 },
+
+        { type: 'se_wait_for_touch',
+          message0: 'wait for touch on chamber %1',
+          args0: [{ type: 'field_dropdown', name: 'CHAMBER',
+                   options: [['any', 'current'], ['0', '0'], ['1', '1'], ['2', '2'], ['3', '3']] }],
+          previousStatement: 'Step', nextStatement: 'Step', colour: 120 },
+
+        { type: 'se_repeat',
+          message0: 'repeat %1 times %2',
+          args0: [{ type: 'field_dropdown', name: 'MODE',
+                    options: [['forever', 'forever'], ['N', 'times']] },
+                  { type: 'field_number', name: 'TIMES', value: 4, min: 1 }],
+          message1: 'do %1', args1: [{ type: 'input_statement', name: 'DO', check: 'Step' }],
+          previousStatement: 'Step', nextStatement: 'Step', colour: 120 },
+
+        { type: 'se_for_each',
+          message0: 'for each chamber',
+          message1: 'do %1', args1: [{ type: 'input_statement', name: 'DO', check: 'Step' }],
+          previousStatement: 'Step', nextStatement: 'Step', colour: 120 },
+
+        // --- conditions ---
+        { type: 'se_elapsed',
+          message0: 'after %1 ms', args0: [{ type: 'field_number', name: 'MS', value: 120000, min: 0 }],
+          output: 'Cond', colour: 20 },
+
+        { type: 'se_touch_count',
+          message0: 'touched at least %1 times', args0: [{ type: 'field_number', name: 'MIN', value: 15, min: 1 }],
+          output: 'Cond', colour: 20 },
+
+        { type: 'se_any',
+          message0: 'any of: %1 %2 %3',
+          args0: [{ type: 'input_dummy' },
+                  { type: 'input_value', name: 'A', check: 'Cond' },
+                  { type: 'input_value', name: 'B', check: 'Cond' }],
+          output: 'Cond', colour: 20 },
+
+        { type: 'se_all',
+          message0: 'all of: %1 %2 %3',
+          args0: [{ type: 'input_dummy' },
+                  { type: 'input_value', name: 'A', check: 'Cond' },
+                  { type: 'input_value', name: 'B', check: 'Cond' }],
+          output: 'Cond', colour: 20 },
+
+        { type: 'se_not',
+          message0: 'not %1', args0: [{ type: 'input_value', name: 'C', check: 'Cond' }],
+          output: 'Cond', colour: 20 },
+
+        { type: 'se_always',
+          message0: 'always', output: 'Cond', colour: 20 },
+      ]);
+    }
+
+    // ---- Compile workspace -> spec ------------------------------------
+    function num(b, f) { return Number(b.getFieldValue(f)); }
+
+    function stepsFromStack(block) {
+      var out = [];
+      while (block) {
+        var o = stepToObj(block);
+        if (o) out.push(o);
+        block = block.getNextBlock();
+      }
+      return out;
+    }
+
+    function stepToObj(b) {
+      switch (b.type) {
+        case 'se_set_led':
+          return { set_led: { color: b.getFieldValue('COLOR'),
+                              pattern: b.getFieldValue('PATTERN'),
+                              period_ms: num(b, 'PERIOD') } };
+        case 'se_set_led_halves':
+          return { set_led_halves: { colors: [b.getFieldValue('C1'), b.getFieldValue('C2')] } };
+        case 'se_beat':
+          return { beat: { mode: b.getFieldValue('MODE'), pct: num(b, 'PCT'),
+                           pct2: num(b, 'PCT2'), aligned: num(b, 'ALIGNED'),
+                           period_ms: num(b, 'PERIOD') } };
+        case 'se_inflate':
+          return { inflate: { chamber: b.getFieldValue('CHAMBER'), pct: num(b, 'PCT') } };
+        case 'se_deflate':
+          return { deflate: { chamber: b.getFieldValue('CHAMBER') } };
+        case 'se_set_pressure':
+          return { set_pressure: { chamber: b.getFieldValue('CHAMBER'), pct: num(b, 'PCT') } };
+        case 'se_wrinkle':
+          return { wrinkle: { chamber: b.getFieldValue('CHAMBER') } };
+        case 'se_stop':
+          return { stop: {} };
+        case 'se_wait':
+          return { wait: { ms: num(b, 'MS') } };
+        case 'se_wait_for_touch':
+          return { wait_for_touch: { chamber: b.getFieldValue('CHAMBER') } };
+        case 'se_repeat': {
+          var o = { do: stepsFromStack(b.getInputTargetBlock('DO')) };
+          if (b.getFieldValue('MODE') === 'forever') o.forever = true;
+          else o.times = num(b, 'TIMES');
+          return { repeat: o };
+        }
+        case 'se_for_each':
+          return { for_each_chamber: { do: stepsFromStack(b.getInputTargetBlock('DO')) } };
+        default:
+          return null;
+      }
+    }
+
+    function condToObj(b) {
+      if (!b) return { always: true };
+      switch (b.type) {
+        case 'se_elapsed':     return { elapsed_ms: num(b, 'MS') };
+        case 'se_touch_count': return { touch_count: { min: num(b, 'MIN') } };
+        case 'se_any':         return { any: [condToObj(b.getInputTargetBlock('A')),
+                                              condToObj(b.getInputTargetBlock('B'))] };
+        case 'se_all':         return { all: [condToObj(b.getInputTargetBlock('A')),
+                                              condToObj(b.getInputTargetBlock('B'))] };
+        case 'se_not':         return { not: condToObj(b.getInputTargetBlock('C')) };
+        default:               return { always: true };
+      }
+    }
+
+    function transitionsFromStack(block) {
+      var out = [];
+      while (block) {
+        out.push({ to: block.getFieldValue('TO'),
+                   when: condToObj(block.getInputTargetBlock('WHEN')) });
+        block = block.getNextBlock();
+      }
+      return out;
+    }
+
+    function getSpec() {
+      var roots = workspace.getBlocksByType('se_behaviour', false);
+      var states = {}, initial = null;
+      if (roots.length) {
+        var s = roots[0].getInputTargetBlock('STATES');
+        while (s) {
+          var name = s.getFieldValue('NAME');
+          if (initial === null) initial = name;
+          states[name] = {
+            do: stepsFromStack(s.getInputTargetBlock('DO')),
+            on_touch: stepsFromStack(s.getInputTargetBlock('ONTOUCH')),
+            transitions: transitionsFromStack(s.getInputTargetBlock('TRANSITIONS')),
+          };
+          s = s.getNextBlock();
+        }
+      }
+      // _blockly carries the exact workspace so the editor can round-trip; the
+      // runtime/validator ignore unknown top-level keys.
+      var spec = { initial: initial, states: states,
+                   _blockly: Blockly.serialization.workspaces.save(workspace) };
+      return JSON.stringify(spec);
+    }
+
+    // ---- Load / reset -------------------------------------------------
+    function loadSpec(json) {
+      try {
+        var spec = (typeof json === 'string') ? JSON.parse(json) : json;
+        if (spec && spec._blockly) {
+          Blockly.serialization.workspaces.load(spec._blockly, workspace);
+          return;
+        }
+      } catch (e) {
+        console.warn('loadSpec failed, starting fresh:', e);
+      }
+      newWorkspace();
+    }
+
+    function newWorkspace() {
+      if (!workspace) return;
+      workspace.clear();
+      var root = workspace.newBlock('se_behaviour');
+      var st = workspace.newBlock('se_state');
+      root.initSvg(); st.initSvg();
+      root.getInput('STATES').connection.connect(st.previousConnection);
+      root.moveBy(30, 30);
+      root.render();
+    }
+  </script>
+</body>
+</html>

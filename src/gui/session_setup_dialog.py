@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from src.activities import ACTIVITIES
+from src.activities import available_activities
 from src.activities.base_activity import BaseActivity
 from src.data.database import Database
 from src.data.models import ActivityPreset, ParticipantRecord
@@ -42,7 +42,7 @@ class SessionSetupDialog(QDialog, Ui_SessionSetupDialog):
         self._robots = robots
         self._db = db
 
-        for activity in ACTIVITIES:
+        for activity in available_activities(self._db):
             self.activity_combo.addItem(activity.name, userData=activity)
 
         # Preset dropdown + "Manage…" button — added programmatically right
