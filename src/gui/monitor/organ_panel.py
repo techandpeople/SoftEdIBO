@@ -96,10 +96,17 @@ class OrganPanel(QGroupBox):
         self._msg.emit(str(state), str(led_color), dict(verdicts or {}))
 
     def _apply(self, state: str, led_color: str, verdicts: dict) -> None:
-        for i, organ in enumerate(self._organs):
-            verdict = verdicts.get(str(organ.get("id")))
-            colour = {"good": _GOOD, "bad": _BAD}.get(verdict, _ABSENT_BG)
-            self._style_dot(self._dots[i], colour)
+        # In simulation we ARE the physical organs, so the dots show the
+        # ground-truth states we clicked (see _render_sim_dots). The activity's
+        # verdicts come from decoding a single parallel resistance, which is
+        # ambiguous when organs share resistances — letting it recolour the dots
+        # would make clicking one organ light up another. Only the LED/state,
+        # which legitimately follows the cure decision, is driven from here.
+        if not self._sim_states:
+            for i, organ in enumerate(self._organs):
+                verdict = verdicts.get(str(organ.get("id")))
+                colour = {"good": _GOOD, "bad": _BAD}.get(verdict, _ABSENT_BG)
+                self._style_dot(self._dots[i], colour)
         self._style_dot(self._led, led_color or _LED_UNKNOWN)
         self.setToolTip(f"State: {state}" if state else "")
 
@@ -122,7 +129,16 @@ class OrganPanel(QGroupBox):
         cur = self._sim_states.get(index, "none")
         self._sim_states[index] = _SIM_STATES[
             (_SIM_STATES.index(cur) + 1) % len(_SIM_STATES)]
+        self._render_sim_dots()
         self._push_sim()
+
+    def _render_sim_dots(self) -> None:
+        """Colour each dot from its own clicked state — ground truth in sim,
+        so a button only ever toggles its own organ."""
+        for i in range(len(self._organs)):
+            state = self._sim_states.get(i, "none")
+            colour = {"good": _GOOD, "bad": _BAD}.get(state, _ABSENT_BG)
+            self._style_dot(self._dots[i], colour)
 
     def _push_sim(self) -> None:
         """Feed the simulated organ circuit with the parallel total of the
