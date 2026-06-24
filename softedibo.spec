@@ -57,6 +57,9 @@ main_a = Analysis(
     binaries=[],
     datas=[
         ("config/", "config/"),
+        # Block editor assets (Tools => Behaviour Editor…). HTML + any vendored
+        # Blockly copy; loaded lazily, only when the editor is opened.
+        ("src/gui/blockly/", "src/gui/blockly/"),
         ("firmware/gateway/firmware.bin",                 "firmware/gateway"),
         ("firmware/gateway/firmware-s3.bin",              "firmware/gateway"),
         ("firmware/gateway/firmware-s3-ap.bin",           "firmware/gateway"),
@@ -73,6 +76,10 @@ main_a = Analysis(
         "serial.tools.list_ports",
         "PySide6.QtSvg",
         "PySide6.QtXml",
+        # Block editor web view (Tools => Behaviour Editor…). PyInstaller's
+        # PySide6 hook bundles the QtWebEngine process when these are imported.
+        "PySide6.QtWebEngineWidgets",
+        "PySide6.QtWebEngineCore",
         # Touch-gesture ML stack (lazily imported in src/ml/training.py).
         # scikit-learn pulls these in but the lazy imports can dodge static
         # analysis, so name them explicitly.

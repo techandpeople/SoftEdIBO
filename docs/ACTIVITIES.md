@@ -14,7 +14,7 @@ The framework is delivered in phases:
 | 1c    | Organ Swap activity skeleton (mocked hardware) | **done** |
 | 1d    | Firmware extensions: organ ADC + WS2818 LED + Python wrappers | planned |
 | 1e    | Wire Organ Swap to real hardware end-to-end | planned |
-| 2     | Declarative activities authored from the GUI (state-machine in DB) | planned |
+| 2     | Declarative activities authored from the GUI (state-machine in DB) | **done** — see "Behaviour engine" below |
 
 ---
 
@@ -61,6 +61,42 @@ simulation" entry in the dropdown again.
   the skin has `chamber_grid` configured).
 - Touch + inflate / deflate are exposed via `ChamberWidget` inside each
   `SkinWidget`.
+
+---
+
+## Behaviour engine (shipped) — declarative specs + block editor
+
+The declarative behaviour engine from Phase 2 is implemented and runs the
+hospital study's behaviours. Two layers:
+
+- **Runtime:** [`ScriptedActivity`](../src/activities/scripted_activity.py)
+  interprets a behaviour *spec* (plain JSON data) as a per-skin state machine
+  with a cooperative sequence scheduler (`wait` / `wait_for_touch` suspend a
+  running sequence). The verb set lives in
+  [`catalog.py`](../src/activities/catalog.py) — actions (`set_led`,
+  `set_led_halves`, `beat`, `inflate`/`deflate`/`set_pressure`, `wrinkle`,
+  `stop`), control flow (`sequence`, `repeat`, `for_each_chamber`,
+  `wait`, `wait_for_touch`) and conditions (`elapsed_ms`, `touch_count`,
+  `any`/`all`/`not`, `always`). The catalogue is the single source of truth and
+  also drives the editor blocks. Specs are validated by `validate_spec`.
+
+- **Authoring:** **Tools => Behaviour Editor…**
+  ([`behavior_editor_dialog.py`](../src/gui/behavior_editor_dialog.py)) is a
+  Scratch-like **block editor** (Blockly in a `QWebEngineView`). Blocks compile
+  to a spec on Save and are stored in the `declarative_activities` table; the
+  exact workspace is stashed under the spec's ignored `_blockly` key for exact
+  round-trip editing. **Blockly / QtWebEngine load only inside the editor** —
+  never during a session. Blockly is loaded from a vendored copy
+  (`scripts/fetch_blockly.sh`) or the CDN as a fallback.
+
+Saved behaviours appear in the session activity dropdown via
+[`available_activities(db)` / `get_activity(name, db)`](../src/activities/__init__.py),
+alongside three code-defined **seed conditions** (Heartbeat / Movement /
+Texture) in [`seed_behaviors.py`](../src/activities/seed_behaviors.py) — the
+study's comportamentos 1-3 / 4-6 / 7-9, each a 3-phase timeline advancing on
+time **or** enough touches. Representation notes: half-and-half LED is painted
+per-pixel in software (`set_led_halves`); "wrinkle" pulls a vacuum (timed
+deflate, open-loop). Editor and runtime are both exercisable in simulation.
 
 ---
 

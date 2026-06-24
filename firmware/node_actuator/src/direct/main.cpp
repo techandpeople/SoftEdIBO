@@ -101,6 +101,18 @@ void loop() {
     while (cmd_queue::pop(c))
         commands::process(c);
 
+    // ---- Emergency stop: keep everything off, skip all actuation control ----
+    // Commands (incl. "resume") are still processed above, so re-arming works.
+    if (chambers::stopped) {
+        chambers::emergencyStopAll();
+        if (now - lastStatusMs >= STATUS_REPORT_MS) {
+            lastStatusMs = now;
+            for (int i = 0; i < NUM_CHAMBERS; i++)
+                commands::sendStatus(i, chambers::cachedKpa[i]);
+        }
+        return;
+    }
+
     // ---- Pressure read + safety stop ----
     if (now - lastPressureMs >= PRESSURE_CHECK_MS) {
         lastPressureMs = now;

@@ -8,6 +8,12 @@ from pathlib import Path
 
 os.environ.setdefault("QT_LOGGING_RULES", "qt.qpa.wayland.textinput=false")
 
+# QtWebEngine (Behaviour Editor's block canvas) runs a Chromium process that
+# hard-crashes on some Linux GPU drivers / Wayland-via-xcb setups. Force the
+# web view to render in software — plenty for a block editor — which avoids the
+# driver-dependent GPU crash. Override by exporting QTWEBENGINE_CHROMIUM_FLAGS.
+os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", "--disable-gpu")
+
 # Run via XWayland (xcb) instead of native Wayland. On GNOME/Wayland, creating a
 # new top-level window (a config dialog) occasionally costs ~120 ms in native Qt
 # surface setup — compositor roundtrips whose latency varies — which makes GNOME
@@ -40,6 +46,20 @@ def _fatal(msg: str) -> None:
 
 
 def main():
+    # Both required BEFORE the QApplication exists for the Behaviour Editor's
+    # QWebEngineView (Tools => Behaviour Editor…):
+    #  1. shared OpenGL contexts (Qt requirement for the WebEngine widget);
+    #  2. importing QtWebEngine itself — on PySide6/Linux, importing it AFTER
+    #     the QApplication is created makes the web view segfault on open. The
+    #     import only loads the libraries; the Chromium subprocess still starts
+    #     lazily when the editor is actually opened, so sessions are unaffected.
+    from PySide6.QtCore import Qt
+    QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
+    try:
+        from PySide6 import QtWebEngineWidgets  # noqa: F401
+    except ImportError:
+        pass   # editor will report a clear error if WebEngine is unavailable
+
     app = QApplication(sys.argv)
     install_exception_hooks("SoftEdIBO")
 

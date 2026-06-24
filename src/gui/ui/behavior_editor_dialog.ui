@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>BehaviorEditorDialog</class>
+ <widget class="QDialog" name="BehaviorEditorDialog">
+  <property name="geometry">
+   <rect><x>0</x><y>0</y><width>900</width><height>640</height></rect>
+  </property>
+  <property name="windowTitle"><string>Behaviour Editor</string></property>
+  <property name="minimumSize">
+   <size><width>720</width><height>480</height></size>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <layout class="QHBoxLayout" name="top_row">
+     <item>
+      <widget class="QLabel" name="behaviour_label">
+       <property name="text"><string>Behaviour:</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QComboBox" name="behaviorCombo">
+       <property name="whatsThis"><string>A saved block program from the database. Pick one to load its blocks, or choose "New behaviour…" to start from scratch.</string></property>
+       <property name="minimumSize">
+        <size><width>260</width><height>0</height></size>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="newButton">
+       <property name="text"><string>New</string></property>
+       <property name="whatsThis"><string>Start a fresh, empty block program. Nothing is saved until you press Save.</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="deleteButton">
+       <property name="text"><string>Delete</string></property>
+       <property name="whatsThis"><string>Delete the selected saved behaviour from the database. Cannot be undone.</string></property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="top_spacer">
+       <property name="orientation"><enum>Qt::Horizontal</enum></property>
+       <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+      </spacer>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="name_row">
+     <item>
+      <widget class="QLabel" name="name_label">
+       <property name="text"><string>Name:</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QLineEdit" name="nameEdit">
+       <property name="whatsThis"><string>A human-readable name for this behaviour. It appears in the activity list once saved.</string></property>
+       <property name="placeholderText"><string>e.g. Hospital — gentle heartbeat</string></property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <widget class="QWidget" name="webContainer" native="true">
+     <property name="whatsThis"><string>Drag blocks here to build the behaviour. Phases are States; inside each State you stack actions (set the LED, beat, inflate, wait, wait for touch…) and add Transitions that move to another phase after a time or enough touches.</string></property>
+     <property name="sizePolicy">
+      <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+       <horstretch>1</horstretch><verstretch>1</verstretch>
+      </sizepolicy>
+     </property>
+     <layout class="QVBoxLayout" name="webLayout">
+      <property name="leftMargin"><number>0</number></property>
+      <property name="topMargin"><number>0</number></property>
+      <property name="rightMargin"><number>0</number></property>
+      <property name="bottomMargin"><number>0</number></property>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="button_row">
+     <item>
+      <widget class="QLabel" name="statusLabel">
+       <property name="text"><string/></property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="button_spacer">
+       <property name="orientation"><enum>Qt::Horizontal</enum></property>
+       <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="QPushButton" name="saveButton">
+       <property name="text"><string>Save</string></property>
+       <property name="whatsThis"><string>Compile the blocks into a behaviour spec and store it in the database. The saved behaviour then appears in the session activity list and runs without the editor.</string></property>
+       <property name="default"><bool>true</bool></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="closeButton">
+       <property name="text"><string>Close</string></property>
+       <property name="whatsThis"><string>Close the editor. Unsaved block changes are discarded.</string></property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

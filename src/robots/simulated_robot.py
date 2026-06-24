@@ -122,6 +122,18 @@ class SimulatedRobot(BaseRobot):
         # already issued before pause() — there is nothing extra to revive here.
         return
 
+    def emergency_stop(self) -> None:
+        for ctrl in self._controllers.values():
+            ctrl.emergency_stop()
+        for skin in self._skins.values():
+            for chamber in skin.chambers.values():
+                chamber.target_pressure = chamber.pressure
+            skin.pause()
+
+    def rearm(self) -> None:
+        for ctrl in self._controllers.values():
+            ctrl.resume()
+
     def tick(self) -> None:
         """Update simulated tank pressures based on chamber pressure deltas."""
         pressure_tank = self._reservoirs.get("pressure")
