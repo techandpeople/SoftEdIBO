@@ -32,16 +32,23 @@ PAGE_NODE = 2
 PAGE_DONE = 3
 # Read-only bundled assets live in BUNDLE (_internal/ when frozen, repo root in dev)
 #
-# Gateway firmware — two board variants; each needs the matching esptool --chip.
-# Both merged images flash at 0x0.
+# Gateway firmware — board variants; each needs the matching esptool --chip.
+# All merged images flash at 0x0. Boards with an "ap" key also ship a SoftAP
+# build (gateway runs a WiFi access point for the Thymios alongside ESP-NOW);
+# the wizard exposes a checkbox to pick it (see FlashGatewayPage).
 GATEWAY_FIRMWARES: dict[str, dict[str, Any]] = {
-    "Seeed XIAO ESP32-C6  (new, USB-C)": {
-        "path": Settings.BUNDLE / "firmware" / "gateway" / "firmware.bin",
-        "chip": "esp32c6",
+    "Seeed XIAO ESP32-S3  (recommended, USB-C)": {
+        "chip":    "esp32s3",
+        "release": Settings.BUNDLE / "firmware" / "gateway" / "firmware-s3.bin",
+        "ap":      Settings.BUNDLE / "firmware" / "gateway" / "firmware-s3-ap.bin",
+    },
+    "Seeed XIAO ESP32-C6  (compact, USB-C)": {
+        "chip":    "esp32c6",
+        "release": Settings.BUNDLE / "firmware" / "gateway" / "firmware.bin",
     },
     "ESP32-WROOM-32  (classic DevKit)": {
-        "path": Settings.BUNDLE / "firmware" / "gateway" / "firmware-esp32.bin",
-        "chip": "esp32",
+        "chip":    "esp32",
+        "release": Settings.BUNDLE / "firmware" / "gateway" / "firmware-esp32.bin",
     },
 }
 
@@ -287,7 +294,7 @@ class FlashGatewayPage(_FlashPage):
         super().__init__(
             "Flash Gateway Firmware",
             "Connect the gateway board (appears as /dev/ttyACM0), then click Flash.",
-            first["path"],
+            first["release"],
             chip=first["chip"],
         )
 
@@ -303,10 +310,35 @@ class FlashGatewayPage(_FlashPage):
         board_row.addStretch()
         self.extra_layout.addLayout(board_row)
 
+        # SoftAP checkbox — flashes the AP-enabled build so WiFi clients (Thymio
+        # robots) can associate while ESP-NOW keeps running. Only boards that
+        # ship an AP build (an "ap" key) support it; the box disables itself for
+        # the others.
+        self._ap_check = QCheckBox("Run as WiFi access point for Thymio robots")
+        self._ap_check.setWhatsThis(
+            "Flash the access-point build of the gateway. It still bridges the "
+            "nodes over ESP-NOW, but also broadcasts a WiFi network the Thymio "
+            "robots can join. Only available on boards with the headroom for it "
+            "(e.g. XIAO ESP32-S3); disabled for boards without an AP build."
+        )
+        self._ap_check.toggled.connect(self._update_firmware_path)
+        self.extra_layout.addWidget(self._ap_check)
+
+        self._on_board_changed(first_label)
+
     def _on_board_changed(self, label: str) -> None:
         variant = GATEWAY_FIRMWARES[label]
-        self._firmware = variant["path"]
         self._chip = variant["chip"]
+        has_ap = "ap" in variant
+        self._ap_check.setEnabled(has_ap)
+        if not has_ap:
+            self._ap_check.setChecked(False)
+        self._update_firmware_path()
+
+    def _update_firmware_path(self) -> None:
+        variant = GATEWAY_FIRMWARES[self._board_combo.currentText()]
+        use_ap = self._ap_check.isChecked() and "ap" in variant
+        self._firmware = variant["ap" if use_ap else "release"]
 
     def nextId(self) -> int:
         # Continue to the node page only when the user chose to flash both.

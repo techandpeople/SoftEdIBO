@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Build all firmware binaries the GUI/wizard expects to find:
 #   firmware/gateway/firmware.bin              (XIAO ESP32-C6, bootloader @ 0x0)
+#   firmware/gateway/firmware-s3.bin           (XIAO ESP32-S3, bootloader @ 0x0)
+#   firmware/gateway/firmware-s3-ap.bin        (XIAO ESP32-S3 + SoftAP, @ 0x0)
 #   firmware/gateway/firmware-esp32.bin        (ESP32-WROOM,   bootloader @ 0x1000)
 #   firmware/node_actuator/firmware-direct-release.bin
 #   firmware/node_actuator/firmware-direct-debug.bin
@@ -52,9 +54,12 @@ merge_node() {
     )
 }
 
-# Gateway — two board variants (see firmware/gateway/README.md):
-merge_node firmware/gateway seeed_xiao_esp32c6 firmware.bin       esp32c6 0x0    80m
-merge_node firmware/gateway esp32dev           firmware-esp32.bin esp32   0x1000 40m
+# Gateway — board variants (see firmware/gateway/README.md). The XIAO C6 and S3
+# share the same ESP-IDF source; the S3 also ships a SoftAP build (-DGATEWAY_AP).
+merge_node firmware/gateway seeed_xiao_esp32c6    firmware.bin       esp32c6 0x0    80m
+merge_node firmware/gateway seeed_xiao_esp32s3    firmware-s3.bin    esp32s3 0x0    80m
+merge_node firmware/gateway seeed_xiao_esp32s3_ap firmware-s3-ap.bin esp32s3 0x0    80m
+merge_node firmware/gateway esp32dev              firmware-esp32.bin esp32   0x1000 40m
 
 # Actuator node — direct + multiplexed, each release/debug.
 merge_node firmware/node_actuator direct            firmware-direct-release.bin
@@ -68,6 +73,8 @@ merge_node firmware/node_magnet_sensor release firmware-release.bin
 echo
 echo "All firmware binaries built:"
 ls -1 firmware/gateway/firmware.bin \
+       firmware/gateway/firmware-s3.bin \
+       firmware/gateway/firmware-s3-ap.bin \
        firmware/gateway/firmware-esp32.bin \
        firmware/node_actuator/firmware-*.bin \
        firmware/node_magnet_sensor/firmware-release.bin
