@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>EmergencyFlashDialog</class>
+ <widget class="QDialog" name="EmergencyFlashDialog">
+  <property name="windowTitle">
+   <string>Emergency Flash (node, dead USB)</string>
+  </property>
+  <property name="minimumSize">
+   <size><width>620</width><height>560</height></size>
+  </property>
+  <layout class="QVBoxLayout" name="root_layout">
+   <item>
+    <widget class="QLabel" name="intro_label">
+     <property name="wordWrap"><bool>true</bool></property>
+     <property name="whatsThis"><string>Cable-flashes node firmware over the UART pins of a board whose own USB no longer works, using a second ESP32 (a classic WROOM DevKit with a CP2102/CH340 chip) held in reset as a transparent USB-to-serial bridge. After this the node has OTA firmware again and can be updated wirelessly from Tools - Update Nodes (OTA).</string></property>
+     <property name="text"><string>Recover a node whose USB is dead by flashing it through a &lt;b&gt;second ESP32&lt;/b&gt; used as a USB-to-serial bridge. The bridge must be a classic &lt;b&gt;WROOM DevKit (CP2102/CH340)&lt;/b&gt; — boards with native USB (S3/C6/XIAO) will not work as a bridge.</string></property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="wiring_box">
+     <property name="title"><string>Wiring &amp; download mode</string></property>
+     <layout class="QVBoxLayout" name="wiring_layout">
+      <item>
+       <widget class="QLabel" name="wiring_label">
+        <property name="wordWrap"><bool>true</bool></property>
+        <property name="textFormat"><enum>Qt::RichText</enum></property>
+        <property name="whatsThis"><string>Hold the bridge board in reset (its EN pin to GND) so its USB-serial chip drives the header pins. Because you are tapping that chip, TX and RX go STRAIGHT (TX-TX, RX-RX), not crossed. The bridge cannot drive the target's reset lines, so put the target into download mode by hand before flashing.</string></property>
+        <property name="text"><string>1. Bridge board: jumper &lt;b&gt;EN&#8594;GND&lt;/b&gt; (keeps its own chip in reset).&lt;br/&gt;2. Wire &lt;b&gt;straight-through&lt;/b&gt; (not crossed): bridge &lt;b&gt;TX&#8594;TX&lt;/b&gt;, &lt;b&gt;RX&#8594;RX&lt;/b&gt;, &lt;b&gt;GND&#8594;GND&lt;/b&gt;.&lt;br/&gt;3. Power the target (3V3&#8594;3V3 &lt;i&gt;or&lt;/i&gt; 5V&#8594;5V, never both), common GND.&lt;br/&gt;4. Download mode on the &lt;b&gt;target&lt;/b&gt;: hold &lt;b&gt;BOOT&lt;/b&gt; (IO0), tap &lt;b&gt;EN/RST&lt;/b&gt;, release BOOT — do this when &#8220;Connecting…&#8221; appears.</string></property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="type_row">
+     <item>
+      <widget class="QLabel" name="type_label">
+       <property name="text"><string>Node type:</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QComboBox" name="type_combo">
+       <property name="minimumSize"><size><width>320</width><height>0</height></size></property>
+       <property name="whatsThis"><string>Which node firmware to write. Pick the one matching the board you are recovering.</string></property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="type_spacer">
+       <property name="orientation"><enum>Qt::Horizontal</enum></property>
+       <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+      </spacer>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <widget class="QCheckBox" name="debug_check">
+     <property name="text"><string>Debug build (verbose Serial output)</string></property>
+     <property name="whatsThis"><string>Flash the debug build of the firmware (verbose Serial logs and the &quot;debug&quot; command) instead of the release build. node_magnet_sensor has only one build, so this is a no-op for it.</string></property>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="port_row">
+     <item>
+      <widget class="QLabel" name="port_label">
+       <property name="text"><string>Bridge port:</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QComboBox" name="port_combo">
+       <property name="minimumSize"><size><width>200</width><height>0</height></size></property>
+       <property name="whatsThis"><string>Serial port of the bridge board (the second ESP32 connected to your PC by USB). Plug it in and press Refresh if it is missing.</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="refresh_btn">
+       <property name="text"><string>Refresh</string></property>
+       <property name="whatsThis"><string>Re-scan the serial ports for the bridge board.</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QLabel" name="baud_label">
+       <property name="text"><string>Baud:</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QComboBox" name="baud_combo">
+       <property name="whatsThis"><string>Flash speed. Hand-wired bridges are noisy; start at 115200 and only raise it if that works reliably.</string></property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="port_spacer">
+       <property name="orientation"><enum>Qt::Horizontal</enum></property>
+       <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+      </spacer>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="flash_row">
+     <item>
+      <widget class="QPushButton" name="flash_btn">
+       <property name="text"><string>Flash Node</string></property>
+       <property name="whatsThis"><string>Write the firmware to the target over the bridge. esptool runs without auto-reset, so make sure the target is in download mode (hold BOOT, tap EN/RST, release BOOT) as it starts connecting.</string></property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="flash_spacer">
+       <property name="orientation"><enum>Qt::Horizontal</enum></property>
+       <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+      </spacer>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <widget class="QProgressBar" name="progress">
+     <property name="minimum"><number>0</number></property>
+     <property name="maximum"><number>100</number></property>
+     <property name="value"><number>0</number></property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QPlainTextEdit" name="log">
+     <property name="readOnly"><bool>true</bool></property>
+     <property name="whatsThis"><string>Live esptool output. Wait for &quot;Flash completed&quot; before unplugging anything.</string></property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QDialogButtonBox" name="button_box">
+     <property name="standardButtons"><set>QDialogButtonBox::Close</set></property>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

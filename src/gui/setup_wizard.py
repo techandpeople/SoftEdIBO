@@ -99,16 +99,28 @@ def firmware_for_node_type(node_type: str, debug: bool = False) -> Path | None:
     return entry["debug" if debug else "release"]
 
 
-def _esptool_cmd(port: str, firmware: Path, chip: str = "esp32") -> tuple[str, list[str]]:
+def _esptool_cmd(port: str, firmware: Path, chip: str = "esp32", *,
+                 baud: str = "921600", no_reset: bool = False) -> tuple[str, list[str]]:
     """Return (program, args) to invoke esptool, handling frozen mode.
 
     In a PyInstaller bundle, the standalone ``esptool`` binary sits next to
     the main executable.  In development, esptool is called as a module via
     the current Python interpreter. ``chip`` is "esp32" for the WROOM gateway
     and all nodes, "esp32c6" for the XIAO C6 gateway.
+
+    ``no_reset`` drops esptool's automatic reset/boot toggling (``--before`` /
+    ``--after no_reset``). Needed by the emergency cable-flash, where the target
+    is reached through a second ESP32 used as a USB-serial bridge: the bridge's
+    DTR/RTS lines can't reach the target's EN/IO0, so the user enters download
+    mode by hand. ``baud`` can be lowered for that hand-wired bridge.
     """
-    flash_args = ["--chip", chip, "--port", port, "--baud", "921600",
-                  "write_flash", "0x0", str(firmware)]
+    flash_args = ["--chip", chip, "--port", port, "--baud", baud]
+    if no_reset:
+        # Underscore spellings stay compatible with both the bundled esptool 4.x
+        # and dev's 5.x (which keeps "no_reset" as a deprecated alias of
+        # "no-reset"); the hyphenated form does not exist in 4.x.
+        flash_args += ["--before", "no_reset", "--after", "no_reset"]
+    flash_args += ["write_flash", "0x0", str(firmware)]
     if getattr(sys, "frozen", False):
         suffix = ".exe" if sys.platform == "win32" else ""
         esptool_bin = Path(sys.executable).parent / f"esptool{suffix}"
