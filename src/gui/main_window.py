@@ -113,6 +113,10 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.actionCalibrateFill.triggered.connect(self._open_fill_calibration)
         self.menuTools.addAction(self.actionCalibrateFill)
 
+        self.actionEmergencyFlash = QAction("Emergency Flash (dead USB)…", self)
+        self.actionEmergencyFlash.triggered.connect(self._open_emergency_flash)
+        self.menuTools.addAction(self.actionEmergencyFlash)
+
         # "?" help-mode toggle in the menu-bar corner — hover any field to see
         # what it does. Reusable across windows (see src/gui/help_mode.py).
         self._help_button = HelpButton(self)
@@ -268,6 +272,13 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         dlg = FillCalibrationDialog(self._settings, self._gateway, parent=self)
         dlg.saved.connect(self._on_robot_configured)   # rebuild robots with new fill times
         dlg.exec()
+
+    def _open_emergency_flash(self) -> None:
+        """Tools => Emergency Flash… — cable-flash a node whose USB is dead,
+        through a second ESP32 used as a USB-serial bridge (recovers a node that
+        is too bricked for OTA over ESP-NOW)."""
+        from src.gui.emergency_flash_dialog import EmergencyFlashDialog
+        EmergencyFlashDialog(parent=self).exec()
 
     def _open_settings(self) -> None:
         dlg = SettingsDialog(self._settings, parent=self)

@@ -97,6 +97,8 @@ inline void hardware_init() {
             mlx[i].setFilter(FILTER);
             present = true;
         }
+        DBG_PRINT("magnet: S%u @0x%02X %s\n",
+                  (unsigned)i, ADDR[i], ready[i] ? "ok" : "MISSING");
     }
     if (!present) {
         DBG_PRINTLN("magnet: no MLX90393 found — module disabled");
@@ -218,6 +220,7 @@ inline void tick(uint32_t now) {
     char msg[256];
     buildMessage(samples, valid, msg, sizeof(msg));
     se::node::toGateway(msg);
+    DBG_PRINTLN(msg);   // echo the magnet stream over Serial in debug builds
 }
 
 }  // namespace magnet
