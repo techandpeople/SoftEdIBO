@@ -42,3 +42,9 @@ constexpr int NUM_LEDS = 24;
 // only free ADC1 input — IO34/35/39 are the pressure sensors, IO32/33 the
 // pumps. TODO: verify IO36 is routed to a header/test pad on the PCB.
 constexpr int ORGAN_SENSE_PIN = 36;
+
+// Optional MLX90393 magnet/touch sensors (see magnet.h). Shared I2C bus on
+// the two otherwise-free GPIOs; the board behaves identically when no sensors
+// are wired (auto-detected at boot). If absent, the module stays inert.
+constexpr int MAGNET_SDA = 21;
+constexpr int MAGNET_SCL = 22;

@@ -26,6 +26,7 @@ from sqlalchemy.engine import Engine
 
 from src.data.models import (
     ActivityPreset,
+    DeclarativeActivity,
     InteractionEvent,
     ParticipantRecord,
     SessionAssignment,
@@ -100,6 +101,18 @@ _activity_presets = Table(
     Column("params",        String, nullable=False, default="{}"),
     Column("created_at",    String, nullable=False),
     Column("updated_at",    String, nullable=False),
+)
+
+# Declarative activities — behaviour specs authored as data (block editor /
+# by hand) and run by ScriptedActivity. ``spec`` is JSON-encoded.
+_declarative_activities = Table(
+    "declarative_activities", _metadata,
+    Column("activity_id",  String, primary_key=True),
+    Column("name",         String, nullable=False),
+    Column("description",  String, default=""),
+    Column("spec",         String, nullable=False, default="{}"),
+    Column("created_at",   String, nullable=False),
+    Column("updated_at",   String, nullable=False),
 )
 
 # Skin templates — reusable layouts shared across skins. ``grid``,
@@ -211,6 +224,7 @@ class Database:
                 ("session",         "sessions",          "session_id"),
                 ("skin_template",   "skin_templates",    "template_id"),
                 ("activity_preset", "activity_presets",  "preset_id"),
+                ("declarative_activity", "declarative_activities", "activity_id"),
             ]:
                 row = conn.execute(
                     select(_counters).where(_counters.c.name == counter_name)
@@ -645,6 +659,79 @@ class Database:
             name=row.name,
             description=row.description or "",
             params=json.loads(row.params or "{}"),
+            created_at=datetime.fromisoformat(row.created_at),
+            updated_at=datetime.fromisoformat(row.updated_at),
+        )
+
+    # ------------------------------------------------------------------
+    # Declarative activities (behaviour specs authored as data)
+    # ------------------------------------------------------------------
+
+    def save_declarative_activity(self, activity: DeclarativeActivity) -> None:
+        """Insert or update a declarative activity. ``activity_id`` must be set."""
+        import json
+        now_iso = datetime.now().isoformat()
+        values = {
+            "activity_id": activity.activity_id,
+            "name":        activity.name,
+            "description": activity.description,
+            "spec":        json.dumps(activity.spec),
+            "created_at":  (activity.created_at or datetime.now()).isoformat(),
+            "updated_at":  now_iso,
+        }
+        with self._db_engine.begin() as conn:
+            result = conn.execute(
+                _declarative_activities.update()
+                .where(_declarative_activities.c.activity_id == activity.activity_id)
+                .values(**values)
+            )
+            if result.rowcount == 0:
+                conn.execute(_declarative_activities.insert().values(**values))
+            n = self._extract_counter_num(activity.activity_id)
+            if n is not None:
+                self._bump_counter(conn, "declarative_activity", n)
+
+    def get_declarative_activities(self) -> list[DeclarativeActivity]:
+        with self._db_engine.connect() as conn:
+            rows = conn.execute(
+                select(_declarative_activities)
+                .order_by(_declarative_activities.c.activity_id)
+            ).fetchall()
+        return [self._row_to_declarative(row) for row in rows]
+
+    def get_declarative_activity(self, activity_id: str
+                                 ) -> DeclarativeActivity | None:
+        with self._db_engine.connect() as conn:
+            row = conn.execute(
+                select(_declarative_activities)
+                .where(_declarative_activities.c.activity_id == activity_id)
+            ).fetchone()
+        return self._row_to_declarative(row) if row is not None else None
+
+    def delete_declarative_activity(self, activity_id: str) -> None:
+        with self._db_engine.begin() as conn:
+            conn.execute(
+                _declarative_activities.delete()
+                .where(_declarative_activities.c.activity_id == activity_id)
+            )
+
+    def next_declarative_activity_id(self) -> str:
+        """Return the next auto-generated id (DA001, DA002, …)."""
+        with self._db_engine.connect() as conn:
+            n = conn.execute(
+                select(_counters.c.value)
+                .where(_counters.c.name == "declarative_activity")
+            ).scalar()
+        return f"DA{(n or 0) + 1:03d}"
+
+    @staticmethod
+    def _row_to_declarative(row) -> DeclarativeActivity:
+        import json
+        return DeclarativeActivity(
+            activity_id=row.activity_id,
+            name=row.name,
+            description=row.description or "",
+            spec=json.loads(row.spec or "{}"),
             created_at=datetime.fromisoformat(row.created_at),
             updated_at=datetime.fromisoformat(row.updated_at),
         )

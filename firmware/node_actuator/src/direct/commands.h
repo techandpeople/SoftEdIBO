@@ -6,6 +6,7 @@
 #include "cmd_queue.h"
 #include "chambers.h"
 #include "leds.h"
+#include "magnet.h"
 #include "pins.h"
 #include "units.h"
 #include "dbg.h"
@@ -64,6 +65,13 @@ inline void process(const cmd_queue::Cmd& c) {
 #ifdef DEBUG_BUILD
     if (c.type == CMD_DEBUG) { sendDebug(); return; }
 #endif
+
+    // Emergency stop / re-arm: handled regardless of chamber, even while stopped.
+    if (c.type == CMD_STOP)   { chambers::stopped = true;  chambers::emergencyStopAll(); return; }
+    if (c.type == CMD_RESUME) { chambers::stopped = false; return; }
+
+    // While latched stopped, drop every actuation command so nothing re-actuates.
+    if (chambers::stopped) return;
 
     int n = c.chamber;
     if (n < 0 || n >= NUM_CHAMBERS) return;
@@ -154,6 +162,8 @@ inline void parseAndQueue(const uint8_t* data, int len) {
     else if (strcmp(cmd, "set_max_pressure") == 0)  { c.type = CMD_SET_MAX;      c.chamber = doc["chamber"] | -1; c.param_kpa = doc["value"] | chambers::DEFAULT_MAX_KPA; }
     else if (strcmp(cmd, "set_min_pressure") == 0)  { c.type = CMD_SET_MIN;      c.chamber = doc["chamber"] | -1; c.param_kpa = doc["value"] | chambers::DEFAULT_MIN_KPA; }
     else if (strcmp(cmd, "hold") == 0)              { c.type = CMD_HOLD;         c.chamber = doc["chamber"] | -1; }
+    else if (strcmp(cmd, "stop") == 0)              { c.type = CMD_STOP;         c.chamber = -1; }
+    else if (strcmp(cmd, "resume") == 0)            { c.type = CMD_RESUME;       c.chamber = -1; }
     else if (strcmp(cmd, "valve_manual") == 0) {
         c.type = CMD_VALVE_MANUAL;
         c.chamber = doc["chamber"] | -1;
@@ -186,6 +196,10 @@ inline void parseAndQueue(const uint8_t* data, int len) {
         else          leds::set(r, g, b, leds::patternFromStr(pat), period, count);
         return;
     }
+    // ---- Magnet/touch board commands (handled inline, not queued) ----
+    // Match what the PC's touch tuning panel sends; no-ops if no sensors wired.
+    else if (strcmp(cmd, "rebaseline") == 0) { magnet::resetBaseline();   return; }
+    else if (strcmp(cmd, "configure") == 0)  { magnet::applyConfigure(doc); return; }
     else return;
 
     if (!push(c)) {

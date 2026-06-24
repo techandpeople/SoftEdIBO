@@ -14,6 +14,8 @@
 #       settings.yaml
 #     firmware/
 #       gateway/firmware.bin                         (ESP32-C6, ESP-IDF)
+#       gateway/firmware-s3.bin                      (ESP32-S3, ESP-IDF)
+#       gateway/firmware-s3-ap.bin                   (ESP32-S3 + SoftAP, ESP-IDF)
 #       gateway/firmware-esp32.bin                   (ESP32-WROOM, Arduino)
 #       node_actuator/firmware-direct-release.bin
 #       node_actuator/firmware-direct-debug.bin
@@ -55,7 +57,12 @@ main_a = Analysis(
     binaries=[],
     datas=[
         ("config/", "config/"),
+        # Block editor assets (Tools => Behaviour Editor…). HTML + any vendored
+        # Blockly copy; loaded lazily, only when the editor is opened.
+        ("src/gui/blockly/", "src/gui/blockly/"),
         ("firmware/gateway/firmware.bin",                 "firmware/gateway"),
+        ("firmware/gateway/firmware-s3.bin",              "firmware/gateway"),
+        ("firmware/gateway/firmware-s3-ap.bin",           "firmware/gateway"),
         ("firmware/gateway/firmware-esp32.bin",           "firmware/gateway"),
         ("firmware/node_actuator/firmware-direct-release.bin",      "firmware/node_actuator"),
         ("firmware/node_actuator/firmware-direct-debug.bin",        "firmware/node_actuator"),
@@ -69,6 +76,10 @@ main_a = Analysis(
         "serial.tools.list_ports",
         "PySide6.QtSvg",
         "PySide6.QtXml",
+        # Block editor web view (Tools => Behaviour Editor…). PyInstaller's
+        # PySide6 hook bundles the QtWebEngine process when these are imported.
+        "PySide6.QtWebEngineWidgets",
+        "PySide6.QtWebEngineCore",
         # Touch-gesture ML stack (lazily imported in src/ml/training.py).
         # scikit-learn pulls these in but the lazy imports can dodge static
         # analysis, so name them explicitly.

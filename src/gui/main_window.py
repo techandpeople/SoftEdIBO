@@ -5,16 +5,21 @@ import os
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtCore import QEvent, Qt, QTimer
+from PySide6.QtGui import QCloseEvent, QKeyEvent
 from PySide6.QtWidgets import (
+    QAbstractSpinBox,
     QApplication,
+    QComboBox,
     QDialog,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QMessageBox,
+    QPlainTextEdit,
     QProgressDialog,
     QPushButton,
+    QTextEdit,
 )
 
 from src._version import __build_time__, __version__
@@ -23,6 +28,7 @@ from src.updater import AppUpdater
 from src.data.database import Database
 from src.gui.async_task import run_async
 from src.gui.data_panel import DataPanel
+from src.gui.emergency_stop_button import EmergencyStopButton
 from src.gui.help_mode import HelpButton
 from src.gui.home_panel import HomePanel
 from src.gui.participant_panel import ParticipantPanel
@@ -97,9 +103,17 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.actionActivityPresets.triggered.connect(self._open_activity_presets)
         self.menuTools.addAction(self.actionActivityPresets)
 
+        self.actionBehaviorEditor = QAction("Behaviour Editor…", self)
+        self.actionBehaviorEditor.triggered.connect(self._open_behavior_editor)
+        self.menuTools.addAction(self.actionBehaviorEditor)
+
         self.actionUpdateNodesOTA = QAction("Update Nodes (OTA)…", self)
         self.actionUpdateNodesOTA.triggered.connect(self._open_ota_dialog)
         self.menuTools.addAction(self.actionUpdateNodesOTA)
+
+        self.actionGatewayAP = QAction("Gateway WiFi AP…", self)
+        self.actionGatewayAP.triggered.connect(self._open_gateway_ap)
+        self.menuTools.addAction(self.actionGatewayAP)
 
         self.actionTrainTouch = QAction("Touch Gestures…", self)
         self.actionTrainTouch.triggered.connect(self._open_train_touch)
@@ -109,10 +123,23 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.actionCalibrateFill.triggered.connect(self._open_fill_calibration)
         self.menuTools.addAction(self.actionCalibrateFill)
 
+        self.actionEmergencyFlash = QAction("Emergency Flash (dead USB)…", self)
+        self.actionEmergencyFlash.triggered.connect(self._open_emergency_flash)
+        self.menuTools.addAction(self.actionEmergencyFlash)
+
         # "?" help-mode toggle in the menu-bar corner — hover any field to see
         # what it does. Reusable across windows (see src/gui/help_mode.py).
         self._help_button = HelpButton(self)
         self.menubar.setCornerWidget(self._help_button, Qt.TopRightCorner)
+
+        # Always-visible emergency stop in the opposite corner. Kills every pump
+        # and valve at once. Pressing the "0" key anywhere does the same (see the
+        # application event filter installed below).
+        self._estop_button = EmergencyStopButton(self)
+        self._estop_button.stop_requested.connect(self._emergency_stop)
+        self._estop_button.rearm_requested.connect(self._rearm)
+        self.menubar.setCornerWidget(self._estop_button, Qt.TopLeftCorner)
+        QApplication.instance().installEventFilter(self)
 
         # Track whether a session is live so OTA can refuse mid-actuation.
         self._session_active = False
@@ -239,6 +266,12 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         )
         dlg.exec()
 
+    def _open_gateway_ap(self) -> None:
+        """Tools => Gateway WiFi AP… — name/password of the SoftAP the gateway
+        broadcasts for the Thymios (access-point firmware build only)."""
+        from src.gui.gateway_ap_dialog import GatewayApDialog
+        GatewayApDialog(self._gateway, parent=self).exec()
+
     def _open_train_touch(self) -> None:
         """Tools => Train Touch Models… — train per-skin-type gesture models
         from recorded sessions + their label CSVs."""
@@ -259,6 +292,13 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         dlg.saved.connect(self._on_robot_configured)   # rebuild robots with new fill times
         dlg.exec()
 
+    def _open_emergency_flash(self) -> None:
+        """Tools => Emergency Flash… — cable-flash a node whose USB is dead,
+        through a second ESP32 used as a USB-serial bridge (recovers a node that
+        is too bricked for OTA over ESP-NOW)."""
+        from src.gui.emergency_flash_dialog import EmergencyFlashDialog
+        EmergencyFlashDialog(parent=self).exec()
+
     def _open_settings(self) -> None:
         dlg = SettingsDialog(self._settings, parent=self)
         dlg.settings_saved.connect(self._on_settings_saved)
@@ -275,6 +315,26 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             if current_preset and self._session_panel._current_activity:
                 self._session_panel._current_activity.apply_preset(current_preset.params)
                 logger.info(f"Applied preset {current_preset.preset_id} to {self._session_panel._current_activity.name}")
+
+    def _open_behavior_editor(self) -> None:
+        """Tools => Behaviour Editor… — author block-based behaviours that
+        compile to declarative specs run by ScriptedActivity. Imported lazily
+        so QtWebEngine is only loaded when the editor is actually opened.
+
+        The app-wide event filter (the "0" panic key) is removed for the
+        editor's lifetime: PySide6 crashes marshalling QtWebEngine's internal
+        QtQuick objects through a Python global event filter (hover events over
+        the web view). The editor drives no hardware, so losing the panic key
+        while it is open is harmless — the modal already blocks the rest of the
+        UI anyway."""
+        from src.gui.behavior_editor_dialog import BehaviorEditorDialog
+        app = QApplication.instance()
+        app.removeEventFilter(self)
+        try:
+            dlg = BehaviorEditorDialog(self._db, parent=self)
+            dlg.exec()
+        finally:
+            app.installEventFilter(self)
 
     def _on_settings_saved(self) -> None:
         """Apply settings changes that don't require a restart."""
@@ -458,6 +518,73 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             f"Soft-based robot for inclusive education .<br><br>"
             f"LASIGE, Faculdade de Ciências, Universidade de Lisboa",
         )
+
+    # ------------------------------------------------------------------
+    # Emergency stop
+    # ------------------------------------------------------------------
+
+    # Text-entry widgets where "0" must reach the field, not the panic key.
+    _TEXT_INPUT_TYPES = (QLineEdit, QAbstractSpinBox, QTextEdit, QPlainTextEdit)
+
+    def eventFilter(self, obj, event) -> bool:
+        """App-wide panic key: a bare "0" fires the emergency stop.
+
+        Installed on the QApplication so it works from any tab or dialog. It is
+        suppressed while a text-entry widget (or an editable combo box) has
+        focus, so typing 0 into a value field still works.
+        """
+        if event.type() == QEvent.Type.KeyPress and isinstance(event, QKeyEvent):
+            if (event.key() == Qt.Key.Key_0
+                    and not event.isAutoRepeat()
+                    and event.modifiers() == Qt.KeyboardModifier.NoModifier
+                    and not self._focus_is_text_input()):
+                self._emergency_stop()
+                return True
+        return super().eventFilter(obj, event)
+
+    def _focus_is_text_input(self) -> bool:
+        w = QApplication.focusWidget()
+        if w is None:
+            return False
+        if isinstance(w, QComboBox):
+            return w.isEditable()
+        return isinstance(w, self._TEXT_INPUT_TYPES)
+
+    def _emergency_stop(self) -> None:
+        """Halt everything: pumps off + valves closed on all nodes, session frozen.
+
+        Idempotent — pressing the panic key repeatedly just re-issues the stop.
+        """
+        for robot in self._robots:
+            try:
+                robot.emergency_stop()
+            except Exception:
+                logger.exception("emergency_stop failed for %s", robot.robot_id)
+        self._session_panel.emergency_stop()
+        self._estop_button.set_stopped(True)
+        self.statusBar().showMessage(
+            "EMERGENCY STOP — all pumps off, valves closed. Click the button to re-arm.")
+        logger.warning("EMERGENCY STOP triggered")
+
+    def _rearm(self) -> None:
+        """Re-enable actuation after an emergency stop (asks for confirmation)."""
+        answer = QMessageBox.question(
+            self, "Re-arm robots",
+            "Re-arm all robots? Pumps and valves will be allowed to run again.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        for robot in self._robots:
+            try:
+                robot.rearm()
+            except Exception:
+                logger.exception("rearm failed for %s", robot.robot_id)
+        self._session_panel.emergency_rearm()
+        self._estop_button.set_stopped(False)
+        self.statusBar().showMessage("Robots re-armed.", 4000)
+        logger.warning("Robots re-armed after emergency stop")
 
     # ------------------------------------------------------------------
     # Lifecycle

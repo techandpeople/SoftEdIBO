@@ -96,6 +96,25 @@ class ESPNowGateway:
             logger.exception("Failed to send command to %s", target_mac)
             return False
 
+    def send_gateway(self, command: str, **kwargs: Any) -> bool:
+        """Send a command to the gateway itself (not relayed to a node).
+
+        Gateway-local commands carry no ``target`` field, so the firmware
+        handles them on the spot instead of forwarding over ESP-NOW (e.g.
+        ``get_ap`` / ``set_ap`` for the SoftAP build).
+        """
+        if not self.is_connected:
+            return False
+        message = {"cmd": command, **kwargs}
+        try:
+            line = json.dumps(message)
+            self._serial.write((line + "\n").encode("utf-8"))
+            self._emit_raw("tx", line)
+            return True
+        except serial.SerialException:
+            logger.exception("Failed to send gateway command %s", command)
+            return False
+
     def send_raw(self, text: str) -> bool:
         """Write a raw line to the gateway serial port.
 

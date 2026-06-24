@@ -58,7 +58,13 @@ class NodeOTAUpdater:
     WINDOW = 8           # max chunks in flight
     ACK_TIMEOUT = 0.4    # seconds before retransmitting an unacked chunk
     MAX_RETRIES = 8      # per-chunk retransmit attempts before aborting
-    READY_TIMEOUT = 5.0  # seconds to wait for ota_ready / ota_done
+    READY_TIMEOUT = 5.0  # seconds to wait for ota_ready
+    # The end phase needs more slack: the node verifies the MD5, then emits a
+    # burst of ota_done frames (~0.5 s) before rebooting. ESP-NOW relay latency
+    # plus that burst can exceed READY_TIMEOUT, so give it a wider window before
+    # declaring a (false) timeout.
+    DONE_TIMEOUT = 12.0  # seconds to wait for ota_done after ota_end
+    END_RESEND = 1.0     # seconds between ota_end retransmits while finishing
 
     def __init__(
         self,
@@ -200,8 +206,7 @@ class NodeOTAUpdater:
         # 3. end + verify + reboot
         self._terminal = None
         self._event.clear()
-        self._gateway.send(self._mac, "ota_end")
-        ok, msg = self._wait_terminal({"done"}, self.READY_TIMEOUT, "ota_end")
+        ok, msg = self._finish(self.DONE_TIMEOUT)
         if not ok:
             return False, msg
         if self._on_progress:
@@ -210,6 +215,44 @@ class NodeOTAUpdater:
 
     def _send_chunk(self, seq: int, data: str) -> None:
         self._gateway.send(self._mac, "ota_data", seq=seq, data=data)
+
+    def _finish(self, timeout: float) -> tuple[bool, str]:
+        """Drive the end phase, surviving a lost ``ota_end`` or ``ota_done``.
+
+        Unlike data chunks, ``ota_end`` had no retransmit: the gateway relay can
+        drop it (the same way it drops oversized chunks), leaving the node parked
+        and the PC timing out at 100 %. So we *resend* ``ota_end`` every
+        :attr:`END_RESEND` seconds until the node confirms.
+
+        Two confirmations count as success:
+          * ``ota_done`` — the node finalized and is rebooting (normal case);
+          * ``not_active`` — a previous ``ota_end`` already finalized the image
+            (its ``ota_done`` burst was lost, or the node already rebooted into
+            the new firmware). The flash is written and MD5-verified either way,
+            so a late ``not_active`` is a success, not a failure.
+        """
+        deadline = time.monotonic() + timeout
+        next_send = 0.0  # send immediately on the first pass
+        while time.monotonic() < deadline:
+            if self._cancelled:
+                return False, "Cancelled"
+            term = self._terminal
+            if term == "done":
+                return True, "ok"
+            if term == "not_active":
+                self._log("ota_end: node already finalized (ota_done lost) — "
+                          "treating as success")
+                return True, "ok"
+            if term is not None and term != "ready":
+                return False, f"Node error during ota_end: {term}"
+
+            now = time.monotonic()
+            if now >= next_send:
+                self._gateway.send(self._mac, "ota_end")
+                next_send = now + self.END_RESEND
+            self._event.wait(0.2)
+            self._event.clear()
+        return False, "Timed out waiting for node during ota_end"
 
     def _wait_terminal(
         self, accept: set[str], timeout: float, phase: str

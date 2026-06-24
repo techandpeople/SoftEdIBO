@@ -138,8 +138,13 @@ inline bool tryHandle(const uint8_t* data, int len) {
         bool ok = Update.end(true);   // true => verify MD5 + set boot partition
         active = false;
         if (!ok) { fail("verify_failed"); return true; }
-        reply("{\"type\":\"ota_done\"}");
-        delay(100);                   // let the reply leave before we reboot
+        // ota_done is a single unacked frame and we reboot right after, so a lost
+        // frame would make the PC time out even though the update succeeded. Send
+        // it a few times spaced out to survive ESP-NOW packet loss.
+        for (int i = 0; i < 4; i++) {
+            reply("{\"type\":\"ota_done\"}");
+            delay(120);               // let each reply leave; total ~0.5 s
+        }
         ESP.restart();
         return true;
     }

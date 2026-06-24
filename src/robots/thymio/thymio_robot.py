@@ -77,6 +77,11 @@ class ThymioRobot(EspRobot):
     def stop(self) -> bool:
         return self.set_motors(0, 0)
 
+    def emergency_stop(self) -> None:
+        # Stop the wheels too, then latch the air nodes off (EspRobot).
+        self.stop()
+        super().emergency_stop()
+
     def set_leds(self, r: int, g: int, b: int) -> bool:
         return self.send_command("leds", r=r, g=g, b=b)
 

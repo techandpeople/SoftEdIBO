@@ -62,6 +62,19 @@ class ESP32Controller:
         """Hold pressure — stop pump, close inflate and deflate valves for this chamber."""
         return self.send_command("hold", chamber=chamber)
 
+    def emergency_stop(self) -> bool:
+        """Latch every actuator on this node OFF — all pumps off, all valves closed.
+
+        The node stays stopped (ignoring inflate/deflate/etc.) until ``resume()``
+        re-arms it, so the firmware holds the safe state even if the app crashes
+        or the gateway link drops afterwards.
+        """
+        return self.send_command("stop")
+
+    def resume(self) -> bool:
+        """Re-arm the node after an :meth:`emergency_stop` so it accepts commands again."""
+        return self.send_command("resume")
+
     def set_pressure(self, chamber: int, value: int) -> bool:
         """Set target pressure for a chamber as 0-100 % of that chamber max."""
         return self.send_command("set_pressure", chamber=chamber, value=value)
@@ -170,6 +183,25 @@ class ESP32Controller:
         if index is not None:
             kwargs["index"] = int(index)
         return self.send_command("set_led", **kwargs)
+
+    def set_led_halves(self, colors: list[str], led_count: int = 24,
+                       pattern: str = "solid") -> bool:
+        """Paint the ring split into ``len(colors)`` equal contiguous arcs.
+
+        Used for the "half purple / half yellow" behaviour look. Done purely
+        in software via per-pixel ``set_led(index=…)`` (the firmware has no
+        segment command), so this sends one frame per LED — fine because the
+        colours only change on a phase transition, never per animation tick.
+        """
+        n = max(1, int(led_count))
+        k = len(colors)
+        if k == 0:
+            return False
+        ok = True
+        for i in range(n):
+            seg = min(i * k // n, k - 1)
+            ok = self.set_led(colors[seg], pattern=pattern, index=i) and ok
+        return ok
 
     def on_touch(self, callback: Callable[[int, int], None]) -> None:
         """Register a callback for touch sensor events.
