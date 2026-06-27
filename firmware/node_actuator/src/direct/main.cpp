@@ -78,6 +78,11 @@ void setup() {
         return;
     }
 
+    // Firmware update support: halt all actuators before a WiFi OTA takes the
+    // node off the air, and announce a WiFi OTA that just completed (see se_ota.h).
+    se::ota::beforeWifiHook = &chambers::emergencyStopAll;
+    se::ota::checkBootDone();
+
     for (int i = 0; i < NUM_CHAMBERS; i++)
         chambers::cachedKpa[i] = pressure::readKpa(PSENSOR_PINS[i]);
 
@@ -97,6 +102,9 @@ void setup() {
 }
 
 void loop() {
+    // ---- Run a pending WiFi OTA (from the main task, not the recv callback) ----
+    se::ota::pollWifi();   // never returns if an update starts (node reboots)
+
     uint32_t now = millis();
 
     // ---- Animate the LED ring (non-blocking, throttled) ----

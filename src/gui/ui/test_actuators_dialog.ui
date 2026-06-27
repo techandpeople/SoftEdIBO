@@ -3,11 +3,11 @@
  <class>TestActuatorsDialog</class>
  <widget class="QDialog" name="TestActuatorsDialog">
   <property name="geometry">
-   <rect><x>0</x><y>0</y><width>780</width><height>600</height></rect>
+   <rect><x>0</x><y>0</y><width>820</width><height>880</height></rect>
   </property>
   <property name="windowTitle"><string>Test Actuators</string></property>
   <property name="minimumSize">
-   <size><width>560</width><height>360</height></size>
+   <size><width>600</width><height>620</height></size>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>
@@ -18,6 +18,15 @@
    </item>
    <item>
     <widget class="QScrollArea" name="chambers_scroll">
+     <property name="sizePolicy">
+      <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+       <horstretch>0</horstretch>
+       <verstretch>1</verstretch>
+      </sizepolicy>
+     </property>
+     <property name="minimumSize">
+      <size><width>0</width><height>240</height></size>
+     </property>
      <property name="whatsThis"><string>One row per chamber. Use the inflate/deflate controls to drive each chamber by hand and confirm the wiring matches the layout. Keep hands clear of the actuators.</string></property>
      <property name="widgetResizable"><bool>true</bool></property>
      <property name="visible"><bool>false</bool></property>

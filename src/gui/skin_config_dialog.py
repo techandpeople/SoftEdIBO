@@ -315,6 +315,7 @@ class SkinConfigDialog(QDialog, Ui_SkinConfigDialog):
         self.calib_btn.clicked.connect(self._on_calibrate)
         self.delete_btn.clicked.connect(self._on_delete)
         self.cancel_btn.clicked.connect(self.reject)
+        self.apply_btn.clicked.connect(self._on_apply)
         self.save_btn.clicked.connect(self._on_save)
 
     # ------------------------------------------------------------------
@@ -610,11 +611,10 @@ class SkinConfigDialog(QDialog, Ui_SkinConfigDialog):
         self._sensor_count_spin.valueChanged.connect(self._on_sensor_count_changed)
         form.addRow("Sensors:", self._sensor_count_spin)
 
-        # Note: Sensor → Chamber routing is now configured per activity,
-        # not per skin. Activities provide a sensor_to_chamber param that
-        # overrides the skin's default, allowing the same physical skin to be
-        # reused with different routings in different activities.
-        outer.addWidget(QLabel("Note: Sensor → Chamber routing is configured in activity presets"))
+        # Note: Sensor → Chamber routing follows the skin's order by default;
+        # behaviours that need a different mapping address chambers explicitly.
+        outer.addWidget(QLabel(
+            "Note: Sensor → Chamber routing defaults to the skin's chamber order"))
 
         return group
 
@@ -1085,27 +1085,30 @@ class SkinConfigDialog(QDialog, Ui_SkinConfigDialog):
         )
         return reply == QMessageBox.StandardButton.Yes
 
-    def _on_save(self) -> None:
+    def _commit(self) -> bool:
+        """Validate the dialog and persist the skin to settings, without
+        closing. Returns True on success. Shared by Save (which then closes)
+        and Apply (which stays open so the user can keep tweaking + testing)."""
         skin_id = self.skin_id_edit.text().strip()
 
         if not skin_id:
             QMessageBox.warning(self, _MISSING_FIELD_TITLE,
                                 "Skin ID cannot be empty.")
-            return
+            return False
         if not self._rows:
             QMessageBox.warning(self, _MISSING_FIELD_TITLE,
                                 "Add at least one chamber.")
-            return
+            return False
 
         chambers = self._collect_chambers()
         if chambers is None:
-            return
+            return False
         if not self._validate_no_duplicate_chambers(chambers):
-            return
+            return False
         if not self._validate_no_sibling_conflicts(chambers):
-            return
+            return False
         if not self._confirm_large_pressure_change(chambers):
-            return
+            return False
 
         skin_type = self.skin_type_combo.currentData() or ""
         skin_variant = self.skin_variant_combo.currentData() or ""
@@ -1116,11 +1119,24 @@ class SkinConfigDialog(QDialog, Ui_SkinConfigDialog):
         organs = self._organs_from_rows() if skin_variant == _ORGAN_VARIANT else []
         skincfg.apply_organs(skin_entry, organs)
 
-        skincfg.save_skin_entry(
+        # save_skin_entry returns the written index — for a brand-new skin this
+        # is the appended slot. Adopt it so a second Apply replaces the entry
+        # instead of appending a duplicate, and flip the dialog into edit mode.
+        self._skin_index = skincfg.save_skin_entry(
             self._settings.data, self._robot_type, self._robot_index,
             self._skin_index, skin_entry)
         self._settings.save()
-        self.accept()
+        if not self.delete_btn.isVisible():
+            self.delete_btn.setVisible(True)
+            self.setWindowTitle("Configure Skin")
+        return True
+
+    def _on_apply(self) -> None:
+        self._commit()
+
+    def _on_save(self) -> None:
+        if self._commit():
+            self.accept()
 
     def _on_delete(self) -> None:
         reply = QMessageBox.question(

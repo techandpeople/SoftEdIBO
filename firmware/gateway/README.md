@@ -35,7 +35,10 @@ The `seeed_xiao_esp32s3_ap` env builds the gateway with a **SoftAP** so WiFi
 clients (e.g. Thymio robots) can associate **while ESP-NOW keeps running** — the
 two share one 2.4 GHz radio, so the AP and the nodes must be on the **same
 channel** (default 1). On the dual-core S3 the ESP-NOW bridge runs on the second
-core so AP traffic never stalls forwarding to the PC. Defaults: SSID `SoftEdIBO`,
+core so AP traffic never stalls forwarding to the PC. The SoftAP (and the WiFi
+firmware update it enables) is **S3-only**: the C6 is single-core, sharing the
+radio, the ESP-NOW bridge and the USB relay on one core, so it stays a plain
+ESP-NOW gateway. Defaults: SSID `SoftEdIBO`,
 password `softedibo`, channel 1, up to 8 clients — override at build time:
 
 ```bash
@@ -62,6 +65,24 @@ NVS. The desktop app exposes this as **Tools → Gateway WiFi AP…**.
 {"type":"ap_set","ok":true,"ssid":"MyNet"}
 {"type":"ap_set","ok":false,"reason":"bad_password"}   // or "empty_ssid"
 {"type":"error","reason":"ap_not_supported"}           // non-AP build
+```
+
+This SoftAP also powers the **fast WiFi firmware update** (S3 only — it buffers
+the image in PSRAM). In the desktop app's **Tools → Update Nodes (OTA)…** pick the
+*WiFi* transport: the PC streams the image to the gateway over the **USB cable**
+(`ota_store_*` gateway-local commands), the gateway buffers it in PSRAM and serves
+it over HTTP (`http://<ap-ip>/fw`, with an `x-MD5` header), and the node joins the
+AP to download it in seconds. The **PC never joins the WiFi** — it stays on the
+cable. The node side is `firmware/common/se_ota.h` (the `ota_wifi` command); the
+gateway proxy is in `src/main.cpp`.
+
+```jsonc
+// PC => gateway (no "target"): stage the image, then trigger the node
+{"cmd":"ota_store_begin","size":806976,"md5":"…"}
+{"type":"ota_store_ready"}                       // or {"type":"ota_store_error","reason":"no_psram"}
+{"cmd":"ota_store_data","data":"<base64>"}        // ×N, no per-chunk ack
+{"cmd":"ota_store_end"}
+{"type":"ota_stored","ok":true,"url":"http://192.168.4.1/fw"}
 ```
 
 Requires [PlatformIO](https://platformio.org/). The XIAO C6 (RISC-V) and S3

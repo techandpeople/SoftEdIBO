@@ -120,7 +120,13 @@ inline void process(const cmd_queue::Cmd& c) {
         } else {
             float delta  = (ch.max_kpa - ch.min_kpa) * constrain(c.param, 0, 100) / 100.0f;
             float target = min(chambers::cachedKpa[n] + delta, ch.max_kpa);
-            chambers::beginInflate(n, chambers::DEFAULT_INFLATE_DUTY, target);
+            // Only actuate if we are actually below the target. Without this guard
+            // each inflate opens the valve and runs the pump for one control cycle
+            // regardless of current pressure (the stop fires only at the next
+            // pressure check), so repeated inflates at the cap creep past max_kpa a
+            // pulse at a time. set_pressure already guards this way.
+            if (chambers::cachedKpa[n] < target)
+                chambers::beginInflate(n, chambers::DEFAULT_INFLATE_DUTY, target);
         }
         break;
     }

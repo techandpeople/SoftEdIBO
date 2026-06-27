@@ -180,13 +180,6 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         if not activity.simulation_mode and not self._check_fill_times(robots):
             return
 
-        # Apply the chosen ActivityPreset (if any) so the activity's
-        # tunable params reflect the user's selection. With no preset,
-        # ``param_values`` stays at the PARAMS / SIM_PARAMS defaults.
-        preset = dialog.selected_preset
-        if preset is not None:
-            activity.apply_preset(preset.params)
-
         # Open assignment dialog if there are robots and participants to assign
         last_path = Settings.ROOT / "data" / _LAST_ASSIGNMENTS_FILE
         assignments = []

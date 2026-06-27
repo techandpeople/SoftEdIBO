@@ -69,6 +69,10 @@ class ChamberWidget(QWidget, Ui_ChamberWidget):
         target  = self._chamber.target_pressure
         self.bar.set_values(current, target)
         self.pressure_lbl.setText(f"{current}/{target}")
+        # Absolute kPa when the firmware reports it (matches the Test Actuators
+        # readout); blank for the simulator / pre-kPa firmware (NaN).
+        kpa = self._chamber.kpa
+        self.kpa_lbl.setText(f"{kpa:.1f} kPa" if kpa == kpa else "")
         if not self._skin.is_connected:
             self.state_lbl.setText("OFF")
         else:

@@ -1,9 +1,11 @@
-"""Tools => Update Nodes (OTA)… — flash node firmware wirelessly over ESP-NOW.
+"""Tools => Update Nodes (OTA)… — flash node firmware wirelessly.
 
 Lists every flashable node declared across the configured robots, lets the user
-pick which to update, and streams the bundled firmware to each through the
-gateway (see :class:`~src.hardware.node_ota_updater.NodeOTAUpdater`). The gateway
-stays cabled to the PC; only the nodes are updated over the air.
+pick which to update, and pushes the bundled firmware to each through the
+gateway. Two transports are offered: ESP-NOW (slow but works anywhere, see
+:class:`~src.hardware.node_ota_updater.NodeOTAUpdater`) and WiFi (fast, via the
+gateway SoftAP, see :class:`~src.hardware.wifi_ota_updater.WifiOTAUpdater`). The
+gateway stays cabled to the PC; only the nodes are updated over the air.
 
 The gateway object is owned by ``MainWindow`` and is expected to be already
 connected (auto-connect on startup, or via the Robots tab / Settings). On open
@@ -32,25 +34,40 @@ from src.gui.setup_wizard import firmware_for_node_type
 from src.gui.ui_ota_update_dialog import Ui_OTAUpdateDialog
 from src.hardware.espnow_gateway import ESPNowGateway
 from src.hardware.node_ota_updater import NodeOTAUpdater
+from src.hardware.wifi_ota_updater import WifiOTAUpdater
 
 logger = logging.getLogger(__name__)
+
+# transport_combo indices.
+_TRANSPORT_ESPNOW, _TRANSPORT_WIFI = range(2)
+
+_DIALOG_TITLE = "Update Nodes"
 
 # Columns
 _COL_SEL, _COL_MAC, _COL_TYPE, _COL_ONLINE, _COL_PROGRESS, _COL_STATUS = range(6)
 
 
 class _OTAWorker(QThread):
-    """Flashes a list of nodes sequentially, one ESP-NOW stream at a time."""
+    """Flashes a list of nodes sequentially, one transfer at a time.
+
+    The transport is picked once for the whole batch: ESP-NOW (slow, works
+    anywhere) or WiFi (fast, needs the gateway SoftAP + this PC on that network).
+    """
 
     progress = Signal(str, int)   # mac, percent
     status = Signal(str, str)     # mac, message
     done = Signal()
 
-    def __init__(self, gateway: ESPNowGateway, jobs: list[tuple[str, Path]]):
+    def __init__(self, gateway: ESPNowGateway, jobs: list[tuple[str, Path]],
+                 transport: int = _TRANSPORT_ESPNOW,
+                 ap_ssid: str = "", ap_password: str = ""):
         super().__init__()
         self._gateway = gateway
         self._jobs = jobs
-        self._current: NodeOTAUpdater | None = None
+        self._transport = transport
+        self._ap_ssid = ap_ssid
+        self._ap_password = ap_password
+        self._current: NodeOTAUpdater | WifiOTAUpdater | None = None
         self._cancelled = False
 
     def cancel(self) -> None:
@@ -58,26 +75,33 @@ class _OTAWorker(QThread):
         if self._current is not None:
             self._current.cancel()
 
+    def _make_updater(self, mac: str, path: Path) -> NodeOTAUpdater | WifiOTAUpdater:
+        on_progress = lambda p, m=mac: self.progress.emit(m, p)
+        on_log = lambda s, m=mac: self.status.emit(m, s)
+        if self._transport == _TRANSPORT_WIFI:
+            return WifiOTAUpdater(
+                self._gateway, mac, path, self._ap_ssid, self._ap_password,
+                on_progress=on_progress, on_log=on_log,
+            )
+        return NodeOTAUpdater(
+            self._gateway, mac, path, on_progress=on_progress, on_log=on_log,
+        )
+
     def run(self) -> None:
         for mac, path in self._jobs:
             if self._cancelled:
                 self.status.emit(mac, "Cancelled")
                 continue
             self.status.emit(mac, "Starting…")
-            updater = NodeOTAUpdater(
-                self._gateway, mac, path,
-                on_progress=lambda p, m=mac: self.progress.emit(m, p),
-                on_log=lambda s, m=mac: self.status.emit(m, s),
-            )
-            self._current = updater
-            ok, msg = updater.run()
+            self._current = self._make_updater(mac, path)
+            ok, msg = self._current.run()
             self.status.emit(mac, ("✓ " if ok else "✗ ") + msg)
         self._current = None
         self.done.emit()
 
 
 class OTAUpdateDialog(QDialog, Ui_OTAUpdateDialog):
-    """Multi-select node firmware updater over ESP-NOW."""
+    """Multi-select node firmware updater (ESP-NOW or WiFi transport)."""
 
     def __init__(self, gateway: ESPNowGateway, settings: Settings,
                  session_active: bool = False, parent=None):
@@ -98,6 +122,8 @@ class OTAUpdateDialog(QDialog, Ui_OTAUpdateDialog):
         self.select_all_btn.clicked.connect(self._on_select_online)
         self.flash_btn.clicked.connect(self._on_flash)
         self.close_btn.clicked.connect(self.reject)
+        self.transport_combo.currentIndexChanged.connect(self._on_transport_changed)
+        self._on_transport_changed(self.transport_combo.currentIndex())
 
         self._populate()
         self._update_banner()
@@ -174,6 +200,13 @@ class OTAUpdateDialog(QDialog, Ui_OTAUpdateDialog):
     # Actions
     # ------------------------------------------------------------------
 
+    def _on_transport_changed(self, index: int) -> None:
+        """Show the AP credential fields + hint only for the WiFi transport."""
+        wifi = index == _TRANSPORT_WIFI
+        for w in (self.ap_ssid_label, self.ap_ssid_edit,
+                  self.ap_pass_label, self.ap_pass_edit, self.wifi_hint_label):
+            w.setVisible(wifi)
+
     def _on_select_online(self) -> None:
         known = self._gateway.known_macs if self._gateway.is_connected else frozenset()
         for mac, row in self._row_by_mac.items():
@@ -204,17 +237,28 @@ class OTAUpdateDialog(QDialog, Ui_OTAUpdateDialog):
             return
         jobs = self._selected_jobs()
         if not jobs:
-            QMessageBox.information(self, "Update Nodes", "No nodes selected.")
+            QMessageBox.information(self, _DIALOG_TITLE, "No nodes selected.")
             return
+
+        transport = self.transport_combo.currentIndex()
+        ssid = self.ap_ssid_edit.text().strip()
+        password = self.ap_pass_edit.text()
+        if transport == _TRANSPORT_WIFI and not ssid:
+            QMessageBox.information(self, _DIALOG_TITLE,
+                                    "Enter the gateway access-point name first.")
+            return
+
+        via = ("fast via the gateway WiFi access point (the PC stays on the "
+               "cable)" if transport == _TRANSPORT_WIFI else "over ESP-NOW")
         if QMessageBox.question(
-            self, "Update Nodes",
-            f"Flash {len(jobs)} node(s) over the air? Do not power them off "
+            self, _DIALOG_TITLE,
+            f"Flash {len(jobs)} node(s) {via}? Do not power them off "
             "during the update.",
         ) != QMessageBox.StandardButton.Yes:
             return
 
         self._set_running(True)
-        self._worker = _OTAWorker(self._gateway, jobs)
+        self._worker = _OTAWorker(self._gateway, jobs, transport, ssid, password)
         self._worker.progress.connect(self._on_progress)
         self._worker.status.connect(self._on_status)
         self._worker.done.connect(self._on_done)
@@ -224,6 +268,9 @@ class OTAUpdateDialog(QDialog, Ui_OTAUpdateDialog):
         self.flash_btn.setEnabled(not running)
         self.select_all_btn.setEnabled(not running)
         self.debug_check.setEnabled(not running)
+        self.transport_combo.setEnabled(not running)
+        self.ap_ssid_edit.setEnabled(not running)
+        self.ap_pass_edit.setEnabled(not running)
         self.close_btn.setText("Cancel" if running else "Close")
 
     def _on_progress(self, mac: str, pct: int) -> None:

@@ -3,7 +3,7 @@
  <class>BehaviorEditorPanel</class>
  <widget class="QWidget" name="BehaviorEditorPanel">
   <property name="geometry">
-   <rect><x>0</x><y>0</y><width>900</width><height>560</height></rect>
+   <rect><x>0</x><y>0</y><width>960</width><height>560</height></rect>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <property name="leftMargin"><number>0</number></property>
@@ -38,6 +38,18 @@
       </widget>
      </item>
      <item>
+      <widget class="QPushButton" name="importButton">
+       <property name="text"><string>Import…</string></property>
+       <property name="whatsThis"><string>Load a behaviour from a portable .json file as a new, unsaved behaviour for review.</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="exportButton">
+       <property name="text"><string>Export…</string></property>
+       <property name="whatsThis"><string>Save the current behaviour to a portable .json file you can share or back up.</string></property>
+      </widget>
+     </item>
+     <item>
       <spacer name="top_spacer">
        <property name="orientation"><enum>Qt::Horizontal</enum></property>
        <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
@@ -61,20 +73,96 @@
     </layout>
    </item>
    <item>
-    <widget class="QWidget" name="webContainer" native="true">
-     <property name="whatsThis"><string>Drag blocks here to build the activity behaviour. Phases are States; inside each State you stack actions (set the LED, beat, inflate, wait, wait for touch…) and add Transitions that move to another phase after a time, enough touches, or an organ condition.</string></property>
-     <property name="sizePolicy">
-      <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
-       <horstretch>1</horstretch><verstretch>1</verstretch>
-      </sizepolicy>
-     </property>
-     <layout class="QVBoxLayout" name="webLayout">
-      <property name="leftMargin"><number>0</number></property>
-      <property name="topMargin"><number>0</number></property>
-      <property name="rightMargin"><number>0</number></property>
-      <property name="bottomMargin"><number>0</number></property>
-     </layout>
-    </widget>
+    <layout class="QHBoxLayout" name="editor_row">
+     <item>
+      <widget class="QWidget" name="webContainer" native="true">
+       <property name="whatsThis"><string>Drag blocks here to build the activity behaviour. Phases are States; inside each State you stack actions (set the LED, beat, inflate, wait, wait for touch…) and add Transitions that move to another phase after a time, enough touches, or an organ condition.</string></property>
+       <property name="sizePolicy">
+        <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+         <horstretch>1</horstretch><verstretch>1</verstretch>
+        </sizepolicy>
+       </property>
+       <layout class="QVBoxLayout" name="webLayout">
+        <property name="leftMargin"><number>0</number></property>
+        <property name="topMargin"><number>0</number></property>
+        <property name="rightMargin"><number>0</number></property>
+        <property name="bottomMargin"><number>0</number></property>
+       </layout>
+      </widget>
+     </item>
+     <item>
+      <widget class="QGroupBox" name="colourGroup">
+       <property name="title"><string>Colour helper</string></property>
+       <property name="maximumSize">
+        <size><width>230</width><height>16777215</height></size>
+       </property>
+       <property name="whatsThis"><string>Pick a colour visually here, Copy it, then paste the #tag into the colour field of a "set LED" or "set LED halves" block. The selected colour previews live on the connected robots.</string></property>
+       <layout class="QVBoxLayout" name="colourLayout">
+        <item>
+         <widget class="QLabel" name="colourHelp">
+          <property name="text"><string>Pick a colour, press Copy, then paste the #tag into a block's colour field.</string></property>
+          <property name="wordWrap"><bool>true</bool></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QWidget" name="swatchContainer" native="true">
+          <layout class="QGridLayout" name="swatchLayout">
+           <property name="leftMargin"><number>0</number></property>
+           <property name="topMargin"><number>0</number></property>
+           <property name="rightMargin"><number>0</number></property>
+           <property name="bottomMargin"><number>0</number></property>
+           <property name="spacing"><number>4</number></property>
+          </layout>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="pickColourButton">
+          <property name="text"><string>Custom colour…</string></property>
+          <property name="whatsThis"><string>Open the full colour picker to choose any colour.</string></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QFrame" name="previewSwatch">
+          <property name="minimumSize">
+           <size><width>0</width><height>30</height></size>
+          </property>
+          <property name="frameShape"><enum>QFrame::StyledPanel</enum></property>
+          <property name="toolTip"><string>The colour currently selected in the helper.</string></property>
+         </widget>
+        </item>
+        <item>
+         <layout class="QHBoxLayout" name="hexRow">
+          <item>
+           <widget class="QLineEdit" name="hexEdit">
+            <property name="readOnly"><bool>true</bool></property>
+            <property name="whatsThis"><string>The selected colour's #rrggbb tag. Copy it into a block's colour field.</string></property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="copyHexButton">
+            <property name="text"><string>Copy</string></property>
+            <property name="whatsThis"><string>Copy the #tag to the clipboard so you can paste it into a colour block.</string></property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item>
+         <widget class="QLabel" name="previewNote">
+          <property name="text"><string>Selected colour previews live on connected robots.</string></property>
+          <property name="wordWrap"><bool>true</bool></property>
+          <property name="styleSheet"><string>color: #666; font-size: 11px;</string></property>
+         </widget>
+        </item>
+        <item>
+         <spacer name="colour_spacer">
+          <property name="orientation"><enum>Qt::Vertical</enum></property>
+          <property name="sizeHint" stdset="0"><size><width>20</width><height>40</height></size></property>
+         </spacer>
+        </item>
+       </layout>
+      </widget>
+     </item>
+    </layout>
    </item>
    <item>
     <layout class="QHBoxLayout" name="button_row">

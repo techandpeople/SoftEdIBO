@@ -247,6 +247,10 @@ void setup() {
         return;
     }
 
+    // Announce a WiFi OTA that just completed (no actuators here, so no shutdown
+    // hook — see se_ota.h).
+    se::ota::checkBootDone();
+
     snprintf(announceMsg, sizeof(announceMsg),
              "{\"status\":\"node_magnet_sensor_ready\",\"sensors\":%u,\"variant\":\"mlx90393\"}",
              (unsigned)streamCount);
@@ -255,6 +259,10 @@ void setup() {
 }
 
 void loop() {
+    // Run a pending WiFi OTA from the main task (never returns if it starts —
+    // the node reboots into the new firmware).
+    se::ota::pollWifi();
+
     uint32_t now = millis();
 
     // While a firmware update is streaming in, stay off the air: ~28 Hz magnet

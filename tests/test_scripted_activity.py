@@ -220,6 +220,27 @@ def test_beat_sync_sets_all_chambers(clock):
     assert set(skin.pressures) == {(0, 70), (1, 70), (2, 70)}
 
 
+def test_fade_cross_fades_between_two_colours(clock):
+    spec = {"initial": "s", "states": {"s": {"do": [
+        {"fade": {"color1": "#000000", "color2": "#ffffff", "period_ms": 2000}},
+    ], "transitions": []}}}
+    ctrl = _FakeCtrl()
+    skin = _FakeSkin(controller=ctrl)
+    robot = _FakeRobot([skin])
+    activity = ScriptedActivity("fade", "", spec)
+    _start(activity, robot)
+    # First frame is exactly colour 1 (black).
+    assert ctrl.led[0] == "#000000"
+    seen = {ctrl.led[0]}
+    for _ in range(40):                  # drive ~4 s of frames
+        clock.advance(0.1)
+        activity._on_tick()
+        seen.add(ctrl.led[0])
+    # It reaches colour 2 (white) and passes through an interpolated midtone.
+    assert "#ffffff" in seen
+    assert any(c not in ("#000000", "#ffffff") for c in seen)
+
+
 def test_wait_for_touch_blocks_until_touched(clock):
     spec = {"initial": "s", "states": {"s": {"do": [
         {"wait_for_touch": {"chamber": 0}},

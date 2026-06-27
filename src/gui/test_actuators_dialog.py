@@ -17,6 +17,7 @@ from src.gui.led_ring_tester import LedRingTester
 from src.gui.ui_test_actuators_dialog import Ui_TestActuatorsDialog
 from src.hardware.espnow_gateway import ESPNowGateway
 from src.hardware.fill_profile import FillProfile
+from src.hardware.units import kpa_to_pct
 
 
 class TestActuatorsDialog(QDialog, Ui_TestActuatorsDialog):
@@ -288,16 +289,14 @@ class TestActuatorsDialog(QDialog, Ui_TestActuatorsDialog):
     def _pct_for_kpa(self, chamber: int, kpa: float) -> int:
         """Percent of the chamber's configured [min, max] kPa range (0-100).
 
-        Mirrors firmware ``units::kpaToPct`` but uses the limits the user set in
-        the config rows, so the readout reflects the configured max even before
-        (or if) the node's ``set_max_pressure`` takes effect."""
+        Uses the shared ``units.kpa_to_pct`` (mirror of firmware
+        ``units::kpaToPct``) against the limits the user set in the config rows,
+        so the readout reflects the configured max even before (or if) the
+        node's ``set_max_pressure`` takes effect."""
         cfg = self._chamber_cfgs.get(chamber, {})
-        min_kpa = float(cfg.get("min_pressure", 0.0))
-        max_kpa = float(cfg.get("max_pressure", 8.0))
-        span = max_kpa - min_kpa
-        if span <= 0.0:
-            return 0
-        return max(0, min(100, round((kpa - min_kpa) * 100.0 / span)))
+        return kpa_to_pct(kpa,
+                          float(cfg.get("min_pressure", 0.0)),
+                          float(cfg.get("max_pressure", 8.0)))
 
     def _on_closed(self) -> None:
         self._active = False

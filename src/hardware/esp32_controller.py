@@ -185,13 +185,15 @@ class ESP32Controller:
         return self.send_command("set_led", **kwargs)
 
     def set_led_halves(self, colors: list[str], led_count: int = 24,
-                       pattern: str = "solid") -> bool:
+                       pattern: str = "solid", period_ms: int = 0) -> bool:
         """Paint the ring split into ``len(colors)`` equal contiguous arcs.
 
         Used for the "half purple / half yellow" behaviour look. Done purely
         in software via per-pixel ``set_led(index=…)`` (the firmware has no
         segment command), so this sends one frame per LED — fine because the
         colours only change on a phase transition, never per animation tick.
+        ``pattern`` / ``period_ms`` are forwarded per pixel for animated looks
+        (e.g. a pulsing split ring).
         """
         n = max(1, int(led_count))
         k = len(colors)
@@ -200,7 +202,8 @@ class ESP32Controller:
         ok = True
         for i in range(n):
             seg = min(i * k // n, k - 1)
-            ok = self.set_led(colors[seg], pattern=pattern, index=i) and ok
+            ok = self.set_led(colors[seg], pattern=pattern,
+                              period_ms=period_ms, index=i) and ok
         return ok
 
     def on_touch(self, callback: Callable[[int, int], None]) -> None:
@@ -215,11 +218,13 @@ class ESP32Controller:
         """Register a callback for pressure status messages.
 
         Args:
-            callback: Called with ``(chamber_id, pressure, state)`` on each
+            callback: Called with ``(chamber_id, pressure, state, kpa)`` on each
                 status reading. ``state`` is the firmware-reported actuation
                 state (0 idle, 1 inflating, 2 deflating) or ``None`` when the
-                firmware doesn't report it; callbacks should accept it as an
-                optional argument.
+                firmware doesn't report it. ``kpa`` is the measured absolute
+                pressure, or NaN when the firmware doesn't report it. Both are
+                trailing optional arguments so simulator callbacks that emit only
+                ``(chamber_id, pressure)`` still work.
         """
         self._pressure_callbacks.append(callback)
 
@@ -292,7 +297,13 @@ class ESP32Controller:
         # infers state from pressure vs target).
         st = data.get("st")
         state = int(st) if isinstance(st, (int, float)) else None
-        self._call_callbacks(self._pressure_callbacks, chamber_id, pressure, state)
+        # ``kpa`` is the measured absolute pressure; only firmware new enough to
+        # send it includes it. NaN flags "unknown" so the consumer recomputes the
+        # percentage from the *configured* range when it has a kPa, and falls
+        # back to the firmware ``pressure`` field when it doesn't.
+        raw_kpa = data.get("kpa")
+        kpa = float(raw_kpa) if isinstance(raw_kpa, (int, float)) else float("nan")
+        self._call_callbacks(self._pressure_callbacks, chamber_id, pressure, state, kpa)
 
     def _dispatch_tank_pressure(self, data: dict[str, Any]) -> None:
         kind = str(data["kind"])

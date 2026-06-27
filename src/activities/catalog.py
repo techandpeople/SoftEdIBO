@@ -89,6 +89,17 @@ ACTIONS: tuple[Verb, ...] = (
          "Split the ring into equal arcs, one colour each (e.g. half purple, "
          "half yellow).", (
         VerbField("colors", "colors", ["#8e44ad", "#f1c40f"]),
+        VerbField("pattern", "enum", "solid",
+                  choices=("solid", "pulse", "blink", "off")),
+        VerbField("period_ms", "ms", 0, description="Animation period."),
+    )),
+    Verb("fade", "action",
+         "Smoothly cross-fade the whole ring back and forth between two "
+         "colours. Wrap in 'repeat forever' for a continuous fade.", (
+        VerbField("color1", "color", "#8e44ad"),
+        VerbField("color2", "color", "#f1c40f"),
+        VerbField("period_ms", "ms", 2000,
+                  description="One full colour1 → colour2 → colour1 cycle."),
     )),
     Verb("inflate", "action", "Drive a chamber up to a pressure %.", (
         CHAMBER_FIELD,
@@ -100,12 +111,6 @@ ACTIONS: tuple[Verb, ...] = (
     Verb("set_pressure", "action", "Set a chamber's absolute target %.", (
         CHAMBER_FIELD,
         VerbField("pct", "pct", 0),
-    )),
-    Verb("wrinkle", "action",
-         "Wrinkle a chamber by pulling it empty (active vacuum on hardware; "
-         "the silicone puckers). Open-loop — capped by the firmware deflate "
-         "limit.", (
-        CHAMBER_FIELD,
     )),
     Verb("beat", "action",
          "One heartbeat cycle across the unit's chambers. Wrap in "
@@ -190,11 +195,17 @@ CONDITIONS: tuple[Verb, ...] = (
 # Aliases accepted in specs for readability (any↔or, all↔and).
 COND_ALIASES = {"or": "any", "and": "all"}
 
+# Verbs no longer offered as blocks but still accepted in saved specs so older
+# behaviours keep loading. ``wrinkle`` was dropped because it is identical to
+# setting a chamber to 0 % (the runtime maps it to that); author with
+# ``set_pressure`` / ``deflate`` instead.
+DEPRECATED_STEP_NAMES = {"wrinkle"}
+
 _ALL_VERBS = {v.name: v for v in (*ACTIONS, *CONTROL, *CONDITIONS)}
 ACTION_NAMES = {v.name for v in ACTIONS}
 CONTROL_NAMES = {v.name for v in CONTROL}
 CONDITION_NAMES = {v.name for v in CONDITIONS} | set(COND_ALIASES)
-STEP_NAMES = ACTION_NAMES | CONTROL_NAMES
+STEP_NAMES = ACTION_NAMES | CONTROL_NAMES | DEPRECATED_STEP_NAMES
 
 
 def verb(name: str) -> Verb | None:

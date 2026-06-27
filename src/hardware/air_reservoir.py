@@ -81,8 +81,10 @@ class AirReservoir:
     # ------------------------------------------------------------------
 
     def _on_pressure_update(self, node_slot: int, pressure: int,
-                            state: int | None = None) -> None:
-        # ``state`` (firmware actuation state) is irrelevant to a reservoir.
+                            state: int | None = None,
+                            kpa: float = float("nan")) -> None:
+        # ``state`` (firmware actuation state) and ``kpa`` (absolute pressure)
+        # are both irrelevant to a reservoir, which tracks its own % set-point.
         if node_slot == self._node_slot:
             self._pressure = pressure
             logger.debug(

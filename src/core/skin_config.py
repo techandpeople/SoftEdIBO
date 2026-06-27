@@ -224,16 +224,21 @@ def apply_organs(entry: dict, organs: list[dict]) -> None:
 
 
 def save_skin_entry(data: dict, robot_type: str, robot_index: int,
-                    skin_index: int, entry: dict) -> None:
-    """Append (skin_index < 0) or replace the skin entry in the settings tree."""
+                    skin_index: int, entry: dict) -> int:
+    """Append (skin_index < 0) or replace the skin entry in the settings tree.
+
+    Returns the index the entry now lives at (the appended index for a new
+    skin), or ``skin_index`` unchanged when the robot index is out of range.
+    """
     robots_list = (data.setdefault("robots", {})
                    .setdefault(YAML_KEY[robot_type], []))
     if 0 <= robot_index < len(robots_list):
         skins = robots_list[robot_index].setdefault("skins", [])
         if skin_index < 0:
             skins.append(entry)
-        else:
-            skins[skin_index] = entry
+            return len(skins) - 1
+        skins[skin_index] = entry
+    return skin_index
 
 
 def delete_skin(data: dict, robot_type: str, robot_index: int,
