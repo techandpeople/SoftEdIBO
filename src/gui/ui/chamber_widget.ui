@@ -28,8 +28,16 @@
     </widget>
    </item>
    <item>
+    <widget class="QLabel" name="kpa_lbl">
+     <property name="whatsThis"><string>Live absolute pressure of this chamber in kPa, as measured by its gauge sensor. Blank when the firmware doesn't report kPa (e.g. the simulator).</string></property>
+     <property name="styleSheet"><string notr="true">font-size: 9px;</string></property>
+     <property name="text"><string/></property>
+     <property name="alignment"><set>Qt::AlignCenter</set></property>
+    </widget>
+   </item>
+   <item>
     <widget class="QLabel" name="pressure_lbl">
-     <property name="whatsThis"><string>Current pressure / target pressure, as a percent of this chamber's maximum.</string></property>
+     <property name="whatsThis"><string>Current pressure / target pressure, as a percent of this chamber's configured min-max range.</string></property>
      <property name="styleSheet"><string notr="true">font-size: 9px;</string></property>
      <property name="text"><string>0/0</string></property>
      <property name="alignment"><set>Qt::AlignCenter</set></property>

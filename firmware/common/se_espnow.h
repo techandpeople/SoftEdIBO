@@ -21,6 +21,8 @@
 
 #include "esp_now.h"
 #include "esp_idf_version.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 
 #ifdef ARDUINO
   #include <WiFi.h>
@@ -40,6 +42,14 @@ using RecvFn = void (*)(const uint8_t mac[6], const uint8_t* data, int len);
 inline RecvFn   _userRecv = nullptr;
 inline uint32_t txOk      = 0;   // ESP-NOW sends that got a link-layer ACK
 inline uint32_t txFail    = 0;   // ESP-NOW sends that failed
+
+// Signalled by the send callback when a frame finishes transmitting (success or
+// fail). sendPaced() waits on it so we never call esp_now_send() while the radio
+// still has a frame in flight — the WiFi TX path only buffers a couple of frames,
+// and a too-soon esp_now_send returns ESP_ERR_ESPNOW_NO_MEM and silently drops the
+// frame. Created + pre-given in begin(); a binary semaphore caps at 1 so the extra
+// gives from fire-and-forget send()/broadcast() are harmless.
+inline SemaphoreHandle_t _txDone = nullptr;
 
 static constexpr uint8_t BROADCAST[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
@@ -82,6 +92,7 @@ inline void _onSent(const uint8_t*, esp_now_send_status_t status) {
 #endif
     if (status == ESP_NOW_SEND_SUCCESS) txOk++;
     else                                txFail++;
+    if (_txDone) xSemaphoreGive(_txDone);   // unblock the next sendPaced()
 }
 
 // ---------------------------------------------------------------------------
@@ -131,6 +142,10 @@ inline bool begin(RecvFn onRecv) {
     radioInit();
     if (esp_now_init() != ESP_OK) return false;
     _userRecv = onRecv;
+    if (!_txDone) {
+        _txDone = xSemaphoreCreateBinary();
+        if (_txDone) xSemaphoreGive(_txDone);   // first sendPaced() must not block
+    }
     esp_now_register_recv_cb(_onRecv);
     esp_now_register_send_cb(_onSent);
     ensurePeer(BROADCAST);
@@ -148,6 +163,18 @@ inline void send(const uint8_t* mac, const char* s) {
     esp_now_send(mac, reinterpret_cast<const uint8_t*>(s), strlen(s));
 }
 inline void broadcast(const char* s) { send(BROADCAST, s); }
+
+// Paced send: wait for the previous frame's TX to complete before starting this
+// one, so a burst of commands (e.g. the PC inflating several chambers at once,
+// each preceded by set_max/set_min) can't overrun the radio's tiny TX queue and
+// have frames silently dropped. Use this on the gateway's PC->node forward path,
+// where commands arrive back-to-back. NOT a retry: it never resends, so it is
+// safe for non-idempotent commands like inflate/deflate.
+inline void sendPaced(const uint8_t* mac, const uint8_t* data, size_t len) {
+    if (_txDone) xSemaphoreTake(_txDone, pdMS_TO_TICKS(20));   // prior send drained
+    if (esp_now_send(mac, data, len) != ESP_OK && _txDone)
+        xSemaphoreGive(_txDone);   // no TX callback will come — free the slot
+}
 
 // Own STA MAC as a string (>=18 byte buffer).
 inline void ownMac(char* buf) {

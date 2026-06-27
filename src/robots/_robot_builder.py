@@ -174,6 +174,7 @@ def _build_one_skin(skin_cfg: dict[str, Any],
          "min_pressure": float(ch.get("min_pressure", 0.0)),
          "fill_time_ms": ch.get("fill_time_ms"),
          "fill_profile": ch.get("fill_profile"),
+         "fill_profiles": ch.get("fill_profiles"),
          "fill_mode": ch.get("fill_mode")}
         for ch in chambers
     ]

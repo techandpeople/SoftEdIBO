@@ -3,20 +3,16 @@
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
-    QComboBox,
     QDialog,
     QFormLayout,
-    QHBoxLayout,
-    QLabel,
     QListWidgetItem,
-    QPushButton,
     QWidget,
 )
 
 from src.activities import available_activities
 from src.activities.base_activity import BaseActivity
 from src.data.database import Database
-from src.data.models import ActivityPreset, ParticipantRecord
+from src.data.models import ParticipantRecord
 from src.gui.ui_session_setup_dialog import Ui_SessionSetupDialog
 from src.robots.base_robot import BaseRobot
 
@@ -44,21 +40,6 @@ class SessionSetupDialog(QDialog, Ui_SessionSetupDialog):
 
         for activity in available_activities(self._db):
             self.activity_combo.addItem(activity.name, userData=activity)
-
-        # Preset dropdown + "Manage…" button — added programmatically right
-        # below the activity dropdown. Reloads whenever the activity changes
-        # so it only lists presets that match the chosen activity.
-        preset_row = QHBoxLayout()
-        self._preset_combo = QComboBox()
-        self._preset_combo.setMinimumWidth(200)
-        preset_row.addWidget(self._preset_combo, stretch=1)
-        manage_btn = QPushButton("Manage…")
-        manage_btn.setToolTip(
-            "Open Tools => Activity Presets… to add/edit/delete bundled "
-            "parameter sets for the selected activity."
-        )
-        manage_btn.clicked.connect(self._open_preset_manager)
-        preset_row.addWidget(manage_btn)
 
         # Simulation-mode checkbox — added programmatically right under the
         # activity dropdown in the form layout (parent form is the .ui file's
@@ -89,14 +70,11 @@ class SessionSetupDialog(QDialog, Ui_SessionSetupDialog):
         form = self.activity_combo.parentWidget().layout()
         if isinstance(form, QFormLayout):
             base = form.getWidgetPosition(self.activity_combo)[0]
-            form.insertRow(base + 1, "Preset:", preset_row)
-            form.insertRow(base + 2, "", self._sim_check)
-            form.insertRow(base + 3, "", self._record_check)
+            form.insertRow(base + 1, "", self._sim_check)
+            form.insertRow(base + 2, "", self._record_check)
         else:
             # Fallback: stash below the activity combo if the parent layout
             # isn't a form (e.g. after .ui refactors).
-            self.activity_combo.parentWidget().layout().addWidget(QLabel("Preset:"))
-            self.activity_combo.parentWidget().layout().addLayout(preset_row)
             self.activity_combo.parentWidget().layout().addWidget(self._sim_check)
             self.activity_combo.parentWidget().layout().addWidget(self._record_check)
 
@@ -122,14 +100,6 @@ class SessionSetupDialog(QDialog, Ui_SessionSetupDialog):
     def selected_activity(self) -> BaseActivity | None:
         """The activity chosen in the combo box."""
         return self.activity_combo.currentData()
-
-    @property
-    def selected_preset(self) -> ActivityPreset | None:
-        """The activity preset chosen, or ``None`` for defaults."""
-        preset_id = self._preset_combo.currentData()
-        if not preset_id:
-            return None
-        return self._db.get_activity_preset(preset_id)
 
     @property
     def simulation_mode(self) -> bool:
@@ -170,10 +140,8 @@ class SessionSetupDialog(QDialog, Ui_SessionSetupDialog):
     # ------------------------------------------------------------------
 
     def _on_activity_changed(self, index: int) -> None:
-        """Refresh the robot list AND the preset dropdown when the activity
-        changes."""
+        """Refresh the robot list when the activity changes."""
         activity: BaseActivity | None = self.activity_combo.itemData(index)
-        self._reload_presets(activity)
         if activity is None:
             self.robot_type_label.setText("—")
             self._populate_robots([])
@@ -182,33 +150,6 @@ class SessionSetupDialog(QDialog, Ui_SessionSetupDialog):
         self.robot_type_label.setText(activity.robot_type.__name__)
         compatible = [r for r in self._robots if isinstance(r, activity.robot_type)]
         self._populate_robots(compatible)
-
-    def _reload_presets(self, activity: BaseActivity | None) -> None:
-        """Repopulate the preset combo with whatever the DB has for the
-        chosen activity. The default option (``None``) means 'use the
-        activity's built-in defaults — no preset'."""
-        self._preset_combo.blockSignals(True)
-        self._preset_combo.clear()
-        self._preset_combo.addItem("(use defaults)", userData=None)
-        if activity is not None:
-            for preset in self._db.get_activity_presets(activity.name):
-                self._preset_combo.addItem(
-                    f"{preset.name} [{preset.preset_id}]",
-                    userData=preset.preset_id,
-                )
-        self._preset_combo.blockSignals(False)
-
-    def _open_preset_manager(self) -> None:
-        """Open the Activity Editor on its Presets tab, pre-selected on the
-        activity currently chosen in this dialog. Refresh our dropdown when it
-        closes so newly-saved presets show up immediately."""
-        from src.gui.activity_editor_dialog import ActivityEditorDialog
-        ActivityEditorDialog(
-            self._db, parent=self,
-            initial_tab="presets",
-            initial_activity=self.selected_activity,
-        ).exec()
-        self._reload_presets(self.selected_activity)
 
     def _populate_robots(self, robots: list[BaseRobot]) -> None:
         """Fill the list widget with checkable robot entries."""

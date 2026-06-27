@@ -41,6 +41,8 @@
 #ifdef GATEWAY_AP
 #include "esp_wifi.h"
 #include "esp_netif.h"
+#include "esp_http_server.h"
+#include "esp_heap_caps.h"
 #include "nvs.h"
 
 #ifndef GATEWAY_AP_SSID
@@ -217,6 +219,157 @@ static void rxTask(void*) {
     }
 }
 
+#ifdef GATEWAY_AP
+// ---------------------------------------------------------------------------
+// WiFi-OTA image proxy (S3 + PSRAM only)
+//
+// Fast node firmware updates without the PC ever leaving the USB cable: the PC
+// streams the image to the gateway over USB (ota_store_* commands), the gateway
+// buffers it in PSRAM and serves it over HTTP on its SoftAP. The node then joins
+// the AP and HTTP-downloads it (see firmware/common/se_ota.h::doWifiUpdate, and
+// the PC side in src/hardware/wifi_ota_updater.py).
+//
+// PSRAM is required (the ~800 KB image won't fit in internal RAM). If the alloc
+// fails (PSRAM not enabled / not present, e.g. the C6) we report ota_store_error
+// instead of crashing, so the ESP-NOW bridge keeps working regardless.
+// ---------------------------------------------------------------------------
+
+static constexpr size_t OTA_IMAGE_MAX = 4 * 1024 * 1024;  // sanity cap
+
+static uint8_t*       s_otaImage   = nullptr;  // PSRAM buffer holding the node image
+static size_t         s_otaCap     = 0;        // allocated capacity (= expected size)
+static size_t         s_otaLen     = 0;        // bytes written so far
+static char           s_otaMd5[33] = {};       // md5 hex from the PC, served as x-MD5
+static bool           s_otaReady   = false;    // image complete and servable
+static httpd_handle_t s_httpd      = nullptr;
+
+// Standard-alphabet base64 decode (mirrors se_ota.h). Returns bytes, or -1.
+static int otaB64Decode(const char* in, uint8_t* out, size_t outcap) {
+    auto val = [](char c) -> int {
+        if (c >= 'A' && c <= 'Z') return c - 'A';
+        if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+        if (c >= '0' && c <= '9') return c - '0' + 52;
+        if (c == '+') return 62;
+        if (c == '/') return 63;
+        return -1;
+    };
+    size_t o = 0;
+    int buf = 0, bits = 0;
+    for (const char* p = in; *p; ++p) {
+        if (*p == '=') break;
+        int v = val(*p);
+        if (v < 0) return -1;
+        buf = (buf << 6) | v;
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            if (o >= outcap) return -1;
+            out[o++] = (buf >> bits) & 0xFF;
+        }
+    }
+    return static_cast<int>(o);
+}
+
+static esp_err_t otaHttpGet(httpd_req_t* req) {
+    if (!s_otaReady || !s_otaImage) {
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "no image staged");
+        return ESP_FAIL;
+    }
+    httpd_resp_set_type(req, "application/octet-stream");
+    if (s_otaMd5[0]) httpd_resp_set_hdr(req, "x-MD5", s_otaMd5);
+    // httpd_resp_send sets Content-Length from the length and chunks internally.
+    return httpd_resp_send(req, reinterpret_cast<const char*>(s_otaImage), s_otaLen);
+}
+
+static void otaHttpStart() {
+    if (s_httpd) return;
+    httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
+    cfg.server_port      = 80;
+    cfg.lru_purge_enable = true;
+    if (httpd_start(&s_httpd, &cfg) != ESP_OK) { s_httpd = nullptr; return; }
+    httpd_uri_t uri = {};
+    uri.uri     = "/fw";
+    uri.method  = HTTP_GET;
+    uri.handler = otaHttpGet;
+    httpd_register_uri_handler(s_httpd, &uri);
+}
+
+static void otaStoreReset() {
+    if (s_otaImage) { heap_caps_free(s_otaImage); s_otaImage = nullptr; }
+    s_otaCap = s_otaLen = 0;
+    s_otaReady = false;
+    s_otaMd5[0] = '\0';
+}
+
+// Handles the ota_store_* gateway-local commands; returns true if it consumed one.
+static bool handleOtaStore(const char* cmd, cJSON* doc) {
+    if (strcmp(cmd, "ota_store_begin") == 0) {
+        cJSON* j_size = cJSON_GetObjectItemCaseSensitive(doc, "size");
+        cJSON* j_md5  = cJSON_GetObjectItemCaseSensitive(doc, "md5");
+        size_t size   = cJSON_IsNumber(j_size) ? (size_t)j_size->valuedouble : 0;
+        otaStoreReset();
+        if (size == 0 || size > OTA_IMAGE_MAX) {
+            usbWriteLine("{\"type\":\"ota_store_error\",\"reason\":\"bad_size\"}");
+            return true;
+        }
+        s_otaImage = static_cast<uint8_t*>(heap_caps_malloc(size, MALLOC_CAP_SPIRAM));
+        if (!s_otaImage) {
+            usbWriteLine("{\"type\":\"ota_store_error\",\"reason\":\"no_psram\"}");
+            return true;
+        }
+        s_otaCap = size;
+        if (cJSON_IsString(j_md5)) strlcpy(s_otaMd5, j_md5->valuestring, sizeof(s_otaMd5));
+        otaHttpStart();
+        usbWriteLine(s_httpd ? "{\"type\":\"ota_store_ready\"}"
+                             : "{\"type\":\"ota_store_error\",\"reason\":\"httpd_failed\"}");
+        return true;
+    }
+
+    if (strcmp(cmd, "ota_store_data") == 0) {
+        // No per-chunk ack: USB is a reliable, ordered link, so we just append and
+        // let ota_store_end verify the total size. Silently ignored if not storing.
+        cJSON* j_data = cJSON_GetObjectItemCaseSensitive(doc, "data");
+        if (s_otaImage && cJSON_IsString(j_data)) {
+            int n = otaB64Decode(j_data->valuestring, s_otaImage + s_otaLen,
+                                 s_otaCap - s_otaLen);
+            if (n > 0) s_otaLen += n;
+        }
+        return true;
+    }
+
+    if (strcmp(cmd, "ota_store_end") == 0) {
+        if (!s_otaImage) {
+            usbWriteLine("{\"type\":\"ota_store_error\",\"reason\":\"not_storing\"}");
+            return true;
+        }
+        if (s_otaLen != s_otaCap) {
+            char buf[96];
+            snprintf(buf, sizeof(buf),
+                     "{\"type\":\"ota_store_error\",\"reason\":\"size_mismatch\","
+                     "\"got\":%u,\"want\":%u}", (unsigned)s_otaLen, (unsigned)s_otaCap);
+            usbWriteLine(buf);
+            otaStoreReset();
+            return true;
+        }
+        s_otaReady = true;
+        // Build the URL from the live AP IP (default 192.168.4.1 if unavailable).
+        char url[40] = "http://192.168.4.1/fw";
+        esp_netif_t* ap = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+        esp_netif_ip_info_t ip;
+        if (ap && esp_netif_get_ip_info(ap, &ip) == ESP_OK)
+            snprintf(url, sizeof(url), "http://" IPSTR "/fw", IP2STR(&ip.ip));
+        char buf[96];
+        snprintf(buf, sizeof(buf),
+                 "{\"type\":\"ota_stored\",\"ok\":true,\"size\":%u,\"url\":\"%s\"}",
+                 (unsigned)s_otaLen, url);
+        usbWriteLine(buf);
+        return true;
+    }
+
+    return false;
+}
+#endif  // GATEWAY_AP
+
 // ---------------------------------------------------------------------------
 // Gateway-local commands: lines WITHOUT a "target" are meant for the gateway
 // itself (not relayed to a node). Currently used to read/set the SoftAP config.
@@ -227,6 +380,8 @@ static void handleGatewayCmd(cJSON* doc) {
     if (!cJSON_IsString(cmd)) return;
 
 #ifdef GATEWAY_AP
+    if (handleOtaStore(cmd->valuestring, doc)) return;
+
     if (strcmp(cmd->valuestring, "get_ap") == 0) {
         char buf[160];
         snprintf(buf, sizeof(buf),
@@ -260,6 +415,11 @@ static void handleGatewayCmd(cJSON* doc) {
     if (strcmp(cmd->valuestring, "get_ap") == 0 ||
         strcmp(cmd->valuestring, "set_ap") == 0)
         usbWriteLine("{\"type\":\"error\",\"reason\":\"ap_not_supported\"}");
+
+    // WiFi-OTA staging only exists on the SoftAP build; tell the PC plainly so it
+    // can fall back to the ESP-NOW transport instead of timing out.
+    if (strncmp(cmd->valuestring, "ota_store_", 10) == 0)
+        usbWriteLine("{\"type\":\"ota_store_error\",\"reason\":\"ap_not_supported\"}");
 }
 
 // ---------------------------------------------------------------------------
@@ -297,7 +457,11 @@ static void processLine(const char* line, size_t len) {
         if (payload) {
             size_t plen = strlen(payload);
             if (plen <= ESPNOW_MAXLEN)
-                se::send(mac, reinterpret_cast<const uint8_t*>(payload), plen);
+                // Paced: PC commands arrive back-to-back (a batch inflate sends
+                // set_max/set_min/inflate per chamber); a bare esp_now_send burst
+                // overruns the radio TX queue and drops frames, so only some
+                // chambers actuate. sendPaced waits for each TX before the next.
+                se::sendPaced(mac, reinterpret_cast<const uint8_t*>(payload), plen);
             cJSON_free(payload);
         }
     }

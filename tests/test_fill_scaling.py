@@ -57,6 +57,19 @@ def test_tracker_note_stop_releases_slot():
     assert t.active_count() == 0
 
 
+def test_tracker_active_slots_returns_live_set_and_prunes():
+    now = [0.0]
+    t = FillLoadTracker(pump_count=1, clock=lambda: now[0])
+    assert t.active_slots() == set()
+    t.note_inflate(0, 1000)
+    t.note_inflate(2, 2000)
+    assert t.active_slots() == {0, 2}
+    now[0] = 1.5                        # slot 0's window elapsed
+    assert t.active_slots() == {2}
+    now[0] = 2.5
+    assert t.active_slots() == set()
+
+
 def test_tracker_drives_scaling_for_concurrent_fills():
     now = [0.0]
     t = FillLoadTracker(pump_count=1, clock=lambda: now[0])

@@ -1,17 +1,21 @@
 <!DOCTYPE html>
 <!--
-  Block editor for the SoftEdIBO behaviour engine (Tools => Behaviour Editor…).
+  Block editor for the SoftEdIBO behaviour engine (Tools => Activity Editor…).
 
   Scratch-like authoring: drag blocks to build a behaviour, which compiles to
   the declarative spec interpreted by ScriptedActivity (src/activities/
   scripted_activity.py). The editor (Blockly) is only ever loaded inside this
   dialog — never during a session.
 
-  Python talks to this page only through three global functions, called via
+  Python talks to this page through three global functions, called via
   QWebEngineView.page().runJavaScript:
     getSpec()        -> JSON string of {initial, states, _blockly}
     loadSpec(json)   -> restore a saved behaviour into the workspace
     newWorkspace()   -> reset to one empty phase
+
+  Colours are plain "#rrggbb" tags in the colour blocks. The hosting panel
+  shows a "Colour helper" side panel to pick a colour visually, copy its tag
+  and preview it live on the connected robots — see behavior_editor_panel.py.
 
   Blockly is loaded from a vendored copy (./blockly.min.js) when present, else
   from the unpkg CDN. Run scripts/fetch_blockly.sh to vendor it for offline use.
@@ -38,11 +42,11 @@
     <category name="Actions" colour="230">
       <block type="se_set_led"></block>
       <block type="se_set_led_halves"></block>
+      <block type="se_fade"></block>
       <block type="se_beat"></block>
       <block type="se_inflate"></block>
       <block type="se_deflate"></block>
       <block type="se_set_pressure"></block>
-      <block type="se_wrinkle"></block>
       <block type="se_stop"></block>
     </category>
     <category name="Control" colour="120">
@@ -80,6 +84,9 @@
     });
 
     var workspace = null;
+    var DEFAULT_COLOUR = '#8e44ad';
+    var PATTERN_OPTIONS = [['solid', 'solid'], ['pulse', 'pulse'],
+                           ['blink', 'blink'], ['off', 'off']];
 
     function init() {
       if (workspace) return;            // both loaders fired — ignore the 2nd
@@ -138,30 +145,33 @@
         // --- actions ---
         { type: 'se_set_led',
           message0: 'set LED colour %1 pattern %2 period(ms) %3',
-          args0: [{ type: 'field_input', name: 'COLOR', text: '#8e44ad' },
-                  { type: 'field_dropdown', name: 'PATTERN',
-                    options: [['solid', 'solid'], ['pulse', 'pulse'], ['blink', 'blink'], ['off', 'off']] },
+          args0: [{ type: 'field_input', name: 'COLOR', text: DEFAULT_COLOUR },
+                  { type: 'field_dropdown', name: 'PATTERN', options: PATTERN_OPTIONS },
                   { type: 'field_number', name: 'PERIOD', value: 0, min: 0 }],
-          previousStatement: 'Step', nextStatement: 'Step', colour: 230 },
+          previousStatement: 'Step', nextStatement: 'Step', colour: 230,
+          tooltip: 'Light the whole ring. The colour is a "#rrggbb" tag — use '
+                 + 'the Colour helper panel on the right to pick one and copy '
+                 + 'it. "period" is the pulse/blink speed in ms (ignored for '
+                 + 'solid/off).' },
 
         { type: 'se_set_led_halves',
-          message0: 'set LED half %1 half %2',
+          message0: 'set LED halves %1 %2 pattern %3 period(ms) %4',
           args0: [{ type: 'field_input', name: 'C1', text: '#8e44ad' },
-                  { type: 'field_input', name: 'C2', text: '#f1c40f' }],
+                  { type: 'field_input', name: 'C2', text: '#f1c40f' },
+                  { type: 'field_dropdown', name: 'PATTERN', options: PATTERN_OPTIONS },
+                  { type: 'field_number', name: 'PERIOD', value: 0, min: 0 }],
           previousStatement: 'Step', nextStatement: 'Step', colour: 230,
-          tooltip: 'Split the ring into two colours (e.g. half purple, half yellow).' },
+          tooltip: 'Split the ring into two colours (e.g. half purple, half '
+                 + 'yellow). Pattern/period animate both halves together.' },
 
-        { type: 'se_beat',
-          message0: 'beat %1 peak %2 %% other %3 %% aligned %4 period(ms) %5',
-          args0: [{ type: 'field_dropdown', name: 'MODE',
-                    options: [['all together', 'sync'], ['one at a time', 'sequential'],
-                              ['random', 'random'], ['aligned/misaligned', 'aligned']] },
-                  { type: 'field_number', name: 'PCT', value: 60, min: 0, max: 100 },
-                  { type: 'field_number', name: 'PCT2', value: 20, min: 0, max: 100 },
-                  { type: 'field_number', name: 'ALIGNED', value: 2, min: 0 },
-                  { type: 'field_number', name: 'PERIOD', value: 2000, min: 100 }],
+        { type: 'se_fade',
+          message0: 'fade between %1 and %2 over %3 ms',
+          args0: [{ type: 'field_input', name: 'C1', text: '#8e44ad' },
+                  { type: 'field_input', name: 'C2', text: '#f1c40f' },
+                  { type: 'field_number', name: 'PERIOD', value: 2000, min: 200 }],
           previousStatement: 'Step', nextStatement: 'Step', colour: 230,
-          tooltip: 'One heartbeat cycle. Wrap in "repeat forever" for a continuous beat.' },
+          tooltip: 'Smoothly cross-fade the whole ring back and forth between '
+                 + 'two colours. Wrap in "repeat forever" for a continuous fade.' },
 
         { type: 'se_inflate',
           message0: 'inflate chamber %1 to %2 %%',
@@ -178,12 +188,9 @@
           message0: 'set chamber %1 to %2 %%',
           args0: [{ type: 'field_dropdown', name: 'CHAMBER', options: CH },
                   { type: 'field_number', name: 'PCT', value: 0, min: 0, max: 100 }],
-          previousStatement: 'Step', nextStatement: 'Step', colour: 230 },
-
-        { type: 'se_wrinkle',
-          message0: 'wrinkle chamber %1 (vacuum)',
-          args0: [{ type: 'field_dropdown', name: 'CHAMBER', options: CH }],
-          previousStatement: 'Step', nextStatement: 'Step', colour: 230 },
+          previousStatement: 'Step', nextStatement: 'Step', colour: 230,
+          tooltip: 'Set a chamber to an exact fill %. Set it to 0 % to empty '
+                 + '(wrinkle) the chamber.' },
 
         { type: 'se_stop',
           message0: 'hold all chambers',
@@ -258,6 +265,61 @@
         { type: 'se_always',
           message0: 'always', output: 'Cond', colour: 20 },
       ]);
+
+      defineBeatBlock();
+    }
+
+    // ---- beat: a block whose fields change with the chosen mode --------
+    // "beat" was the one block nobody could read, so it is built by hand to
+    // (a) spell each mode out in plain words and (b) hide the "soft chambers"
+    // row unless the mode actually uses it.
+    function defineBeatBlock() {
+      Blockly.Blocks['se_beat'] = {
+        init: function () {
+          var self = this;
+          this.appendDummyInput()
+            .appendField('beat —')
+            .appendField(new Blockly.FieldDropdown([
+              ['all chambers together', 'sync'],
+              ['one chamber at a time', 'sequential'],
+              ['chambers in random order', 'random'],
+              ['some strong, the rest soft', 'aligned'],
+            ], function (mode) { self.updateShape_(mode); return mode; }), 'MODE');
+          this.appendDummyInput()
+            .appendField('strength')
+            .appendField(new Blockly.FieldNumber(60, 0, 100), 'PCT')
+            .appendField('%');
+          this.appendDummyInput('SOFT_ROW')
+            .appendField('soft chambers at')
+            .appendField(new Blockly.FieldNumber(20, 0, 100), 'PCT2')
+            .appendField('% , how many strong')
+            .appendField(new Blockly.FieldNumber(2, 0), 'ALIGNED');
+          this.appendDummyInput()
+            .appendField('one cycle every')
+            .appendField(new Blockly.FieldNumber(2000, 100), 'PERIOD')
+            .appendField('ms');
+          this.setPreviousStatement(true, 'Step');
+          this.setNextStatement(true, 'Step');
+          this.setColour(230);
+          this.setTooltip(
+            'One heartbeat cycle across the chambers — wrap it in '
+            + '"repeat forever" for a continuous beat. "strength" is the peak '
+            + 'fill %. Only "some strong, the rest soft" uses the soft-chamber '
+            + 'row (those chambers beat to the soft %, the rest to strength).');
+          this.updateShape_(this.getFieldValue('MODE'));
+        },
+        updateShape_: function (mode) {
+          var row = this.getInput('SOFT_ROW');
+          if (row) row.setVisible(mode === 'aligned');
+          if (this.rendered) this.render();
+        },
+        saveExtraState: function () {
+          return { mode: this.getFieldValue('MODE') };
+        },
+        loadExtraState: function (state) {
+          this.updateShape_(state && state.mode);
+        },
+      };
     }
 
     // ---- Compile workspace -> spec ------------------------------------
@@ -280,7 +342,12 @@
                               pattern: b.getFieldValue('PATTERN'),
                               period_ms: num(b, 'PERIOD') } };
         case 'se_set_led_halves':
-          return { set_led_halves: { colors: [b.getFieldValue('C1'), b.getFieldValue('C2')] } };
+          return { set_led_halves: { colors: [b.getFieldValue('C1'), b.getFieldValue('C2')],
+                                     pattern: b.getFieldValue('PATTERN'),
+                                     period_ms: num(b, 'PERIOD') } };
+        case 'se_fade':
+          return { fade: { color1: b.getFieldValue('C1'), color2: b.getFieldValue('C2'),
+                           period_ms: num(b, 'PERIOD') } };
         case 'se_beat':
           return { beat: { mode: b.getFieldValue('MODE'), pct: num(b, 'PCT'),
                            pct2: num(b, 'PCT2'), aligned: num(b, 'ALIGNED'),
@@ -291,8 +358,6 @@
           return { deflate: { chamber: b.getFieldValue('CHAMBER') } };
         case 'se_set_pressure':
           return { set_pressure: { chamber: b.getFieldValue('CHAMBER'), pct: num(b, 'PCT') } };
-        case 'se_wrinkle':
-          return { wrinkle: { chamber: b.getFieldValue('CHAMBER') } };
         case 'se_stop':
           return { stop: {} };
         case 'se_wait':

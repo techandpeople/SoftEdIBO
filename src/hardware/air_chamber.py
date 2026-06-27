@@ -3,6 +3,8 @@
 import threading
 from enum import Enum
 
+from src.hardware.units import kpa_to_pct
+
 
 class ChamberState(Enum):
     """Possible states of an air chamber."""
@@ -20,14 +22,20 @@ class AirChamber:
         chamber_id: int,
         esp32_mac: str,
         max_pressure: float = 8.0,
+        min_pressure: float = 0.0,
     ):
         self.chamber_id = chamber_id
         self.esp32_mac = esp32_mac
-        # Configured per-chamber maximum pressure in kPa.
+        # Configured per-chamber pressure range in kPa. ``min_pressure`` is
+        # negative for vacuum-fed chambers (0 % == deepest vacuum).
         self.max_pressure = max(0.0, float(max_pressure))
+        self.min_pressure = float(min_pressure)
         self._state = ChamberState.IDLE
-        self._pressure: int = 0         # 0-100 (% of configured max), current measured value
-        self._target_pressure: int = 0  # 0-100 (% of configured max), commanded target
+        self._pressure: int = 0         # 0-100 (% of configured range), current measured value
+        self._target_pressure: int = 0  # 0-100 (% of configured range), commanded target
+        # Latest measured absolute pressure in kPa (NaN until the firmware sends
+        # one; the simulator and pre-kPa firmware leave it NaN).
+        self._kpa: float = float("nan")
         # Protects compound read-compare-write between the hardware thread
         # (update_pressure) and the main thread (target_pressure setter).
         self._lock = threading.Lock()
@@ -43,8 +51,17 @@ class AirChamber:
 
     @property
     def pressure(self) -> int:
-        """Get current pressure level (0-100 % of chamber max)."""
+        """Get current pressure level (0-100 % of chamber range)."""
         return self._pressure
+
+    @property
+    def kpa(self) -> float:
+        """Latest measured absolute pressure in kPa, or NaN if unknown.
+
+        NaN means no firmware kPa has arrived (the simulator, or firmware too
+        old to report it) — consumers fall back to the percentage.
+        """
+        return self._kpa
 
     @pressure.setter
     def pressure(self, value: int) -> None:
@@ -61,7 +78,8 @@ class AirChamber:
             self._target_pressure = max(0, min(100, value))
 
     def update_pressure(self, pressure: int,
-                        actuating: "ChamberState | None" = None) -> None:
+                        actuating: "ChamberState | None" = None,
+                        kpa: float = float("nan")) -> None:
         """Update measured pressure and derive state atomically.
 
         Called from the hardware (serial) thread. Acquires the lock so that
@@ -76,9 +94,22 @@ class AirChamber:
         off) no longer shows a perpetual INFLATING/DEFLATING. When ``None`` (old
         firmware that doesn't report it, or the simulator) the state is inferred
         from measured pressure vs the commanded target, as before.
+
+        ``kpa`` is the measured absolute pressure. When present (real firmware)
+        it is authoritative: the percentage is recomputed from it against this
+        chamber's *configured* ``[min, max]`` range, exactly like the Test
+        Actuators dialog. The firmware's own ``pressure`` field is computed
+        against the limits the node currently holds, which lag the PC config (a
+        dropped ``set_max_pressure``, or the 8 kPa boot default), so trusting it
+        makes the live readout disagree with the configured range. When NaN
+        (simulator / pre-kPa firmware) the given ``pressure`` is used as-is.
         """
         with self._lock:
-            self._pressure = max(0, min(100, pressure))
+            if kpa == kpa:  # not NaN -> recompute % from the configured range
+                self._kpa = kpa
+                self._pressure = kpa_to_pct(kpa, self.min_pressure, self.max_pressure)
+            else:
+                self._pressure = max(0, min(100, pressure))
             if actuating is not None:
                 self._state = (self._settled_state()
                                if actuating is ChamberState.IDLE else actuating)

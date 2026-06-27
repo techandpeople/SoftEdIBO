@@ -79,7 +79,7 @@ jobs:
             firmware/node_actuator/firmware-multiplexed-release.bin
             firmware/node_actuator/firmware-multiplexed-debug.bin
             firmware/node_magnet_sensor/firmware-release.bin
-          key: fwbins-${{ hashFiles('firmware/common/**', 'firmware/gateway/src/**', 'firmware/gateway/platformio.ini', 'firmware/gateway/CMakeLists.txt', 'firmware/gateway/sdkconfig.defaults', 'firmware/node_actuator/src/**', 'firmware/node_actuator/platformio.ini', 'firmware/node_magnet_sensor/src/**', 'firmware/node_magnet_sensor/platformio.ini') }}
+          key: fwbins-${{ hashFiles('firmware/common/**', 'firmware/gateway/src/**', 'firmware/gateway/platformio.ini', 'firmware/gateway/CMakeLists.txt', 'firmware/gateway/sdkconfig.defaults*', 'firmware/node_actuator/src/**', 'firmware/node_actuator/platformio.ini', 'firmware/node_magnet_sensor/src/**', 'firmware/node_magnet_sensor/platformio.ini') }}
 
       - name: Install PlatformIO
         if: steps.fwcache.outputs.cache-hit != 'true'

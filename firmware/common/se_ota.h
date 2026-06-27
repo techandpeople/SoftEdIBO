@@ -29,6 +29,8 @@
 
 #include <Arduino.h>
 #include <Update.h>
+#include <HTTPClient.h>
+#include <HTTPUpdate.h>
 #include <ArduinoJson.h>
 #include <cstring>
 
@@ -41,6 +43,44 @@ inline bool     active      = false;   // an image is being received
 inline uint32_t expectedSeq = 0;       // next chunk index we expect
 inline size_t   total       = 0;       // image size from ota_begin
 inline size_t   written     = 0;       // bytes flashed so far
+
+// --- WiFi (fast) OTA -------------------------------------------------------
+// The ESP-NOW path above is robust but slow: the gateway->node relay caps the
+// payload at ~190 B, so the image crawls across as ~96-byte base64 chunks. For a
+// big image it is far quicker to pull the firmware over WiFi. On the `ota_wifi`
+// command the node joins the gateway's SoftAP as a station and HTTP-downloads
+// the image from a tiny server the PC hosts on that network. The PC side is
+// src/hardware/wifi_ota_updater.py; the gateway must run the SoftAP build
+// (-DGATEWAY_AP) and the PC must be joined to that access point.
+//
+// A successful HTTPUpdate reboots from inside update(), so the node can't reply
+// over ESP-NOW afterwards (the radio is in STA mode). We instead arm a flag in
+// RTC memory before the update; the fresh boot sees it and broadcasts ota_done
+// (see checkBootDone()). A node that fails to join the AP or download just
+// reboots back into its current firmware, so a failed WiFi update is safe.
+
+// Optional node-supplied hook: called right before the node leaves ESP-NOW for
+// WiFi, so an actuator node can halt pumps/valves before it goes off the air.
+inline void (*beforeWifiHook)() = nullptr;
+
+// A WiFi-OTA request is handed from the recv callback (WiFi task) to the main
+// loop via this flag + buffers, NOT acted on in place: the STA connect blocks
+// for seconds and esp_now_deinit() tears down ESP-NOW, which is unsafe from
+// inside the WiFi task that dispatches the recv callback. pollWifi() runs it
+// from loop(). (Flash writes for the ESP-NOW path are quick + synchronous, so
+// those stay inline; a WiFi connect needs the WiFi task to keep running.)
+inline volatile bool wifiPending = false;
+inline char wifiSsid[33] = {};
+inline char wifiPass[65] = {};
+inline char wifiUrl[160] = {};
+
+// Armed before a WiFi update; survives the software reset that HTTPUpdate
+// triggers (RTC_NOINIT memory is not cleared on a restart, only on power loss).
+// Deliberately NOT inline/initialised: a zero-init would defeat the noinit
+// section, and exactly one translation unit (a node's single main.cpp) includes
+// this header, so there is no ODR clash.
+RTC_NOINIT_ATTR uint32_t wifiDoneFlag;
+constexpr uint32_t WIFI_DONE_MAGIC = 0xB007D02E;  // "boot done"
 
 inline void reply(const char* s) { se::node::toGateway(s); }
 
@@ -83,6 +123,35 @@ inline int b64decode(const char* in, size_t inlen, uint8_t* out, size_t outcap) 
         }
     }
     return (int)o;
+}
+
+// Arm the done flag, join the AP and pull the image over HTTP. Runs from the
+// main task (via pollWifi), never the recv callback. Returns only on failure — a
+// successful HTTPUpdate reboots from inside update(), and the fresh boot reports
+// ota_done via checkBootDone(). On any failure the flag is cleared and the node
+// restarts into its current firmware to recover the ESP-NOW link.
+inline void doWifiUpdate(const char* ssid, const char* pass, const char* url) {
+    wifiDoneFlag = WIFI_DONE_MAGIC;   // confirmed by checkBootDone() after reboot
+
+    esp_now_deinit();                 // free the shared radio for dedicated STA use
+    WiFi.persistent(false);
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(ssid, pass);
+    uint32_t start = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - start < 15000) delay(200);
+    if (WiFi.status() != WL_CONNECTED) {
+        wifiDoneFlag = 0;
+        ESP.restart();
+    }
+
+    WiFiClient client;
+    httpUpdate.rebootOnUpdate(true);  // reboots on success; the armed flag => ota_done
+    // The server sends an x-MD5 header, which HTTPUpdate verifies before booting.
+    httpUpdate.update(client, url);
+
+    // Reached only if the update failed (success rebooted inside update()).
+    wifiDoneFlag = 0;
+    ESP.restart();
 }
 
 // Returns true if `data` was an ota_* command (and was handled), so the caller
@@ -133,6 +202,21 @@ inline bool tryHandle(const uint8_t* data, int len) {
         return true;
     }
 
+    if (strcmp(cmd, "ota_wifi") == 0) {
+        const char* ssid = doc["ssid"] | "";
+        const char* pass = doc["pass"] | "";
+        const char* url  = doc["url"]  | "";
+        if (!*ssid || !*url) { fail("bad_wifi_args"); return true; }
+        strlcpy(wifiSsid, ssid, sizeof(wifiSsid));
+        strlcpy(wifiPass, pass, sizeof(wifiPass));
+        strlcpy(wifiUrl,  url,  sizeof(wifiUrl));
+        // Ack while still on ESP-NOW so the PC knows the node accepted and is
+        // going off the air; the actual connect + download runs from pollWifi().
+        reply("{\"type\":\"ota_wifi_start\"}");
+        wifiPending = true;
+        return true;
+    }
+
     if (strcmp(cmd, "ota_end") == 0) {
         if (!active) { fail("not_active"); return true; }
         bool ok = Update.end(true);   // true => verify MD5 + set boot partition
@@ -150,6 +234,33 @@ inline bool tryHandle(const uint8_t* data, int len) {
     }
 
     return true;  // unknown ota_* command — consume it anyway
+}
+
+// Call from loop(): if a WiFi OTA was requested (ota_wifi), run it now from the
+// main task — safe to block and tear down ESP-NOW here, unlike the recv
+// callback. Does not return on a successful update (the node reboots). A no-op
+// when nothing is pending, so it is cheap to call every loop.
+inline void pollWifi() {
+    if (!wifiPending) return;
+    wifiPending = false;
+    delay(60);                        // let the ota_wifi_start ack leave first
+    if (beforeWifiHook) beforeWifiHook();   // node-specific safe shutdown
+    doWifiUpdate(wifiSsid, wifiPass, wifiUrl);
+}
+
+// Call once from setup() after se::begin(): if a WiFi OTA just completed, the
+// flag armed before the reboot survived in RTC memory — announce success to the
+// PC and clear it. Broadcast (not toGateway) because a fresh boot has not learned
+// the gateway MAC yet; the gateway forwards broadcasts to the PC all the same.
+// A cold boot leaves the flag uninitialised, so a spurious match is ~1 in 2^32
+// and harmless (the PC only listens for ota_done during an update).
+inline void checkBootDone() {
+    if (wifiDoneFlag != WIFI_DONE_MAGIC) return;
+    wifiDoneFlag = 0;
+    for (int i = 0; i < 4; i++) {
+        se::broadcast("{\"type\":\"ota_done\"}");
+        delay(100);
+    }
 }
 
 }  // namespace ota

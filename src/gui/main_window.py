@@ -11,7 +11,6 @@ from PySide6.QtWidgets import (
     QAbstractSpinBox,
     QApplication,
     QComboBox,
-    QDialog,
     QLabel,
     QLineEdit,
     QMainWindow,
@@ -319,32 +318,23 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         dlg.exec()
 
     def _open_activity_editor(self) -> None:
-        """Tools => Activity Editor… — author block-based behaviours (Visual
-        Editor tab) and tune per-activity parameter presets (Presets tab) in one
-        dialog. Imported lazily so QtWebEngine is only loaded when the editor is
-        actually opened.
+        """Tools => Activity Editor… — author block-based behaviours in the
+        Visual Editor. Imported lazily so QtWebEngine is only loaded when the
+        editor is actually opened. The connected robots are passed in so the
+        editor can preview picked LED colours on them live.
 
         The app-wide event filter (the "0" panic key) is removed for the
         editor's lifetime: PySide6 crashes marshalling QtWebEngine's internal
         QtQuick objects through a Python global event filter (hover events over
-        the web view). The editor drives no hardware, so losing the panic key
-        while it is open is harmless — the modal already blocks the rest of the
-        UI anyway."""
+        the web view). The editor drives no chambers and clears its LED preview
+        on close, so losing the panic key while it is open is harmless — the
+        modal already blocks the rest of the UI anyway."""
         from src.gui.activity_editor_dialog import ActivityEditorDialog
         app = QApplication.instance()
         app.removeEventFilter(self)
         try:
-            dlg = ActivityEditorDialog(self._db, parent=self)
-            if dlg.exec() == QDialog.DialogCode.Accepted:
-                # Apply the preset selected on the Presets tab to the running
-                # activity, if any (mirrors the old Activity Presets manager).
-                current_preset = dlg.selected_preset()
-                if current_preset and self._session_panel._current_activity:
-                    self._session_panel._current_activity.apply_preset(
-                        current_preset.params)
-                    logger.info("Applied preset %s to %s",
-                                current_preset.preset_id,
-                                self._session_panel._current_activity.name)
+            ActivityEditorDialog(self._db, parent=self,
+                                 robots=self._robots).exec()
         finally:
             app.installEventFilter(self)
 

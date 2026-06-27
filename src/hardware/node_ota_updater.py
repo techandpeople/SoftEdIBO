@@ -52,6 +52,26 @@ _ESP_APP_MAGIC = 0xE9
 _APP_OFFSET = 0x10000
 
 
+def extract_app_image(data: bytes) -> bytes:
+    """Return the bare app-partition image to flash over OTA, or ``b""`` if none.
+
+    The bundled node ``.bin`` files are *merged* flash images (bootloader +
+    partition table + app, meant for esptool at offset 0x0). The node's OTA
+    writer (``Update.h`` for ESP-NOW, ``HTTPUpdate`` for WiFi) expects only the
+    application image (first byte = 0xE9), so a merged image makes the node
+    reject the first sector. Detect that case and slice out the app partition at
+    its standard 0x10000 offset; a file that already starts with the app magic
+    is returned as-is. Shared by the ESP-NOW and WiFi updaters.
+    """
+    if not data:
+        return b""
+    if data[0] == _ESP_APP_MAGIC:
+        return data
+    if len(data) > _APP_OFFSET and data[_APP_OFFSET] == _ESP_APP_MAGIC:
+        return data[_APP_OFFSET:]
+    return b""
+
+
 class NodeOTAUpdater:
     """Streams a firmware ``.bin`` to one node and verifies it, over ESP-NOW."""
 
@@ -125,21 +145,12 @@ class NodeOTAUpdater:
             self._gateway.remove_message_callback(self._handle)
 
     def _app_image(self, data: bytes) -> bytes:
-        """Return the bare app-partition image to flash over OTA.
-
-        The bundled node ``.bin`` files are *merged* flash images (bootloader +
-        partition table + app, meant for esptool at offset 0x0). ``Update.h`` on
-        the node expects only the application image (first byte = 0xE9), so a
-        merged image makes the node reject the first sector. Detect that case and
-        slice out the app partition at its standard 0x10000 offset; a file that
-        already starts with the app magic is sent as-is.
-        """
-        if data[0] == _ESP_APP_MAGIC:
-            return data
-        if len(data) > _APP_OFFSET and data[_APP_OFFSET] == _ESP_APP_MAGIC:
+        """Bare app-partition image to stream (see :func:`extract_app_image`),
+        logging when a merged image is sliced."""
+        img = extract_app_image(data)
+        if img and data and data[0] != _ESP_APP_MAGIC:
             self._log(f"merged flash image — extracting app at 0x{_APP_OFFSET:x}")
-            return data[_APP_OFFSET:]
-        return b""
+        return img
 
     # ------------------------------------------------------------------
     # Transfer phases

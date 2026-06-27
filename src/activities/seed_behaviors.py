@@ -8,8 +8,8 @@ same "cured" look (yellow ring, all chambers beating together):
   amplitudes → strong synchronised beat.
 - Condition B (Movement): chambers move *one at a time* (low energy) → mixed
   amplitudes → synchronised beat.
-- Condition C (Texture): the *skin* changes — wrinkled (vacuum) → half
-  wrinkled / half smooth → smooth and breathing.
+- Condition C (Texture): the *skin* changes — emptied / rough (chambers at
+  0 %) → half empty / half smooth → smooth and breathing.
 
 These are the comportamentos 1-3 / 4-6 / 7-9 from the study brief. They are
 authored here as plain data so the same specs can later be loaded into the
@@ -107,20 +107,20 @@ CONDITION_B = {
 CONDITION_C = {
     "initial": "phase1",
     "states": {
-        # Wrinkled all over (vacuum), dim purple — "skin without air, rough".
+        # Emptied all over (rough, "no air"), dim purple.
         "phase1": {
             "do": [
                 {"set_led": {"color": PURPLE, "pattern": "solid"}},
-                {"for_each_chamber": {"do": [{"wrinkle": {}}]}},
+                {"for_each_chamber": {"do": [{"set_pressure": {"pct": 0}}]}},
             ],
             "transitions": [_advance("phase2", PHASE2_AFTER_MS)],
         },
-        # Half air: chambers 0,1 wrinkled, chamber 2 smooth; half-colour ring.
+        # Half air: chambers 0,1 emptied, chamber 2 smooth; half-colour ring.
         "phase2": {
             "do": [
                 {"set_led_halves": {"colors": HALF}},
-                {"wrinkle": {"chamber": 0}},
-                {"wrinkle": {"chamber": 1}},
+                {"set_pressure": {"chamber": 0, "pct": 0}},
+                {"set_pressure": {"chamber": 1, "pct": 0}},
                 {"set_pressure": {"chamber": 2, "pct": 55}},
             ],
             "transitions": [_advance("phase3", PHASE3_AFTER_MS - PHASE2_AFTER_MS)],
@@ -139,6 +139,6 @@ SEED_CONDITIONS: list[tuple[str, str, dict]] = [
      "Hospital study condition: chambers move one at a time, then converge on "
      "a synchronised beat.", CONDITION_B),
     ("Behaviour C — Texture",
-     "Hospital study condition: skin goes from wrinkled (vacuum) to smooth and "
-     "breathing.", CONDITION_C),
+     "Hospital study condition: skin goes from emptied / rough (chambers at "
+     "0 %) to smooth and breathing.", CONDITION_C),
 ]

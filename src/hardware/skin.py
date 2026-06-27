@@ -220,9 +220,8 @@ class Skin:
                 chamber_id=local_idx,
                 esp32_mac=self.mac,
                 max_pressure=float(inp.get("max_pressure", 8.0)),
+                min_pressure=float(inp.get("min_pressure", 0.0)),
             )
-            # Stash min_pressure on the AirChamber for serialisation (chamber_defs).
-            ch.min_pressure = float(inp.get("min_pressure", 0.0))  # type: ignore[attr-defined]
             self._chambers[local_idx] = ch
 
     @staticmethod
@@ -240,16 +239,30 @@ class Skin:
         return out
 
     def _push_pressure_limits(self) -> None:
-        """Push each chamber's max + min pressure to the firmware so they
-        survive a PC crash mid-session (no-op for controllers lacking setters)."""
+        """Push every chamber's max + min pressure to the firmware (e.g. once at
+        construction). No-op for controllers lacking setters (the simulator)."""
+        for local_idx in range(len(self._slots)):
+            self._push_limits(local_idx)
+
+    def _push_limits(self, local_idx: int) -> None:
+        """Push one chamber's max + min pressure to the firmware (max first, then
+        min, so the firmware validates min against the fresh max).
+
+        Re-sent before every actuation because ESP-NOW is fire-and-forget (no ACK
+        yet): the one-shot push at construction can be dropped, and external tools
+        (e.g. the Test Actuators dialog, or an "ignore max" run) can leave a stale
+        ``max_kpa`` on the node. Without this the firmware clamps an inflate to
+        whatever limit it currently holds, so repeated steps could climb far past
+        the configured max. The Test Actuators dialog already re-pushes the same
+        way; this brings the live session in line."""
         set_max = getattr(self._ctrl, "set_max_pressure", None)
         set_min = getattr(self._ctrl, "set_min_pressure", None)
-        for local_idx, slot in enumerate(self._slots):
-            ch = self._chambers[local_idx]
-            if set_max is not None:
-                set_max(slot, ch.max_pressure)
-            if set_min is not None:
-                set_min(slot, getattr(ch, "min_pressure", 0.0))
+        ch = self._chambers[local_idx]
+        slot = self._slots[local_idx]
+        if set_max is not None:
+            set_max(slot, ch.max_pressure)
+        if set_min is not None:
+            set_min(slot, ch.min_pressure)
 
     # ------------------------------------------------------------------
     # Properties
@@ -293,7 +306,7 @@ class Skin:
                 "mac": self.mac, "slot": slot,
                 "max_pressure": ch.max_pressure,
             }
-            min_p = getattr(ch, "min_pressure", 0.0)
+            min_p = ch.min_pressure
             if abs(min_p) > 1e-3:   # only persist explicit non-zero defaults
                 d["min_pressure"] = min_p
             mode = self._fill_modes.get(idx, DEFAULT_FILL_MODE)
@@ -371,11 +384,12 @@ class Skin:
     # ------------------------------------------------------------------
 
     def _on_pressure(self, node_slot: int, pressure: int,
-                     state: int | None = None) -> None:
+                     state: int | None = None,
+                     kpa: float = float("nan")) -> None:
         local_idx = self._reverse.get(node_slot)
         if local_idx is not None:
             actuating = _FW_ACTUATION.get(state) if state is not None else None
-            self._chambers[local_idx].update_pressure(pressure, actuating)
+            self._chambers[local_idx].update_pressure(pressure, actuating, kpa)
 
     def _on_target(self, node_slot: int, target: int) -> None:
         local_idx = self._reverse.get(node_slot)
@@ -389,6 +403,11 @@ class Skin:
             logger.error("Skin %s: no chamber at local index %d", self.skin_id, local_idx)
             return False
         slot = self._slots[local_idx]
+
+        # Re-assert the configured min/max on the node before acting, so the
+        # firmware clamps to them even if the construction-time push was lost or
+        # an external tool left a stale limit (see _push_limits).
+        self._push_limits(local_idx)
 
         if kind == "inflate":
             return self._inflate(local_idx, chamber, slot, value, co_active)
@@ -441,6 +460,16 @@ class Skin:
             chamber.state = ChamberState.INFLATING
         elif new_target > 0:
             chamber.state = ChamberState.INFLATED
+
+        # Already at (or above) the requested level: there is nothing to inflate.
+        # The firmware ``inflate`` path runs the pump for one control cycle per
+        # command regardless of current pressure (it only stops at the next
+        # pressure check), so holding ``+`` at the cap over-inflates past the
+        # limit a pulse at a time. The firmware guards ``set_pressure`` this way
+        # but not ``inflate``; mirror it here so the relative inflate can't push
+        # past where we already are.
+        if chamber.pressure >= new_target:
+            return True
 
         profile = self._fill_profiles.get(local_idx)
         pressure_mode = self._fill_modes.get(local_idx) == FILL_MODE_PRESSURE

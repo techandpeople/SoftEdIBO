@@ -347,6 +347,8 @@ class ScriptedActivity(BaseActivity):
                                            {**ctx, "chamber": c})
         elif verb == "beat":
             yield from self._run_beat(unit, params)
+        elif verb == "fade":
+            yield from self._run_fade(unit, params)
         else:
             self._apply_action(unit, verb, params, ctx)
             # instantaneous — no yield
@@ -401,6 +403,42 @@ class ScriptedActivity(BaseActivity):
                 self._set_pressure(unit, c, 0)
             yield ("ms", period - period // 2)
 
+    def _run_fade(self, unit: _Unit, params: dict) -> Generator:
+        """One smooth colour1 → colour2 → colour1 cross-fade across the whole
+        ring. Authors wrap this in 'repeat forever' for a continuous fade."""
+        c1 = self._parse_rgb(params.get("color1", "#000000"))
+        c2 = self._parse_rgb(params.get("color2", "#ffffff"))
+        period = max(200, int(params.get("period_ms", 2000)))
+        half = period // 2
+        # The scheduler ticks every _TICK_MS, so a frame can't be finer than
+        # that; pick the frame count that fits whole ticks into each half.
+        frames = max(2, half // _TICK_MS)
+        step_ms = max(_TICK_MS, half // frames)
+        for target in (c2, c1):           # fade towards c2, then back to c1
+            start = c1 if target is c2 else c2
+            for i in range(frames):
+                t = i / (frames - 1) if frames > 1 else 1.0
+                self._set_led(unit, self._lerp_hex(start, target, t), "solid", 0)
+                yield ("ms", step_ms)
+
+    @staticmethod
+    def _parse_rgb(hex_colour: str) -> tuple[int, int, int]:
+        h = str(hex_colour).strip().lstrip("#")
+        if len(h) == 3:
+            h = "".join(c * 2 for c in h)
+        try:
+            return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        except (ValueError, IndexError):
+            return 0, 0, 0
+
+    @staticmethod
+    def _lerp_hex(a: tuple[int, int, int], b: tuple[int, int, int],
+                  t: float) -> str:
+        r = round(a[0] + (b[0] - a[0]) * t)
+        g = round(a[1] + (b[1] - a[1]) * t)
+        bl = round(a[2] + (b[2] - a[2]) * t)
+        return f"#{r:02x}{g:02x}{bl:02x}"
+
     # ------------------------------------------------------------------
     # Instantaneous actions
     # ------------------------------------------------------------------
@@ -413,7 +451,9 @@ class ScriptedActivity(BaseActivity):
                           int(params.get("period_ms", 0)))
         elif verb == "set_led_halves":
             colors = params.get("colors", params.get("_value", []))
-            self._set_led_halves(unit, list(colors))
+            self._set_led_halves(unit, list(colors),
+                                 params.get("pattern", "solid"),
+                                 int(params.get("period_ms", 0)))
         elif verb in ("inflate", "set_pressure"):
             self._set_pressure(unit, self._resolve_chamber(unit, params, ctx),
                                int(params.get("pct", 60 if verb == "inflate" else 0)))
@@ -453,18 +493,19 @@ class ScriptedActivity(BaseActivity):
         except Exception:   # noqa: BLE001
             logger.exception("set_led failed on %s", unit.unit_id)
 
-    def _set_led_halves(self, unit: _Unit, colors: list[str]) -> None:
+    def _set_led_halves(self, unit: _Unit, colors: list[str],
+                        pattern: str = "solid", period_ms: int = 0) -> None:
         if not colors:
             return
         halves = getattr(unit.ctrl, "set_led_halves", None)
         if halves is not None:
             try:
-                halves(colors)
+                halves(colors, pattern=pattern, period_ms=period_ms)
                 return
             except Exception:   # noqa: BLE001
                 logger.exception("set_led_halves failed on %s", unit.unit_id)
         # Fallback: a controller without the helper at least shows one colour.
-        self._set_led(unit, colors[0], "solid", 0)
+        self._set_led(unit, colors[0], pattern, period_ms)
 
     @staticmethod
     def _resolve_chamber(unit: _Unit, params: dict, ctx: dict):

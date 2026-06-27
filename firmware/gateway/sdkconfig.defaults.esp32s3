@@ -1,0 +1,13 @@
+# ESP-IDF defaults applied to every esp32s3 gateway build (not the C6).
+#
+# ESP-IDF auto-appends this target-specific file on top of sdkconfig.defaults.
+# The Seeed XIAO ESP32-S3 (S3R8) carries 8 MB octal PSRAM; the SoftAP build's
+# WiFi-OTA proxy buffers the node image there (see src/main.cpp). Enabling PSRAM
+# here is harmless for the plain S3 build (it just inits the RAM at boot).
+#
+# IGNORE_NOTFOUND lets the gateway boot even if PSRAM init fails (wrong module),
+# so it degrades to "no_psram" on ota_store rather than boot-looping.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_IGNORE_NOTFOUND=y

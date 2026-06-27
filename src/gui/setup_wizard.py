@@ -45,6 +45,9 @@ GATEWAY_FIRMWARES: dict[str, dict[str, Any]] = {
     "Seeed XIAO ESP32-C6  (compact, USB-C)": {
         "chip":    "esp32c6",
         "release": Settings.BUNDLE / "firmware" / "gateway" / "firmware.bin",
+        # No "ap" key: the SoftAP / WiFi-OTA features are S3-only (the C6 is
+        # single-core and shares the radio + USB on one core). The C6 stays a
+        # plain ESP-NOW gateway.
     },
     "ESP32-WROOM-32  (classic DevKit)": {
         "chip":    "esp32",

@@ -439,7 +439,13 @@ void processCommand(const cmd_queue::Cmd& c) {
         } else {
             float delta  = (ch.max_kpa - ch.min_kpa) * constrain(c.param, 0, 100) / 100.0f;
             float target = min(chambers::cachedKpa[n] + delta, ch.max_kpa);
-            chambers::beginInflate(n, target);
+            // Only actuate if we are actually below the target. Without this guard
+            // each inflate opens the valve and runs the pump for one control cycle
+            // regardless of current pressure (the stop fires only at the next
+            // pressure check), so repeated inflates at the cap creep past max_kpa a
+            // pulse at a time. set_pressure already guards this way.
+            if (chambers::cachedKpa[n] < target)
+                chambers::beginInflate(n, target);
         }
         break;
     }
@@ -668,6 +674,11 @@ void setup() {
         return;
     }
 
+    // Firmware update support: halt all actuators before a WiFi OTA takes the
+    // node off the air, and announce a WiFi OTA that just completed (see se_ota.h).
+    se::ota::beforeWifiHook = &emergencyStopAll;
+    se::ota::checkBootDone();
+
     bool pca_ok = pca_valves::init();
     if (!pca_ok) {
         config::state.error = true;
@@ -688,6 +699,10 @@ void setup() {
 }
 
 void loop() {
+    // Run a pending WiFi OTA from the main task (never returns if it starts —
+    // the node reboots into the new firmware).
+    se::ota::pollWifi();
+
     cmd_queue::Cmd c;
     while (cmd_queue::pop(c)) {
         processCommand(c);
