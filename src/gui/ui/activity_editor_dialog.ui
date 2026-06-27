@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>ActivityEditorDialog</class>
+ <widget class="QDialog" name="ActivityEditorDialog">
+  <property name="geometry">
+   <rect><x>0</x><y>0</y><width>900</width><height>640</height></rect>
+  </property>
+  <property name="windowTitle"><string>Activity Editor</string></property>
+  <property name="minimumSize">
+   <size><width>720</width><height>480</height></size>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <widget class="QTabWidget" name="tabs">
+     <property name="whatsThis"><string>Two ways to author activities: the Visual Editor builds block-based behaviours; Presets tunes the parameters of the built-in activities.</string></property>
+     <property name="currentIndex"><number>0</number></property>
+     <widget class="QWidget" name="tab_visual">
+      <attribute name="title"><string>Visual Editor</string></attribute>
+      <layout class="QVBoxLayout" name="visualLayout">
+       <property name="leftMargin"><number>4</number></property>
+       <property name="topMargin"><number>4</number></property>
+       <property name="rightMargin"><number>4</number></property>
+       <property name="bottomMargin"><number>4</number></property>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="tab_presets">
+      <attribute name="title"><string>Presets</string></attribute>
+      <layout class="QVBoxLayout" name="presetsLayout">
+       <property name="leftMargin"><number>4</number></property>
+       <property name="topMargin"><number>4</number></property>
+       <property name="rightMargin"><number>4</number></property>
+       <property name="bottomMargin"><number>4</number></property>
+      </layout>
+     </widget>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="dialog_button_row">
+     <item>
+      <spacer name="dialog_button_spacer">
+       <property name="orientation"><enum>Qt::Horizontal</enum></property>
+       <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="QPushButton" name="closeButton">
+       <property name="text"><string>Close</string></property>
+       <property name="whatsThis"><string>Close the editor. Unsaved changes in either tab are discarded — Save first.</string></property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

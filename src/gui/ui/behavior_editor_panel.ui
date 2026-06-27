@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ui version="4.0">
- <class>BehaviorEditorDialog</class>
- <widget class="QDialog" name="BehaviorEditorDialog">
+ <class>BehaviorEditorPanel</class>
+ <widget class="QWidget" name="BehaviorEditorPanel">
   <property name="geometry">
-   <rect><x>0</x><y>0</y><width>900</width><height>640</height></rect>
-  </property>
-  <property name="windowTitle"><string>Behaviour Editor</string></property>
-  <property name="minimumSize">
-   <size><width>720</width><height>480</height></size>
+   <rect><x>0</x><y>0</y><width>900</width><height>560</height></rect>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
+   <property name="leftMargin"><number>0</number></property>
+   <property name="topMargin"><number>0</number></property>
+   <property name="rightMargin"><number>0</number></property>
+   <property name="bottomMargin"><number>0</number></property>
    <item>
     <layout class="QHBoxLayout" name="top_row">
      <item>
@@ -62,7 +62,7 @@
    </item>
    <item>
     <widget class="QWidget" name="webContainer" native="true">
-     <property name="whatsThis"><string>Drag blocks here to build the behaviour. Phases are States; inside each State you stack actions (set the LED, beat, inflate, wait, wait for touch…) and add Transitions that move to another phase after a time or enough touches.</string></property>
+     <property name="whatsThis"><string>Drag blocks here to build the activity behaviour. Phases are States; inside each State you stack actions (set the LED, beat, inflate, wait, wait for touch…) and add Transitions that move to another phase after a time, enough touches, or an organ condition.</string></property>
      <property name="sizePolicy">
       <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
        <horstretch>1</horstretch><verstretch>1</verstretch>
@@ -91,15 +91,8 @@
      </item>
      <item>
       <widget class="QPushButton" name="saveButton">
-       <property name="text"><string>Save</string></property>
+       <property name="text"><string>Save behaviour</string></property>
        <property name="whatsThis"><string>Compile the blocks into a behaviour spec and store it in the database. The saved behaviour then appears in the session activity list and runs without the editor.</string></property>
-       <property name="default"><bool>true</bool></property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QPushButton" name="closeButton">
-       <property name="text"><string>Close</string></property>
-       <property name="whatsThis"><string>Close the editor. Unsaved block changes are discarded.</string></property>
       </widget>
      </item>
     </layout>

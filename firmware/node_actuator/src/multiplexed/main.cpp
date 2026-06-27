@@ -59,10 +59,10 @@ void sendStatus(int chamber, float kpa) {
     if (!gatewayKnown) return;
     auto& ch = chambers::state[chamber];
     int pct = units::kpaToPct(kpa, ch.min_kpa, ch.max_kpa);
-    char buf[56];
+    char buf[72];
     int len = snprintf(buf, sizeof(buf),
-                       "{\"type\":\"status\",\"chamber\":%d,\"pressure\":%d}",
-                       chamber, pct);
+                       "{\"type\":\"status\",\"chamber\":%d,\"pressure\":%d,\"kpa\":%.2f}",
+                       chamber, pct, kpa);
     esp_now_send(gatewayMac, reinterpret_cast<const uint8_t*>(buf), len);
 }
 

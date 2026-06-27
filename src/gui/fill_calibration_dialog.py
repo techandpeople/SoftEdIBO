@@ -1,23 +1,30 @@
-"""Fill-time calibration dialog (Tools → Calibrate Fill Times…).
+"""Fill-curve calibration dialog (Tools → Calibrate Fill Times…).
 
-Measures, per actuator chamber, how long it takes to inflate from empty to (near)
-its maximum — using the pressure sensor as ground truth — and stores that as the
-chamber's ``fill_time_ms`` in settings. At runtime the firmware can then inflate
-by time instead of closing the loop on the laggy multiplexed pressure sensor (a
-hard 5 s ceiling + the firmware ``HARD_MAX`` pressure cutoff stay as safety nets).
+Measures, per actuator chamber, its **time→pressure fill curve** — how the
+pressure climbs as the inflate valve is held open — using the pressure sensor as
+ground truth, and stores it as the chamber's ``fill_profile`` in settings. At
+runtime the app converts an inflate target into an open-valve time from that
+curve, so the firmware doesn't have to close the loop on the laggy multiplexed
+pressure sensor (the firmware ``HARD_MAX`` cutoff + a total-time ceiling stay as
+safety nets).
 
 Flow per chamber (one at a time, driven by a timer + gateway status messages):
-  1. **Deflate** to empty (settle until pressure is low, or a timeout).
-  2. **Inflate** to max, timing until pressure reaches the target %.
-  3. Record the elapsed time, deflate back, show the result.
+  1. **Deflate** to empty so the sweep starts at ambient.
+  2. **Step** the inflate valve open for a fixed window, let the sensor settle,
+     read the pressure %, record a curve point — repeating until the chamber
+     reaches the target or a total-time ceiling.
+  3. Record the curve, deflate back, show the result.
 
-Talks to the node directly through the gateway (same pattern as the Test
-Actuators dialog). The measurement maths live in the Qt-free
-:mod:`src.hardware.fill_calibration` so they're unit-tested.
+Re-running a chamber with a smaller step size refines its curve. The live kPa of
+each chamber is shown next to its progress, alongside the percentage.
+
+The measurement maths live in the Qt-free :mod:`src.hardware.fill_calibration`
+so they're unit-tested; this dialog only drives the hardware and the UI.
 """
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from PySide6.QtCore import Qt, QTimer, Signal
@@ -34,26 +41,34 @@ from PySide6.QtWidgets import (
 
 from src.gui.ui_fill_calibration_dialog import Ui_FillCalibrationDialog
 from src.hardware.fill_calibration import (
-    MAX_FILL_MS,
-    FillTimeCalibrator,
+    DEFAULT_STEP_MS,
+    STEP_CHOICES_MS,
+    FillProfileCalibrator,
     iter_actuator_chambers,
-    set_fill_time,
+    set_fill_profile,
 )
+from src.hardware.fill_profile import FillProfile
 
-# How empty the chamber must read before we start timing an inflation, and how
-# long we'll wait for that before giving up on the deflate phase.
+# How empty the chamber must read before we start the sweep, and how long we'll
+# wait for that before giving up on the deflate phase.
 _EMPTY_PCT = 5.0
 _MAX_DEFLATE_MS = 7000
+# Extra settle time after each step's valve-open window, to let the laggy sensor
+# catch up before we read the pressure for that step.
+_SETTLE_MS = 350
 _TICK_MS = 100
+
+# Human labels for the step-size choices (ms → label).
+_STEP_LABELS = {600.0: "Coarse", 400.0: "Medium", 250.0: "Fine", 150.0: "Very fine"}
 
 
 class FillCalibrationDialog(QDialog, Ui_FillCalibrationDialog):
-    """Calibrate per-chamber fill times against the pressure sensor."""
+    """Calibrate per-chamber fill curves against the pressure sensor."""
 
-    # gateway read thread → GUI thread: (mac, chamber, pressure_pct)
-    _pressure = Signal(str, int, float)
-    # Emitted after fill times are written to settings, so the app can rebuild
-    # robots to pick up the new ``fill_time_ms`` values.
+    # gateway read thread → GUI thread: (mac, chamber, pressure_pct, kpa)
+    _pressure = Signal(str, int, float, float)
+    # Emitted after fill curves are written to settings, so the app can rebuild
+    # robots to pick up the new ``fill_profile`` values.
     saved = Signal()
 
     def __init__(self, settings: Any, gateway: Any,
@@ -69,11 +84,16 @@ class FillCalibrationDialog(QDialog, Ui_FillCalibrationDialog):
         # every actuator chamber across all configured robots.
         self._chambers = (chambers if chambers is not None
                           else iter_actuator_chambers(settings.data))
-        # measured results: (mac, slot) → fill_time_ms
-        self._results: dict[tuple[str, int], float] = {}
-        # currently-running calibration, or None
+        # measured results: (mac, slot) → fill_profile list ([[ms, pct], ...])
+        self._results: dict[tuple[str, int], list[list[float]]] = {}
+        # currently-running calibration job, or None
         self._job: dict | None = None
         self._rows: dict[tuple[str, int], dict] = {}
+
+        for ms in STEP_CHOICES_MS:
+            label = _STEP_LABELS.get(ms, f"{int(ms)} ms")
+            self.step_combo.addItem(f"{label} — {int(ms)} ms", userData=float(ms))
+        self._select_step(DEFAULT_STEP_MS)
 
         # The static frame (intro, scroll area, buttons) lives in the .ui; the
         # per-chamber rows are built here and added to ``rows_layout``.
@@ -100,6 +120,15 @@ class FillCalibrationDialog(QDialog, Ui_FillCalibrationDialog):
             gateway.on_message(self._on_gateway_message)
         self.finished.connect(lambda _=0: self._stop())
 
+    def _select_step(self, ms: float) -> None:
+        idx = self.step_combo.findData(float(ms))
+        if idx >= 0:
+            self.step_combo.setCurrentIndex(idx)
+
+    def _step_ms(self) -> float:
+        data = self.step_combo.currentData()
+        return float(data) if data is not None else DEFAULT_STEP_MS
+
     # ------------------------------------------------------------------
     # UI
     # ------------------------------------------------------------------
@@ -115,25 +144,40 @@ class FillCalibrationDialog(QDialog, Ui_FillCalibrationDialog):
         # Ignored width policy lets the label shrink below its text (clipping its
         # own text) so a narrow dialog never pushes the buttons off the row.
         name.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        cur = ch["fill_time_ms"]
-        result = QLabel(f"{cur} ms" if cur is not None else "—")
-        # Fixed width (not just a minimum) so a wide value like the timeout text
-        # never steals space from the progress bar — keeps every row aligned.
-        result.setFixedWidth(110)
-        result.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         bar = QProgressBar()
         bar.setRange(0, 100)
         bar.setTextVisible(False)
         bar.setMaximumHeight(10)
+        # Live kPa readout (firmware reports it per chamber); "—" until a status
+        # message arrives. Fixed width so rows stay aligned.
+        kpa = QLabel("—")
+        kpa.setFixedWidth(80)
+        kpa.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        kpa.setToolTip("Live chamber pressure in kPa.")
+        # Calibration result (full fill time / timeout). Pre-fill from any stored
+        # curve so the user sees what's already calibrated.
+        result = QLabel(self._result_text(ch))
+        result.setFixedWidth(120)
+        result.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         btn = QPushButton("Calibrate")
         btn.setEnabled(self._gateway is not None)
         btn.clicked.connect(lambda _=False, k=key: self._calibrate_one(k))
         h.addWidget(name, stretch=2)
         h.addWidget(bar, stretch=3)
+        h.addWidget(kpa)
         h.addWidget(result)
         h.addWidget(btn)
-        self._rows[key] = {"result": result, "bar": bar, "btn": btn, "cfg": ch}
+        self._rows[key] = {"result": result, "bar": bar, "btn": btn,
+                           "kpa": kpa, "cfg": ch}
         return w
+
+    @staticmethod
+    def _result_text(ch: dict) -> str:
+        prof = FillProfile.from_list(ch.get("fill_profile"))
+        if prof is not None:
+            return f"{int(round(prof.full_time_ms))} ms"
+        ms = ch.get("fill_time_ms")
+        return f"{int(ms)} ms" if ms else "—"
 
     # ------------------------------------------------------------------
     # Calibration driving
@@ -148,9 +192,10 @@ class FillCalibrationDialog(QDialog, Ui_FillCalibrationDialog):
         self._set_buttons_enabled(False)
         self._job = {
             "key": key, "mac": key[0], "slot": key[1], "phase": "deflate",
-            "cal": FillTimeCalibrator(), "elapsed": 0, "queue": queue,
+            "cal": FillProfileCalibrator(step_ms=self._step_ms()),
+            "phase_elapsed": 0, "last_pct": 100.0, "queue": queue,
         }
-        # Start empty: deflate and wait until the chamber reads low.
+        # Start at ambient: deflate and wait until the chamber reads empty.
         self._gateway.send(key[0], "deflate", chamber=key[1])
         self._tick.start()
 
@@ -161,38 +206,48 @@ class FillCalibrationDialog(QDialog, Ui_FillCalibrationDialog):
         first = queue.pop(0)
         self._calibrate_one(first, queue=queue)
 
+    def _begin_step(self, job: dict) -> None:
+        """Open the inflate valve for one step window and wait for it to settle."""
+        job["phase"] = "step"
+        job["phase_elapsed"] = 0
+        # Time-based fill for exactly one step: the firmware opens the inflate
+        # valve for ``ms`` then closes it (HARD_MAX is the only pressure cutoff).
+        self._gateway.send(job["mac"], "inflate", chamber=job["slot"],
+                           ms=int(job["cal"].step_ms))
+
     def _on_tick(self) -> None:
         job = self._job
         if job is None:
             return
-        job["elapsed"] += _TICK_MS
+        job["phase_elapsed"] += _TICK_MS
         if job["phase"] == "deflate":
-            # Give up waiting for "empty" after a bounded time and inflate anyway.
-            if job["elapsed"] >= _MAX_DEFLATE_MS:
-                self._begin_inflate(job)
-        elif job["phase"] == "inflate":
-            if job["cal"].tick() is not None:        # 5 s ceiling hit
-                self._finish_job(timed_out=True)
+            # Once empty (or after a bounded wait) begin the inflate sweep.
+            if job["last_pct"] <= _EMPTY_PCT or job["phase_elapsed"] >= _MAX_DEFLATE_MS:
+                self._begin_step(job)
+        elif job["phase"] == "step":
+            # After the valve-open window + a settle, record the settled reading.
+            if job["phase_elapsed"] >= job["cal"].step_ms + _SETTLE_MS:
+                done = job["cal"].record(job["last_pct"])
+                self._rows[job["key"]]["bar"].setValue(
+                    int(max(0.0, min(100.0, job["cal"].profile.top_pct))))
+                if done:
+                    self._finish_job()
+                else:
+                    self._begin_step(job)
 
-    def _begin_inflate(self, job: dict) -> None:
-        job["phase"] = "inflate"
-        job["cal"].start()
-        self._gateway.send(job["mac"], "inflate", chamber=job["slot"], value=255)
-
-    def _on_pressure(self, mac: str, chamber: int, pct: float) -> None:
+    def _on_pressure(self, mac: str, chamber: int, pct: float, kpa: float) -> None:
+        # Keep every row's live kPa current, whichever chamber is being swept.
+        row = self._rows.get((mac, chamber))
+        if row is not None:
+            row["kpa"].setText(f"{kpa:.2f} kPa" if not math.isnan(kpa) else f"{pct:.0f}%")
         job = self._job
         if job is None or mac != job["mac"] or chamber != job["slot"]:
             return
-        row = self._rows[job["key"]]
-        row["bar"].setValue(int(max(0.0, min(100.0, pct))))
+        job["last_pct"] = pct
         if job["phase"] == "deflate":
-            if pct <= _EMPTY_PCT:
-                self._begin_inflate(job)
-        elif job["phase"] == "inflate":
-            if job["cal"].update(pct) is not None:
-                self._finish_job(timed_out=job["cal"].timed_out)
+            self._rows[job["key"]]["bar"].setValue(int(max(0.0, min(100.0, pct))))
 
-    def _finish_job(self, *, timed_out: bool) -> None:
+    def _finish_job(self) -> None:
         job = self._job
         if job is None:
             return
@@ -201,39 +256,46 @@ class FillCalibrationDialog(QDialog, Ui_FillCalibrationDialog):
         cal = job["cal"]
         key = job["key"]
         row = self._rows[key]
-        # Deflate back to a safe resting state.
-        self._gateway.send(job["mac"], "deflate", chamber=job["slot"])
-        if cal.result_ms is not None and not timed_out:
-            self._results[key] = cal.result_ms
-            row["result"].setText(f"{int(round(cal.result_ms))} ms")
+        profile = cal.profile
+        self._results[key] = profile.to_list()
+        if cal.timed_out:
+            row["result"].setText(f"≥{int(round(profile.full_time_ms))} ms")
+            row["result"].setToolTip(
+                f"Timed out at {int(profile.top_pct)}% — chamber did not reach "
+                "the target. Curve still saved up to that point.")
         else:
-            row["result"].setText(f"≥{int(MAX_FILL_MS)} ms")
-            row["result"].setToolTip("Timed out — chamber did not reach target.")
+            row["result"].setText(f"{int(round(profile.full_time_ms))} ms ✓")
+            row["result"].setToolTip(
+                f"Reached {int(profile.top_pct)}% over {cal.steps} steps.")
+        # Deflate the (now inflated) chamber back to a safe resting state.
+        self._gateway.send(job["mac"], "deflate", chamber=job["slot"])
         queue = job["queue"]
         if queue:
             nxt = queue.pop(0)
-            QTimer.singleShot(300, lambda k=nxt, q=queue:
+            QTimer.singleShot(400, lambda k=nxt, q=queue:
                               self._calibrate_one(k, queue=q))
         else:
             self._set_buttons_enabled(True)
 
     def _set_buttons_enabled(self, on: bool) -> None:
         self.all_btn.setEnabled(on and bool(self._chambers))
+        self.step_combo.setEnabled(on)
         for r in self._rows.values():
             r["btn"].setEnabled(on)
 
     def _stop(self) -> None:
-        """Abort any running calibration and deflate everything touched."""
+        """Abort any running calibration and halt everything touched.
+
+        Sends ``hold`` (close valves, pumps off), NOT ``deflate``: the deflate
+        pump is an active vacuum, so deflating on Stop would spin the vacuum
+        pump rather than simply stopping. Stop should halt, not actuate.
+        """
         self._tick.stop()
-        macs = {k[0] for k in self._rows}
-        if self._job is not None:
-            job, self._job = self._job, None
-            self._gateway.send(job["mac"], "deflate", chamber=job["slot"])
-        # Best-effort: deflate all chambers so nothing is left inflated.
+        self._job = None
+        # Best-effort: halt every chamber so nothing is left actuating.
         if self._gateway is not None:
             for (mac, slot) in self._rows:
-                self._gateway.send(mac, "deflate", chamber=slot)
-            _ = macs
+                self._gateway.send(mac, "hold", chamber=slot)
         self._set_buttons_enabled(True)
 
     # ------------------------------------------------------------------
@@ -244,12 +306,12 @@ class FillCalibrationDialog(QDialog, Ui_FillCalibrationDialog):
         if not self._results:
             QMessageBox.information(self, "Save", "Nothing calibrated yet.")
             return
-        for (mac, slot), ms in self._results.items():
-            set_fill_time(self._settings.data, mac, slot, ms)
+        for (mac, slot), profile in self._results.items():
+            set_fill_profile(self._settings.data, mac, slot, profile)
         self._settings.save()
         self.saved.emit()
         QMessageBox.information(
-            self, "Save", f"Saved fill times for {len(self._results)} chamber(s).")
+            self, "Save", f"Saved fill curves for {len(self._results)} chamber(s).")
 
     # ------------------------------------------------------------------
     # Gateway plumbing (read thread → Signal → GUI thread)
@@ -263,9 +325,12 @@ class FillCalibrationDialog(QDialog, Ui_FillCalibrationDialog):
         mac = data.get("source")
         chamber = data.get("chamber")
         pressure = data.get("pressure")
+        kpa = data.get("kpa")
         if isinstance(mac, str) and isinstance(chamber, int) \
                 and isinstance(pressure, (int, float)):
-            self._pressure.emit(mac, chamber, float(pressure))
+            self._pressure.emit(
+                mac, chamber, float(pressure),
+                float(kpa) if isinstance(kpa, (int, float)) else float("nan"))
 
     def closeEvent(self, ev) -> None:   # noqa: N802 (Qt override)
         self._active = False

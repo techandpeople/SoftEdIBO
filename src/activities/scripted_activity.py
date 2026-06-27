@@ -29,6 +29,8 @@ from PySide6.QtCore import QObject, QTimer
 
 from src.activities import catalog
 from src.activities.base_activity import BaseActivity
+from src.activities.organ_resolver import OrganResolver
+from src.hardware.organ_sensor import OrganSensor
 from src.robots.base_robot import BaseRobot
 
 if TYPE_CHECKING:
@@ -45,6 +47,11 @@ _TICK_MS = 50
 #   ("touch", chamber|None) — resume on the next touch (of that chamber)
 WaitToken = tuple
 
+# Default match tolerance (Ω) for decomposing the organ circuit reading when a
+# spec uses an `organs` condition. Overridable per-spec via
+# ``spec["organ_tolerance_ohm"]`` (mirrors OrganSwapActivity's tunable).
+_DEFAULT_ORGAN_TOLERANCE_OHM = 80.0
+
 
 @dataclass
 class _Unit:
@@ -60,6 +67,11 @@ class _Unit:
     touch_seq: int = 0
     touch_seq_by_chamber: dict[int, int] = field(default_factory=dict)
     active_touch: set[int] = field(default_factory=set)
+    # Organ status, for `organs` conditions: per-organ good/bad/absent verdict
+    # resolved from this skin's organ circuit, plus the sensor(s) feeding it.
+    organ_verdicts: dict[str, str] = field(default_factory=dict)
+    resolver: Any = None
+    organ_sensors: list = field(default_factory=list)
     # Body program: a generator yielding WaitTokens, plus the wait it is
     # currently blocked on (None = ready to advance).
     runner: Generator | None = None
@@ -79,6 +91,8 @@ class ScriptedActivity(BaseActivity):
         self._spec = spec
         self._states: dict[str, Any] = spec["states"]
         self._initial: str = spec["initial"]
+        self._organ_tolerance = float(
+            spec.get("organ_tolerance_ohm", _DEFAULT_ORGAN_TOLERANCE_OHM))
         self._units: dict[str, _Unit] = {}
         self._tick_owner: QObject | None = None
         self._tick: QTimer | None = None
@@ -99,6 +113,7 @@ class ScriptedActivity(BaseActivity):
                 )
                 self._units[unit.unit_id] = unit
                 self._subscribe_touch(unit)
+                self._setup_organs(unit, skin)
         logger.info("ScriptedActivity %r set up: %d units",
                     self.name, len(self._units))
 
@@ -206,9 +221,41 @@ class ScriptedActivity(BaseActivity):
             return all(self._eval_cond(unit, c) for c in (val or []))
         if name == "not":
             return not self._eval_cond(unit, val)
+        if name == "organs":
+            return self._eval_organs(unit, val)
         if name == "always":
             return bool(val)
         return False
+
+    def _eval_organs(self, unit: _Unit, params: Any) -> bool:
+        """Evaluate an ``organs`` condition against the unit's resolved organs.
+
+        ``all_good`` / ``all_bad`` short-circuit to 'every organ matches';
+        ``count`` compares the good and bad counts via their operators. A unit
+        with no organs (or no reading yet) is never satisfied."""
+        if not isinstance(params, dict):
+            params = {}
+        verdicts = unit.organ_verdicts or {}
+        total = len(verdicts)
+        good = sum(1 for v in verdicts.values() if v == "good")
+        bad = sum(1 for v in verdicts.values() if v == "bad")
+        scope = params.get("scope", "count")
+        if scope == "all_good":
+            return total > 0 and good == total
+        if scope == "all_bad":
+            return total > 0 and bad == total
+        return (self._cmp(good, params.get("good_op", ">="),
+                          int(params.get("good", 0)))
+                and self._cmp(bad, params.get("bad_op", "<="),
+                              int(params.get("bad", 0))))
+
+    @staticmethod
+    def _cmp(actual: int, op: str, target: int) -> bool:
+        if op == "<=":
+            return actual <= target
+        if op == "==":
+            return actual == target
+        return actual >= target   # default ">="
 
     # ------------------------------------------------------------------
     # Cooperative scheduler
@@ -430,6 +477,54 @@ class ScriptedActivity(BaseActivity):
             return int(val)
         except (TypeError, ValueError):
             return ctx.get("chamber")
+
+    # ------------------------------------------------------------------
+    # Organ input (for `organs` conditions)
+    # ------------------------------------------------------------------
+
+    def _setup_organs(self, unit: _Unit, skin: Any) -> None:
+        """Wire this skin's organ circuit so `organs` conditions can read it.
+
+        Builds an OrganResolver from the skin's declared organ shapes and binds
+        an OrganSensor to the controller/slot carrying the circuit. Cover-off
+        marks every organ absent; each finite reading re-resolves the per-organ
+        good/bad/absent verdicts. Skins without organs are left inert."""
+        organs = list(getattr(skin, "organs", []) or [])
+        if not organs:
+            return
+        unit.resolver = OrganResolver.from_organ_configs(
+            organs, self._organ_tolerance)
+        unit.organ_verdicts = {str(o.get("id", i)): "absent"
+                               for i, o in enumerate(organs)}
+        ctrl, slot = self._organ_controller_and_slot(skin)
+        if ctrl is None or getattr(ctrl, "on_organ", None) is None:
+            return
+        sensor = OrganSensor(ctrl, slot=slot)
+        sensor.on_cover(lambda closed, u=unit: self._on_cover(u, closed))
+        sensor.on_resistance(lambda ohm, u=unit: self._on_resistance(u, ohm))
+        unit.organ_sensors.append(sensor)
+
+    @staticmethod
+    def _organ_controller_and_slot(skin: Any) -> tuple[Any, int]:
+        """Controller + slot carrying this skin's organ circuit (mirrors
+        OrganSwapActivity._organ_controller)."""
+        ctrl = getattr(skin, "_ctrl", None)
+        cfg = getattr(skin, "organ", None) or {}
+        slot = int(cfg.get("slot", 0))
+        mac = cfg.get("node_mac")
+        if mac and getattr(ctrl, "mac_address", None) != mac:
+            tc = getattr(skin, "touch_controller", None)
+            if getattr(tc, "mac_address", None) == mac:
+                ctrl = tc
+        return ctrl, slot
+
+    def _on_cover(self, unit: _Unit, closed: bool) -> None:
+        if not closed:                      # open circuit → every organ absent
+            unit.organ_verdicts = dict.fromkeys(unit.organ_verdicts, "absent")
+
+    def _on_resistance(self, unit: _Unit, resistance_ohm: float) -> None:
+        if unit.resolver is not None:
+            unit.organ_verdicts = unit.resolver.resolve(resistance_ohm)
 
     # ------------------------------------------------------------------
     # Touch input

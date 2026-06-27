@@ -3,11 +3,11 @@
  <class>TestActuatorsDialog</class>
  <widget class="QDialog" name="TestActuatorsDialog">
   <property name="geometry">
-   <rect><x>0</x><y>0</y><width>420</width><height>280</height></rect>
+   <rect><x>0</x><y>0</y><width>780</width><height>600</height></rect>
   </property>
   <property name="windowTitle"><string>Test Actuators</string></property>
   <property name="minimumSize">
-   <size><width>420</width><height>200</height></size>
+   <size><width>560</width><height>360</height></size>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>

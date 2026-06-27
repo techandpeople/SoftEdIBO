@@ -77,17 +77,25 @@ hospital study's behaviours. Two layers:
   `set_led_halves`, `beat`, `inflate`/`deflate`/`set_pressure`, `wrinkle`,
   `stop`), control flow (`sequence`, `repeat`, `for_each_chamber`,
   `wait`, `wait_for_touch`) and conditions (`elapsed_ms`, `touch_count`,
-  `any`/`all`/`not`, `always`). The catalogue is the single source of truth and
-  also drives the editor blocks. Specs are validated by `validate_spec`.
+  `organs`, `any`/`all`/`not`, `always`). The catalogue is the single source of
+  truth and also drives the editor blocks. Specs are validated by `validate_spec`.
+  The `organs` condition compares how many of the skin's plugged organs resolve
+  to good/bad (decomposed from the organ circuit by `OrganResolver`): `scope`
+  `all_good`/`all_bad` mean "every organ matches", `count` compares the good and
+  bad counts via their operators (e.g. `good >= 3 and bad <= 0` to cure).
 
-- **Authoring:** **Tools => Behaviour Editor…**
-  ([`behavior_editor_dialog.py`](../src/gui/behavior_editor_dialog.py)) is a
+- **Authoring:** **Tools => Activity Editor…**
+  ([`activity_editor_dialog.py`](../src/gui/activity_editor_dialog.py)) is a
+  tabbed dialog. Its **Visual Editor** tab
+  ([`behavior_editor_panel.py`](../src/gui/behavior_editor_panel.py)) is a
   Scratch-like **block editor** (Blockly in a `QWebEngineView`). Blocks compile
   to a spec on Save and are stored in the `declarative_activities` table; the
   exact workspace is stashed under the spec's ignored `_blockly` key for exact
   round-trip editing. **Blockly / QtWebEngine load only inside the editor** —
   never during a session. Blockly is loaded from a vendored copy
-  (`scripts/fetch_blockly.sh`) or the CDN as a fallback.
+  (`scripts/fetch_blockly.sh`) or the CDN as a fallback. Its **Presets** tab
+  ([`activity_preset_panel.py`](../src/gui/activity_preset_panel.py)) is the
+  per-activity parameter-preset manager (see below).
 
 Saved behaviours appear in the session activity dropdown via
 [`available_activities(db)` / `get_activity(name, db)`](../src/activities/__init__.py),
@@ -289,7 +297,7 @@ The values flow:
 where the controller converts the `%/s` values to per-tick step sizes on
 its 100-ms internal timer.
 
-### Preset editor dialog (`Tools => Activity Presets…`)
+### Preset editor (`Tools => Activity Editor…` → Presets tab)
 
 Implemented in
 [`src/gui/activity_preset_dialog.py`](../src/gui/activity_preset_dialog.py).
@@ -608,7 +616,7 @@ The behaviour framework builds on top of work already shipped this session:
   → dropdown + Apply + Save). Reuse layouts across skins; same pattern
   is now used for activity presets.
 - **Activity presets** (this phase) — DB-backed bundles of tunable
-  values, edited via `Tools => Activity Presets…`.
+  values, edited via the **Presets** tab of `Tools => Activity Editor…`.
 - **`simulation_mode` per activity** (this phase) — replaces the standalone
   `SimulationActivity` with a checkbox; baseline `SIM_PARAMS` give every
   activity tunable inflate/deflate speeds for free.

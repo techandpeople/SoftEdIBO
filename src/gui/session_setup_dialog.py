@@ -199,12 +199,13 @@ class SessionSetupDialog(QDialog, Ui_SessionSetupDialog):
         self._preset_combo.blockSignals(False)
 
     def _open_preset_manager(self) -> None:
-        """Open the Activity Presets manager pre-selected on the activity
-        currently chosen in this dialog. Refresh our dropdown when it
+        """Open the Activity Editor on its Presets tab, pre-selected on the
+        activity currently chosen in this dialog. Refresh our dropdown when it
         closes so newly-saved presets show up immediately."""
-        from src.gui.activity_preset_dialog import ActivityPresetDialog
-        ActivityPresetDialog(
+        from src.gui.activity_editor_dialog import ActivityEditorDialog
+        ActivityEditorDialog(
             self._db, parent=self,
+            initial_tab="presets",
             initial_activity=self.selected_activity,
         ).exec()
         self._reload_presets(self.selected_activity)

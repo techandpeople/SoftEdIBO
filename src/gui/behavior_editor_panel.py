@@ -1,14 +1,16 @@
-"""Behaviour Editor dialog (Tools => Behaviour Editor…).
+"""BehaviorEditorPanel — block-based activity authoring (Visual Editor tab).
 
-A Scratch-like block editor for authoring behaviours without writing Python.
-The blocks are hosted by Blockly inside a ``QWebEngineView``; on Save they are
-compiled to the declarative spec interpreted by
+A Scratch-like block editor for authoring activity behaviours without writing
+Python. The blocks are hosted by Blockly inside a ``QWebEngineView``; on Save
+they are compiled to the declarative spec interpreted by
 :class:`~src.activities.scripted_activity.ScriptedActivity` and stored in the
 ``declarative_activities`` table. The saved behaviour then appears in the
 session activity list and runs **without** this editor — Blockly / QtWebEngine
 are only ever imported here, never during a session.
 
-Python drives the page through three JS globals (see ``blockly/editor.html``):
+This is a plain :class:`QWidget` so it can be embedded as the "Visual Editor"
+tab of :class:`~src.gui.activity_editor_dialog.ActivityEditorDialog`. Python
+drives the page through three JS globals (see ``blockly/editor.html``):
 ``getSpec()``, ``loadSpec(json)`` and ``newWorkspace()``.
 """
 
@@ -18,13 +20,13 @@ import json
 import logging
 from datetime import datetime
 from PySide6.QtCore import QUrl
-from PySide6.QtWidgets import QDialog, QMessageBox, QWidget
+from PySide6.QtWidgets import QMessageBox, QWidget
 
 from src.activities.catalog import SpecError, validate_spec
 from src.config.settings import Settings
 from src.data.database import Database
 from src.data.models import DeclarativeActivity
-from src.gui.ui_behavior_editor_dialog import Ui_BehaviorEditorDialog
+from src.gui.ui_behavior_editor_panel import Ui_BehaviorEditorPanel
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +36,7 @@ _NEW_LABEL = "(New behaviour…)"
 _EDITOR_HTML = Settings.BUNDLE / "src" / "gui" / "blockly" / "editor.html"
 
 
-class BehaviorEditorDialog(QDialog, Ui_BehaviorEditorDialog):
+class BehaviorEditorPanel(QWidget, Ui_BehaviorEditorPanel):
     """Author and persist declarative behaviours via Blockly blocks."""
 
     def __init__(self, db: Database, parent: QWidget | None = None) -> None:
@@ -44,8 +46,9 @@ class BehaviorEditorDialog(QDialog, Ui_BehaviorEditorDialog):
         self._records: list[DeclarativeActivity] = []
         self._ready = False
 
-        # QtWebEngine is heavy — import it only now (the dialog is itself lazy-
-        # imported from the Tools menu), so a session never pays for it.
+        # QtWebEngine is heavy — import it only now (the dialog hosting this
+        # panel is itself lazy-imported from the Tools menu), so a session
+        # never pays for it.
         from PySide6.QtWebEngineWidgets import QWebEngineView
         self._web = QWebEngineView(self.webContainer)
         self.webLayout.addWidget(self._web)
@@ -56,7 +59,6 @@ class BehaviorEditorDialog(QDialog, Ui_BehaviorEditorDialog):
         self.newButton.clicked.connect(self._on_new)
         self.deleteButton.clicked.connect(self._on_delete)
         self.saveButton.clicked.connect(self._on_save)
-        self.closeButton.clicked.connect(self.accept)
         self.behaviorCombo.currentIndexChanged.connect(self._on_select)
 
         self._reload_combo(select_id=None)

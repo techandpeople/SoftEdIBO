@@ -2,97 +2,111 @@
 
 The multiplexed pressure sensors are too slow/laggy to close the loop on the
 pump in real time, so chambers are inflated for a **pre-measured time** instead.
-This module measures that time once, using the pressure sensor as ground truth:
-inflate a chamber from empty and record how long it takes to reach (near) its
-maximum — that elapsed time becomes the chamber's ``fill_time_ms``.
+Because a chamber does not fill linearly (pressure rises fast, then creeps toward
+the max), one number isn't enough: we measure the whole **time→pressure curve**.
 
-Two safety limits always apply (mirroring the firmware): a hard ceiling of
-``MAX_FILL_MS`` (5 s) and the firmware's own ``HARD_MAX`` pressure cutoff — so a
-stuck/unplugged sensor can never run a pump indefinitely during calibration.
+:class:`FillProfileCalibrator` builds that curve with a discrete-step sweep,
+starting from the ambient (empty) state: open the inflate valve for a fixed
+``step_ms``, let the laggy sensor settle, read the pressure (% of the chamber
+max), record a curve point, and repeat — accumulating time — until the chamber
+reaches the target or a total-time ceiling (asymptotic creep that never gets
+there). Re-running with a smaller ``step_ms`` yields a finer curve.
 
-The :class:`FillTimeCalibrator` is deliberately Qt-free and clock-injectable so
-it can be unit-tested; the Qt dialog (``src/gui/fill_calibration_dialog.py``)
-drives it from gateway pressure messages and a timer.
+The result is stored per chamber as ``fill_profile`` (a list of ``[ms, pct]``);
+:class:`~src.hardware.fill_profile.FillProfile` interpolates it at runtime so the
+firmware inflates by time instead of the slow sensor. A hard total-time ceiling
+and the firmware's own ``HARD_MAX`` pressure cutoff stay as safety nets.
+
+The calibrator is deliberately Qt-free and feeds on plain pressure readings, so
+it's unit-tested; the Qt dialog (``src/gui/fill_calibration_dialog.py``) drives
+the hardware (deflate → step inflate → settle → read) and feeds it.
 """
 
 from __future__ import annotations
 
-import time
-from typing import Any, Callable
+from typing import Any
 
-# Hardcoded safety ceiling, shared with the firmware. A fill that hasn't reached
-# the target by now is capped here and flagged as timed out.
-MAX_FILL_MS: float = 5000.0
+from src.hardware.fill_profile import FillProfile
 
-# Fraction of the chamber max we consider "full" for timing. Slightly under 100%
-# so sensor noise / the last asymptotic creep don't stall the measurement.
-DEFAULT_TARGET_PCT: float = 95.0
+# Defaults for a discrete-step sweep. The first (coarse) pass uses ~400 ms steps;
+# re-running with a smaller step refines the curve. The sweep stops a hair under
+# 100 % (sensor noise / the last asymptotic creep never reaches a clean 100), and
+# is bounded in total time so a stuck/unplugged sensor can't sweep forever.
+DEFAULT_STEP_MS: float = 400.0
+DEFAULT_TARGET_PCT: float = 98.0
+DEFAULT_TIMEOUT_MS: float = 8000.0
+
+# Step granularity offered in the dialog (coarse → fine), for the refine passes.
+STEP_CHOICES_MS: tuple[float, ...] = (600.0, 400.0, 250.0, 150.0)
 
 
-class FillTimeCalibrator:
-    """Times a single chamber inflating from empty to ``target_pct`` of its max.
+class FillProfileCalibrator:
+    """Builds a :class:`FillProfile` from a discrete-step inflate sweep.
 
-    Usage (driven by the caller):
-        cal = FillTimeCalibrator()
-        cal.start()                      # caller opens the inflate valve/pump
-        ... feed each pressure reading ...
-        done = cal.update(pressure_pct)  # returns result_ms once reached/capped
-        ... or call cal.tick() periodically to enforce the timeout ...
+    Driven by the caller (the dialog), which does the hardware work::
 
-    ``clock`` returns seconds (monotonic); inject a fake one in tests.
+        cal = FillProfileCalibrator(step_ms=400)
+        # chamber already deflated to ambient
+        while not cal.done:
+            driver_opens_inflate_valve_for(cal.step_ms)
+            wait_for_sensor_to_settle()
+            cal.record(read_pressure_pct())     # returns True when finished
+        store(cal.profile.to_list())
+
+    Each :meth:`record` advances the cumulative fill time by one ``step_ms`` and
+    appends a ``(cumulative_ms, pct)`` point. It finishes when the chamber
+    reaches ``target_pct`` or the cumulative time reaches ``max_total_ms``.
     """
 
-    def __init__(self, target_pct: float = DEFAULT_TARGET_PCT,
-                 max_ms: float = MAX_FILL_MS,
-                 clock: Callable[[], float] = time.monotonic) -> None:
+    def __init__(self, step_ms: float = DEFAULT_STEP_MS,
+                 target_pct: float = DEFAULT_TARGET_PCT,
+                 max_total_ms: float = DEFAULT_TIMEOUT_MS) -> None:
+        self.step_ms = max(1.0, float(step_ms))
         self.target_pct = float(target_pct)
-        self.max_ms = float(max_ms)
-        self._clock = clock
-        self._t0: float | None = None
-        self.result_ms: float | None = None
-        self.timed_out: bool = False
-
-    def start(self) -> None:
-        """Mark the inflate start (call right when the valve/pump opens)."""
-        self._t0 = self._clock() * 1000.0
-        self.result_ms = None
+        self.max_total_ms = float(max_total_ms)
+        self._points: list[tuple[float, float]] = [(0.0, 0.0)]   # ambient anchor
+        self._elapsed = 0.0
+        self.done = False
         self.timed_out = False
 
     @property
-    def running(self) -> bool:
-        return self._t0 is not None and self.result_ms is None
-
     def elapsed_ms(self) -> float:
-        if self._t0 is None:
-            return 0.0
-        return self._clock() * 1000.0 - self._t0
+        return self._elapsed
 
-    def update(self, pressure_pct: float) -> float | None:
-        """Feed a pressure reading (0–100 %). Returns ``result_ms`` once the
-        chamber reaches the target or the timeout caps it, else ``None``."""
-        if not self.running:
-            return self.result_ms
-        elapsed = self.elapsed_ms()
-        if elapsed >= self.max_ms:
-            self.timed_out = True
-            self.result_ms = self.max_ms
-        elif pressure_pct >= self.target_pct:
-            self.result_ms = elapsed
-        return self.result_ms
+    @property
+    def steps(self) -> int:
+        """Number of inflate steps recorded so far (excludes the anchor)."""
+        return len(self._points) - 1
 
-    def tick(self) -> float | None:
-        """Enforce the timeout when no new pressure readings are arriving."""
-        if self.running and self.elapsed_ms() >= self.max_ms:
+    def record(self, pressure_pct: float) -> bool:
+        """Feed the settled pressure reading (0–100 %) taken after one step.
+
+        Advances cumulative time by ``step_ms``, appends the curve point, and
+        returns ``True`` once the sweep is finished (target reached or timed
+        out), else ``False``."""
+        if self.done:
+            return True
+        self._elapsed += self.step_ms
+        pct = max(0.0, min(100.0, float(pressure_pct)))
+        self._points.append((self._elapsed, pct))
+        if pct >= self.target_pct:
+            self.done = True
+        elif self._elapsed >= self.max_total_ms:
+            self.done = True
             self.timed_out = True
-            self.result_ms = self.max_ms
-        return self.result_ms
+        return self.done
+
+    @property
+    def profile(self) -> FillProfile:
+        """The curve measured so far (usable even mid-sweep)."""
+        return FillProfile(self._points)
 
 
 # ---------------------------------------------------------------------------
 # Settings helpers (pure dict walks over ``Settings.data``)
 # ---------------------------------------------------------------------------
 
-# Node types that actuate chambers (and so have fill times to calibrate).
+# Node types that actuate chambers (and so have fill curves to calibrate).
 ACTUATOR_NODE_TYPES = ("node_direct", "node_multiplexed")
 
 
@@ -106,9 +120,11 @@ def _iter_robots(settings_data: dict) -> Any:
 def iter_actuator_chambers(settings_data: dict) -> list[dict]:
     """List configured chambers that can be calibrated, one entry per chamber.
 
-    Each entry: ``{robot_id, skin_id, mac, slot, node_type, fill_time_ms}``
-    (``fill_time_ms`` is ``None`` when not yet calibrated). Built by joining each
-    skin's ``chambers`` to its node's ``node_type``."""
+    Each entry: ``{robot_id, skin_id, mac, slot, node_type, fill_profile,
+    fill_time_ms, calibrated}``. ``fill_profile`` is the stored ``[[ms, pct],
+    ...]`` list (or ``None``); ``fill_time_ms`` is the legacy scalar (or
+    ``None``); ``calibrated`` is True when either is present. Built by joining
+    each skin's ``chambers`` to its node's ``node_type``."""
     out: list[dict] = []
     for robot in _iter_robots(settings_data):
         node_types = {n.get("mac"): n.get("node_type")
@@ -119,38 +135,44 @@ def iter_actuator_chambers(settings_data: dict) -> list[dict]:
                 nt = node_types.get(mac)
                 if nt not in ACTUATOR_NODE_TYPES:
                     continue
+                profile = ch.get("fill_profile")
+                fill_ms = ch.get("fill_time_ms")
                 out.append({
                     "robot_id": robot.get("id", ""),
                     "skin_id": skin.get("skin_id", ""),
                     "mac": mac,
                     "slot": int(ch.get("slot", 0)),
                     "node_type": nt,
-                    "fill_time_ms": ch.get("fill_time_ms"),
+                    "fill_profile": profile,
+                    "fill_time_ms": fill_ms,
+                    "calibrated": bool(profile) or bool(fill_ms),
                 })
     return out
 
 
-def set_fill_time(settings_data: dict, mac: str, slot: int,
-                  fill_time_ms: float | None) -> int:
-    """Write ``fill_time_ms`` onto every chamber entry matching ``mac``+``slot``.
+def set_fill_profile(settings_data: dict, mac: str, slot: int,
+                     profile: list[list[float]] | None) -> int:
+    """Write ``fill_profile`` onto every chamber entry matching ``mac``+``slot``.
 
-    Stored next to ``max_pressure`` on the chamber. ``None`` clears it. Returns
-    the number of chamber entries updated."""
+    Stored next to ``max_pressure``. Writing a profile drops any legacy
+    ``fill_time_ms`` so the two can't disagree. ``None`` clears the profile.
+    Returns the number of chamber entries updated."""
     n = 0
     for robot in _iter_robots(settings_data):
         for skin in robot.get("skins") or []:
             for ch in skin.get("chambers") or []:
                 if ch.get("mac") == mac and int(ch.get("slot", 0)) == int(slot):
-                    if fill_time_ms is None:
+                    if profile:
+                        ch["fill_profile"] = profile
                         ch.pop("fill_time_ms", None)
                     else:
-                        ch["fill_time_ms"] = int(round(fill_time_ms))
+                        ch.pop("fill_profile", None)
                     n += 1
     return n
 
 
-def chambers_missing_fill_time(settings_data: dict) -> list[dict]:
-    """Configured actuator chambers that have no ``fill_time_ms`` yet — used by
-    the pre-activity guard to offer calibration."""
+def chambers_missing_calibration(settings_data: dict) -> list[dict]:
+    """Configured actuator chambers with no fill curve (or legacy scalar) yet —
+    used by the pre-activity guard to offer calibration."""
     return [c for c in iter_actuator_chambers(settings_data)
-            if c["fill_time_ms"] is None]
+            if not c["calibrated"]]

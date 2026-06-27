@@ -24,9 +24,10 @@ inline uint32_t cmdDropped = 0;
 inline void sendStatus(int ch, float kpa) {
     if (!gatewayKnown) return;
     int  pct = units::kpaToPct(kpa, chambers::state[ch].min_kpa, chambers::state[ch].max_kpa);
-    char buf[48];
+    char buf[64];
     int  len = snprintf(buf, sizeof(buf),
-                        "{\"type\":\"status\",\"chamber\":%d,\"pressure\":%d}", ch, pct);
+                        "{\"type\":\"status\",\"chamber\":%d,\"pressure\":%d,\"kpa\":%.2f}",
+                        ch, pct, kpa);
     esp_now_send(gatewayMac, reinterpret_cast<uint8_t*>(buf), len);
 }
 
@@ -34,6 +35,27 @@ inline void sendPong() {
     if (!gatewayKnown) return;
     static const char pong[] = "{\"type\":\"pong\"}";
     esp_now_send(gatewayMac, reinterpret_cast<const uint8_t*>(pong), sizeof(pong) - 1);
+}
+
+// Echo back that a command actually reached the node (used to tell a lost
+// gateway->node ESP-NOW frame apart from a frame that arrived but didn't act).
+inline void sendAck(const char* cmd) {
+    if (!gatewayKnown) return;
+    char buf[48];
+    int  len = snprintf(buf, sizeof(buf), "{\"type\":\"ack\",\"cmd\":\"%s\"}", cmd);
+    esp_now_send(gatewayMac, reinterpret_cast<uint8_t*>(buf), len);
+}
+
+// Report the live pump PWM duties (read straight from the LEDC registers, so it
+// reflects whatever last drove them — recalcPumps, manual, or emergencyStopAll).
+// Lets the PC see whether/when the firmware actually cut the pumps.
+inline void sendPumps() {
+    if (!gatewayKnown) return;
+    char buf[48];
+    int  len = snprintf(buf, sizeof(buf), "{\"type\":\"pumps\",\"inf\":%u,\"def\":%u}",
+                        (unsigned)ledcRead(chambers::PUMP1_LEDC_CH),
+                        (unsigned)ledcRead(chambers::PUMP2_LEDC_CH));
+    esp_now_send(gatewayMac, reinterpret_cast<uint8_t*>(buf), len);
 }
 
 #ifdef DEBUG_BUILD
@@ -67,11 +89,18 @@ inline void process(const cmd_queue::Cmd& c) {
 #endif
 
     // Emergency stop / re-arm: handled regardless of chamber, even while stopped.
-    if (c.type == CMD_STOP)   { chambers::stopped = true;  chambers::emergencyStopAll(); return; }
-    if (c.type == CMD_RESUME) { chambers::stopped = false; return; }
+    if (c.type == CMD_STOP)   { chambers::stopped = true;  chambers::emergencyStopAll(); sendAck("stop");   sendPumps(); return; }
+    if (c.type == CMD_RESUME) { chambers::stopped = false; sendAck("resume"); return; }
+
+    // Stop a continuous bench-test run: honoured even while latched stopped.
+    if (c.type == CMD_TEST_STOP) { chambers::testStop(); sendAck("test_stop"); sendPumps(); return; }
 
     // While latched stopped, drop every actuation command so nothing re-actuates.
     if (chambers::stopped) return;
+
+    // Start a continuous bench-test run (param = direction). Targetless, so it
+    // must be handled before the per-chamber index guard below.
+    if (c.type == CMD_TEST_RUN) { chambers::testRun(c.param, c.chamber); sendAck("test_run"); sendPumps(); return; }
 
     int n = c.chamber;
     if (n < 0 || n >= NUM_CHAMBERS) return;
@@ -164,6 +193,8 @@ inline void parseAndQueue(const uint8_t* data, int len) {
     else if (strcmp(cmd, "hold") == 0)              { c.type = CMD_HOLD;         c.chamber = doc["chamber"] | -1; }
     else if (strcmp(cmd, "stop") == 0)              { c.type = CMD_STOP;         c.chamber = -1; }
     else if (strcmp(cmd, "resume") == 0)            { c.type = CMD_RESUME;       c.chamber = -1; }
+    else if (strcmp(cmd, "test_run") == 0)          { c.type = CMD_TEST_RUN;     c.chamber = doc["chamber"] | -1; c.param = doc["dir"] | 0; }  // 0=inflate, 1=deflate; chamber -1 = all
+    else if (strcmp(cmd, "test_stop") == 0)         { c.type = CMD_TEST_STOP;    c.chamber = -1; }
     else if (strcmp(cmd, "valve_manual") == 0) {
         c.type = CMD_VALVE_MANUAL;
         c.chamber = doc["chamber"] | -1;

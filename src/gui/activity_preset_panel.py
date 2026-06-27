@@ -1,11 +1,12 @@
-"""Activity Presets manager dialog (Tools => Activity Presets…).
+"""ActivityPresetPanel — reusable preset-management form.
 
-Lets the operator browse, create, edit and delete the named parameter
-presets stored in the ``activity_presets`` table. The form is generated
-on the fly from each activity's declared ``PARAMS`` (and the inherited
-``SIM_PARAMS``) so adding a new tunable knob to an activity is a one-line
-change with no UI work.
+Browse, create, edit and delete the named parameter presets stored in the
+``activity_presets`` table. The form is generated on the fly from each
+activity's declared ``PARAMS`` (plus the inherited ``SIM_PARAMS``) so adding a
+new tunable knob to an activity is a one-line change with no UI work.
 
+This is a plain :class:`QWidget` so it can be embedded anywhere — it is the
+"Presets" tab of :class:`~src.gui.activity_editor_dialog.ActivityEditorDialog`.
 See ``docs/ACTIVITIES.md`` for the broader behaviour-framework plan.
 """
 
@@ -20,7 +21,6 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QColorDialog,
     QComboBox,
-    QDialog,
     QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
@@ -33,15 +33,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-# How many sensor/chamber slots the `sensor_map` editor exposes by default.
-_SENSOR_MAP_MAX_INDEX = 15
-
 from src.activities import ACTIVITIES
 from src.activities.base_activity import BaseActivity, Param
 from src.data.database import Database
 from src.data.models import ActivityPreset
-from src.gui.ui_activity_preset_dialog import Ui_ActivityPresetDialog
+from src.gui.ui_activity_preset_panel import Ui_ActivityPresetPanel
 
+# How many sensor/chamber slots the `sensor_map` editor exposes by default.
+_SENSOR_MAP_MAX_INDEX = 15
 
 _NEW_LABEL = "(unsaved preset)"
 
@@ -104,7 +103,7 @@ class _SensorMap(QWidget):
         outer.addWidget(add_btn)
 
     # ------------------------------------------------------------------
-    # Public API (used by ActivityPresetDialog._set/_get_widget_value)
+    # Public API (used by ActivityPresetPanel._set/_get_widget_value)
     # ------------------------------------------------------------------
 
     def value(self) -> dict[str, int]:
@@ -166,22 +165,18 @@ class _SensorMap(QWidget):
             row_widget.deleteLater()
 
 
-class ActivityPresetDialog(QDialog, Ui_ActivityPresetDialog):
+class ActivityPresetPanel(QWidget, Ui_ActivityPresetPanel):
     """Browse / edit / delete activity presets, stored in the DB."""
 
     def __init__(self, db: Database, parent: QWidget | None = None,
-                 *, initial_activity: BaseActivity | None = None,
-                 apply_on_close: bool = False) -> None:
+                 *, initial_activity: BaseActivity | None = None) -> None:
         super().__init__(parent)
         self.setupUi(self)
         self._db = db
         self._current_preset_id: str | None = None
         self._widgets: dict[str, QWidget] = {}
         self._initial_activity = initial_activity
-        self._apply_on_close = apply_on_close
 
-        # The static frame lives in the .ui; the params form is rebuilt per
-        # activity into ``params_layout``.
         for activity in ACTIVITIES:
             self.activity_combo.addItem(activity.name, userData=activity)
         self.activity_combo.currentIndexChanged.connect(self._on_activity_changed)
@@ -189,7 +184,6 @@ class ActivityPresetDialog(QDialog, Ui_ActivityPresetDialog):
         self.new_btn.clicked.connect(self._on_new)
         self.delete_btn.clicked.connect(self._on_delete)
         self.save_btn.clicked.connect(self._on_save)
-        self.close_btn.clicked.connect(self._on_close)
 
         # Bootstrap selection — prefer the activity the caller asked for
         # (e.g. the one already picked in SessionSetupDialog) so the user
@@ -289,10 +283,6 @@ class ActivityPresetDialog(QDialog, Ui_ActivityPresetDialog):
             if self.preset_combo.itemData(i) == preset_id:
                 self.preset_combo.setCurrentIndex(i)
                 break
-
-    def _on_close(self) -> None:
-        """Close dialog, applying preset if opened from manage."""
-        self.accept()
 
     def _on_delete(self) -> None:
         if self._current_preset_id is None:

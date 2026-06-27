@@ -34,7 +34,9 @@ def test_actuator_macs_excludes_magnet_and_macless():
 
 
 def test_magnet_macs():
-    assert skincfg.magnet_macs(_data(), "turtle", 0) == ["MM"]
+    # node_direct folds in the magnet sensing, so its MAC is also selectable as
+    # a touch node, alongside the dedicated node_magnet_sensor board.
+    assert skincfg.magnet_macs(_data(), "turtle", 0) == ["AA", "MM"]
 
 
 def test_node_max_slots():
@@ -116,6 +118,16 @@ def test_build_skin_entry_strips_default_pressure():
     assert entry["skin_variant"] == "v2"
     # input list must not be mutated
     assert chambers[0]["max_pressure"] == 8.0
+
+
+def test_build_skin_entry_strips_default_min_pressure():
+    chambers = [{"mac": "AA", "slot": 0, "min_pressure": 0.0},
+                {"mac": "BB", "slot": 1, "min_pressure": -8.0}]   # vacuum-fed
+    entry = skincfg.build_skin_entry("belly-1", chambers)
+    assert "min_pressure" not in entry["chambers"][0]   # default dropped
+    assert entry["chambers"][1]["min_pressure"] == -8.0  # non-default kept
+    # input list must not be mutated
+    assert chambers[0]["min_pressure"] == 0.0
 
 
 def test_build_skin_entry_omits_empty_type_variant():

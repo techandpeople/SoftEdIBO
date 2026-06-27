@@ -321,9 +321,26 @@ class RobotPanel(QWidget, Ui_RobotPanel):
         self.start_scan()
 
     def _on_serial_monitor(self) -> None:
-        """Open a raw serial debugging terminal for the gateway link."""
+        """Open a raw serial debugging terminal for the gateway link.
+
+        Modeless (``show``, not ``exec``) and kept on top, so it can float over
+        the test/config dialogs while you drive them and watch the live tx/rx
+        stream. A modal dialog would block the window behind it, which makes it
+        useless for debugging actuation while a command is in flight. Only one
+        instance is kept; re-triggering just raises it.
+        """
         from src.gui.serial_monitor_dialog import SerialMonitorDialog
-        SerialMonitorDialog(self._gateway, parent=self).exec()
+        existing = getattr(self, "_serial_monitor", None)
+        if existing is not None:
+            existing.raise_()
+            existing.activateWindow()
+            return
+        dlg = SerialMonitorDialog(self._gateway, parent=self)
+        dlg.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
+        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dlg.destroyed.connect(lambda: setattr(self, "_serial_monitor", None))
+        self._serial_monitor = dlg
+        dlg.show()
 
     def _on_scan_done(self) -> None:
         self.scan_btn.setEnabled(True)
