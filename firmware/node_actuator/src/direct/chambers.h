@@ -256,6 +256,51 @@ inline void manualSafetyTick(uint32_t now) {
 }
 
 // ---------------------------------------------------------------------------
+// Continuous bench test — latch ONE pump + all of its valves wide open,
+// INDEFINITELY, ignoring pressure and the manual dead-man. For verifying pump
+// and valve wiring at the bench when the pressure sensor reads wrong; never used
+// in normal operation or exposed to children.
+//
+// ``testDir`` is checked by loop(): while >= 0 it short-circuits every control
+// tick (pressure cutoff, dead-man, watchdog) so nothing can stop the run. The
+// hardware is asserted once by testRun() and held; testStop() / STOP ALL clear it.
+// ---------------------------------------------------------------------------
+
+inline int testDir     = -1;   // -1 = off, 0 = inflate, 1 = deflate
+inline int testChamber = -1;   // -1 = all chambers, else a single chamber index
+
+inline void testStop() {
+    testDir     = -1;
+    testChamber = -1;
+    ledcWrite(PUMP1_LEDC_CH, 0);
+    ledcWrite(PUMP2_LEDC_CH, 0);
+    for (int n = 0; n < NUM_CHAMBERS; n++) {
+        setValve(n, 0, false);
+        setValve(n, 1, false);
+    }
+}
+
+// dir: 0 = inflate (PUMP1), 1 = deflate (PUMP2). ``chamber`` < 0 opens every
+// valve of that direction (whole-node wiring test); a valid index opens only
+// that one chamber's valve (per-chamber bench inflate/deflate that ignores
+// pressure and runs until stopped). Owns the hardware directly, so it drops any
+// manual override to keep manualSafetyTick from fighting it once the test ends.
+inline void testRun(int dir, int chamber = -1) {
+    if (dir != 0 && dir != 1) return;
+    testDir     = dir;
+    testChamber = (chamber >= 0 && chamber < NUM_CHAMBERS) ? chamber : -1;
+    for (int i = 0; i < 2; i++)                 { manualPumpOn[i] = false; manualPumpTs[i] = 0; }
+    for (int i = 0; i < NUM_CHAMBERS * 2; i++)  { manualValveOn[i] = false; manualValveTs[i] = 0; }
+    ledcWrite(PUMP1_LEDC_CH, dir == 0 ? DEFAULT_INFLATE_DUTY : 0);
+    ledcWrite(PUMP2_LEDC_CH, dir == 1 ? 255 : 0);
+    for (int n = 0; n < NUM_CHAMBERS; n++) {
+        bool open = (testChamber < 0 || testChamber == n);
+        setValve(n, dir,     open);
+        setValve(n, 1 - dir, false);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Emergency stop — latch every actuator OFF until explicitly re-armed.
 //
 // ``stopped`` is checked by loop(): while set, all autonomous ticks and new
@@ -267,6 +312,8 @@ inline void manualSafetyTick(uint32_t now) {
 inline bool stopped = false;
 
 inline void emergencyStopAll() {
+    testDir     = -1;        // also cancels any continuous bench-test run
+    testChamber = -1;
     // Pumps off.
     ledcWrite(PUMP1_LEDC_CH, 0);
     ledcWrite(PUMP2_LEDC_CH, 0);

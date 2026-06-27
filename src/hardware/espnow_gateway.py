@@ -184,6 +184,11 @@ class ESPNowGateway:
             return
         if "source" in data:
             self._known_macs.add(data["source"])
+        # Surface gateway-reported errors (e.g. a command the gateway couldn't
+        # parse because the serial link dropped/garbled bytes) so a swallowed
+        # command is visible in the console instead of failing silently.
+        if data.get("type") == "error":
+            logger.warning("Gateway error: %s", data)
         dead: list[weakref.ref] = []
         for wr in self._callbacks:
             cb = wr()

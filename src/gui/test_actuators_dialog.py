@@ -2,6 +2,7 @@
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QDialog,
     QGroupBox,
     QHBoxLayout,
@@ -31,7 +32,7 @@ class TestActuatorsDialog(QDialog, Ui_TestActuatorsDialog):
     """
 
     # Emitted from the gateway read thread; connected to _update_pressure (main thread)
-    _pressure_received = Signal(int, int)   # chamber, pressure_adc
+    _pressure_received = Signal(int, int, float)   # chamber, pressure_pct, kpa
 
     def __init__(
         self,
@@ -45,12 +46,32 @@ class TestActuatorsDialog(QDialog, Ui_TestActuatorsDialog):
         self._mac = mac
         self._gateway = gateway
         self._active = True
+        # True while STOP ALL has the node latched off. We do NOT auto-resume
+        # (that would throw away the firmware's continuous "stay-off" enforcement
+        # and lose the stop if a single ESP-NOW frame drops); instead we re-arm
+        # lazily right before the next actuation. See _stop_all / _arm.
+        self._stopped = False
         self._pressure_labels: dict[int, QLabel] = {}   # slot => label
         self._valve_states: dict[tuple[int, int], tuple[bool, QPushButton]] = {}  # (slot, side) => (open, button)
+        # Per-chamber inflate/deflate buttons, so the continuous-run toggle can
+        # update their text. (slot, direction) => button; direction 0=inflate, 1=deflate.
+        self._chamber_btns: dict[tuple[int, int], QPushButton] = {}
 
         self.setupUi(self)
         self.setWindowTitle(f"Test Actuators — {mac}")
         self.close_btn.clicked.connect(self.accept)
+
+        # When checked, a per-chamber Inflate/Deflate button starts a continuous
+        # run of just that chamber (ignores the pressure cap, runs until the
+        # button is pressed again) instead of a one-shot fill to max/min.
+        self._cont_cb = QCheckBox(
+            "Ignore max pressure — per-chamber Inflate/Deflate runs until stopped")
+        self._cont_cb.setWhatsThis(
+            "While checked, a chamber's Inflate or Deflate button toggles a "
+            "continuous run of that one chamber: it opens the matching valve and "
+            "drives the pump, ignoring the configured max/min pressure, until you "
+            "press the button (now ⏹ Stop) again. While unchecked, those "
+            "buttons do a one-shot fill toward the configured max/min.")
 
         if not skin_cfgs:
             self.no_chambers_label.setVisible(True)
@@ -59,6 +80,9 @@ class TestActuatorsDialog(QDialog, Ui_TestActuatorsDialog):
             for skin_cfg in skin_cfgs:
                 self.chambers_vbox.addWidget(self._build_chamber_group(skin_cfg))
             self.chambers_vbox.addStretch()
+            self.verticalLayout.insertWidget(
+                self.verticalLayout.indexOf(self.chambers_scroll) + 1,
+                self._cont_cb)
 
         # WS2812 LED ring tester (node_direct boards). Insert before the
         # Close button (the last widget in the dialog's vertical layout).
@@ -96,6 +120,43 @@ class TestActuatorsDialog(QDialog, Ui_TestActuatorsDialog):
         self.verticalLayout.insertWidget(
             self.verticalLayout.count() - 1, pump_group)
 
+        # Continuous run (bench wiring test): drive one pump + all of its valves
+        # wide open INDEFINITELY, ignoring pressure and the firmware dead-man.
+        # Use when the pressure sensor reads wrong and the normal inflate/deflate
+        # keeps cutting out. Mutually exclusive; closing the dialog stops it.
+        # Active continuous run as (direction, chamber): direction 0=inflate,
+        # 1=deflate; chamber -1 = all chambers (global run), else a single
+        # chamber. None = no run. One firmware latch → at most one run at a time.
+        self._run: tuple[int, int] | None = None
+        run_group = QGroupBox("Continuous Run (ignores pressure)")
+        run_group.setWhatsThis(
+            "Drive one pump and all of its valves wide open indefinitely, "
+            "ignoring the pressure reading and the firmware dead-man timeout. "
+            "Use this to check pump/valve wiring when the pressure sensor reads "
+            "wrong. Press the active button again, STOP ALL, or close the dialog "
+            "to stop.")
+        run_layout = QHBoxLayout(run_group)
+
+        self._run_inf_btn = QPushButton("Run Inflate ∞: OFF")
+        self._run_inf_btn.setStyleSheet(monospace_style)
+        self._run_inf_btn.setWhatsThis(
+            "Turn the inflate pump on and open every inflate valve, and keep them "
+            "on until stopped. Ignores pressure limits.")
+        self._run_inf_btn.clicked.connect(lambda _=False: self._toggle_run(0))
+        run_layout.addWidget(self._run_inf_btn)
+
+        self._run_def_btn = QPushButton("Run Deflate ∞: OFF")
+        self._run_def_btn.setStyleSheet(monospace_style)
+        self._run_def_btn.setWhatsThis(
+            "Turn the deflate pump on and open every deflate valve, and keep them "
+            "on until stopped. Ignores pressure limits.")
+        self._run_def_btn.clicked.connect(lambda _=False: self._toggle_run(1))
+        run_layout.addWidget(self._run_def_btn)
+
+        run_layout.addStretch()
+        self.verticalLayout.insertWidget(
+            self.verticalLayout.count() - 1, run_group)
+
         self._pressure_received.connect(self._update_pressure)
         self._gateway.on_message(self._on_gateway_message)
         self.finished.connect(self._on_closed)
@@ -128,8 +189,10 @@ class TestActuatorsDialog(QDialog, Ui_TestActuatorsDialog):
             slot_row.addWidget(QLabel(f"  Slot {slot}:"))
             inf_btn = QPushButton("Inflate")
             def_btn = QPushButton("Deflate")
-            inf_btn.clicked.connect(lambda _=False, s=slot: self._inflate_slot(s))
-            def_btn.clicked.connect(lambda _=False, s=slot: self._deflate_slot(s))
+            inf_btn.clicked.connect(lambda _=False, s=slot: self._chamber_dir(s, 0))
+            def_btn.clicked.connect(lambda _=False, s=slot: self._chamber_dir(s, 1))
+            self._chamber_btns[(slot, 0)] = inf_btn
+            self._chamber_btns[(slot, 1)] = def_btn
             slot_row.addWidget(inf_btn)
             slot_row.addWidget(def_btn)
 
@@ -171,17 +234,31 @@ class TestActuatorsDialog(QDialog, Ui_TestActuatorsDialog):
             return
         chamber = data.get("chamber")
         pressure = data.get("pressure")
+        kpa = data.get("kpa")
         if isinstance(chamber, int) and isinstance(pressure, int):
-            self._pressure_received.emit(chamber, pressure)
+            # ``kpa`` only arrives from firmware new enough to send it; NaN flags
+            # "unknown" so the label can fall back to just the percentage.
+            self._pressure_received.emit(
+                chamber, pressure,
+                float(kpa) if isinstance(kpa, (int, float)) else float("nan"))
 
-    def _update_pressure(self, chamber: int, pressure: int) -> None:
+    def _update_pressure(self, chamber: int, pressure: int, kpa: float) -> None:
         """Called in the main thread via Signal."""
         lbl = self._pressure_labels.get(chamber)
         if lbl:
-            lbl.setText(f"ADC: {pressure}")
+            if kpa == kpa:   # not NaN → firmware reported real kPa
+                lbl.setText(f"{kpa:.2f} kPa  ({pressure}%)")
+            else:
+                lbl.setText(f"{pressure}%")
 
     def _on_closed(self) -> None:
         self._active = False
+        # A continuous run ignores the firmware dead-man, so it would keep going
+        # after the dialog closes — always stop it on the way out.
+        self._stop_run()
+        # If we left the node latched off via STOP ALL, re-arm it so the rest of
+        # the app can drive it again (everything is already off, so this is safe).
+        self._arm()
 
     # ------------------------------------------------------------------
     # Commands
@@ -198,13 +275,29 @@ class TestActuatorsDialog(QDialog, Ui_TestActuatorsDialog):
             self._gateway.send(self._mac, "set_led", color=color_hex,
                                index=index, pattern=pattern)
 
+    def _arm(self) -> None:
+        """Release the STOP ALL latch (if set) before the next actuation.
+
+        STOP ALL leaves the node latched off so a single delivered ``stop`` frame
+        keeps everything off via the firmware's continuous enforcement. The node
+        drops every actuation command while latched, so any per-slot / manual
+        control must re-arm it first.
+        """
+        if self._stopped:
+            self._gateway.send(self._mac, "resume")
+            self._stopped = False
+
     def _inflate_slot(self, slot: int) -> None:
-        self._gateway.send(self._mac, "inflate", chamber=slot, value=255)
-        self._update_pump_button(0, True)  # Inflate pump is now ON
+        # The node reads "delta" (percent of this chamber's range), NOT "value":
+        # a "value" key is silently ignored and the firmware falls back to 10 %.
+        # delta=100 inflates toward the chamber's configured max pressure.
+        self._arm()
+        self._gateway.send(self._mac, "inflate", chamber=slot, delta=100)
 
     def _deflate_slot(self, slot: int) -> None:
-        self._gateway.send(self._mac, "deflate", chamber=slot)
-        self._update_pump_button(1, True)  # Deflate pump is now ON
+        # delta=100 deflates toward the chamber's configured min pressure.
+        self._arm()
+        self._gateway.send(self._mac, "deflate", chamber=slot, delta=100)
 
     def _inflate_slots(self, slots: list[int]) -> None:
         for slot in slots:
@@ -228,7 +321,9 @@ class TestActuatorsDialog(QDialog, Ui_TestActuatorsDialog):
         status = "OPEN  " if is_open else "CLOSED"
         btn.setText(f"{side_name} Valve: {status}")
 
-        # Send command to firmware
+        # Send command to firmware (re-arm first if STOP ALL latched the node)
+        if is_open:
+            self._arm()
         self._gateway.send(self._mac, "valve_manual", chamber=chamber,
                           side=side, open=1 if is_open else 0)
 
@@ -245,34 +340,104 @@ class TestActuatorsDialog(QDialog, Ui_TestActuatorsDialog):
         status = "ON " if is_on else "OFF"
         btn.setText(f"{pump_name} Pump: {status}")
 
-        # Send command to firmware
+        # Send command to firmware (re-arm first if STOP ALL latched the node)
+        if is_on:
+            self._arm()
         self._gateway.send(self._mac, "pump_manual", pump=pump, on=1 if is_on else 0)
 
-    def _update_pump_button(self, pump: int, is_on: bool) -> None:
-        """Update pump button state (e.g., when inflate/deflate changes the pump state)."""
-        if pump not in self._pump_states:
-            return
-        _, btn = self._pump_states[pump]
-        self._pump_states[pump] = (is_on, btn)
-        pump_name = "Inflate" if pump == 0 else "Deflate"
-        status = "ON " if is_on else "OFF"
-        btn.setText(f"{pump_name} Pump: {status}")
+    def _chamber_dir(self, slot: int, direction: int) -> None:
+        """Per-chamber Inflate (``direction`` 0) / Deflate (1) button.
 
-    def _stop_all(self) -> None:
-        """Close all valves and turn off all pumps."""
-        # Close all valves
-        for key in self._valve_states:
-            chamber, side = key
-            _, btn = self._valve_states[key]
+        If this chamber+direction is the active continuous run, stop it. Else,
+        with 'Ignore max pressure' checked, start a continuous run of just this
+        chamber (opens its valve + drives the pump, ignoring the pressure cap,
+        until stopped); otherwise do a one-shot fill toward the configured
+        max/min."""
+        if self._run == (direction, slot):
+            self._stop_run()
+        elif self._cont_cb.isChecked():
+            self._start_run(direction, slot)
+        elif direction == 0:
+            self._inflate_slot(slot)
+        else:
+            self._deflate_slot(slot)
+
+    def _toggle_run(self, direction: int) -> None:
+        """Global continuous run: every chamber's valve of ``direction`` (0=inflate,
+        1=deflate) wide open + the pump, indefinitely. See :meth:`_start_run`."""
+        if self._run == (direction, -1):
+            self._stop_run()
+        else:
+            self._start_run(direction, -1)
+
+    def _start_run(self, direction: int, chamber: int) -> None:
+        """Start a continuous open-loop run, ignoring pressure and the dead-man.
+
+        ``test_run`` makes the firmware drive the inflate/deflate pump plus the
+        matching valve(s) wide open until stopped — every chamber when
+        ``chamber`` is -1, else just that one. There's a single firmware latch,
+        so any run replaces the previous one; ``_refresh_run_buttons`` reverts
+        the old button. ``testRun`` clears manual overrides, so reset those too."""
+        self._arm()
+        self._reset_manual_ui()
+        self._run = (direction, chamber)
+        self._gateway.send(self._mac, "test_run", dir=direction, chamber=chamber)
+        self._refresh_run_buttons()
+
+    def _stop_run(self) -> None:
+        if self._run is None:
+            return
+        self._run = None
+        self._gateway.send(self._mac, "test_stop")
+        self._refresh_run_buttons()
+
+    def _refresh_run_buttons(self) -> None:
+        run = self._run
+        self._run_inf_btn.setText(
+            f"Run Inflate ∞: {'ON ' if run == (0, -1) else 'OFF'}")
+        self._run_def_btn.setText(
+            f"Run Deflate ∞: {'ON ' if run == (1, -1) else 'OFF'}")
+        for (slot, direction), btn in self._chamber_btns.items():
+            default = "Inflate" if direction == 0 else "Deflate"
+            btn.setText("⏹ Stop" if run == (direction, slot) else default)
+
+    def _reset_manual_ui(self) -> None:
+        """Reset the manual valve/pump toggle buttons to OFF/CLOSED (UI only)."""
+        for key, (_, btn) in self._valve_states.items():
+            _, side = key
             self._valve_states[key] = (False, btn)
             side_name = "Inflate" if side == 0 else "Deflate"
             btn.setText(f"{side_name} Valve: CLOSED")
-            self._gateway.send(self._mac, "valve_manual", chamber=chamber, side=side, open=0)
-
-        # Turn off all pumps
-        for pump in self._pump_states:
-            _, btn = self._pump_states[pump]
+        for pump, (_, btn) in self._pump_states.items():
             self._pump_states[pump] = (False, btn)
             pump_name = "Inflate" if pump == 0 else "Deflate"
             btn.setText(f"{pump_name} Pump: OFF")
-            self._gateway.send(self._mac, "pump_manual", pump=pump, on=0)
+
+    def _stop_all(self) -> None:
+        """Halt everything and LATCH the node off until the next actuation.
+
+        ``stop`` (firmware ``emergencyStopAll``) cuts both pumps, closes every
+        valve, clears manual overrides AND resets every chamber to IDLE. Crucially
+        we do NOT immediately ``resume``: the firmware keeps re-asserting the
+        all-off state every loop *while latched*, so a single delivered ``stop``
+        frame holds everything off permanently — even if a later frame drops. The
+        previous code resumed in the same breath, which discarded that continuous
+        enforcement; if the lone ``stop`` frame was lost over ESP-NOW the actuator
+        kept running until its own 5 s safety timeout (the reported bug).
+
+        The node ignores actuation commands while latched, so the per-slot / manual
+        controls re-arm it lazily via :meth:`_arm` on the next press, and the dialog
+        re-arms on close so the rest of the app isn't left with a stopped node.
+
+        ``stop`` is sent a few times because ESP-NOW is best-effort; ``stop`` is
+        idempotent, so extra frames only improve the odds one lands.
+        """
+        self._stopped = True
+        for _ in range(3):
+            self._gateway.send(self._mac, "stop")
+
+        # Reflect the halted hardware in the UI ("stop"/emergencyStopAll also
+        # cancels any continuous run, so clear those toggles too).
+        self._reset_manual_ui()
+        self._run = None
+        self._refresh_run_buttons()

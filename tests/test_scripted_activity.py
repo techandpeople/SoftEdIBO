@@ -242,6 +242,88 @@ def test_wait_for_touch_blocks_until_touched(clock):
 
 
 # ---------------------------------------------------------------------------
+# Organ conditions
+# ---------------------------------------------------------------------------
+
+class _FakeOrganCtrl(_FakeCtrl):
+    """Controller that also streams organ-resistance readings (on_organ)."""
+    def __init__(self):
+        super().__init__()
+        self._organ_cbs = []
+
+    def on_organ(self, cb):
+        self._organ_cbs.append(cb)
+
+    def fire_organ(self, resistance_ohm, slot=0):
+        for cb in self._organ_cbs:
+            cb(float(resistance_ohm), slot)
+
+
+def _organ_spec(cond):
+    """A 2-phase spec that leaves 'sick' for 'cured' when ``cond`` holds."""
+    return {"initial": "sick", "states": {
+        "sick": {"do": [], "transitions": [{"to": "cured", "when": cond}]},
+        "cured": {"do": []}}}
+
+
+def _organ_skin(ctrl):
+    skin = _FakeSkin(controller=ctrl, n_chambers=2)
+    skin.organ = {"slot": 0}
+    skin.organs = [{"id": "1", "good_ohm": 1000, "bad_ohm": 3000},
+                   {"id": "2", "good_ohm": 1000, "bad_ohm": 3000}]
+    return skin
+
+
+def test_organs_all_good_transition(clock):
+    ctrl = _FakeOrganCtrl()
+    skin = _organ_skin(ctrl)
+    robot = _FakeRobot([skin])
+    activity = _start(ScriptedActivity("t", "d", _organ_spec(
+        {"organs": {"scope": "all_good"}})), robot)
+    unit = _unit(activity)
+
+    activity._on_tick()
+    assert unit.state == "sick"                  # no reading yet → not cured
+
+    ctrl.fire_organ(500.0)                        # two 1000Ω good organs ‖ = 500Ω
+    assert unit.organ_verdicts == {"1": "good", "2": "good"}
+    activity._on_tick()
+    assert unit.state == "cured"
+
+
+def test_organs_count_requires_no_bad(clock):
+    ctrl = _FakeOrganCtrl()
+    skin = _organ_skin(ctrl)
+    robot = _FakeRobot([skin])
+    activity = _start(ScriptedActivity("t", "d", _organ_spec(
+        {"organs": {"scope": "count", "good_op": ">=", "good": 1,
+                    "bad_op": "<=", "bad": 0}})), robot)
+    unit = _unit(activity)
+
+    # One good (1000Ω) ‖ one bad (3000Ω) = 750Ω: a bad organ is still plugged.
+    ctrl.fire_organ(750.0)
+    activity._on_tick()
+    assert unit.state == "sick"                  # bad_op <= 0 fails
+
+    ctrl.fire_organ(1000.0)                       # a single good organ, no bad
+    activity._on_tick()
+    assert unit.state == "cured"
+
+
+def test_organs_cover_off_marks_absent(clock):
+    ctrl = _FakeOrganCtrl()
+    skin = _organ_skin(ctrl)
+    activity = _start(ScriptedActivity("t", "d", _organ_spec(
+        {"organs": {"scope": "all_good"}})), _FakeRobot([skin]))
+    unit = _unit(activity)
+
+    ctrl.fire_organ(500.0)
+    assert unit.organ_verdicts == {"1": "good", "2": "good"}
+    ctrl.fire_organ(float("inf"))                 # cover lifted → open circuit
+    assert set(unit.organ_verdicts.values()) == {"absent"}
+
+
+# ---------------------------------------------------------------------------
 # DB round-trip
 # ---------------------------------------------------------------------------
 

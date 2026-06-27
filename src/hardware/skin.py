@@ -23,7 +23,8 @@ import time
 from typing import Any, Callable, Optional
 
 from src.hardware.air_chamber import AirChamber, ChamberState
-from src.hardware.fill_scaling import effective_fill_ms
+from src.hardware.fill_profile import FillProfile
+from src.hardware.fill_scaling import scale_fill_ms
 from src.hardware.touch_event_router import TouchEventRouter
 
 logger = logging.getLogger(__name__)
@@ -100,8 +101,13 @@ class Skin:
         self._reverse: dict[int, int] = {}
         # local_idx → AirChamber
         self._chambers: dict[int, AirChamber] = {}
-        # local_idx → calibrated fill time (ms) or None (pressure-based)
+        # local_idx → calibrated fill time (ms) or None (pressure-based). Kept
+        # for status/serialisation; the runtime fill timing reads _fill_profiles.
         self._fill_times: dict[int, int | None] = {}
+        # local_idx → calibrated time→pressure curve, or None (pressure-based).
+        # Built from the chamber's ``fill_profile`` curve, falling back to a
+        # straight line through a legacy scalar ``fill_time_ms``.
+        self._fill_profiles: dict[int, FillProfile | None] = {}
 
         self._build_chambers(chamber_inputs)
 
@@ -145,6 +151,11 @@ class Skin:
             node_slot = int(inp["node_slot"])
             fill_time = inp.get("fill_time_ms")
             self._fill_times[local_idx] = int(fill_time) if fill_time else None
+            # Prefer a measured curve; fall back to a linear curve through the
+            # legacy scalar so old calibrations keep working unchanged.
+            self._fill_profiles[local_idx] = (
+                FillProfile.from_list(inp.get("fill_profile"))
+                or FillProfile.linear(fill_time))
             self._slots.append(node_slot)
             self._reverse[node_slot] = local_idx
             ch = AirChamber(
@@ -213,9 +224,13 @@ class Skin:
             min_p = getattr(ch, "min_pressure", 0.0)
             if abs(min_p) > 1e-3:   # only persist explicit non-zero defaults
                 d["min_pressure"] = min_p
-            fill = self._fill_times.get(idx)
-            if fill:
-                d["fill_time_ms"] = fill
+            profile = self._fill_profiles.get(idx)
+            if profile is not None and not profile.is_empty:
+                d["fill_profile"] = profile.to_list()
+            else:
+                fill = self._fill_times.get(idx)
+                if fill:
+                    d["fill_time_ms"] = fill
             defs.append(d)
         return defs
 
@@ -287,22 +302,27 @@ class Skin:
         slot = self._slots[local_idx]
 
         if kind == "inflate":
-            new_target = min(100, chamber.target_pressure + value)
+            prev_target = chamber.target_pressure
+            new_target = min(100, prev_target + value)
             chamber.target_pressure = new_target
             if chamber.pressure < new_target:
                 chamber.state = ChamberState.INFLATING
             elif new_target > 0:
                 chamber.state = ChamberState.INFLATED
             # Calibrated chamber → inflate by time so the firmware doesn't depend
-            # on the laggy pressure sensor. The window scales with the requested
-            # delta AND the node's concurrent fill load (pumps are shared per
-            # node): the more chambers inflating at once, the longer each takes.
+            # on the laggy pressure sensor. The base time comes from the measured
+            # fill curve (time to climb from the current target to the new one —
+            # the curve is non-linear, so this beats assuming proportionality),
+            # then scales with the node's concurrent fill load (pumps are shared:
+            # the more chambers inflating at once, the longer each takes).
             # Uncalibrated → classic pressure-based inflate.
-            fill = self._fill_times.get(local_idx)
-            if fill:
+            profile = self._fill_profiles.get(local_idx)
+            if profile is not None:
+                base_ms = (profile.time_for_pct(new_target)
+                           - profile.time_for_pct(prev_target))
                 load = self._ctrl.fill_load
-                ms = effective_fill_ms(fill, value, load.active_count() + 1,
-                                       load.pump_count)
+                ms = scale_fill_ms(base_ms, load.active_count() + 1,
+                                   load.pump_count)
                 load.note_inflate(slot, ms)
                 return self._ctrl.inflate(slot, value, ms=ms)
             return self._ctrl.inflate(slot, value)

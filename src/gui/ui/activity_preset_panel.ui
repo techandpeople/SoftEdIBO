@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ui version="4.0">
- <class>ActivityPresetDialog</class>
- <widget class="QDialog" name="ActivityPresetDialog">
+ <class>ActivityPresetPanel</class>
+ <widget class="QWidget" name="ActivityPresetPanel">
   <property name="geometry">
-   <rect><x>0</x><y>0</y><width>540</width><height>600</height></rect>
-  </property>
-  <property name="windowTitle"><string>Activity Presets</string></property>
-  <property name="minimumSize">
-   <size><width>540</width><height>600</height></size>
+   <rect><x>0</x><y>0</y><width>540</width><height>560</height></rect>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
+   <property name="leftMargin"><number>0</number></property>
+   <property name="topMargin"><number>0</number></property>
+   <property name="rightMargin"><number>0</number></property>
+   <property name="bottomMargin"><number>0</number></property>
    <item>
     <layout class="QFormLayout" name="top_form">
      <item row="0" column="0">
@@ -58,6 +58,7 @@
      </item>
      <item row="2" column="1">
       <widget class="QLineEdit" name="name_edit">
+       <property name="whatsThis"><string>A human-readable name for this preset. It appears in the preset dropdown once saved.</string></property>
        <property name="placeholderText"><string>e.g. Easy, Therapy v3, 1st grade…</string></property>
       </widget>
      </item>
@@ -68,6 +69,7 @@
      </item>
      <item row="3" column="1">
       <widget class="QLineEdit" name="desc_edit">
+       <property name="whatsThis"><string>Optional free-text note describing what this preset is for.</string></property>
        <property name="placeholderText"><string>Optional description</string></property>
       </widget>
      </item>
@@ -84,7 +86,7 @@
      <property name="sizePolicy">
       <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
        <horstretch>0</horstretch>
-       <verstretch>0</verstretch>
+       <verstretch>1</verstretch>
       </sizepolicy>
      </property>
      <property name="widgetResizable"><bool>true</bool></property>
@@ -103,12 +105,8 @@
      </item>
      <item>
       <widget class="QPushButton" name="save_btn">
-       <property name="text"><string>Save</string></property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QPushButton" name="close_btn">
-       <property name="text"><string>Close</string></property>
+       <property name="text"><string>Save preset</string></property>
+       <property name="whatsThis"><string>Store the current parameter values in the selected preset (or a new one).</string></property>
       </widget>
      </item>
     </layout>

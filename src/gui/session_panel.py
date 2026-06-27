@@ -308,9 +308,9 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         Returns True to proceed with the session (calibrated, or the operator
         chose to start anyway with the pressure-based fallback), False to abort
         (the operator opened the calibration tool instead)."""
-        from src.hardware.fill_calibration import chambers_missing_fill_time
+        from src.hardware.fill_calibration import chambers_missing_calibration
         selected = {r.robot_id for r in robots}
-        missing = [c for c in chambers_missing_fill_time(Settings().data)
+        missing = [c for c in chambers_missing_calibration(Settings().data)
                    if c["robot_id"] in selected]
         if not missing:
             return True

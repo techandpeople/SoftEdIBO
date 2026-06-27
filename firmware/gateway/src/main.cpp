@@ -268,7 +268,22 @@ static void handleGatewayCmd(cJSON* doc) {
 
 static void processLine(const char* line, size_t len) {
     cJSON* doc = cJSON_ParseWithLength(line, len);
-    if (!doc) return;
+    if (!doc) {
+        // A PC command arrived unparseable — almost always serial byte loss /
+        // truncation on the USB link. Report it instead of silently dropping it,
+        // so a swallowed command (e.g. a missed "stop") is visible on the PC.
+        cJSON* err = cJSON_CreateObject();
+        if (err) {
+            cJSON_AddStringToObject(err, "type", "error");
+            cJSON_AddStringToObject(err, "reason", "bad_cmd_json");
+            cJSON_AddNumberToObject(err, "len", (double)len);
+            cJSON_AddStringToObject(err, "raw", line);
+            char* out = cJSON_PrintUnformatted(err);
+            if (out) { usbWriteLine(out); cJSON_free(out); }
+            cJSON_Delete(err);
+        }
+        return;
+    }
 
     cJSON* target = cJSON_GetObjectItemCaseSensitive(doc, "target");
     uint8_t mac[6];

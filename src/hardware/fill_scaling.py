@@ -28,21 +28,35 @@ import time
 from typing import Callable
 
 
+def scale_fill_ms(base_ms: float, active_chambers: int, pump_count: int) -> int:
+    """Apply the shared-pump load factor to an already-computed fill time.
+
+    ``base_ms`` is the open-valve time this chamber needs *alone* (e.g. the time
+    a :class:`~src.hardware.fill_profile.FillProfile` says it takes to climb from
+    the current level to the target). The result scales it up by the concurrent
+    fill load, never below ``base_ms`` (the floor — see module docstring), and is
+    always >= 1."""
+    n = max(1, int(active_chambers))
+    p = max(1, int(pump_count))
+    load = max(1.0, n / p)
+    return max(1, int(round(max(0.0, float(base_ms)) * load)))
+
+
 def effective_fill_ms(base_ms: float, value_pct: float,
                       active_chambers: int, pump_count: int) -> int:
-    """Effective time-based fill duration in ms (always >= 1).
+    """Effective time-based fill duration in ms (always >= 1), assuming a
+    **linear** fill (legacy scalar ``fill_time_ms`` path).
 
-    ``base_ms``: calibrated fill time for this chamber alone.
+    ``base_ms``: calibrated full fill time for this chamber alone.
     ``value_pct``: requested fill, 0-100 % of the chamber max.
     ``active_chambers``: chambers inflating concurrently on the node (incl. this
     one, so >= 1).
     ``pump_count``: pressure pumps shared on the node (>= 1).
-    """
+
+    Prefer a :class:`~src.hardware.fill_profile.FillProfile` + :func:`scale_fill_ms`
+    where a measured curve exists; this linear form is the fallback."""
     frac = max(0.0, min(100.0, float(value_pct))) / 100.0
-    n = max(1, int(active_chambers))
-    p = max(1, int(pump_count))
-    load = max(1.0, n / p)
-    return max(1, int(round(float(base_ms) * frac * load)))
+    return scale_fill_ms(float(base_ms) * frac, active_chambers, pump_count)
 
 
 class FillLoadTracker:

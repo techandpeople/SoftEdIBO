@@ -168,6 +168,22 @@ CONDITIONS: tuple[Verb, ...] = (
     Verb("not", "condition", "True if the sub-condition is false.", (
         VerbField("cond", "cond", None),
     )),
+    Verb("organs", "condition",
+         "Organ-status condition, evaluated against the unit's plugged organs "
+         "(resolved good/bad/absent from the skin's organ circuit). 'scope' "
+         "all_good / all_bad short-circuit to 'every organ is good / bad'; "
+         "'count' compares the good and bad counts via their operators.", (
+        VerbField("scope", "enum", "count",
+                  choices=("count", "all_good", "all_bad"),
+                  description="count=use the good/bad comparisons; "
+                              "all_good/all_bad ignore them."),
+        VerbField("good_op", "enum", ">=", choices=(">=", "<=", "=="),
+                  description="How to compare the good-organ count."),
+        VerbField("good", "int", 1, description="Good-organ count threshold."),
+        VerbField("bad_op", "enum", "<=", choices=(">=", "<=", "=="),
+                  description="How to compare the bad-organ count."),
+        VerbField("bad", "int", 0, description="Bad-organ count threshold."),
+    )),
     Verb("always", "condition", "Always true (unconditional transition).", ()),
 )
 

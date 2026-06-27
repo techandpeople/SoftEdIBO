@@ -57,7 +57,19 @@ static void onReceived(const uint8_t mac_addr[6], const uint8_t* data, int len) 
 
 static void processLine(const char* line, size_t len) {
     JsonDocument doc;
-    if (deserializeJson(doc, line, len) != DeserializationError::Ok) return;
+    if (deserializeJson(doc, line, len) != DeserializationError::Ok) {
+        // A PC command arrived unparseable — almost always serial byte loss /
+        // truncation on the USB-UART link. Report it instead of silently
+        // dropping it, so a swallowed command (e.g. a missed "stop") is visible.
+        JsonDocument err;
+        err["type"]   = "error";
+        err["reason"] = "bad_cmd_json";
+        err["len"]    = (uint32_t)len;
+        err["raw"]    = line;
+        serializeJson(err, Serial);
+        Serial.println();
+        return;
+    }
 
     const char* targetStr = doc["target"] | "";
     uint8_t target[6];

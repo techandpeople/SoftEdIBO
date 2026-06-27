@@ -18,11 +18,20 @@ YAML_KEY: dict[str, str] = {"turtle": "turtles", "tree": "trees", "thymio": "thy
 
 DEFAULT_MAX_KPA = 8.0
 MAX_ALLOWED_KPA = 12.0
+# Lower cap: 0 by default; negative for chambers fed from a vacuum reservoir
+# (matches the firmware HARD_MIN of -12 kPa).
+DEFAULT_MIN_KPA = 0.0
+MIN_ALLOWED_KPA = -12.0
 CONFIRM_DELTA = 2.0
 MAX_CHAMBERS = 3
 # Node types that actually own chambers (can inflate/deflate). Sensor-only
 # boards (node_magnet_sensor) are excluded from chamber selection.
 ACTUATOR_NODE_TYPES = ("node_direct", "node_multiplexed")
+# Node types that can stream magnet/touch data, hence be picked as a skin's
+# touch node. Either the dedicated sensor board, or a ``node_direct`` that folds
+# the MLX90393 sensing into the actuator firmware (same board, same MAC, so the
+# touch node is the actuator's own MAC). ``node_multiplexed`` has no magnet bus.
+MAGNET_NODE_TYPES = ("node_magnet_sensor", "node_direct")
 
 
 # ---------------------------------------------------------------------------
@@ -51,9 +60,12 @@ def node_max_slots(data: dict, robot_type: str, robot_index: int) -> dict[str, i
 
 
 def magnet_macs(data: dict, robot_type: str, robot_index: int) -> list[str]:
-    """MACs of magnet/touch sensor boards."""
+    """MACs of nodes that can serve as a skin's touch node — the dedicated
+    ``node_magnet_sensor`` boards plus any ``node_direct`` (which folds the
+    magnet sensing into its own firmware, so its actuator MAC is also its
+    touch MAC)."""
     return [n["mac"] for n in robot_nodes(data, robot_type, robot_index)
-            if n.get("node_type") == "node_magnet_sensor" and n.get("mac")]
+            if n.get("node_type") in MAGNET_NODE_TYPES and n.get("mac")]
 
 
 def load_skin_cfg(data: dict, robot_type: str, robot_index: int,
@@ -155,14 +167,17 @@ def build_skin_entry(skin_id: str, chambers: list[dict],
                      skin_type: str = "", skin_variant: str = "") -> dict:
     """Build the base skin entry (chambers + metadata).
 
-    ``max_pressure`` is dropped from a chamber when it equals the default, so the
-    YAML stays terse. Layout/touch fields are added by the caller afterwards.
+    ``max_pressure``/``min_pressure`` are dropped from a chamber when they equal
+    the defaults, so the YAML stays terse. Layout/touch fields are added by the
+    caller afterwards.
     """
     out_chambers: list[dict] = []
     for ch in chambers:
         c = dict(ch)
         if abs(c.get("max_pressure", DEFAULT_MAX_KPA) - DEFAULT_MAX_KPA) < 1e-9:
             c.pop("max_pressure", None)
+        if abs(c.get("min_pressure", DEFAULT_MIN_KPA) - DEFAULT_MIN_KPA) < 1e-9:
+            c.pop("min_pressure", None)
         out_chambers.append(c)
     entry: dict = {"skin_id": skin_id, "chambers": out_chambers}
     if skin_type:

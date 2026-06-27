@@ -11,6 +11,9 @@ enum CmdType : uint8_t {
     CMD_INFLATE, CMD_DEFLATE, CMD_SET_PRESSURE, CMD_SET_MAX, CMD_SET_MIN, CMD_HOLD,
     // Manual valve/pump control (debug/test).
     CMD_VALVE_MANUAL, CMD_PUMP_MANUAL,
+    // Continuous bench test: latch one pump + all of its valves wide open,
+    // ignoring pressure + the dead-man, until stopped (node_direct only).
+    CMD_TEST_RUN, CMD_TEST_STOP,
     // Emergency stop: latch all actuators off until re-armed.
     CMD_STOP, CMD_RESUME,
     // Configuration / status.

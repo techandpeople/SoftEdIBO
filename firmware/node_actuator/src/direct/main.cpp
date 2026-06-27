@@ -88,6 +88,12 @@ void setup() {
     se::broadcast(ready_msg);
 
     LOG("%s\n", ready_msg);
+
+    // Magnet board ready — broadcast only now that ESP-NOW is up (announce() is a
+    // no-op if no MLX90393 sensors are wired). Doing this inside magnet's
+    // hardware_init(), before se::begin(), is what made the node disappear
+    // whenever the sensors were connected.
+    magnet::announce();
 }
 
 void loop() {
@@ -109,6 +115,24 @@ void loop() {
             lastStatusMs = now;
             for (int i = 0; i < NUM_CHAMBERS; i++)
                 commands::sendStatus(i, chambers::cachedKpa[i]);
+            commands::sendPumps();   // live pump state (debug: stop-latency hunt)
+        }
+        return;
+    }
+
+    // ---- Continuous bench test: hold one pump + its valves open, skip control ----
+    // testRun() already asserted the hardware; we only refresh pressure telemetry
+    // (so the dialog can watch the live, possibly bad, sensor) and bail before any
+    // pressure / dead-man / watchdog tick can stop the run. New test_stop/test_run
+    // commands are still processed above, so the latch can always be exited.
+    if (chambers::testDir >= 0) {
+        if (now - lastStatusMs >= STATUS_REPORT_MS) {
+            lastStatusMs = now;
+            for (int i = 0; i < NUM_CHAMBERS; i++) {
+                chambers::cachedKpa[i] = pressure::readKpa(PSENSOR_PINS[i]);
+                commands::sendStatus(i, chambers::cachedKpa[i]);
+            }
+            commands::sendPumps();
         }
         return;
     }
@@ -157,5 +181,6 @@ void loop() {
         lastStatusMs = now;
         for (int i = 0; i < NUM_CHAMBERS; i++)
             commands::sendStatus(i, chambers::cachedKpa[i]);
+        commands::sendPumps();   // live pump state (debug: stop-latency hunt)
     }
 }

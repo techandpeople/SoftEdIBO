@@ -97,7 +97,7 @@ The gateway strips `"target"` before forwarding so nodes receive only the comman
 
 **Gateway => PC** — every message from a node gets a `"source"` MAC added:
 ```json
-{"source":"AA:BB:CC:DD:EE:01","type":"status","chamber":0,"pressure":75}
+{"source":"AA:BB:CC:DD:EE:01","type":"status","chamber":0,"pressure":75,"kpa":6.00}
 {"source":"AA:BB:CC:DD:EE:01","type":"pong"}
 {"source":"AA:BB:CC:DD:EE:01","type":"debug","ch":[...],"tx_ok":1520,"tx_fail":3,"drop":0,"up":342}
 {"status":"gateway_ready","mac":"AA:BB:CC:DD:EE:00"}

@@ -107,9 +107,20 @@ inline void hardware_init() {
 
     // The PC's QuadrantDetector consumes 4 sensors; always advertise NUM_SENSORS
     // so quadrant mapping stays stable even if one sensor is briefly unwired.
+    // NB: only BUILD the message here — it is broadcast by announce(), not now.
+    // hardware_init() runs before se::begin() in setup(), so broadcasting at this
+    // point hits an uninitialised radio: the send is lost and can crash the stack,
+    // which left the whole node invisible ("no nodes found") whenever sensors were
+    // wired (present == true) but worked fine when they were not.
     snprintf(announceMsg, sizeof(announceMsg),
              "{\"status\":\"node_magnet_sensor_ready\",\"sensors\":%u,\"variant\":\"mlx90393\"}",
              (unsigned)NUM_SENSORS);
+}
+
+// Broadcast the magnet board's ready message. Must be called from setup() AFTER
+// se::begin() has brought ESP-NOW up. No-op when no sensors are present.
+inline void announce() {
+    if (!present) return;
     se::broadcast(announceMsg);
     LOG("%s\n", announceMsg);
 }

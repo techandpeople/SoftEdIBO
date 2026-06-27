@@ -19,7 +19,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Behaviour Editor</title>
+  <title>Activity Editor — Visual</title>
   <style>
     html, body { margin: 0; height: 100%; font-family: sans-serif; }
     #blocklyDiv { position: absolute; top: 0; left: 0; right: 0; bottom: 0; }
@@ -54,6 +54,7 @@
     <category name="Conditions" colour="20">
       <block type="se_elapsed"></block>
       <block type="se_touch_count"></block>
+      <block type="se_organs"></block>
       <block type="se_any"></block>
       <block type="se_all"></block>
       <block type="se_not"></block>
@@ -221,6 +222,21 @@
           message0: 'touched at least %1 times', args0: [{ type: 'field_number', name: 'MIN', value: 15, min: 1 }],
           output: 'Cond', colour: 20 },
 
+        { type: 'se_organs',
+          message0: 'organs %1 good %2 %3 bad %4 %5',
+          args0: [{ type: 'field_dropdown', name: 'SCOPE',
+                    options: [['by count', 'count'], ['all good', 'all_good'], ['all bad', 'all_bad']] },
+                  { type: 'field_dropdown', name: 'GOOD_OP',
+                    options: [['≥', '>='], ['≤', '<='], ['=', '==']] },
+                  { type: 'field_number', name: 'GOOD', value: 3, min: 0 },
+                  { type: 'field_dropdown', name: 'BAD_OP',
+                    options: [['≥', '>='], ['≤', '<='], ['=', '==']] },
+                  { type: 'field_number', name: 'BAD', value: 0, min: 0 }],
+          output: 'Cond', colour: 20,
+          tooltip: 'Organ status (good/bad organs plugged into the skin). '
+                 + '"by count" uses the good/bad comparisons; "all good" / '
+                 + '"all bad" mean every organ matches and ignore the numbers.' },
+
         { type: 'se_any',
           message0: 'any of: %1 %2 %3',
           args0: [{ type: 'input_dummy' },
@@ -301,6 +317,9 @@
       switch (b.type) {
         case 'se_elapsed':     return { elapsed_ms: num(b, 'MS') };
         case 'se_touch_count': return { touch_count: { min: num(b, 'MIN') } };
+        case 'se_organs':      return { organs: { scope: b.getFieldValue('SCOPE'),
+                                                  good_op: b.getFieldValue('GOOD_OP'), good: num(b, 'GOOD'),
+                                                  bad_op: b.getFieldValue('BAD_OP'), bad: num(b, 'BAD') } };
         case 'se_any':         return { any: [condToObj(b.getInputTargetBlock('A')),
                                               condToObj(b.getInputTargetBlock('B'))] };
         case 'se_all':         return { all: [condToObj(b.getInputTargetBlock('A')),
