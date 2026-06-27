@@ -97,7 +97,7 @@ Each message arrives on the PC with a `source` field added by the gateway.
 | `type` / `status` | Fields | When |
 |---|---|---|
 | `status:"node_*_ready"` | — | Once at boot, ESP-NOW broadcast to `FF:FF:FF:FF:FF:FF` |
-| `status` | `chamber`, `pressure` (0–100 %) | Every 500 ms, one per chamber |
+| `status` | `chamber`, `pressure` (0–100 %), `kpa`, `st` (actuation: 0 idle, 1 inflating, 2 deflating) | Every 500 ms, one per chamber |
 | `pong` | — | Reply to `ping` |
 | `debug` | (per-node — see below) | Reply to `debug`, debug build only |
 

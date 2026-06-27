@@ -17,13 +17,34 @@ from dataclasses import dataclass
 YAML_KEY: dict[str, str] = {"turtle": "turtles", "tree": "trees", "thymio": "thymios"}
 
 DEFAULT_MAX_KPA = 8.0
-MAX_ALLOWED_KPA = 12.0
-# Lower cap: 0 by default; negative for chambers fed from a vacuum reservoir
-# (matches the firmware HARD_MIN of -12 kPa).
+# Upper/lower bound for the per-chamber Max/Min the config dialog accepts. These
+# are intentionally generous (effectively uncapped for these low-pressure air
+# chambers) — the pressure gauge is unreliable, so over-pressure is held off by
+# TIME-based backstops (firmware MAX_FILL_MS, the manual dead-man, and the
+# actuation watchdog), not by an artificial pressure ceiling. Kept in sync with
+# the firmware HARD_*_KPA constants.
+MAX_ALLOWED_KPA = 100.0
+# Lower cap: 0 by default; negative for chambers fed from a vacuum reservoir.
 DEFAULT_MIN_KPA = 0.0
-MIN_ALLOWED_KPA = -12.0
+MIN_ALLOWED_KPA = -100.0
 CONFIRM_DELTA = 2.0
 MAX_CHAMBERS = 3
+
+# How a chamber decides when to stop inflating:
+#   "time"     — open the inflate valve for a calibrated time window (fill_profile);
+#                the firmware never closes the loop on the laggy pressure sensor.
+#   "pressure" — classic closed loop: inflate until the gauge sensor hits target.
+# Deflate is always pressure-based above atmosphere (and time-bounded below, since
+# the gauge sensor is blind to vacuum), so this only governs inflation.
+FILL_MODE_TIME = "time"
+FILL_MODE_PRESSURE = "pressure"
+DEFAULT_FILL_MODE = FILL_MODE_TIME
+FILL_MODES = (FILL_MODE_TIME, FILL_MODE_PRESSURE)
+
+
+def normalize_fill_mode(value: object) -> str:
+    """Coerce a stored/UI fill-mode value to a known mode (default ``time``)."""
+    return value if value in FILL_MODES else DEFAULT_FILL_MODE
 # Node types that actually own chambers (can inflate/deflate). Sensor-only
 # boards (node_magnet_sensor) are excluded from chamber selection.
 ACTUATOR_NODE_TYPES = ("node_direct", "node_multiplexed")
@@ -178,6 +199,9 @@ def build_skin_entry(skin_id: str, chambers: list[dict],
             c.pop("max_pressure", None)
         if abs(c.get("min_pressure", DEFAULT_MIN_KPA) - DEFAULT_MIN_KPA) < 1e-9:
             c.pop("min_pressure", None)
+        # Keep the YAML terse: only persist a non-default fill mode.
+        if normalize_fill_mode(c.get("fill_mode")) == DEFAULT_FILL_MODE:
+            c.pop("fill_mode", None)
         out_chambers.append(c)
     entry: dict = {"skin_id": skin_id, "chambers": out_chambers}
     if skin_type:

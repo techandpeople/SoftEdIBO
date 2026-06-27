@@ -1,6 +1,6 @@
 """Test actuators dialog — inflate/deflate individual chambers via the gateway."""
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -12,9 +12,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from src.core.skin_config import FILL_MODE_PRESSURE, normalize_fill_mode
 from src.gui.led_ring_tester import LedRingTester
 from src.gui.ui_test_actuators_dialog import Ui_TestActuatorsDialog
 from src.hardware.espnow_gateway import ESPNowGateway
+from src.hardware.fill_profile import FillProfile
 
 
 class TestActuatorsDialog(QDialog, Ui_TestActuatorsDialog):
@@ -26,7 +28,12 @@ class TestActuatorsDialog(QDialog, Ui_TestActuatorsDialog):
 
     Args:
         mac: Target ESP32 MAC address.
-        skin_cfgs: List of skin config dicts (``skin_id`` + ``slots``).
+        skin_cfgs: List of skin config dicts. Each is ``skin_id`` plus a
+            ``chambers`` list of per-chamber dicts (``slot``, ``max_pressure``,
+            ``min_pressure``, ``fill_mode`` and optional ``fill_time_ms`` /
+            ``fill_profile``). The limits are pushed to the node before each
+            actuation, and time-mode chambers inflate by their calibrated time
+            window — mirroring how :class:`~src.hardware.skin.Skin` drives them.
         gateway: Connected ESP-NOW gateway.
         parent: Optional parent widget.
     """
@@ -56,6 +63,11 @@ class TestActuatorsDialog(QDialog, Ui_TestActuatorsDialog):
         # Per-chamber inflate/deflate buttons, so the continuous-run toggle can
         # update their text. (slot, direction) => button; direction 0=inflate, 1=deflate.
         self._chamber_btns: dict[tuple[int, int], QPushButton] = {}
+        # slot => chamber config dict (max/min pressure, fill mode + calibration).
+        # Used to push the configured limits to the node before actuating and to
+        # inflate time-mode chambers by their calibrated time window instead of
+        # closing the loop on the laggy gauge sensor — matching Skin in production.
+        self._chamber_cfgs: dict[int, dict] = {}
 
         self.setupUi(self)
         self.setWindowTitle(f"Test Actuators — {mac}")
@@ -83,6 +95,10 @@ class TestActuatorsDialog(QDialog, Ui_TestActuatorsDialog):
             self.verticalLayout.insertWidget(
                 self.verticalLayout.indexOf(self.chambers_scroll) + 1,
                 self._cont_cb)
+            # Apply the configured limits up front so the firmware's reported
+            # pressure %% matches each chamber's min/max from the start, not only
+            # after that chamber is first actuated (otherwise it uses boot defaults).
+            self._push_all_limits()
 
         # WS2812 LED ring tester (node_direct boards). Insert before the
         # Close button (the last widget in the dialog's vertical layout).
@@ -128,6 +144,12 @@ class TestActuatorsDialog(QDialog, Ui_TestActuatorsDialog):
         # 1=deflate; chamber -1 = all chambers (global run), else a single
         # chamber. None = no run. One firmware latch → at most one run at a time.
         self._run: tuple[int, int] | None = None
+        # Dead-man keepalive for the node_direct continuous run. That run bypasses
+        # every firmware safety, so the node ends it if these keepalives stop
+        # arriving (dialog gone, USB/ESP-NOW link dropped). See _send_run_keepalive.
+        self._run_keepalive = QTimer(self)
+        self._run_keepalive.setInterval(1000)
+        self._run_keepalive.timeout.connect(self._send_run_keepalive)
         run_group = QGroupBox("Continuous Run (ignores pressure)")
         run_group.setWhatsThis(
             "Drive one pump and all of its valves wide open indefinitely, "
@@ -167,7 +189,10 @@ class TestActuatorsDialog(QDialog, Ui_TestActuatorsDialog):
 
     def _build_chamber_group(self, skin_cfg: dict) -> QGroupBox:
         skin_id = skin_cfg.get("skin_id", "—")
-        slots: list[int] = sorted(skin_cfg.get("slots", []))
+        chamber_cfgs: list[dict] = skin_cfg.get("chambers", [])
+        for cfg in chamber_cfgs:
+            self._chamber_cfgs[int(cfg["slot"])] = cfg
+        slots: list[int] = sorted(int(c["slot"]) for c in chamber_cfgs)
 
         box = QGroupBox(f"Air Chamber: {skin_id}")
         vbox = QVBoxLayout(box)
@@ -243,13 +268,36 @@ class TestActuatorsDialog(QDialog, Ui_TestActuatorsDialog):
                 float(kpa) if isinstance(kpa, (int, float)) else float("nan"))
 
     def _update_pressure(self, chamber: int, pressure: int, kpa: float) -> None:
-        """Called in the main thread via Signal."""
+        """Called in the main thread via Signal.
+
+        The percentage is derived here from the chamber's *configured* min/max
+        (kPa), not from the node's ``pressure`` field. The node computes its
+        percent against the limits it currently holds, which lag the config until
+        ``set_max_pressure`` actually lands — a dropped frame or a continuous
+        "ignore max" run leaves it on the 8 kPa boot default, so every reading
+        above that clamps to 100 %. Recomputing from the config the dialog already
+        holds keeps the readout honest regardless of what the node holds."""
         lbl = self._pressure_labels.get(chamber)
-        if lbl:
-            if kpa == kpa:   # not NaN → firmware reported real kPa
-                lbl.setText(f"{kpa:.2f} kPa  ({pressure}%)")
-            else:
-                lbl.setText(f"{pressure}%")
+        if not lbl:
+            return
+        if kpa == kpa:   # not NaN → firmware reported real kPa
+            lbl.setText(f"{kpa:.2f} kPa  ({self._pct_for_kpa(chamber, kpa)}%)")
+        else:
+            lbl.setText(f"{pressure}%")
+
+    def _pct_for_kpa(self, chamber: int, kpa: float) -> int:
+        """Percent of the chamber's configured [min, max] kPa range (0-100).
+
+        Mirrors firmware ``units::kpaToPct`` but uses the limits the user set in
+        the config rows, so the readout reflects the configured max even before
+        (or if) the node's ``set_max_pressure`` takes effect."""
+        cfg = self._chamber_cfgs.get(chamber, {})
+        min_kpa = float(cfg.get("min_pressure", 0.0))
+        max_kpa = float(cfg.get("max_pressure", 8.0))
+        span = max_kpa - min_kpa
+        if span <= 0.0:
+            return 0
+        return max(0, min(100, round((kpa - min_kpa) * 100.0 / span)))
 
     def _on_closed(self) -> None:
         self._active = False
@@ -287,16 +335,65 @@ class TestActuatorsDialog(QDialog, Ui_TestActuatorsDialog):
             self._gateway.send(self._mac, "resume")
             self._stopped = False
 
+    def _push_limits(self, slot: int) -> None:
+        """Push this chamber's configured max+min pressure to the node before
+        actuating, so a one-shot inflate/deflate targets the configured limits.
+
+        The dialog drives the node directly (it never builds a Skin), so unlike a
+        live session nothing has applied these limits — without this the firmware
+        uses its boot defaults (8 kPa / 0 kPa), so deflate toward 0 kPa stops at
+        once and inflate stops at the default cap, never reaching what was set.
+        Order matches Skin._push_pressure_limits (max first, then min)."""
+        cfg = self._chamber_cfgs.get(slot)
+        if not cfg:
+            return
+        self._gateway.send(self._mac, "set_max_pressure", chamber=slot,
+                           value=float(cfg["max_pressure"]))
+        self._gateway.send(self._mac, "set_min_pressure", chamber=slot,
+                           value=float(cfg["min_pressure"]))
+
+    def _push_all_limits(self) -> None:
+        """Push every configured chamber's limits once on open, mirroring
+        Skin._push_pressure_limits. Without this the firmware reports its boot
+        defaults (8 kPa / 0 kPa) until a chamber is first actuated, so the status
+        %% shown next to the kPa reading wouldn't match the configured min/max."""
+        for slot in self._chamber_cfgs:
+            self._push_limits(slot)
+
+    def _inflate_ms(self, slot: int) -> int | None:
+        """Full-window calibrated fill time (ms) for a time-mode chamber, else None.
+
+        Mirrors Skin._inflate: a chamber in ``time`` mode with a calibration curve
+        inflates by a time window so the laggy gauge sensor never closes the loop;
+        a ``pressure``-mode chamber (or one with no curve) stays closed-loop."""
+        cfg = self._chamber_cfgs.get(slot)
+        if not cfg or normalize_fill_mode(cfg.get("fill_mode")) == FILL_MODE_PRESSURE:
+            return None
+        profile = (FillProfile.from_list(cfg.get("fill_profile"))
+                   or FillProfile.linear(cfg.get("fill_time_ms")))
+        if profile is None or profile.is_empty:
+            return None
+        return int(round(profile.time_for_pct(100)))
+
     def _inflate_slot(self, slot: int) -> None:
         # The node reads "delta" (percent of this chamber's range), NOT "value":
         # a "value" key is silently ignored and the firmware falls back to 10 %.
-        # delta=100 inflates toward the chamber's configured max pressure.
+        # delta=100 inflates toward the chamber's configured max pressure; for a
+        # calibrated time-mode chamber send the time window too (the firmware then
+        # ignores the gauge sensor for the fill, capping only at HARD_MAX).
         self._arm()
-        self._gateway.send(self._mac, "inflate", chamber=slot, delta=100)
+        self._push_limits(slot)
+        ms = self._inflate_ms(slot)
+        if ms:
+            self._gateway.send(self._mac, "inflate", chamber=slot, delta=100, ms=ms)
+        else:
+            self._gateway.send(self._mac, "inflate", chamber=slot, delta=100)
 
     def _deflate_slot(self, slot: int) -> None:
-        # delta=100 deflates toward the chamber's configured min pressure.
+        # delta=100 deflates toward the chamber's configured min pressure (the
+        # firmware's deflate time cap is always armed as the vacuum backstop).
         self._arm()
+        self._push_limits(slot)
         self._gateway.send(self._mac, "deflate", chamber=slot, delta=100)
 
     def _inflate_slots(self, slots: list[int]) -> None:
@@ -382,14 +479,31 @@ class TestActuatorsDialog(QDialog, Ui_TestActuatorsDialog):
         self._reset_manual_ui()
         self._run = (direction, chamber)
         self._gateway.send(self._mac, "test_run", dir=direction, chamber=chamber)
+        self._run_keepalive.start()
         self._refresh_run_buttons()
 
     def _stop_run(self) -> None:
         if self._run is None:
             return
+        self._run_keepalive.stop()
         self._run = None
         self._gateway.send(self._mac, "test_stop")
         self._refresh_run_buttons()
+
+    def _send_run_keepalive(self) -> None:
+        """Re-send the active continuous run as a dead-man keepalive.
+
+        node_direct's ``test_run`` short-circuits every firmware safety (pressure
+        cutoff, dead-man, watchdog), so the node force-stops the run if these
+        keepalives stop arriving. Re-sending the same dir/chamber only refreshes
+        the node's dead-man timer — it does not re-assert the hardware. No-op on
+        boards without ``test_run`` (node_multiplexed)."""
+        run = self._run
+        if run is None:
+            self._run_keepalive.stop()
+            return
+        direction, chamber = run
+        self._gateway.send(self._mac, "test_run", dir=direction, chamber=chamber)
 
     def _refresh_run_buttons(self) -> None:
         run = self._run
@@ -439,5 +553,6 @@ class TestActuatorsDialog(QDialog, Ui_TestActuatorsDialog):
         # Reflect the halted hardware in the UI ("stop"/emergencyStopAll also
         # cancels any continuous run, so clear those toggles too).
         self._reset_manual_ui()
+        self._run_keepalive.stop()
         self._run = None
         self._refresh_run_buttons()

@@ -146,12 +146,14 @@ def _epoch_ms(iso: str) -> float:
     return datetime.fromisoformat(iso).timestamp() * 1000.0
 
 
-def samples_from_recording(path: str | Path) -> Iterator[Sample]:
+def samples_from_recording(path: str | Path, field: str = "adj") -> Iterator[Sample]:
     """Yield :data:`Sample` tuples from a stream recording JSONL.
 
     Tracks the latest per-chamber pressure from ``status`` messages and emits a
-    sample at each ``magnet`` message (the fast stream), pairing the magnet
-    ``adj`` with the last-known chamber pressures.
+    sample at each ``magnet`` message (the fast stream), pairing the chosen
+    magnet ``field`` vector with the last-known chamber pressures. Use
+    ``field="mag"`` to build the matrix in raw uT (what the PC detection path and
+    :mod:`src.core.touch_compensation` use); ``"adj"`` for the normalised field.
     """
     pressures: dict[int, float] = {}
     with open(path, encoding="utf-8") as f:
@@ -170,13 +172,15 @@ def samples_from_recording(path: str | Path) -> Iterator[Sample]:
                 except (TypeError, ValueError):
                     continue
             elif mtype == "magnet":
-                adj = msg.get("adj") or []
-                if isinstance(adj, list):
+                vec = msg.get(field) or []
+                if isinstance(vec, list):
                     yield (_epoch_ms(obj["t"]), dict(pressures),
-                           [float(v) for v in adj])
+                           [float(v) for v in vec])
 
 
-def build_coupling_from_recording(path: str | Path, sensor_count: int, **kw
-                                  ) -> CouplingMatrix:
-    """Convenience: parse a recording and build the coupling matrix."""
-    return build_coupling(samples_from_recording(path), sensor_count, **kw)
+def build_coupling_from_recording(path: str | Path, sensor_count: int,
+                                  field: str = "adj", **kw) -> CouplingMatrix:
+    """Convenience: parse a recording and build the coupling matrix.
+
+    ``field`` selects the magnet vector ("adj" normalised, or "mag" raw uT)."""
+    return build_coupling(samples_from_recording(path, field), sensor_count, **kw)

@@ -60,15 +60,29 @@ class AirChamber:
         with self._lock:
             self._target_pressure = max(0, min(100, value))
 
-    def update_pressure(self, pressure: int) -> None:
+    def update_pressure(self, pressure: int,
+                        actuating: "ChamberState | None" = None) -> None:
         """Update measured pressure and derive state atomically.
 
         Called from the hardware (serial) thread. Acquires the lock so that
         the read of target_pressure and the write of state are atomic with
         respect to the main thread's target_pressure setter.
+
+        ``actuating`` is the chamber's *real* actuation state as reported by the
+        firmware status: ``INFLATING``/``DEFLATING`` while a pump is driving it,
+        ``IDLE`` once it stops. When given it is authoritative — a firmware-idle
+        chamber settles to ``INFLATED`` (holding a level) or ``IDLE`` (empty), so
+        a chamber whose pressure never reached its target (e.g. the pumps are
+        off) no longer shows a perpetual INFLATING/DEFLATING. When ``None`` (old
+        firmware that doesn't report it, or the simulator) the state is inferred
+        from measured pressure vs the commanded target, as before.
         """
         with self._lock:
             self._pressure = max(0, min(100, pressure))
+            if actuating is not None:
+                self._state = (self._settled_state()
+                               if actuating is ChamberState.IDLE else actuating)
+                return
             target = self._target_pressure
             if self._pressure == target:
                 self._state = ChamberState.INFLATED if target > 0 else ChamberState.IDLE
@@ -76,6 +90,11 @@ class AirChamber:
                 self._state = ChamberState.INFLATING
             else:
                 self._state = ChamberState.DEFLATING
+
+    def _settled_state(self) -> ChamberState:
+        """State of a chamber the firmware reports as not actuating: holding a
+        level (``INFLATED``) or empty (``IDLE``)."""
+        return ChamberState.INFLATED if self._pressure > 0 else ChamberState.IDLE
 
     def __repr__(self) -> str:
         return (

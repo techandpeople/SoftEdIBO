@@ -80,7 +80,9 @@ class AirReservoir:
     # Internal
     # ------------------------------------------------------------------
 
-    def _on_pressure_update(self, node_slot: int, pressure: int) -> None:
+    def _on_pressure_update(self, node_slot: int, pressure: int,
+                            state: int | None = None) -> None:
+        # ``state`` (firmware actuation state) is irrelevant to a reservoir.
         if node_slot == self._node_slot:
             self._pressure = pressure
             logger.debug(

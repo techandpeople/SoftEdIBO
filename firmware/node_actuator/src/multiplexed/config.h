@@ -16,8 +16,12 @@ constexpr float HARD_TANK_MIN_KPA             = -80.0f;
 
 constexpr float DEFAULT_CHAMBER_MAX_KPA =   8.0f;
 constexpr float DEFAULT_CHAMBER_MIN_KPA =   0.0f;
-constexpr float HARD_CHAMBER_MAX_KPA    =  12.0f;
-constexpr float HARD_CHAMBER_MIN_KPA    = -12.0f;
+// Effectively uncapped per-chamber (the unreliable gauge must not gate fills):
+// over-pressure is bounded by TIME — MAX_FILL_MS, the manual dead-man, and the
+// actuation watchdog — not by this ceiling. Kept in sync with
+// skin_config.MAX_ALLOWED_KPA. (The shared TANK caps above are unchanged.)
+constexpr float HARD_CHAMBER_MAX_KPA    =  100.0f;
+constexpr float HARD_CHAMBER_MIN_KPA    = -100.0f;
 
 struct State {
     bool ready          = false;     // becomes true after autodetect succeeds

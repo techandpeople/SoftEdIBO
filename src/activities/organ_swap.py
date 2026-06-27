@@ -472,11 +472,10 @@ class OrganSwapActivity(BaseActivity):
     def _subscribe_touch(self, robot: BaseRobot) -> None:
         """Subscribe to each skin's magnet board for touch reactions. Bound
         per skin so a touch on one skin only drives that skin's chambers."""
+        from src.hardware.touch_source import subscribe_skin_magnet
         for skin in getattr(robot, "skins", {}).values():
-            tc = getattr(skin, "touch_controller", None)
-            on_magnet = getattr(tc, "on_magnet", None) if tc is not None else None
-            if on_magnet is not None:
-                on_magnet(lambda data, sk=skin: self._on_magnet(sk, data))
+            subscribe_skin_magnet(skin,
+                                  lambda data, sk=skin: self._on_magnet(sk, data))
 
     # ------------------------------------------------------------------
     # Event handlers

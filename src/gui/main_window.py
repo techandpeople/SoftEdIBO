@@ -119,6 +119,10 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.actionCalibrateFill.triggered.connect(self._open_fill_calibration)
         self.menuTools.addAction(self.actionCalibrateFill)
 
+        self.actionCalibrateTouch = QAction("Calibrate Touch Coupling…", self)
+        self.actionCalibrateTouch.triggered.connect(self._open_touch_calibration)
+        self.menuTools.addAction(self.actionCalibrateTouch)
+
         self.actionEmergencyFlash = QAction("Emergency Flash (dead USB)…", self)
         self.actionEmergencyFlash.triggered.connect(self._open_emergency_flash)
         self.menuTools.addAction(self.actionEmergencyFlash)
@@ -286,6 +290,20 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         from src.gui.fill_calibration_dialog import FillCalibrationDialog
         dlg = FillCalibrationDialog(self._settings, self._gateway, parent=self)
         dlg.saved.connect(self._on_robot_configured)   # rebuild robots with new fill times
+        dlg.exec()
+
+    def _open_touch_calibration(self) -> None:
+        """Tools => Calibrate Touch Coupling… — measure how each chamber shifts
+        the magnet sensors and store the per-skin compensation matrix."""
+        if self._session_active:
+            QMessageBox.warning(
+                self, "Calibrate Touch Coupling",
+                "Stop the running session before calibrating — calibration "
+                "drives the pumps directly.")
+            return
+        from src.gui.touch_calibration_dialog import TouchCalibrationDialog
+        dlg = TouchCalibrationDialog(self._settings, self._gateway, parent=self)
+        dlg.saved.connect(self._on_robot_configured)   # rebuild robots to apply the matrix
         dlg.exec()
 
     def _open_emergency_flash(self) -> None:

@@ -13,8 +13,11 @@ namespace chambers {
 
 constexpr float DEFAULT_MAX_KPA = 8.0f;
 constexpr float DEFAULT_MIN_KPA = 0.0f;
-constexpr float HARD_MAX_KPA    = 12.0f;
-constexpr float HARD_MIN_KPA    = -12.0f;   // limit for vacuum-fed chambers
+// Effectively uncapped (the unreliable gauge must not gate fills): over-pressure
+// is bounded by TIME — MAX_FILL_MS, the manual dead-man, and the actuation
+// watchdog — not by this ceiling. Kept in sync with skin_config.MAX_ALLOWED_KPA.
+constexpr float HARD_MAX_KPA    =  100.0f;
+constexpr float HARD_MIN_KPA    = -100.0f;   // limit for vacuum-fed chambers
 constexpr uint8_t  DEFAULT_INFLATE_DUTY = 255;
 
 constexpr int PUMP_PWM_FREQ = 20000;
@@ -269,6 +272,13 @@ inline void manualSafetyTick(uint32_t now) {
 inline int testDir     = -1;   // -1 = off, 0 = inflate, 1 = deflate
 inline int testChamber = -1;   // -1 = all chambers, else a single chamber index
 
+// Dead-man for the continuous run: it bypasses every other safety, so it must not
+// outlive the PC link. The dialog re-sends ``test_run`` ~1 Hz as a keepalive; if
+// none arrives within this window (dialog gone, USB/ESP-NOW link dropped) loop()
+// force-stops the run. Generous vs the ~1 s keepalive to tolerate a dropped frame.
+constexpr uint32_t TEST_RUN_TIMEOUT_MS = 3000;
+inline uint32_t testHeartbeatMs = 0;
+
 inline void testStop() {
     testDir     = -1;
     testChamber = -1;
@@ -287,8 +297,11 @@ inline void testStop() {
 // manual override to keep manualSafetyTick from fighting it once the test ends.
 inline void testRun(int dir, int chamber = -1) {
     if (dir != 0 && dir != 1) return;
+    testHeartbeatMs = millis();          // every (re)send refreshes the dead-man
+    int newChamber  = (chamber >= 0 && chamber < NUM_CHAMBERS) ? chamber : -1;
+    if (testDir == dir && testChamber == newChamber) return;  // already running → just refreshed
     testDir     = dir;
-    testChamber = (chamber >= 0 && chamber < NUM_CHAMBERS) ? chamber : -1;
+    testChamber = newChamber;
     for (int i = 0; i < 2; i++)                 { manualPumpOn[i] = false; manualPumpTs[i] = 0; }
     for (int i = 0; i < NUM_CHAMBERS * 2; i++)  { manualValveOn[i] = false; manualValveTs[i] = 0; }
     ledcWrite(PUMP1_LEDC_CH, dir == 0 ? DEFAULT_INFLATE_DUTY : 0);

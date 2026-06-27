@@ -16,7 +16,7 @@
    <item>
     <widget class="QLabel" name="intro_label">
      <property name="wordWrap"><bool>true</bool></property>
-     <property name="text"><string>Inflates each chamber from empty in fixed time steps, reading the pressure after each step, to measure its time→pressure fill curve. The curve is saved per chamber and used instead of live pressure control. Re-run with a smaller step to refine. Keep hands clear.</string></property>
+     <property name="text"><string>Inflates each chamber from empty in fixed time steps, waiting for the pressure to settle after each step, to measure its time→pressure fill curve. "Calibrate all" also measures combinations of chambers filling together (they share a pump, so fill slower). Curves are saved per chamber and used instead of live pressure control. Re-run with a smaller step to refine. Keep hands clear.</string></property>
     </widget>
    </item>
    <item>
@@ -36,6 +36,12 @@
        <property name="orientation"><enum>Qt::Horizontal</enum></property>
        <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
       </spacer>
+     </item>
+     <item>
+      <widget class="QLabel" name="combo_status">
+       <property name="whatsThis"><string>Progress of a "Calibrate all" run: which sweep is in progress out of the total, and which node/slots it covers (solo = one chamber, combo = several filling together to measure their shared-pump load).</string></property>
+       <property name="text"><string/></property>
+      </widget>
      </item>
     </layout>
    </item>
@@ -57,7 +63,7 @@
     <layout class="QHBoxLayout" name="button_row">
      <item>
       <widget class="QPushButton" name="all_btn">
-       <property name="whatsThis"><string>Run the timing sweep for every chamber in turn. Each is inflated from empty to its max while the sensor times it. Keep hands clear during the run.</string></property>
+       <property name="whatsThis"><string>Run the timing sweep for every chamber alone, then for every combination of chambers on each node filling together (to measure the shared-pump slowdown). Confirms the run count first. Keep hands clear during the run.</string></property>
        <property name="text"><string>Calibrate all</string></property>
       </widget>
      </item>
