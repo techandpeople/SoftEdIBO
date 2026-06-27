@@ -87,6 +87,16 @@ class FillLoadTracker:
         self._prune(now)
         return len(self._until)
 
+    def active_slots(self) -> set[int]:
+        """Slots whose fill window is still open — the live co-active set.
+
+        Used to look up a chamber's fill curve measured under exactly this
+        concurrent set (see :mod:`src.hardware.fill_calibration` combinations);
+        falls back to :func:`scale_fill_ms` when no such curve exists."""
+        now = self._clock()
+        self._prune(now)
+        return set(self._until)
+
     def note_inflate(self, slot: int, ms: float) -> None:
         """Record that ``slot`` is inflating for ``ms`` from now."""
         now = self._clock()

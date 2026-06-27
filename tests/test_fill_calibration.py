@@ -86,3 +86,10 @@ def test_set_fill_profile_writes_and_drops_legacy_scalar():
 def test_chambers_missing_calibration():
     missing = chambers_missing_calibration(_settings())
     assert [c["slot"] for c in missing] == [0]    # slot 1 has the legacy scalar
+
+
+def test_pressure_mode_chamber_not_flagged_for_calibration():
+    data = _settings()
+    # Slot 0 is uncalibrated but set to pressure fill mode → needs no curve.
+    data["robots"]["turtles"][0]["skins"][0]["chambers"][0]["fill_mode"] = "pressure"
+    assert chambers_missing_calibration(data) == []

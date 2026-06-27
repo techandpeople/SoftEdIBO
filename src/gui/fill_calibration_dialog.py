@@ -39,13 +39,17 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from itertools import combinations
+
 from src.gui.ui_fill_calibration_dialog import Ui_FillCalibrationDialog
 from src.hardware.fill_calibration import (
     DEFAULT_STEP_MS,
     STEP_CHOICES_MS,
-    FillProfileCalibrator,
+    MultiChamberFillCalibrator,
+    combo_key,
     iter_actuator_chambers,
     set_fill_profile,
+    set_fill_profiles,
 )
 from src.hardware.fill_profile import FillProfile
 
@@ -53,10 +57,17 @@ from src.hardware.fill_profile import FillProfile
 # wait for that before giving up on the deflate phase.
 _EMPTY_PCT = 5.0
 _MAX_DEFLATE_MS = 7000
-# Extra settle time after each step's valve-open window, to let the laggy sensor
-# catch up before we read the pressure for that step.
-_SETTLE_MS = 350
+# Adaptive settle after each step's valve-open window: the multiplexed sensor is
+# laggy, so instead of a fixed wait we hold until the reading stops moving
+# (|Δpct| < _STABLE_DELTA_PCT for _STABLE_TICKS consecutive ticks), bounded by a
+# floor (let the sensor begin to move) and a hard ceiling (never wait forever).
+_STABLE_DELTA_PCT = 1.0
+_STABLE_TICKS = 3
+_MIN_SETTLE_MS = 250
+_MAX_SETTLE_MS = 2500
 _TICK_MS = 100
+# Rough per-sweep time estimate, only for the "Calibrate all" confirmation.
+_EST_SECS_PER_RUN = 12
 
 # Human labels for the step-size choices (ms → label).
 _STEP_LABELS = {600.0: "Coarse", 400.0: "Medium", 250.0: "Fine", 150.0: "Very fine"}
@@ -84,8 +95,11 @@ class FillCalibrationDialog(QDialog, Ui_FillCalibrationDialog):
         # every actuator chamber across all configured robots.
         self._chambers = (chambers if chambers is not None
                           else iter_actuator_chambers(settings.data))
-        # measured results: (mac, slot) → fill_profile list ([[ms, pct], ...])
+        # measured solo results: (mac, slot) → fill_profile list ([[ms, pct], ...])
         self._results: dict[tuple[str, int], list[list[float]]] = {}
+        # measured combination results: (mac, slot) → {combo_key: curve}, the
+        # chamber's fill curve under each co-active slot set it was swept in.
+        self._combo_results: dict[tuple[str, int], dict[str, list[list[float]]]] = {}
         # currently-running calibration job, or None
         self._job: dict | None = None
         self._rows: dict[tuple[str, int], dict] = {}
@@ -183,37 +197,99 @@ class FillCalibrationDialog(QDialog, Ui_FillCalibrationDialog):
     # Calibration driving
     # ------------------------------------------------------------------
 
-    def _calibrate_one(self, key: tuple[str, int], *, queue: list | None = None) -> None:
+    def _calibrate_one(self, key: tuple[str, int]) -> None:
+        """Per-row button: a solo (single-chamber) sweep."""
         if self._job is not None:
             return                       # one at a time
-        row = self._rows[key]
-        row["bar"].setValue(0)
-        row["result"].setText("…")
-        self._set_buttons_enabled(False)
-        self._job = {
-            "key": key, "mac": key[0], "slot": key[1], "phase": "deflate",
-            "cal": FillProfileCalibrator(step_ms=self._step_ms()),
-            "phase_elapsed": 0, "last_pct": 100.0, "queue": queue,
-        }
-        # Start at ambient: deflate and wait until the chamber reads empty.
-        self._gateway.send(key[0], "deflate", chamber=key[1])
-        self._tick.start()
+        self._run_queue([{"mac": key[0], "slots": [key[1]], "idx": 1, "total": 1}])
 
     def _calibrate_all(self) -> None:
         if self._job is not None:
             return
-        queue = list(self._rows.keys())
-        first = queue.pop(0)
-        self._calibrate_one(first, queue=queue)
+        specs = self._build_all_specs()
+        if not specs:
+            return
+        combos = sum(1 for s in specs if len(s["slots"]) > 1)
+        if combos:
+            est = len(specs) * _EST_SECS_PER_RUN
+            if QMessageBox.question(
+                    self, "Calibrate all",
+                    f"This runs {len(specs)} sweeps — every chamber alone plus all "
+                    f"{combos} multi-chamber combinations (chambers sharing a pump "
+                    f"fill slower together). Roughly ~{est // 60}m{est % 60:02d}s.\n\n"
+                    "Each set is inflated from empty. Keep hands clear; Stop aborts "
+                    "at any time.") != QMessageBox.StandardButton.Yes:
+                return
+        self._run_queue(specs)
+
+    def _build_all_specs(self) -> list[dict]:
+        """All sweeps for "Calibrate all": per node, every non-empty subset of its
+        chambers (solos + combinations). Combinations are per node because pumps
+        are shared per node."""
+        groups: dict[str, list[int]] = {}
+        for ch in self._chambers:
+            groups.setdefault(ch["mac"], []).append(int(ch["slot"]))
+        specs: list[dict] = []
+        for mac, slots in groups.items():
+            slots = sorted(set(slots))
+            for r in range(1, len(slots) + 1):
+                for combo in combinations(slots, r):
+                    specs.append({"mac": mac, "slots": list(combo)})
+        total = len(specs)
+        for i, sp in enumerate(specs, 1):
+            sp["idx"], sp["total"] = i, total
+        return specs
+
+    def _run_queue(self, specs: list[dict]) -> None:
+        """Start the first spec, carrying the rest as the queue."""
+        if not specs:
+            self._set_buttons_enabled(True)
+            self.combo_status.setText("")
+            return
+        spec = specs[0]
+        self._start_job(spec["mac"], spec["slots"], queue=specs[1:],
+                        combo_index=(spec["idx"], spec["total"]))
+
+    def _start_job(self, mac: str, slots: list[int], *, queue: list[dict],
+                   combo_index: tuple[int, int]) -> None:
+        if self._job is not None:
+            return
+        slots = sorted(int(s) for s in slots)
+        for s in slots:
+            row = self._rows.get((mac, s))
+            if row is not None:
+                row["bar"].setValue(0)
+                if len(slots) == 1:
+                    row["result"].setText("…")
+        self._set_buttons_enabled(False)
+        self._job = {
+            "mac": mac, "slots": slots, "phase": "deflate", "phase_elapsed": 0,
+            "cal": MultiChamberFillCalibrator(slots, step_ms=self._step_ms()),
+            "last_pct": dict.fromkeys(slots, 100.0), "settle": {},
+            "queue": queue, "combo_index": combo_index,
+        }
+        self._update_combo_status(mac, slots, combo_index)
+        # Start at ambient: deflate every slot in the set and wait until empty.
+        for s in slots:
+            self._gateway.send(mac, "deflate", chamber=s)
+        self._tick.start()
 
     def _begin_step(self, job: dict) -> None:
-        """Open the inflate valve for one step window and wait for it to settle."""
+        """Open the inflate valves of the still-unfinished slots for one step."""
         job["phase"] = "step"
         job["phase_elapsed"] = 0
-        # Time-based fill for exactly one step: the firmware opens the inflate
+        # Time-based fill for exactly one step: the firmware opens each inflate
         # valve for ``ms`` then closes it (HARD_MAX is the only pressure cutoff).
-        self._gateway.send(job["mac"], "inflate", chamber=job["slot"],
-                           ms=int(job["cal"].step_ms))
+        for s in job["cal"].pending_slots():
+            self._gateway.send(job["mac"], "inflate", chamber=s,
+                               ms=int(job["cal"].step_ms))
+
+    def _begin_settle(self, job: dict) -> None:
+        """Start watching the (now valve-closed) readings settle before recording."""
+        job["phase"] = "settle"
+        job["phase_elapsed"] = 0
+        job["settle"] = {s: {"prev": job["last_pct"][s], "stable": 0}
+                         for s in job["cal"].pending_slots()}
 
     def _on_tick(self) -> None:
         job = self._job
@@ -221,19 +297,50 @@ class FillCalibrationDialog(QDialog, Ui_FillCalibrationDialog):
             return
         job["phase_elapsed"] += _TICK_MS
         if job["phase"] == "deflate":
-            # Once empty (or after a bounded wait) begin the inflate sweep.
-            if job["last_pct"] <= _EMPTY_PCT or job["phase_elapsed"] >= _MAX_DEFLATE_MS:
+            empty = all(job["last_pct"][s] <= _EMPTY_PCT for s in job["slots"])
+            if empty or job["phase_elapsed"] >= _MAX_DEFLATE_MS:
                 self._begin_step(job)
         elif job["phase"] == "step":
-            # After the valve-open window + a settle, record the settled reading.
-            if job["phase_elapsed"] >= job["cal"].step_ms + _SETTLE_MS:
-                done = job["cal"].record(job["last_pct"])
-                self._rows[job["key"]]["bar"].setValue(
-                    int(max(0.0, min(100.0, job["cal"].profile.top_pct))))
-                if done:
-                    self._finish_job()
-                else:
-                    self._begin_step(job)
+            # Wait out the firmware's valve-open window, then let the sensor settle.
+            if job["phase_elapsed"] >= job["cal"].step_ms:
+                self._begin_settle(job)
+        elif job["phase"] == "settle":
+            self._update_settle(job)
+            if self._settle_ready(job):
+                self._record_step(job)
+
+    def _update_settle(self, job: dict) -> None:
+        """Per-tick stability count: a slot is stable once its reading stops moving."""
+        for s in job["cal"].pending_slots():
+            st = job["settle"].setdefault(s, {"prev": job["last_pct"][s], "stable": 0})
+            if abs(job["last_pct"][s] - st["prev"]) < _STABLE_DELTA_PCT:
+                st["stable"] += 1
+            else:
+                st["stable"] = 0
+            st["prev"] = job["last_pct"][s]
+
+    @staticmethod
+    def _settle_ready(job: dict) -> bool:
+        if job["phase_elapsed"] >= _MAX_SETTLE_MS:
+            return True                  # ceiling — record whatever we have
+        if job["phase_elapsed"] < _MIN_SETTLE_MS:
+            return False                 # floor — let the laggy sensor start moving
+        return all(job["settle"].get(s, {}).get("stable", 0) >= _STABLE_TICKS
+                   for s in job["cal"].pending_slots())
+
+    def _record_step(self, job: dict) -> None:
+        cal = job["cal"]
+        readings = {s: job["last_pct"][s] for s in cal.pending_slots()}
+        done = cal.record(readings)
+        for s in job["slots"]:
+            row = self._rows.get((job["mac"], s))
+            if row is not None:
+                row["bar"].setValue(int(max(0.0, min(
+                    100.0, cal.calibrator(s).profile.top_pct))))
+        if done:
+            self._finish_job()
+        else:
+            self._begin_step(job)
 
     def _on_pressure(self, mac: str, chamber: int, pct: float, kpa: float) -> None:
         # Keep every row's live kPa current, whichever chamber is being swept.
@@ -241,11 +348,11 @@ class FillCalibrationDialog(QDialog, Ui_FillCalibrationDialog):
         if row is not None:
             row["kpa"].setText(f"{kpa:.2f} kPa" if not math.isnan(kpa) else f"{pct:.0f}%")
         job = self._job
-        if job is None or mac != job["mac"] or chamber != job["slot"]:
+        if job is None or mac != job["mac"] or chamber not in job["last_pct"]:
             return
-        job["last_pct"] = pct
-        if job["phase"] == "deflate":
-            self._rows[job["key"]]["bar"].setValue(int(max(0.0, min(100.0, pct))))
+        job["last_pct"][chamber] = pct
+        if job["phase"] == "deflate" and row is not None:
+            row["bar"].setValue(int(max(0.0, min(100.0, pct))))
 
     def _finish_job(self) -> None:
         job = self._job
@@ -254,10 +361,31 @@ class FillCalibrationDialog(QDialog, Ui_FillCalibrationDialog):
         self._job = None
         self._tick.stop()
         cal = job["cal"]
-        key = job["key"]
-        row = self._rows[key]
+        mac, slots = job["mac"], job["slots"]
+        profiles = cal.profiles()
+        if len(slots) == 1:
+            s = slots[0]
+            self._results[(mac, s)] = profiles[s]
+            self._set_solo_result(mac, s, cal.calibrator(s))
+        else:
+            key = combo_key(slots)
+            for s in slots:
+                self._combo_results.setdefault((mac, s), {})[key] = profiles[s]
+        # Deflate the (now inflated) chambers back to a safe resting state.
+        for s in slots:
+            self._gateway.send(mac, "deflate", chamber=s)
+        queue = job["queue"]
+        if queue:
+            QTimer.singleShot(400, lambda q=queue: self._run_queue(q))
+        else:
+            self.combo_status.setText("")
+            self._set_buttons_enabled(True)
+
+    def _set_solo_result(self, mac: str, slot: int, cal: Any) -> None:
+        row = self._rows.get((mac, slot))
+        if row is None:
+            return
         profile = cal.profile
-        self._results[key] = profile.to_list()
         if cal.timed_out:
             row["result"].setText(f"≥{int(round(profile.full_time_ms))} ms")
             row["result"].setToolTip(
@@ -267,15 +395,14 @@ class FillCalibrationDialog(QDialog, Ui_FillCalibrationDialog):
             row["result"].setText(f"{int(round(profile.full_time_ms))} ms ✓")
             row["result"].setToolTip(
                 f"Reached {int(profile.top_pct)}% over {cal.steps} steps.")
-        # Deflate the (now inflated) chamber back to a safe resting state.
-        self._gateway.send(job["mac"], "deflate", chamber=job["slot"])
-        queue = job["queue"]
-        if queue:
-            nxt = queue.pop(0)
-            QTimer.singleShot(400, lambda k=nxt, q=queue:
-                              self._calibrate_one(k, queue=q))
-        else:
-            self._set_buttons_enabled(True)
+
+    def _update_combo_status(self, mac: str, slots: list[int],
+                             combo_index: tuple[int, int]) -> None:
+        idx, total = combo_index
+        kind = "solo" if len(slots) == 1 else "combo"
+        slot_txt = ",".join(str(s) for s in slots)
+        self.combo_status.setText(
+            f"Run {idx}/{total} — {mac} slots {slot_txt} ({kind})")
 
     def _set_buttons_enabled(self, on: bool) -> None:
         self.all_btn.setEnabled(on and bool(self._chambers))
@@ -292,6 +419,7 @@ class FillCalibrationDialog(QDialog, Ui_FillCalibrationDialog):
         """
         self._tick.stop()
         self._job = None
+        self.combo_status.setText("")
         # Best-effort: halt every chamber so nothing is left actuating.
         if self._gateway is not None:
             for (mac, slot) in self._rows:
@@ -303,15 +431,18 @@ class FillCalibrationDialog(QDialog, Ui_FillCalibrationDialog):
     # ------------------------------------------------------------------
 
     def _save(self) -> None:
-        if not self._results:
+        if not self._results and not self._combo_results:
             QMessageBox.information(self, "Save", "Nothing calibrated yet.")
             return
         for (mac, slot), profile in self._results.items():
             set_fill_profile(self._settings.data, mac, slot, profile)
+        for (mac, slot), combos in self._combo_results.items():
+            set_fill_profiles(self._settings.data, mac, slot, combos)
         self._settings.save()
         self.saved.emit()
+        n = len(set(self._results) | set(self._combo_results))
         QMessageBox.information(
-            self, "Save", f"Saved fill curves for {len(self._results)} chamber(s).")
+            self, "Save", f"Saved fill curves for {n} chamber(s).")
 
     # ------------------------------------------------------------------
     # Gateway plumbing (read thread → Signal → GUI thread)

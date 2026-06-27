@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from src.core import skin_config
 from src.hardware.fill_profile import FillProfile
 
 # Defaults for a discrete-step sweep. The first (coarse) pass uses ~400 ms steps;
@@ -102,12 +103,83 @@ class FillProfileCalibrator:
         return FillProfile(self._points)
 
 
+class MultiChamberFillCalibrator:
+    """Sweeps several chambers **in lockstep** to measure their curves under the
+    real shared-pump load (see :mod:`src.hardware.fill_scaling`).
+
+    Wraps one :class:`FillProfileCalibrator` per slot, all on the same node, all
+    using the same ``step_ms`` so their cumulative times stay aligned. Each step
+    the driver opens the inflate valves of the still-:meth:`pending_slots`,
+    settles, and feeds every pending slot its reading via :meth:`record`. A slot
+    finishes when its own calibrator reaches target/timeout; once finished its
+    valve is no longer opened, so the remaining chambers continue under the now
+    **lighter** load — exactly as at runtime, where a chamber stops when it
+    reaches its target while the others keep filling. The run is :attr:`done`
+    when every slot has finished.
+
+    A single-slot set degenerates to a plain solo sweep, so the dialog drives
+    solo and combination calibrations through one code path."""
+
+    def __init__(self, slots: Any, step_ms: float = DEFAULT_STEP_MS,
+                 target_pct: float = DEFAULT_TARGET_PCT,
+                 max_total_ms: float = DEFAULT_TIMEOUT_MS) -> None:
+        self.step_ms = max(1.0, float(step_ms))
+        self._cals: dict[int, FillProfileCalibrator] = {
+            int(s): FillProfileCalibrator(self.step_ms, target_pct, max_total_ms)
+            for s in slots}
+
+    @property
+    def slots(self) -> list[int]:
+        return sorted(self._cals)
+
+    def calibrator(self, slot: int) -> FillProfileCalibrator:
+        """The per-slot sweep (for its profile / timed_out / steps)."""
+        return self._cals[int(slot)]
+
+    def pending_slots(self) -> list[int]:
+        """Slots not yet finished — the valves to open on the next step."""
+        return sorted(s for s, c in self._cals.items() if not c.done)
+
+    @property
+    def done(self) -> bool:
+        return all(c.done for c in self._cals.values())
+
+    def record(self, readings: dict[int, float]) -> bool:
+        """Advance one step: feed each *pending* slot its settled reading.
+
+        ``readings`` maps slot → pressure %% (0–100); a pending slot missing from
+        the dict reuses its last recorded value. Returns ``True`` once every slot
+        has finished."""
+        for slot, cal in self._cals.items():
+            if cal.done:
+                continue
+            cal.record(readings.get(slot, cal.profile.top_pct))
+        return self.done
+
+    def profiles(self) -> dict[int, list[list[float]]]:
+        """Per-slot measured curve in the stored ``[[ms, pct], ...]`` form."""
+        return {slot: cal.profile.to_list() for slot, cal in self._cals.items()}
+
+
 # ---------------------------------------------------------------------------
 # Settings helpers (pure dict walks over ``Settings.data``)
 # ---------------------------------------------------------------------------
 
 # Node types that actuate chambers (and so have fill curves to calibrate).
 ACTUATOR_NODE_TYPES = ("node_direct", "node_multiplexed")
+
+
+def combo_key(slots: Any) -> str:
+    """Stable key for a co-active slot set: sorted, de-duped, comma-joined.
+
+    Used to store/look up a chamber's fill curve measured under a specific set of
+    concurrently-inflating slots on its node (e.g. ``"0,1,2"``)."""
+    return ",".join(str(s) for s in sorted({int(x) for x in slots}))
+
+
+def parse_combo_key(key: str) -> frozenset[int]:
+    """Inverse of :func:`combo_key` — the slot set a stored combo was measured at."""
+    return frozenset(int(p) for p in str(key).split(",") if p != "")
 
 
 def _iter_robots(settings_data: dict) -> Any:
@@ -143,11 +215,31 @@ def iter_actuator_chambers(settings_data: dict) -> list[dict]:
                     "mac": mac,
                     "slot": int(ch.get("slot", 0)),
                     "node_type": nt,
+                    "fill_mode": skin_config.normalize_fill_mode(ch.get("fill_mode")),
                     "fill_profile": profile,
+                    "fill_profiles": ch.get("fill_profiles") or {},
                     "fill_time_ms": fill_ms,
                     "calibrated": bool(profile) or bool(fill_ms),
                 })
     return out
+
+
+def iter_actuator_nodes(settings_data: dict) -> list[dict]:
+    """Group calibratable chambers by node (``mac``), one entry per node.
+
+    Each entry: ``{mac, node_type, slots, chambers}``. Combinations only matter
+    within a node (pumps/reservoir are shared per node), so the calibration
+    enumerates concurrent subsets from each node's ``slots``."""
+    nodes: dict[str, dict] = {}
+    for ch in iter_actuator_chambers(settings_data):
+        node = nodes.setdefault(ch["mac"], {
+            "mac": ch["mac"], "node_type": ch["node_type"],
+            "slots": [], "chambers": []})
+        node["slots"].append(ch["slot"])
+        node["chambers"].append(ch)
+    for node in nodes.values():
+        node["slots"] = sorted(set(node["slots"]))
+    return list(nodes.values())
 
 
 def set_fill_profile(settings_data: dict, mac: str, slot: int,
@@ -171,8 +263,35 @@ def set_fill_profile(settings_data: dict, mac: str, slot: int,
     return n
 
 
+def set_fill_profiles(settings_data: dict, mac: str, slot: int,
+                      combos: dict[str, list[list[float]]] | None) -> int:
+    """Write the per-combination ``fill_profiles`` map onto matching chamber(s).
+
+    ``combos`` maps a :func:`combo_key` (co-active slot set) to that chamber's
+    measured curve under that load. Stored next to ``fill_profile`` (the solo
+    curve); an empty/``None`` map clears it. Like :func:`set_fill_profile`,
+    writing a measured curve drops any legacy ``fill_time_ms``. Returns the number
+    of chamber entries updated."""
+    n = 0
+    for robot in _iter_robots(settings_data):
+        for skin in robot.get("skins") or []:
+            for ch in skin.get("chambers") or []:
+                if ch.get("mac") == mac and int(ch.get("slot", 0)) == int(slot):
+                    if combos:
+                        ch["fill_profiles"] = {str(k): v for k, v in combos.items()}
+                        ch.pop("fill_time_ms", None)
+                    else:
+                        ch.pop("fill_profiles", None)
+                    n += 1
+    return n
+
+
 def chambers_missing_calibration(settings_data: dict) -> list[dict]:
-    """Configured actuator chambers with no fill curve (or legacy scalar) yet —
-    used by the pre-activity guard to offer calibration."""
+    """Configured actuator chambers that still need a fill curve — used by the
+    pre-activity guard to offer calibration.
+
+    Chambers set to ``pressure`` fill mode inflate closed-loop on the gauge
+    sensor and need no calibration, so they are never flagged."""
     return [c for c in iter_actuator_chambers(settings_data)
-            if not c["calibrated"]]
+            if not c["calibrated"]
+            and c["fill_mode"] != skin_config.FILL_MODE_PRESSURE]

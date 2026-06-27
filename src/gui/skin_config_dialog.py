@@ -49,6 +49,7 @@ _MAX_ALLOWED_KPA   = skincfg.MAX_ALLOWED_KPA
 _DEFAULT_MIN_KPA   = skincfg.DEFAULT_MIN_KPA
 _MIN_ALLOWED_KPA   = skincfg.MIN_ALLOWED_KPA
 _MAX_CHAMBERS      = skincfg.MAX_CHAMBERS
+_DEFAULT_FILL_MODE = skincfg.DEFAULT_FILL_MODE
 _NONE_LABEL        = "(none)"
 _MISSING_FIELD_TITLE = "Missing Field"
 # Silicone variant that carries pluggable organs (organ editor gated on it).
@@ -56,7 +57,8 @@ _ORGAN_VARIANT     = "organ"
 
 
 class _ChamberRow(QWidget):
-    """A single chamber row: MAC dropdown + slot spinbox + min/max pressure spinboxes + remove."""
+    """A single chamber row: MAC dropdown + slot spinbox + min/max pressure
+    spinboxes + fill-mode combo + remove."""
 
     def __init__(
         self,
@@ -66,6 +68,7 @@ class _ChamberRow(QWidget):
         slot: int = 0,
         max_pressure: float = _DEFAULT_MAX_KPA,
         min_pressure: float = _DEFAULT_MIN_KPA,
+        fill_mode: str = _DEFAULT_FILL_MODE,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -111,8 +114,24 @@ class _ChamberRow(QWidget):
         self._max_spin.setSuffix(" kPa")
         self._max_spin.setFixedWidth(75)
         self._max_spin.setWhatsThis(
-            "Highest pressure this chamber inflates to (100% maps here). The "
-            "firmware also enforces its own hard safety ceiling.")
+            "Highest pressure this chamber inflates to (100% maps here). "
+            "Effectively uncapped — the gauge sensor is unreliable, so runaway "
+            "fills are bounded by TIME (fill window / watchdog), not by a "
+            "pressure ceiling. Set a value the chamber and pump can physically "
+            "take.")
+
+        self._mode_combo = QComboBox()
+        self._mode_combo.addItem("Time", skincfg.FILL_MODE_TIME)
+        self._mode_combo.addItem("Pressure", skincfg.FILL_MODE_PRESSURE)
+        mode_idx = self._mode_combo.findData(skincfg.normalize_fill_mode(fill_mode))
+        if mode_idx >= 0:
+            self._mode_combo.setCurrentIndex(mode_idx)
+        self._mode_combo.setWhatsThis(
+            "How this chamber decides when to stop inflating. Time: open the "
+            "valve for a calibrated time window (needs Calibrate Fill; ignores "
+            "the laggy pressure sensor). Pressure: classic closed loop — inflate "
+            "until the gauge sensor reaches the target. Deflate is always "
+            "pressure-based (the sensor cannot read vacuum).")
 
         self._remove_btn = QPushButton("✕")
         self._remove_btn.setFixedWidth(24)
@@ -124,18 +143,21 @@ class _ChamberRow(QWidget):
         hbox.addWidget(self._min_spin)
         hbox.addWidget(QLabel("Max:"))
         hbox.addWidget(self._max_spin)
+        hbox.addWidget(QLabel("Fill:"))
+        hbox.addWidget(self._mode_combo)
         hbox.addWidget(self._remove_btn)
 
     @property
     def remove_btn(self) -> QPushButton:
         return self._remove_btn
 
-    def get_values(self) -> tuple[str, int, float, float]:
+    def get_values(self) -> tuple[str, int, float, float, str]:
         return (
             self._mac_combo.currentText(),
             self._slot_spin.value(),
             round(self._max_spin.value(), 1),
             round(self._min_spin.value(), 1),
+            self._mode_combo.currentData(),
         )
 
     def _on_mac_changed(self, _mac: str) -> None:
@@ -332,6 +354,7 @@ class SkinConfigDialog(QDialog, Ui_SkinConfigDialog):
                 slot=int(ch.get("slot", 0)),
                 max_pressure=float(ch.get("max_pressure", _DEFAULT_MAX_KPA)),
                 min_pressure=float(ch.get("min_pressure", _DEFAULT_MIN_KPA)),
+                fill_mode=skincfg.normalize_fill_mode(ch.get("fill_mode")),
             )
         if not self._rows:
             self._add_row()  # start with one empty row
@@ -471,7 +494,7 @@ class SkinConfigDialog(QDialog, Ui_SkinConfigDialog):
         if self._rows:
             # Collect the template defaults from the first row (typical use is
             # uniform pressure caps across a skin's chambers).
-            _, _, max_p, min_p = self._rows[0].get_values()
+            _, _, max_p, min_p, _ = self._rows[0].get_values()
         template = SkinTemplate(
             template_id=self._db.next_skin_template_id(),
             name=name.strip(),
@@ -532,13 +555,15 @@ class SkinConfigDialog(QDialog, Ui_SkinConfigDialog):
         slot: int = 0,
         max_pressure: float = _DEFAULT_MAX_KPA,
         min_pressure: float = _DEFAULT_MIN_KPA,
+        fill_mode: str = _DEFAULT_FILL_MODE,
     ) -> None:
         if len(self._rows) >= _MAX_CHAMBERS:
             return
         macs      = self._node_macs()
         max_slots = self._node_max_slots()
         row = _ChamberRow(macs, max_slots, mac=mac, slot=slot,
-                          max_pressure=max_pressure, min_pressure=min_pressure)
+                          max_pressure=max_pressure, min_pressure=min_pressure,
+                          fill_mode=fill_mode)
         row.remove_btn.clicked.connect(lambda: self._remove_row(row))
         self._rows.append(row)
         self.rows_layout.addWidget(row)
@@ -867,6 +892,13 @@ class SkinConfigDialog(QDialog, Ui_SkinConfigDialog):
             return
         touch_entry: dict = {"node_mac": touch_mac,
                              "sensor_count": int(self._sensor_count_spin.value())}
+        # Preserve touch sub-config this dialog does not edit (written elsewhere:
+        # the touch-coupling calibration tool, the tuning panel) so a skin save
+        # doesn't wipe the measured coupling matrix or routing.
+        prev_touch = self._load_skin_cfg().get("touch") or {}
+        for key in ("coupling", "compensation", "sensor_to_chamber"):
+            if key in prev_touch:
+                touch_entry[key] = prev_touch[key]
         skin_entry["touch"] = touch_entry
 
     def _rebuild_palette(self) -> None:
@@ -912,17 +944,35 @@ class SkinConfigDialog(QDialog, Ui_SkinConfigDialog):
     # ------------------------------------------------------------------
 
     def _on_test(self) -> None:
-        macs = list({row.get_values()[0] for row in self._rows if row.get_values()[0]})
+        rows = [row.get_values() for row in self._rows]
+        macs = list({mac for mac, *_ in rows if mac})
         if not macs:
             QMessageBox.warning(self, "Test Actuators", "Configure at least one chamber first.")
             return
         from src.gui.test_actuators_dialog import TestActuatorsDialog
-        skin_id   = self.skin_id_edit.text().strip() or "preview"
-        chambers  = [{"mac": m, "slot": s} for m, s, *_ in [r.get_values() for r in self._rows]]
-        # TestActuatorsDialog expects the old skin_cfgs format; build a compatible dict
-        skin_cfgs = [{"skin_id": skin_id, "slots": [c["slot"] for c in chambers]}]
+        skin_id = self.skin_id_edit.text().strip() or "preview"
+        mac = macs[0]
+        # Fill calibration (fill_profile/fill_time_ms) is not edited in the rows,
+        # so carry it over from the saved skin, keyed by (mac, slot) — the test
+        # dialog needs it to inflate time-mode chambers by their time window.
+        prev = {(c.get("mac"), int(c.get("slot", 0))): c
+                for c in self._load_skin_cfg().get("chambers", [])}
+        chambers: list[dict] = []
+        for m, s, max_p, min_p, mode in rows:
+            if m != mac:
+                continue
+            cfg = {"slot": int(s), "max_pressure": float(max_p),
+                   "min_pressure": float(min_p), "fill_mode": mode}
+            saved = prev.get((m, int(s)))
+            if saved:
+                if saved.get("fill_profile") is not None:
+                    cfg["fill_profile"] = saved["fill_profile"]
+                if saved.get("fill_time_ms") is not None:
+                    cfg["fill_time_ms"] = saved["fill_time_ms"]
+            chambers.append(cfg)
+        skin_cfgs = [{"skin_id": skin_id, "chambers": chambers}]
         dlg = TestActuatorsDialog(
-            mac=macs[0],
+            mac=mac,
             skin_cfgs=skin_cfgs,
             gateway=self._gateway,
             parent=self,
@@ -940,7 +990,7 @@ class SkinConfigDialog(QDialog, Ui_SkinConfigDialog):
         skin_id = self.skin_id_edit.text().strip() or "(unsaved)"
         chambers: list[dict] = []
         for row in self._rows:
-            mac, slot, _max_p, _min_p = row.get_values()
+            mac, slot, _max_p, _min_p, _mode = row.get_values()
             if not mac:
                 continue
             if node_types.get(mac) not in ("node_direct", "node_multiplexed"):
@@ -968,9 +1018,24 @@ class SkinConfigDialog(QDialog, Ui_SkinConfigDialog):
 
     def _collect_chambers(self) -> list[dict] | None:
         """Read each chamber row into a list of dicts. Returns None and
-        warns if any row is missing its MAC."""
-        chambers = [{"mac": m, "slot": s, "max_pressure": p, "min_pressure": mn}
-                    for m, s, p, mn in (row.get_values() for row in self._rows)]
+        warns if any row is missing its MAC.
+
+        Fill calibration (``fill_profile``/``fill_time_ms``) is not edited here —
+        it is written by the Calibrate Fill dialog — so it is carried over from
+        the saved skin, keyed by (mac, slot), instead of being dropped on save."""
+        prev = {(c.get("mac"), int(c.get("slot", 0))): c
+                for c in self._load_skin_cfg().get("chambers", [])}
+        chambers: list[dict] = []
+        for m, s, p, mn, fm in (row.get_values() for row in self._rows):
+            ch: dict = {"mac": m, "slot": s, "max_pressure": p,
+                        "min_pressure": mn, "fill_mode": fm}
+            saved = prev.get((m, int(s)))
+            if saved:
+                if saved.get("fill_profile") is not None:
+                    ch["fill_profile"] = saved["fill_profile"]
+                if saved.get("fill_time_ms") is not None:
+                    ch["fill_time_ms"] = saved["fill_time_ms"]
+            chambers.append(ch)
         if skincfg.find_missing_mac(chambers):
             QMessageBox.warning(
                 self, _MISSING_FIELD_TITLE,

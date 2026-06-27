@@ -102,14 +102,12 @@ class LiveTouchClassifier:
         self._t0: float | None = None
 
     def attach(self) -> bool:
-        """Subscribe to the skin's magnet controller. Returns False if there is
-        nothing to attach to or no model to run (stays inert)."""
-        tc = getattr(self._skin, "touch_controller", None)
-        on_magnet = getattr(tc, "on_magnet", None) if tc is not None else None
-        if on_magnet is None or not self._clf.has_model:
+        """Subscribe to the skin's compensated magnet stream. Returns False if
+        there is nothing to attach to or no model to run (stays inert)."""
+        if not self._clf.has_model:
             return False
-        on_magnet(self._handle_magnet)
-        return True
+        from src.hardware.touch_source import subscribe_skin_magnet
+        return subscribe_skin_magnet(self._skin, self._handle_magnet)
 
     def _handle_magnet(self, data: dict) -> None:
         import time

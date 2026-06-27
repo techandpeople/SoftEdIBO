@@ -173,7 +173,8 @@ def _build_one_skin(skin_cfg: dict[str, Any],
          "max_pressure": float(ch.get("max_pressure", 8.0)),
          "min_pressure": float(ch.get("min_pressure", 0.0)),
          "fill_time_ms": ch.get("fill_time_ms"),
-         "fill_profile": ch.get("fill_profile")}
+         "fill_profile": ch.get("fill_profile"),
+         "fill_mode": ch.get("fill_mode")}
         for ch in chambers
     ]
     touch_ctrl = (touch_controllers or {}).get(skin_id)

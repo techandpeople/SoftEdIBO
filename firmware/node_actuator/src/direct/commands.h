@@ -24,10 +24,13 @@ inline uint32_t cmdDropped = 0;
 inline void sendStatus(int ch, float kpa) {
     if (!gatewayKnown) return;
     int  pct = units::kpaToPct(kpa, chambers::state[ch].min_kpa, chambers::state[ch].max_kpa);
-    char buf[64];
+    // "st" is the real actuation state (0 idle, 1 inflating, 2 deflating) so the
+    // PC reflects whether a pump is actually driving the chamber rather than
+    // inferring it from pressure-vs-target (which never settles with pumps off).
+    char buf[80];
     int  len = snprintf(buf, sizeof(buf),
-                        "{\"type\":\"status\",\"chamber\":%d,\"pressure\":%d,\"kpa\":%.2f}",
-                        ch, pct, kpa);
+                        "{\"type\":\"status\",\"chamber\":%d,\"pressure\":%d,\"kpa\":%.2f,\"st\":%d}",
+                        ch, pct, kpa, (int)chambers::state[ch].state);
     esp_now_send(gatewayMac, reinterpret_cast<uint8_t*>(buf), len);
 }
 

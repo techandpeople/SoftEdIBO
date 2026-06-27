@@ -218,3 +218,82 @@ class TestObserverPanel:
         panel.event.connect(lambda *a: captured.append(a))
         panel._emit_observation("P1", "watches")
         assert captured == [("observer", "watches", "P1", "")]
+
+
+# ---------------------------------------------------------------------------
+# TestActuatorsDialog — one-shot inflate/deflate respects configured limits
+# ---------------------------------------------------------------------------
+
+class _RecordingGateway:
+    """Captures every (cmd, kwargs) the dialog sends to the node."""
+
+    def __init__(self):
+        self.sent: list[tuple[str, dict]] = []
+
+    def send(self, _mac, cmd, **kwargs):
+        self.sent.append((cmd, kwargs))
+        return True
+
+    def on_message(self, _cb):
+        pass
+
+
+class TestActuatorsDialogActuation:
+    MAC = "AA:BB:CC:DD:EE:FF"
+
+    def _dialog(self, qtbot, gateway, *, fill_mode, fill_time_ms=None):
+        from src.gui.test_actuators_dialog import TestActuatorsDialog
+
+        skin_cfgs = [{
+            "skin_id": "s",
+            "chambers": [{
+                "slot": 0, "max_pressure": 6.0, "min_pressure": -2.0,
+                "fill_mode": fill_mode, "fill_time_ms": fill_time_ms,
+            }],
+        }]
+        dlg = TestActuatorsDialog(self.MAC, skin_cfgs, gateway, led_count=0)
+        qtbot.addWidget(dlg)
+        gateway.sent.clear()   # drop anything sent during construction
+        return dlg
+
+    def test_inflate_pushes_configured_limits_before_actuating(self, qtbot):
+        gw = _RecordingGateway()
+        dlg = self._dialog(qtbot, gw, fill_mode="pressure")
+        dlg._inflate_slot(0)
+        cmds = [c for c, _ in gw.sent]
+        # Limits go out (max then min) before the inflate so the node targets the
+        # configured caps, not its boot defaults.
+        assert cmds[:2] == ["set_max_pressure", "set_min_pressure"]
+        assert gw.sent[0][1] == {"chamber": 0, "value": 6.0}
+        assert gw.sent[1][1] == {"chamber": 0, "value": -2.0}
+        assert "inflate" in cmds
+
+    def test_inflate_pressure_mode_closes_the_loop_no_time_window(self, qtbot):
+        gw = _RecordingGateway()
+        dlg = self._dialog(qtbot, gw, fill_mode="pressure", fill_time_ms=3000)
+        dlg._inflate_slot(0)
+        inflate = [kw for c, kw in gw.sent if c == "inflate"]
+        assert inflate == [{"chamber": 0, "delta": 100}]
+
+    def test_inflate_time_mode_uses_calibrated_time_window(self, qtbot):
+        gw = _RecordingGateway()
+        dlg = self._dialog(qtbot, gw, fill_mode="time", fill_time_ms=3000)
+        dlg._inflate_slot(0)
+        inflate = [kw for c, kw in gw.sent if c == "inflate"]
+        assert inflate == [{"chamber": 0, "delta": 100, "ms": 3000}]
+
+    def test_inflate_time_mode_without_calibration_falls_back_to_pressure(self, qtbot):
+        gw = _RecordingGateway()
+        dlg = self._dialog(qtbot, gw, fill_mode="time", fill_time_ms=None)
+        dlg._inflate_slot(0)
+        inflate = [kw for c, kw in gw.sent if c == "inflate"]
+        assert inflate == [{"chamber": 0, "delta": 100}]
+
+    def test_deflate_pushes_limits_and_runs_to_configured_min(self, qtbot):
+        gw = _RecordingGateway()
+        dlg = self._dialog(qtbot, gw, fill_mode="time", fill_time_ms=3000)
+        dlg._deflate_slot(0)
+        cmds = [c for c, _ in gw.sent]
+        assert cmds[:2] == ["set_max_pressure", "set_min_pressure"]
+        deflate = [kw for c, kw in gw.sent if c == "deflate"]
+        assert deflate == [{"chamber": 0, "delta": 100}]

@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>TouchCalibrationDialog</class>
+ <widget class="QDialog" name="TouchCalibrationDialog">
+  <property name="geometry">
+   <rect><x>0</x><y>0</y><width>600</width><height>480</height></rect>
+  </property>
+  <property name="windowTitle"><string>Calibrate Touch ↔ Chamber Coupling</string></property>
+  <property name="minimumSize">
+   <size><width>560</width><height>0</height></size>
+  </property>
+  <property name="maximumSize">
+   <size><width>760</width><height>16777215</height></size>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <widget class="QLabel" name="intro_label">
+     <property name="wordWrap"><bool>true</bool></property>
+     <property name="text"><string>Inflating a chamber shifts the magnet over each touch sensor, which can fake a touch. This sweep inflates each chamber alone, reads how much it moves every sensor (in µT), and stores that as a per-chamber compensation matrix that is subtracted from the live reading. Run it once per skin, without touching the skin. Keep hands clear.</string></property>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="skin_row">
+     <item>
+      <widget class="QLabel" name="skin_label">
+       <property name="text"><string>Skin:</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QComboBox" name="skin_combo">
+       <property name="whatsThis"><string>Which skin to calibrate. Only skins whose touch node can stream magnet data are listed.</string></property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="skin_spacer">
+       <property name="orientation"><enum>Qt::Horizontal</enum></property>
+       <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+      </spacer>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <widget class="QProgressBar" name="progress">
+     <property name="value"><number>0</number></property>
+     <property name="whatsThis"><string>Sweep progress across the skin's chambers.</string></property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QLabel" name="status_label">
+     <property name="text"><string>Idle.</string></property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QPlainTextEdit" name="preview">
+     <property name="readOnly"><bool>true</bool></property>
+     <property name="whatsThis"><string>Measured coupling matrix: per chamber, the µT shift it causes on each sensor. Larger numbers mean stronger contamination.</string></property>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="tuning_row">
+     <item>
+      <widget class="QCheckBox" name="enable_check">
+       <property name="text"><string>Enable compensation after saving</string></property>
+       <property name="checked"><bool>true</bool></property>
+       <property name="whatsThis"><string>Subtract the measured matrix from the live touch readings during sessions. Turn off to store the matrix without applying it yet.</string></property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="tuning_spacer">
+       <property name="orientation"><enum>Qt::Horizontal</enum></property>
+       <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="QLabel" name="threshold_label">
+       <property name="text"><string>Touch threshold (µT):</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QSpinBox" name="threshold_spin">
+       <property name="minimum"><number>10</number></property>
+       <property name="maximum"><number>5000</number></property>
+       <property name="singleStep"><number>10</number></property>
+       <property name="value"><number>300</number></property>
+       <property name="whatsThis"><string>After compensation, a sensor counts as touched when its residual reaches this many µT. Lower = more sensitive.</string></property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="suppress_row">
+     <item>
+      <widget class="QCheckBox" name="suppress_check">
+       <property name="text"><string>Ignore a sensor while its chamber is at/above</string></property>
+       <property name="whatsThis"><string>Last-resort fallback: instead of compensating, blank a sensor entirely while a strongly-coupled chamber is this inflated (or this deep in vacuum). Use only if compensation alone is not enough.</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QSpinBox" name="suppress_spin">
+       <property name="minimum"><number>1</number></property>
+       <property name="maximum"><number>100</number></property>
+       <property name="suffix"><string> %</string></property>
+       <property name="value"><number>90</number></property>
+       <property name="enabled"><bool>false</bool></property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="suppress_spacer">
+       <property name="orientation"><enum>Qt::Horizontal</enum></property>
+       <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+      </spacer>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="button_row">
+     <item>
+      <widget class="QPushButton" name="run_btn">
+       <property name="text"><string>Run sweep</string></property>
+       <property name="whatsThis"><string>Inflate each chamber in turn and measure its effect on every sensor. Do not touch the skin during the sweep.</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="stop_btn">
+       <property name="text"><string>⏹ Stop</string></property>
+       <property name="whatsThis"><string>Abort the sweep and halt every chamber (close valves, pumps off).</string></property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="button_spacer">
+       <property name="orientation"><enum>Qt::Horizontal</enum></property>
+       <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="QPushButton" name="save_btn">
+       <property name="text"><string>Save</string></property>
+       <property name="whatsThis"><string>Store the measured coupling matrix (and the chosen settings) onto the skin.</string></property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

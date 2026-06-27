@@ -211,11 +211,15 @@ class ESP32Controller:
         """
         self._touch_callbacks.append(callback)
 
-    def on_pressure(self, callback: Callable[[int, int], None]) -> None:
+    def on_pressure(self, callback: Callable[..., None]) -> None:
         """Register a callback for pressure status messages.
 
         Args:
-            callback: Called with (chamber_id, pressure) on each status reading.
+            callback: Called with ``(chamber_id, pressure, state)`` on each
+                status reading. ``state`` is the firmware-reported actuation
+                state (0 idle, 1 inflating, 2 deflating) or ``None`` when the
+                firmware doesn't report it; callbacks should accept it as an
+                optional argument.
         """
         self._pressure_callbacks.append(callback)
 
@@ -283,7 +287,12 @@ class ESP32Controller:
     def _dispatch_chamber_pressure(self, data: dict[str, Any]) -> None:
         chamber_id = int(data["chamber"])
         pressure = int(data["pressure"])
-        self._call_callbacks(self._pressure_callbacks, chamber_id, pressure)
+        # ``st`` is the firmware-reported actuation state (0 idle, 1 inflating,
+        # 2 deflating); absent on older firmware → None (the consumer then
+        # infers state from pressure vs target).
+        st = data.get("st")
+        state = int(st) if isinstance(st, (int, float)) else None
+        self._call_callbacks(self._pressure_callbacks, chamber_id, pressure, state)
 
     def _dispatch_tank_pressure(self, data: dict[str, Any]) -> None:
         kind = str(data["kind"])

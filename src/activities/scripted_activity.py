@@ -531,10 +531,9 @@ class ScriptedActivity(BaseActivity):
     # ------------------------------------------------------------------
 
     def _subscribe_touch(self, unit: _Unit) -> None:
-        tc = getattr(unit.skin, "touch_controller", None)
-        on_magnet = getattr(tc, "on_magnet", None) if tc is not None else None
-        if on_magnet is not None:
-            on_magnet(lambda data, u=unit: self._on_magnet(u, data))
+        from src.hardware.touch_source import subscribe_skin_magnet
+        subscribe_skin_magnet(unit.skin,
+                              lambda data, u=unit: self._on_magnet(u, data))
 
     def _on_magnet(self, unit: _Unit, data: dict[str, Any]) -> None:
         active = data.get("act") or []

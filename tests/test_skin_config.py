@@ -135,6 +135,23 @@ def test_build_skin_entry_omits_empty_type_variant():
     assert "skin_type" not in entry and "skin_variant" not in entry
 
 
+def test_build_skin_entry_fill_mode_default_dropped_pressure_kept():
+    chambers = [{"mac": "AA", "slot": 0, "fill_mode": "time"},       # default
+                {"mac": "BB", "slot": 1, "fill_mode": "pressure"}]   # non-default
+    entry = skincfg.build_skin_entry("belly-1", chambers)
+    assert "fill_mode" not in entry["chambers"][0]
+    assert entry["chambers"][1]["fill_mode"] == "pressure"
+    # input list must not be mutated
+    assert chambers[0]["fill_mode"] == "time"
+
+
+def test_normalize_fill_mode():
+    assert skincfg.normalize_fill_mode("pressure") == "pressure"
+    assert skincfg.normalize_fill_mode("time") == "time"
+    assert skincfg.normalize_fill_mode(None) == skincfg.DEFAULT_FILL_MODE
+    assert skincfg.normalize_fill_mode("bogus") == skincfg.DEFAULT_FILL_MODE
+
+
 def test_save_skin_entry_append_and_replace():
     data = _data()
     skincfg.save_skin_entry(data, "turtle", 0, -1, {"skin_id": "new-1"})

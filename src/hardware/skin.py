@@ -22,12 +22,26 @@ import math
 import time
 from typing import Any, Callable, Optional
 
+from src.core.skin_config import (
+    DEFAULT_FILL_MODE, FILL_MODE_PRESSURE, normalize_fill_mode)
+from src.core.touch_compensation import compensator_from_config
 from src.hardware.air_chamber import AirChamber, ChamberState
+from src.hardware.fill_calibration import combo_key, parse_combo_key
 from src.hardware.fill_profile import FillProfile
 from src.hardware.fill_scaling import scale_fill_ms
 from src.hardware.touch_event_router import TouchEventRouter
+from src.hardware.touch_source import CompensatedMagnetSource
 
 logger = logging.getLogger(__name__)
+
+# Firmware status ``st`` field → chamber actuation state. The firmware reports
+# only whether a chamber is actively driven (INFLATING/DEFLATING) or not (IDLE);
+# AirChamber maps a firmware-IDLE chamber to INFLATED/IDLE from its pressure.
+_FW_ACTUATION = {
+    0: ChamberState.IDLE,
+    1: ChamberState.INFLATING,
+    2: ChamberState.DEFLATING,
+}
 
 
 class Skin:
@@ -108,6 +122,15 @@ class Skin:
         # Built from the chamber's ``fill_profile`` curve, falling back to a
         # straight line through a legacy scalar ``fill_time_ms``.
         self._fill_profiles: dict[int, FillProfile | None] = {}
+        # local_idx → {frozenset(node_slots): FillProfile} — curves measured with
+        # exactly that set of chambers inflating together (the shared-pump load is
+        # baked into the curve). Runtime prefers an exact match over scaling the
+        # solo curve; falls back to scale_fill_ms when no combination matches.
+        self._combo_profiles: dict[int, dict[frozenset[int], FillProfile]] = {}
+        # local_idx → fill mode ("time" | "pressure"). In "pressure" mode the
+        # chamber inflates closed-loop on the gauge sensor even when a calibrated
+        # curve exists, so the curve is ignored for runtime timing.
+        self._fill_modes: dict[int, str] = {}
 
         self._build_chambers(chamber_inputs)
 
@@ -119,22 +142,55 @@ class Skin:
 
         self._push_pressure_limits()
 
+        # Magnet stream for DETECTION consumers. When pressure-informed
+        # compensation is configured+enabled this wraps the raw controller and
+        # subtracts the actuation offset (so an inflating chamber can't fake a
+        # touch); otherwise it is just the raw controller, so behaviour is
+        # unchanged. The raw ``touch_controller`` stays the source for the
+        # recorder / monitor / coupling calibration (they need uncompensated uT).
+        self.touch_source = self._build_touch_source(touch, touch_controller)
+
         # Touch position tracking (if touch sensing is configured)
         self._touch_position_tracker = None
         self._touch_detector = None
         if touch and touch_controller:
-            self._setup_touch_tracking(touch, touch_controller)
+            self._setup_touch_tracking(touch)
 
         # Higher-level touch events (press/release per chamber), independent of
         # position tracking so they work for any sensor count. Delegated to a
-        # TouchEventRouter (edge detection + sensor→chamber mapping).
+        # TouchEventRouter (edge detection + sensor→chamber mapping). Fed from the
+        # compensated source so a false touch never reaches the activity layer.
         self._touch_router = TouchEventRouter.from_touch_config(
             touch, len(self._chambers), name=self.skin_id)
-        self._touch_router.attach(touch_controller)
+        self._touch_router.attach(self.touch_source)
 
     # ------------------------------------------------------------------
     # Construction helpers
     # ------------------------------------------------------------------
+
+    def _build_touch_source(self, touch: dict[str, Any] | None,
+                            touch_controller: Any) -> Any:
+        """Return the magnet source for detection consumers.
+
+        A :class:`CompensatedMagnetSource` when the skin's ``touch`` config has an
+        enabled coupling matrix; otherwise the raw controller unchanged (so the
+        detection path is byte-for-byte identical when compensation is off)."""
+        if touch_controller is None:
+            return None
+        compensator = compensator_from_config(touch)
+        if compensator is None:
+            return touch_controller
+        logger.info("Pressure-informed touch compensation enabled for skin %s",
+                    self.skin_id)
+        return CompensatedMagnetSource(
+            touch_controller, compensator, self._chamber_levels)
+
+    def _chamber_levels(self) -> dict[int, float]:
+        """Current inflation level (% of max) per node slot — the live signal the
+        compensator scales the coupling matrix by (matrix chambers are keyed by
+        slot, matching the firmware ``status`` broadcasts)."""
+        return {self._slots[idx]: float(ch.pressure)
+                for idx, ch in self._chambers.items()}
 
     def _build_chambers(self, chamber_inputs: list[dict[str, Any]]) -> None:
         """Create one AirChamber per input, recording slot/index maps and fill
@@ -156,6 +212,8 @@ class Skin:
             self._fill_profiles[local_idx] = (
                 FillProfile.from_list(inp.get("fill_profile"))
                 or FillProfile.linear(fill_time))
+            self._combo_profiles[local_idx] = self._parse_combos(inp.get("fill_profiles"))
+            self._fill_modes[local_idx] = normalize_fill_mode(inp.get("fill_mode"))
             self._slots.append(node_slot)
             self._reverse[node_slot] = local_idx
             ch = AirChamber(
@@ -166,6 +224,20 @@ class Skin:
             # Stash min_pressure on the AirChamber for serialisation (chamber_defs).
             ch.min_pressure = float(inp.get("min_pressure", 0.0))  # type: ignore[attr-defined]
             self._chambers[local_idx] = ch
+
+    @staticmethod
+    def _parse_combos(raw: Any) -> dict[frozenset[int], FillProfile]:
+        """Parse a chamber's stored ``fill_profiles`` (combo_key → curve) into a
+        ``{frozenset(node_slots): FillProfile}`` lookup. Ignores malformed entries
+        and single-slot keys (those are the solo ``fill_profile``)."""
+        out: dict[frozenset[int], FillProfile] = {}
+        if isinstance(raw, dict):
+            for key, curve in raw.items():
+                slots = parse_combo_key(key)
+                prof = FillProfile.from_list(curve)
+                if len(slots) >= 2 and prof is not None:
+                    out[slots] = prof
+        return out
 
     def _push_pressure_limits(self) -> None:
         """Push each chamber's max + min pressure to the firmware so they
@@ -224,6 +296,9 @@ class Skin:
             min_p = getattr(ch, "min_pressure", 0.0)
             if abs(min_p) > 1e-3:   # only persist explicit non-zero defaults
                 d["min_pressure"] = min_p
+            mode = self._fill_modes.get(idx, DEFAULT_FILL_MODE)
+            if mode != DEFAULT_FILL_MODE:   # only persist a non-default fill mode
+                d["fill_mode"] = mode
             profile = self._fill_profiles.get(idx)
             if profile is not None and not profile.is_empty:
                 d["fill_profile"] = profile.to_list()
@@ -231,6 +306,10 @@ class Skin:
                 fill = self._fill_times.get(idx)
                 if fill:
                     d["fill_time_ms"] = fill
+            combos = self._combo_profiles.get(idx)
+            if combos:
+                d["fill_profiles"] = {combo_key(slots): prof.to_list()
+                                      for slots, prof in combos.items()}
             defs.append(d)
         return defs
 
@@ -239,9 +318,16 @@ class Skin:
     # ------------------------------------------------------------------
 
     def inflate(self, local_idx: int | None = None, delta: int = 10) -> bool:
-        """Inflate by delta % (relative). Pass None for all chambers."""
+        """Inflate by delta % (relative). Pass None for all chambers.
+
+        A broadcast (``None``) inflates the whole skin in one batch, so the
+        chambers fill *together*: their node slots are passed as the co-active set
+        so each can use a curve measured for exactly that combination (rather than
+        the incrementally-growing fill-load snapshot a per-chamber call sees)."""
         if local_idx is None:
-            return all(self._apply(i, "inflate", delta) for i in self._chambers)
+            co_active = set(self._slots)
+            return all(self._apply(i, "inflate", delta, co_active=co_active)
+                       for i in self._chambers)
         return self._apply(local_idx, "inflate", delta)
 
     def deflate(self, local_idx: int | None = None, delta: int = 10) -> bool:
@@ -284,17 +370,20 @@ class Skin:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _on_pressure(self, node_slot: int, pressure: int) -> None:
+    def _on_pressure(self, node_slot: int, pressure: int,
+                     state: int | None = None) -> None:
         local_idx = self._reverse.get(node_slot)
         if local_idx is not None:
-            self._chambers[local_idx].update_pressure(pressure)
+            actuating = _FW_ACTUATION.get(state) if state is not None else None
+            self._chambers[local_idx].update_pressure(pressure, actuating)
 
     def _on_target(self, node_slot: int, target: int) -> None:
         local_idx = self._reverse.get(node_slot)
         if local_idx is not None:
             self._chambers[local_idx].target_pressure = target
 
-    def _apply(self, local_idx: int, kind: str, value: int) -> bool:
+    def _apply(self, local_idx: int, kind: str, value: int,
+               co_active: set[int] | None = None) -> bool:
         chamber = self._chambers.get(local_idx)
         if chamber is None:
             logger.error("Skin %s: no chamber at local index %d", self.skin_id, local_idx)
@@ -302,30 +391,7 @@ class Skin:
         slot = self._slots[local_idx]
 
         if kind == "inflate":
-            prev_target = chamber.target_pressure
-            new_target = min(100, prev_target + value)
-            chamber.target_pressure = new_target
-            if chamber.pressure < new_target:
-                chamber.state = ChamberState.INFLATING
-            elif new_target > 0:
-                chamber.state = ChamberState.INFLATED
-            # Calibrated chamber → inflate by time so the firmware doesn't depend
-            # on the laggy pressure sensor. The base time comes from the measured
-            # fill curve (time to climb from the current target to the new one —
-            # the curve is non-linear, so this beats assuming proportionality),
-            # then scales with the node's concurrent fill load (pumps are shared:
-            # the more chambers inflating at once, the longer each takes).
-            # Uncalibrated → classic pressure-based inflate.
-            profile = self._fill_profiles.get(local_idx)
-            if profile is not None:
-                base_ms = (profile.time_for_pct(new_target)
-                           - profile.time_for_pct(prev_target))
-                load = self._ctrl.fill_load
-                ms = scale_fill_ms(base_ms, load.active_count() + 1,
-                                   load.pump_count)
-                load.note_inflate(slot, ms)
-                return self._ctrl.inflate(slot, value, ms=ms)
-            return self._ctrl.inflate(slot, value)
+            return self._inflate(local_idx, chamber, slot, value, co_active)
 
         if kind == "deflate":
             new_target = max(0, chamber.target_pressure - value)
@@ -352,6 +418,48 @@ class Skin:
         self._ctrl.fill_load.note_stop(slot)
         return self._ctrl.set_pressure(slot, v)
 
+    def _inflate(self, local_idx: int, chamber: AirChamber, slot: int,
+                 value: int, co_active: set[int] | None = None) -> bool:
+        """Relative inflate of one chamber, choosing time- vs pressure-based fill.
+
+        A calibrated chamber in ``time`` mode inflates by a *time window* derived
+        from its measured fill curve (time to climb from the current target to
+        the new one — the curve is non-linear, so this beats assuming
+        proportionality). When a curve was measured for *exactly* the set of
+        chambers about to fill together (``co_active`` for a batch, else the live
+        fill-load snapshot), that combination curve is used directly — its
+        shared-pump slowdown is already baked in. Otherwise the solo curve is
+        scaled by the node's concurrent fill load (more chambers at once = each
+        takes longer). A chamber in ``pressure`` mode (or one with no curve) uses
+        classic closed-loop pressure inflate, letting the gauge sensor decide when
+        to stop.
+        """
+        prev_target = chamber.target_pressure
+        new_target = min(100, prev_target + value)
+        chamber.target_pressure = new_target
+        if chamber.pressure < new_target:
+            chamber.state = ChamberState.INFLATING
+        elif new_target > 0:
+            chamber.state = ChamberState.INFLATED
+
+        profile = self._fill_profiles.get(local_idx)
+        pressure_mode = self._fill_modes.get(local_idx) == FILL_MODE_PRESSURE
+        if profile is not None and not pressure_mode:
+            load = self._ctrl.fill_load
+            active = set(co_active) if co_active is not None \
+                else load.active_slots() | {slot}
+            measured = self._combo_profiles.get(local_idx, {}).get(frozenset(active))
+            if measured is not None:
+                ms = max(1, int(round(measured.time_for_pct(new_target)
+                                      - measured.time_for_pct(prev_target))))
+            else:
+                base_ms = (profile.time_for_pct(new_target)
+                           - profile.time_for_pct(prev_target))
+                ms = scale_fill_ms(base_ms, load.active_count() + 1, load.pump_count)
+            load.note_inflate(slot, ms)
+            return self._ctrl.inflate(slot, value, ms=ms)
+        return self._ctrl.inflate(slot, value)
+
     # ------------------------------------------------------------------
     # Touch events (press/release per chamber)
     # ------------------------------------------------------------------
@@ -364,11 +472,25 @@ class Skin:
         the GUI thread before touching Qt."""
         self._touch_router.subscribe(callback)
 
+    def on_magnet(self, callback: Callable[[dict[str, Any]], None]) -> bool:
+        """Register ``callback(data)`` for this skin's compensated magnet stream.
+
+        This is the source detection consumers (activities, gesture ML) should
+        use instead of subscribing to ``touch_controller`` directly, so they see
+        pressure-compensated readings. Returns False when the skin has no magnet
+        source. Fires on the gateway thread — marshal to the GUI thread first."""
+        src = self.touch_source
+        on_magnet = getattr(src, "on_magnet", None) if src is not None else None
+        if on_magnet is None:
+            return False
+        on_magnet(callback)
+        return True
+
     # ------------------------------------------------------------------
     # Touch position tracking
     # ------------------------------------------------------------------
 
-    def _setup_touch_tracking(self, touch: dict[str, Any], touch_controller: Any) -> None:
+    def _setup_touch_tracking(self, touch: dict[str, Any]) -> None:
         """Initialize touch position tracking with quadrant detection.
 
         The quadrant detector resolves *where* on the skin a touch lands from a
@@ -408,9 +530,9 @@ class Skin:
                 min_touch_duration_ms=min_duration,
             )
 
-            # Register magnet sensor callback for touch data
-            if hasattr(touch_controller, "on_magnet"):
-                touch_controller.on_magnet(self._on_magnet_touch_data)
+            # Register for the compensated magnet stream (position tracking).
+            if hasattr(self.touch_source, "on_magnet"):
+                self.touch_source.on_magnet(self._on_magnet_touch_data)
 
             logger.info(f"Touch position tracking enabled for skin {self.skin_id}")
 

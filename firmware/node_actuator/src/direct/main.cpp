@@ -126,15 +126,24 @@ void loop() {
     // pressure / dead-man / watchdog tick can stop the run. New test_stop/test_run
     // commands are still processed above, so the latch can always be exited.
     if (chambers::testDir >= 0) {
-        if (now - lastStatusMs >= STATUS_REPORT_MS) {
-            lastStatusMs = now;
-            for (int i = 0; i < NUM_CHAMBERS; i++) {
-                chambers::cachedKpa[i] = pressure::readKpa(PSENSOR_PINS[i]);
-                commands::sendStatus(i, chambers::cachedKpa[i]);
+        // Dead-man: this run bypasses every other safety, so it must not outlive
+        // the PC link. The dialog re-sends `test_run` ~1 Hz as a keepalive; if none
+        // arrives in time (dialog gone, USB/ESP-NOW link dropped) end the run and
+        // fall through to normal (now-idle) control rather than inflate forever.
+        if (now - chambers::testHeartbeatMs >= chambers::TEST_RUN_TIMEOUT_MS) {
+            DBG_PRINT("TEST_RUN dead-man fired (no keepalive) — stopping\n");
+            chambers::testStop();
+        } else {
+            if (now - lastStatusMs >= STATUS_REPORT_MS) {
+                lastStatusMs = now;
+                for (int i = 0; i < NUM_CHAMBERS; i++) {
+                    chambers::cachedKpa[i] = pressure::readKpa(PSENSOR_PINS[i]);
+                    commands::sendStatus(i, chambers::cachedKpa[i]);
+                }
+                commands::sendPumps();
             }
-            commands::sendPumps();
+            return;
         }
-        return;
     }
 
     // ---- Pressure read + safety stop ----
@@ -144,11 +153,19 @@ void loop() {
             chambers::cachedKpa[i] = pressure::readKpa(PSENSOR_PINS[i]);
             float kpa = chambers::cachedKpa[i];
             auto& ch  = chambers::state[i];
-            if (ch.state == chambers::INFLATING &&
-                (kpa >= ch.target_kpa || kpa >= ch.max_kpa)) {
-                chambers::stop(i);
-                ch.hold_kpa = chambers::cachedKpa[i];   // maintain the achieved level
-                chambers::recalcPumps();
+            if (ch.state == chambers::INFLATING) {
+                // A time-based fill (fill_until_ms set) deliberately ignores the
+                // per-chamber pressure target — that is the whole point of timing
+                // the fill when the gauge sensor is laggy or reads high. Only the
+                // absolute HARD_MAX backstops it; fillTimeTick() ends it on time.
+                // A closed-loop fill still stops at its sensor target as before.
+                float ceiling = (ch.fill_until_ms != 0)
+                                ? chambers::HARD_MAX_KPA : ch.target_kpa;
+                if (kpa >= ceiling) {
+                    chambers::stop(i);
+                    ch.hold_kpa = chambers::cachedKpa[i];   // maintain the achieved level
+                    chambers::recalcPumps();
+                }
             }
             if (ch.state == chambers::DEFLATING && kpa <= ch.target_kpa) {
                 chambers::stop(i);

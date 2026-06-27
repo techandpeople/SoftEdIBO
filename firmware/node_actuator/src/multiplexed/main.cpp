@@ -59,10 +59,13 @@ void sendStatus(int chamber, float kpa) {
     if (!gatewayKnown) return;
     auto& ch = chambers::state[chamber];
     int pct = units::kpaToPct(kpa, ch.min_kpa, ch.max_kpa);
-    char buf[72];
+    // "st" is the real actuation state (0 idle, 1 inflating, 2 deflating) so the
+    // PC reflects whether a chamber is actually being driven rather than
+    // inferring it from pressure-vs-target (which never settles with pumps off).
+    char buf[80];
     int len = snprintf(buf, sizeof(buf),
-                       "{\"type\":\"status\",\"chamber\":%d,\"pressure\":%d,\"kpa\":%.2f}",
-                       chamber, pct, kpa);
+                       "{\"type\":\"status\",\"chamber\":%d,\"pressure\":%d,\"kpa\":%.2f,\"st\":%d}",
+                       chamber, pct, kpa, (int)ch.state);
     esp_now_send(gatewayMac, reinterpret_cast<const uint8_t*>(buf), len);
 }
 
@@ -585,10 +588,18 @@ void chamberControlStep(uint32_t now) {
         chambers::cachedKpa[i] = mux::readKpa(mux_ch);
 
         auto& ch = chambers::state[i];
-        if (ch.state == chambers::INFLATING &&
-            (chambers::cachedKpa[i] >= ch.target_kpa || chambers::cachedKpa[i] >= ch.max_kpa)) {
-            chambers::stop(i);
-            ch.hold_kpa = chambers::cachedKpa[i];   // maintain the achieved level
+        if (ch.state == chambers::INFLATING) {
+            // A time-based fill (fill_until_ms set) deliberately ignores the
+            // per-chamber pressure target — that is the whole point of timing the
+            // fill when the gauge sensor is laggy or reads high. Only the absolute
+            // HARD_MAX backstops it; fillTimeTick() ends it on time. A closed-loop
+            // fill still stops at its sensor target as before.
+            float ceiling = (ch.fill_until_ms != 0)
+                            ? config::HARD_CHAMBER_MAX_KPA : ch.target_kpa;
+            if (chambers::cachedKpa[i] >= ceiling) {
+                chambers::stop(i);
+                ch.hold_kpa = chambers::cachedKpa[i];   // maintain the achieved level
+            }
         }
         if (ch.state == chambers::DEFLATING &&
             (chambers::cachedKpa[i] <= ch.target_kpa || chambers::cachedKpa[i] <= ch.min_kpa)) {
