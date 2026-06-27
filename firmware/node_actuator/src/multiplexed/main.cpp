@@ -21,7 +21,18 @@ constexpr uint32_t PRESSURE_CHECK_MS = 200;
 constexpr uint32_t STATUS_REPORT_MS  = 500;
 constexpr float DETECT_DELTA_KPA     = 0.3f;
 
+// The closed-loop chamber cutoff runs MUCH tighter than tank control / telemetry.
+// A chamber's inflate pump runs at full duty the whole time it is INFLATING, so
+// the achieved pressure overshoots the target by however much is delivered between
+// two checks: at 200 ms a single "+" step (e.g. +10 % of range) blew past to ~30 %
+// before the cutoff looked at the sensor. 20 ms shrinks that window ~10x so the
+// measured level settles on the commanded target (mirrors node_direct). Tank
+// control stays on the slow PRESSURE_CHECK_MS cadence — its pumps must not toggle
+// fast, and the slow mux scan is fine for them.
+constexpr uint32_t CHAMBER_CHECK_MS  = 20;
+
 uint32_t lastPressureMs = 0;
+uint32_t lastChamberMs  = 0;
 uint32_t lastStatusMs = 0;
 
 // Gateway MAC tracking lives in the shared ESP-NOW layer.
@@ -751,8 +762,14 @@ void loop() {
             manualPressureSafety();
         } else {
             tankControlStep();
-            chamberControlStep(now);
         }
+    }
+
+    // Closed-loop chamber cutoff on its own tight cadence (see CHAMBER_CHECK_MS):
+    // the slow tank/telemetry cadence let a small inflate step overshoot badly.
+    if (!manualActive && now - lastChamberMs >= CHAMBER_CHECK_MS) {
+        lastChamberMs = now;
+        chamberControlStep(now);
     }
 
     if (now - lastStatusMs >= STATUS_REPORT_MS) {

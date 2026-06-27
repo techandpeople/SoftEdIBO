@@ -1,5 +1,6 @@
 """Tests for the database module."""
 
+import json
 import os
 import tempfile
 from datetime import datetime
@@ -69,3 +70,28 @@ def test_log_and_get_events(db):
     assert len(events) == 1
     assert events[0].action == "inflate"
     assert events[0].type == "turtle"
+
+
+def test_get_session_start_meta_roundtrips_robots(db):
+    """Resume rebuilds a session's robots from its start event, not the global
+    last_assignments cache, so the per-session robot list survives intact."""
+    db.save_session(SessionRecord(
+        session_id="S100", activity_name="Group Touch", start_time=datetime.now()))
+    db.log_event(InteractionEvent(
+        session_id="S100", participant_id="system", type="session", action="start",
+        timestamp=datetime.now(),
+        metadata=json.dumps({"robot_ids": ["turtle-1", "tree-1"],
+                             "simulation_mode": True}),
+    ))
+    db.flush_events()
+
+    meta = db.get_session_start_meta("S100")
+    assert meta["robot_ids"] == ["turtle-1", "tree-1"]
+    assert meta["simulation_mode"] is True
+
+
+def test_get_session_start_meta_absent_returns_empty(db):
+    """A session with no recorded start metadata (e.g. created before this was
+    tracked) yields an empty dict, so resume restores no robots rather than
+    wrong ones."""
+    assert db.get_session_start_meta("missing") == {}
