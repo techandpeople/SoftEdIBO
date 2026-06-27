@@ -1,5 +1,6 @@
 """Session control panel for managing study sessions."""
 
+import json
 import logging
 from datetime import datetime
 
@@ -106,15 +107,48 @@ class SessionPanel(QWidget, Ui_SessionPanel):
             self._db.save_session(record)
 
     def _resume_session(self, record: SessionRecord) -> None:
-        """Restore panel state for a previously interrupted session."""
+        """Restore panel state for a previously interrupted session.
+
+        The robots are rebuilt from the session's own ``start`` event metadata
+        (see :meth:`Database.get_session_start_meta`), so resume restores
+        exactly the robots that session ran with — not whatever the global
+        ``last_assignments.json`` cache happens to hold.
+        """
+        activity = get_activity(record.activity_name, self._db)
+        if activity is None:
+            # Legacy/removed activity (e.g. an old "Simulation" session) — it
+            # can no longer be rebuilt, so close it out rather than half-resume.
+            QMessageBox.warning(
+                self,
+                "Cannot resume session",
+                f"Session <b>{record.session_id}</b> used activity "
+                f"'{record.activity_name}', which is no longer available.\n\n"
+                "The session has been closed.",
+            )
+            record.end_time = datetime.now()
+            self._db.save_session(record)
+            return
+
         self._current_record = record
+        self._current_activity = activity
+        meta = self._db.get_session_start_meta(record.session_id)
+        activity.simulation_mode = bool(meta.get("simulation_mode", False))
+
         participants = self._db.get_session_participants(record.session_id)
         participant_names = (
             ", ".join(p.participant_id for p in participants) if participants else "none"
         )
 
+        robot_ids = set(meta.get("robot_ids", []))
+        session_robots = [r for r in self._available_robots if r.robot_id in robot_ids]
+        session_robots = activity.prepare_robots(session_robots)
+        robot_names = (
+            ", ".join(r.robot_id for r in session_robots) if session_robots else "none"
+        )
+
         self.session_id_label.setText(record.session_id)
         self.activity_label.setText(record.activity_name)
+        self.robots_label.setText(robot_names)
         self.participants_label.setText(participant_names)
         self.status_label.setText("Status: Running (resumed)")
         self.new_session_btn.setEnabled(False)
@@ -131,27 +165,10 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         ))
         self.session_started.emit(record.session_id)
 
-        last_path = Settings.ROOT / "data" / _LAST_ASSIGNMENTS_FILE
-        last_data = last_asgn.load(last_path)
-        if last_data and last_data.get("session_id") == record.session_id:
-            ids = set(last_data.get("robot_ids", []))
-            session_robots = [r for r in self._available_robots if r.robot_id in ids]
-        else:
-            session_robots = []
-        self._current_activity = get_activity(record.activity_name, self._db)
-        if self._current_activity is not None:
-            if last_data:
-                self._current_activity.simulation_mode = last_data.get("simulation_mode", False)
-            session_robots = self._current_activity.prepare_robots(session_robots)
-        robot_names = (
-            ", ".join(r.robot_id for r in session_robots) if session_robots else "none"
-        )
-        self.robots_label.setText(robot_names)
         self._monitor.set_robots(session_robots)
-        sim = self._current_activity.simulation_mode if self._current_activity else False
-        self._start_recording(record.session_id, True, sim, session_robots)
-        if self._current_activity is not None:
-            self._start_activity(self._current_activity, record.session_id, session_robots)
+        self._start_recording(record.session_id, True, activity.simulation_mode,
+                              session_robots)
+        self._start_activity(activity, record.session_id, session_robots)
         self._build_skin_participant_map(record.session_id)
         self._session_participants = list(participants)
         self._open_assignment_panel(session_robots)
@@ -232,6 +249,13 @@ class SessionPanel(QWidget, Ui_SessionPanel):
             type="session",
             action="start",
             timestamp=start_time,
+            # Durable, per-session record of exactly which robots this session
+            # ran with (and the sim flag) so resume can rebuild it without
+            # relying on the global last_assignments.json cache.
+            metadata=json.dumps({
+                "robot_ids": [r.robot_id for r in robots],
+                "simulation_mode": activity.simulation_mode,
+            }),
         ))
 
         robot_names = ", ".join(r.robot_id for r in robots) if robots else "none"

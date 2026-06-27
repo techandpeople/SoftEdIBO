@@ -38,7 +38,16 @@
 #include "commands.h"
 #include "dbg.h"
 
-constexpr uint32_t PRESSURE_CHECK_MS = 200;
+// How often the closed-loop pressure cutoff (loop() below) samples each gauge
+// and stops a chamber that has reached its target. This is the control loop, NOT
+// telemetry — keep it tight. The inflate pump runs at full duty the whole time a
+// chamber is INFLATING, so the achieved pressure overshoots the target by however
+// much the pump delivers between two checks: at the old 200 ms a single "+" step
+// (e.g. +10 % of range) blew past to ~30 % before the cutoff ever looked at the
+// sensor. At 20 ms that overshoot window is ~10x smaller, so the measured level
+// settles on the commanded target instead of sailing past it. A read is cheap
+// (3 dedicated ADC pins, 4 samples each ≈ 100 µs); telemetry stays at 500 ms.
+constexpr uint32_t PRESSURE_CHECK_MS = 20;
 constexpr uint32_t STATUS_REPORT_MS  = 500;
 
 static uint32_t lastPressureMs = 0;

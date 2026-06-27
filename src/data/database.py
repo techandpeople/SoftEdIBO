@@ -443,6 +443,38 @@ class Database:
                     unit_ids=json.dumps(assignment.unit_ids),
                 ))
 
+    def get_session_start_meta(self, session_id: str) -> dict:
+        """Return the parsed metadata of a session's ``start`` event.
+
+        The start event records the exact robots and simulation flag the
+        session ran with, as a JSON object (``{"robot_ids": [...],
+        "simulation_mode": bool}``). This is the durable, per-session source
+        of truth used to rebuild a session on resume — unlike the global
+        ``last_assignments.json`` cache, which only ever holds the most recent
+        session and so restores wrong/stale robots for any other session.
+
+        Returns an empty dict when there is no start event or its metadata is
+        missing/unparseable (e.g. sessions created before this was recorded).
+        """
+        import json
+        with self._db_engine.connect() as conn:
+            row = conn.execute(
+                select(_events.c.metadata)
+                .where(
+                    (_events.c.session_id == session_id)
+                    & (_events.c.type == "session")
+                    & (_events.c.action == "start")
+                )
+                .order_by(_events.c.event_id)
+            ).first()
+        if row is None or not row.metadata:
+            return {}
+        try:
+            data = json.loads(row.metadata)
+        except (ValueError, TypeError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
     def get_session_assignments(self, session_id: str) -> list[SessionAssignment]:
         """Return all robot-unit=>participant assignments for a session."""
         import json
