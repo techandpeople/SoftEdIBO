@@ -41,6 +41,9 @@ class SessionPanel(QWidget, Ui_SessionPanel):
     session_stopped = Signal()
     reload_requested = Signal()     # ask the app to rebuild robots (e.g. after calibration)
 
+    _NEXT_PHASE_LABEL = "Next Phase"
+    _NO_MORE_PHASES_LABEL = "No more phases"
+
     def __init__(self, db: Database, gateway=None):
         super().__init__()
         self.setupUi(self)
@@ -63,6 +66,8 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         self.new_session_btn.clicked.connect(self._open_setup_dialog)
         self.pause_btn.clicked.connect(self._on_pause)
         self.stop_btn.clicked.connect(self._on_stop)
+        self.prev_phase_btn.clicked.connect(self._on_previous_phase)
+        self.next_phase_btn.clicked.connect(self._on_next_phase)
         self.observer_btn.clicked.connect(self._show_observer_panel)
 
         self._monitor = RobotMonitorPanel()
@@ -155,6 +160,8 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         self.pause_btn.setEnabled(True)
         self.stop_btn.setEnabled(True)
         self.observer_btn.setEnabled(bool(participants))
+        # Phase buttons are enabled by _wire_phase_controls once the activity
+        # has started and its units are in the initial phase.
 
         self._db.log_event(InteractionEvent(
             session_id=record.session_id,
@@ -272,6 +279,8 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         self.pause_btn.setEnabled(True)
         self.stop_btn.setEnabled(True)
         self.observer_btn.setEnabled(bool(participants))
+        # Phase buttons are enabled by _wire_phase_controls once the activity
+        # has started and its units are in the initial phase.
 
         self._current_activity = activity
         robots = activity.prepare_robots(robots)
@@ -298,8 +307,20 @@ class SessionPanel(QWidget, Ui_SessionPanel):
             activity.setup(session, robots)
             activity.start()
             self._wire_organ_views(activity)
+            self._wire_phase_controls(activity)
         except Exception:   # noqa: BLE001 — surface but don't crash the GUI
             logger.exception("Failed to start activity %s", activity.name)
+
+    def _wire_phase_controls(self, activity: BaseActivity) -> None:
+        """Keep the Previous/Next phase buttons in sync with the activity.
+
+        Registers a listener so the activity's own timed and touch-driven
+        transitions update the buttons too — not only the manual presses — then
+        sets their initial state for the phase the activity just started in."""
+        add_listener = getattr(activity, "add_phase_listener", None)
+        if add_listener is not None:
+            add_listener(lambda a=activity: self._update_phase_buttons(a))
+        self._update_phase_buttons(activity)
 
     def _wire_organ_views(self, activity: BaseActivity) -> None:
         """Route an organ-aware activity's per-skin updates to the monitor's
@@ -568,6 +589,62 @@ class SessionPanel(QWidget, Ui_SessionPanel):
                 self._pending_touches.pop(i)
                 break
 
+    @staticmethod
+    def _activity_can(activity: BaseActivity | None, method: str) -> bool:
+        """Call a bool-returning activity capability method (e.g.
+        ``has_phases``), tolerating activities that don't define it."""
+        fn = getattr(activity, method, None)
+        return bool(fn()) if callable(fn) else False
+
+    def _activity_has_phases(self, activity: BaseActivity | None) -> bool:
+        """True when the activity is a multi-phase scripted behaviour, so the
+        phase controls are meaningful (other activities have no phases)."""
+        return self._activity_can(activity, "has_phases")
+
+    def _update_phase_buttons(self, activity: BaseActivity | None) -> None:
+        """Sync the Previous/Next phase buttons to where the timeline is now.
+
+        Called both by the manual buttons and by the activity's own timed /
+        touch transitions (via ``add_phase_listener``), so the controls always
+        reflect the actual phase. The Next button greys out and reads 'No more
+        phases' at the terminal phase; Previous greys out on the first phase.
+        """
+        has_phases = self._activity_has_phases(activity)
+        can_next = self._activity_can(activity, "can_advance_phase")
+        can_prev = self._activity_can(activity, "can_rewind_phase")
+        self.next_phase_btn.setText(
+            self._NO_MORE_PHASES_LABEL if has_phases and not can_next
+            else self._NEXT_PHASE_LABEL)
+        self.next_phase_btn.setEnabled(can_next)
+        self.prev_phase_btn.setEnabled(can_prev)
+
+    def _on_next_phase(self) -> None:
+        """Skip the timer and advance the running behaviour to its next phase."""
+        self._move_phase("advance_phase", "next_phase")
+
+    def _on_previous_phase(self) -> None:
+        """Rewind the running behaviour to its previous phase."""
+        self._move_phase("rewind_phase", "previous_phase")
+
+    def _move_phase(self, method: str, action: str) -> None:
+        """Drive a manual phase move and log it. The button enabled/label state
+        is refreshed by the activity's phase listener (see
+        :meth:`_wire_phase_controls`), which fires on the resulting transition.
+        """
+        move = getattr(self._current_activity, method, None)
+        if move is None:
+            return
+        new_phase = move()
+        if new_phase is not None and self._current_record is not None:
+            self._db.log_event(InteractionEvent(
+                session_id=self._current_record.session_id,
+                participant_id="system",
+                type="session",
+                action=action,
+                target=new_phase,
+                timestamp=datetime.now(),
+            ))
+
     def _on_pause(self) -> None:
         """Toggle between paused and running state, logging a session event."""
         if self.pause_btn.text() == "Pause":
@@ -606,6 +683,10 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         self._current_activity.pause()
         self._monitor.set_paused(True)
         self.pause_btn.setText("Resume")
+        # Moving a phase actuates chambers on enter, so neither button must be
+        # reachable while the system is halted.
+        self.prev_phase_btn.setEnabled(False)
+        self.next_phase_btn.setEnabled(False)
         self.status_label.setText("Status: EMERGENCY STOP")
         if self._current_record is not None:
             self._db.log_event(InteractionEvent(
@@ -623,6 +704,7 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         self._current_activity.resume()
         self._monitor.set_paused(False)
         self.pause_btn.setText("Pause")
+        self._update_phase_buttons(self._current_activity)
         self.status_label.setText("Status: Running")
         if self._current_record is not None:
             self._db.log_event(InteractionEvent(
@@ -690,6 +772,9 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         self.pause_btn.setText("Pause")
         self.pause_btn.setEnabled(False)
         self.stop_btn.setEnabled(False)
+        self.prev_phase_btn.setEnabled(False)
+        self.next_phase_btn.setText(self._NEXT_PHASE_LABEL)
+        self.next_phase_btn.setEnabled(False)
         self.observer_btn.setEnabled(False)
 
         if self._current_activity is not None:

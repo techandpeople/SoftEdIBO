@@ -40,8 +40,24 @@ PIO=(python -m platformio)
 merge_node() {
     local dir="$1" env="$2" out="$3"
     local chip="${4:-esp32}" boot_off="${5:-0x1000}" freq="${6:-40m}"
+    local out_path="$dir/$out"
     echo
     echo "=== $dir [$env] -> $out ==="
+
+    # Skip when the merged bundle already exists and is newer than every source it
+    # can depend on: this env's src/, the shared firmware/common/ headers, the
+    # board's platformio.ini and any sdkconfig. A re-run then rebuilds only the
+    # envs that actually changed (e.g. edit a node → the gateway/magnet bundles are
+    # left untouched). Pass REBUILD=1 to force a full rebuild.
+    local deps=("$dir/src" firmware/common "$dir/platformio.ini")
+    local f
+    for f in "$dir"/sdkconfig*; do [[ -e "$f" ]] && deps+=("$f"); done
+    if [[ "${REBUILD:-0}" != 1 && -f "$out_path" \
+          && -z "$(find "${deps[@]}" -newer "$out_path" 2>/dev/null)" ]]; then
+        echo "skip (bundle up to date)"
+        return
+    fi
+
     (
         cd "$dir"
         "${PIO[@]}" run -e "$env"

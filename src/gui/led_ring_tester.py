@@ -19,7 +19,8 @@ from src.gui.ui_led_ring_tester import Ui_LedRingTester
 
 _OFF_COLOR = QColor("#202020")
 
-# Basic LED colors
+# Basic LED colors. Purple matches the behaviour editor's default (#8e44ad) so
+# the same colour is selectable from the test panel and the activity editor.
 _COLORS = {
     "Red":    "#ff0000",
     "Green":  "#00ff00",
@@ -27,6 +28,7 @@ _COLORS = {
     "White":  "#ffffff",
     "Yellow": "#ffff00",
     "Cyan":   "#00ffff",
+    "Purple": "#8e44ad",
 }
 
 _PATTERNS = ["solid", "blink", "pulse"]

@@ -236,6 +236,13 @@ static void rxTask(void*) {
 
 static constexpr size_t OTA_IMAGE_MAX = 4 * 1024 * 1024;  // sanity cap
 
+// Cumulative ack cadence for the staging stream: the gateway tells the PC how
+// many bytes it has actually appended each time s_otaLen crosses a multiple of
+// this, so the PC can flow-control and never outrun the USB RX buffer. Without
+// it the PC blasts the whole image back-to-back, the RX buffer overflows, bytes
+// are silently dropped, and ota_store_end reports size_mismatch.
+static constexpr size_t OTA_ACK_EVERY = 4 * 1024;
+
 static uint8_t*       s_otaImage   = nullptr;  // PSRAM buffer holding the node image
 static size_t         s_otaCap     = 0;        // allocated capacity (= expected size)
 static size_t         s_otaLen     = 0;        // bytes written so far
@@ -326,13 +333,22 @@ static bool handleOtaStore(const char* cmd, cJSON* doc) {
     }
 
     if (strcmp(cmd, "ota_store_data") == 0) {
-        // No per-chunk ack: USB is a reliable, ordered link, so we just append and
-        // let ota_store_end verify the total size. Silently ignored if not storing.
+        // Append the chunk and emit a cumulative ack every OTA_ACK_EVERY bytes so
+        // the PC can window its sends (USB is ordered but NOT lossless once the RX
+        // buffer overflows). Silently ignored if not storing.
         cJSON* j_data = cJSON_GetObjectItemCaseSensitive(doc, "data");
         if (s_otaImage && cJSON_IsString(j_data)) {
+            size_t before = s_otaLen;
             int n = otaB64Decode(j_data->valuestring, s_otaImage + s_otaLen,
                                  s_otaCap - s_otaLen);
             if (n > 0) s_otaLen += n;
+            if (s_otaLen / OTA_ACK_EVERY != before / OTA_ACK_EVERY) {
+                char buf[48];
+                snprintf(buf, sizeof(buf),
+                         "{\"type\":\"ota_store_ack\",\"len\":%u}",
+                         (unsigned)s_otaLen);
+                usbWriteLine(buf);
+            }
         }
         return true;
     }
@@ -475,7 +491,10 @@ static void processLine(const char* line, size_t len) {
 extern "C" void app_main(void) {
     usb_serial_jtag_driver_config_t ucfg = {
         .tx_buffer_size = 1024,
-        .rx_buffer_size = 1024,
+        // Large RX buffer so the bulk OTA staging stream (PC -> gateway) has
+        // headroom while a line is being parsed/decoded. Sized comfortably above
+        // the PC's in-flight window (see WifiOTAUpdater.STORE_WINDOW).
+        .rx_buffer_size = 16384,
     };
     usb_serial_jtag_driver_install(&ucfg);
 
@@ -513,20 +532,25 @@ extern "C" void app_main(void) {
 #endif
     usbWriteLine(ready);
 
-    // Read serial line-by-line into a fixed stack buffer (no heap per line).
-    static char line[SERIAL_BUF_LEN];
-    size_t      llen = 0;
-    uint8_t     ch;
+    // Read serial in bulk (draining the RX buffer fast keeps the OTA staging
+    // stream from overflowing it), splitting into lines in a fixed stack buffer.
+    static char    line[SERIAL_BUF_LEN];
+    size_t         llen = 0;
+    static uint8_t rx[256];
     for (;;) {
-        if (usb_serial_jtag_read_bytes(&ch, 1, pdMS_TO_TICKS(20)) <= 0) continue;
-        if (ch == '\n' || ch == '\r') {
-            if (llen > 0) {
-                line[llen] = '\0';
-                processLine(line, llen);
-                llen = 0;
+        int got = usb_serial_jtag_read_bytes(rx, sizeof(rx), pdMS_TO_TICKS(20));
+        if (got <= 0) continue;
+        for (int i = 0; i < got; ++i) {
+            uint8_t ch = rx[i];
+            if (ch == '\n' || ch == '\r') {
+                if (llen > 0) {
+                    line[llen] = '\0';
+                    processLine(line, llen);
+                    llen = 0;
+                }
+            } else if (llen < SERIAL_BUF_LEN - 1) {
+                line[llen++] = static_cast<char>(ch);
             }
-        } else if (llen < SERIAL_BUF_LEN - 1) {
-            line[llen++] = static_cast<char>(ch);
         }
     }
 }

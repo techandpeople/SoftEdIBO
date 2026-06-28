@@ -84,30 +84,23 @@ inline void sendDebug() {
 }
 #endif
 
-inline void process(const cmd_queue::Cmd& c) {
+// Actuation commands that a ``chamber == -1`` target fans out to every chamber
+// in parallel (one frame, not one per chamber). Inflate-all opens every valve
+// together for a fast coarse fill that narrows 3→2→1 as each chamber hits its
+// target (the last finishes isolated/precise; earlier ones are coupled until
+// check valves are fitted). Limit commands (set_max/set_min — each chamber has
+// its own) and the manual bench controls stay single-target.
+inline bool isFanOut(cmd_queue::CmdType t) {
     using namespace cmd_queue;
-    if (c.type == CMD_PING)  { sendPong();  return; }
-#ifdef DEBUG_BUILD
-    if (c.type == CMD_DEBUG) { sendDebug(); return; }
-#endif
+    return t == CMD_INFLATE || t == CMD_DEFLATE
+        || t == CMD_SET_PRESSURE || t == CMD_HOLD;
+}
 
-    // Emergency stop / re-arm: handled regardless of chamber, even while stopped.
-    if (c.type == CMD_STOP)   { chambers::stopped = true;  chambers::emergencyStopAll(); sendAck("stop");   sendPumps(); return; }
-    if (c.type == CMD_RESUME) { chambers::stopped = false; sendAck("resume"); return; }
-
-    // Stop a continuous bench-test run: honoured even while latched stopped.
-    if (c.type == CMD_TEST_STOP) { chambers::testStop(); sendAck("test_stop"); sendPumps(); return; }
-
-    // While latched stopped, drop every actuation command so nothing re-actuates.
-    if (chambers::stopped) return;
-
-    // Start a continuous bench-test run (param = direction). Targetless, so it
-    // must be handled before the per-chamber index guard below.
-    if (c.type == CMD_TEST_RUN) { chambers::testRun(c.param, c.chamber); sendAck("test_run"); sendPumps(); return; }
-
-    int n = c.chamber;
-    if (n < 0 || n >= NUM_CHAMBERS) return;
-
+// Apply one already-parsed command to a single (assumed valid) chamber ``n``.
+// Split out of process() so a ``chamber == -1`` actuation can fan out to every
+// chamber in one pass.
+inline void applyChamberCmd(int n, const cmd_queue::Cmd& c) {
+    using namespace cmd_queue;
     auto& ch = chambers::state[n];
 
     switch (c.type) {
@@ -183,6 +176,43 @@ inline void process(const cmd_queue::Cmd& c) {
     default:
         break;
     }
+}
+
+inline void process(const cmd_queue::Cmd& c) {
+    using namespace cmd_queue;
+    if (c.type == CMD_PING)  { sendPong();  return; }
+#ifdef DEBUG_BUILD
+    if (c.type == CMD_DEBUG) { sendDebug(); return; }
+#endif
+
+    // Emergency stop / re-arm: handled regardless of chamber, even while stopped.
+    if (c.type == CMD_STOP)   { chambers::stopped = true;  chambers::emergencyStopAll(); sendAck("stop");   sendPumps(); return; }
+    if (c.type == CMD_RESUME) { chambers::stopped = false; sendAck("resume"); return; }
+
+    // Stop a continuous bench-test run: honoured even while latched stopped.
+    if (c.type == CMD_TEST_STOP) { chambers::testStop(); sendAck("test_stop"); sendPumps(); return; }
+
+    // While latched stopped, drop every actuation command so nothing re-actuates.
+    if (chambers::stopped) return;
+
+    // Start a continuous bench-test run (param = direction). Targetless, so it
+    // must be handled before the per-chamber index guard below.
+    if (c.type == CMD_TEST_RUN) { chambers::testRun(c.param, c.chamber); sendAck("test_run"); sendPumps(); return; }
+
+    // chamber == -1 actuates EVERY chamber from ONE frame (the PC's Inflate/
+    // Deflate-All): all valves open together (fast coarse fill) and each chamber
+    // closes its OWN valve as it reaches its target, while the valve-driven pump
+    // keeps running for the rest (see chambers.h recalcPumps). The open set
+    // narrows 3→2→1, so the last chamber finishes isolated (precise) — earlier
+    // ones are coupled/approximate until per-chamber check valves are fitted. One
+    // frame also can't be dropped per-chamber (no command-level retry).
+    int n = c.chamber;
+    if (n == -1 && isFanOut(c.type)) {
+        for (int i = 0; i < NUM_CHAMBERS; i++) applyChamberCmd(i, c);
+        return;
+    }
+    if (n < 0 || n >= NUM_CHAMBERS) return;
+    applyChamberCmd(n, c);
 }
 
 inline void parseAndQueue(const uint8_t* data, int len) {

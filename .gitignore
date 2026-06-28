@@ -28,7 +28,8 @@ coverage.xml
 src/gui/ui_*.py
 
 # IDE
-.vscode/
+.vscode/*
+!.vscode/c_cpp_properties.json
 .idea/
 *.swp
 *.swo

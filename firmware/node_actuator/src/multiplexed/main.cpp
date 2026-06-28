@@ -378,67 +378,21 @@ void emergencyStopAll() {
     for (int i = 0; i < MAX_CHAMBERS; i++) chambers::stop(i);
 }
 
-void processCommand(const cmd_queue::Cmd& c) {
+// Actuation commands that a ``chamber == -1`` target fans out to every chamber
+// (so "Inflate All" / "Deflate All" is one frame, not one per chamber). Limit
+// commands (set_max/set_min — each chamber has its own) and the manual bench
+// controls are deliberately excluded; they stay single-target.
+bool isFanOut(cmd_queue::CmdType t) {
     using namespace cmd_queue;
+    return t == CMD_INFLATE || t == CMD_DEFLATE
+        || t == CMD_SET_PRESSURE || t == CMD_HOLD;
+}
 
-    if (c.type == CMD_PING) {
-        sendPong();
-        return;
-    }
-
-    // Emergency stop / re-arm — works regardless of configured/error state.
-    if (c.type == CMD_STOP)   { emergencyStopped = true;  emergencyStopAll(); return; }
-    if (c.type == CMD_RESUME) { emergencyStopped = false; return; }
-
-#ifdef DEBUG_BUILD
-    if (c.type == CMD_DEBUG) {
-        char buf[192];
-        int len = snprintf(buf, sizeof(buf),
-                           "{\"type\":\"debug\",\"ready\":%d,\"configured\":%d,\"num_chambers\":%d,\"p_tank\":%d,\"v_tank\":%d}",
-                           config::state.ready ? 1 : 0,
-                           configured ? 1 : 0,
-                           config::state.num_chambers,
-                           config::state.pressure_tank_mux_ch,
-                           config::state.vacuum_tank_mux_ch);
-        if (gatewayKnown) {
-            esp_now_send(gatewayMac, reinterpret_cast<uint8_t*>(buf), len);
-        }
-        return;
-    }
-#endif
-
-    if (config::state.error) {
-        sendError("pca9685_address_conflict");
-        return;
-    }
-
-    if (c.type == CMD_CONFIGURE) {
-        config::state.num_chambers          = max(1, min((int)c.cfg_chambers, MAX_CHAMBERS));
-        config::state.tank_pressure_min_kpa = constrain(c.cfg_p_min, config::HARD_TANK_MIN_KPA, config::HARD_TANK_MAX_KPA);
-        config::state.tank_pressure_max_kpa = constrain(c.cfg_p_max, config::state.tank_pressure_min_kpa + 0.1f, config::HARD_TANK_MAX_KPA);
-        config::state.tank_vacuum_min_kpa   = constrain(c.cfg_v_min, config::HARD_TANK_MIN_KPA, config::HARD_TANK_MAX_KPA);
-        config::state.tank_vacuum_max_kpa   = constrain(c.cfg_v_max, config::state.tank_vacuum_min_kpa + 0.1f, config::HARD_TANK_MAX_KPA);
-        config::state.tank_pressure_target_kpa = constrain(c.cfg_p_target,
-            config::state.tank_pressure_min_kpa, config::state.tank_pressure_max_kpa);
-        config::state.tank_vacuum_target_kpa   = constrain(c.cfg_v_target,
-            config::state.tank_vacuum_min_kpa,   config::state.tank_vacuum_max_kpa);
-        if (c.cfg_pressure_mask || c.cfg_vacuum_mask) {
-            applyPumpGroups(c.cfg_pressure_mask, c.cfg_vacuum_mask);
-        }
-        configured = true;
-        return;
-    }
-
-    if (!configured) {
-        sendError("not_configured");
-        return;
-    }
-
-    int n = c.chamber;
-    if (n < 0 || n >= config::state.num_chambers || n >= MAX_CHAMBERS) {
-        return;
-    }
-
+// Apply one already-parsed command to a single (assumed valid) chamber ``n``.
+// Split out of processCommand() so a ``chamber == -1`` actuation can fan out to
+// every chamber in one pass.
+void applyChamberCmd(int n, const cmd_queue::Cmd& c) {
+    using namespace cmd_queue;
     auto& ch = chambers::state[n];
 
     switch (c.type) {
@@ -512,6 +466,76 @@ void processCommand(const cmd_queue::Cmd& c) {
     default:
         break;
     }
+}
+
+void processCommand(const cmd_queue::Cmd& c) {
+    using namespace cmd_queue;
+
+    if (c.type == CMD_PING) {
+        sendPong();
+        return;
+    }
+
+    // Emergency stop / re-arm — works regardless of configured/error state.
+    if (c.type == CMD_STOP)   { emergencyStopped = true;  emergencyStopAll(); return; }
+    if (c.type == CMD_RESUME) { emergencyStopped = false; return; }
+
+#ifdef DEBUG_BUILD
+    if (c.type == CMD_DEBUG) {
+        char buf[192];
+        int len = snprintf(buf, sizeof(buf),
+                           "{\"type\":\"debug\",\"ready\":%d,\"configured\":%d,\"num_chambers\":%d,\"p_tank\":%d,\"v_tank\":%d}",
+                           config::state.ready ? 1 : 0,
+                           configured ? 1 : 0,
+                           config::state.num_chambers,
+                           config::state.pressure_tank_mux_ch,
+                           config::state.vacuum_tank_mux_ch);
+        if (gatewayKnown) {
+            esp_now_send(gatewayMac, reinterpret_cast<uint8_t*>(buf), len);
+        }
+        return;
+    }
+#endif
+
+    if (config::state.error) {
+        sendError("pca9685_address_conflict");
+        return;
+    }
+
+    if (c.type == CMD_CONFIGURE) {
+        config::state.num_chambers          = max(1, min((int)c.cfg_chambers, MAX_CHAMBERS));
+        config::state.tank_pressure_min_kpa = constrain(c.cfg_p_min, config::HARD_TANK_MIN_KPA, config::HARD_TANK_MAX_KPA);
+        config::state.tank_pressure_max_kpa = constrain(c.cfg_p_max, config::state.tank_pressure_min_kpa + 0.1f, config::HARD_TANK_MAX_KPA);
+        config::state.tank_vacuum_min_kpa   = constrain(c.cfg_v_min, config::HARD_TANK_MIN_KPA, config::HARD_TANK_MAX_KPA);
+        config::state.tank_vacuum_max_kpa   = constrain(c.cfg_v_max, config::state.tank_vacuum_min_kpa + 0.1f, config::HARD_TANK_MAX_KPA);
+        config::state.tank_pressure_target_kpa = constrain(c.cfg_p_target,
+            config::state.tank_pressure_min_kpa, config::state.tank_pressure_max_kpa);
+        config::state.tank_vacuum_target_kpa   = constrain(c.cfg_v_target,
+            config::state.tank_vacuum_min_kpa,   config::state.tank_vacuum_max_kpa);
+        if (c.cfg_pressure_mask || c.cfg_vacuum_mask) {
+            applyPumpGroups(c.cfg_pressure_mask, c.cfg_vacuum_mask);
+        }
+        configured = true;
+        return;
+    }
+
+    if (!configured) {
+        sendError("not_configured");
+        return;
+    }
+
+    // chamber == -1 fans an actuation out to EVERY chamber, so the PC's
+    // Inflate/Deflate-All travels as ONE ESP-NOW frame instead of one per
+    // chamber. With no command-level retry a single dropped per-chamber frame
+    // used to leave most chambers un-actuated (the "only one inflates" bug).
+    int n = c.chamber;
+    int limit = min(config::state.num_chambers, (int)MAX_CHAMBERS);
+    if (n == -1 && isFanOut(c.type)) {
+        for (int i = 0; i < limit; i++) applyChamberCmd(i, c);
+        return;
+    }
+    if (n < 0 || n >= limit) return;
+    applyChamberCmd(n, c);
 }
 
 float readTankKpa(int mux_ch) {
