@@ -48,12 +48,14 @@ def test_extract_invalid_returns_empty():
 class FakeGateway:
     """ESPNowGateway stand-in: records sends, replays gateway/node messages."""
 
-    def __init__(self):
+    def __init__(self, auto_ack=False):
         self.is_connected = True
         self.gateway_sends: list[tuple[str, dict]] = []   # (cmd, kwargs)
         self.node_sends: list[tuple[str, str, dict]] = []  # (mac, cmd, kwargs)
         self._cb = None
         self._lock = threading.Lock()
+        self._auto_ack = auto_ack   # mirror the gateway's cumulative ota_store_ack
+        self._recv = 0              # bytes "received" so far (for acks)
 
     def on_message(self, cb):
         self._cb = cb
@@ -63,8 +65,15 @@ class FakeGateway:
             self._cb = None
 
     def send_gateway(self, command, **kwargs):
+        ack = None
         with self._lock:
             self.gateway_sends.append((command, kwargs))
+            if self._auto_ack and command == "ota_store_data":
+                self._recv += len(base64.b64decode(kwargs["data"]))
+                ack = {"type": "ota_store_ack", "len": self._recv}
+        # Deliver outside the lock (the updater's handler runs on this thread).
+        if ack is not None:
+            self.deliver(ack)
         return True
 
     def send(self, mac, command, **kwargs):
@@ -144,6 +153,43 @@ def test_wifi_ota_stages_and_confirms(tmp_path):
     gw.deliver({"source": MAC, "type": "ota_done"})
     thread.join(timeout=5)
     assert result and result[0][0] is True
+
+
+def test_wifi_ota_large_image_flow_controlled(tmp_path):
+    # Bigger than the in-flight window so _await_window actually blocks/resumes;
+    # the fake gateway acks cumulatively like the real one, so it drains fine.
+    app = bytes([_ESP_APP_MAGIC]) + b"node-firmware-payload" * 4096  # ~84 KB
+    gw = FakeGateway(auto_ack=True)
+    result, thread = _run_in_thread(_make(gw, tmp_path, app))
+
+    gw.wait_gateway("ota_store_begin")
+    gw.deliver({"type": "ota_store_ready"})
+    gw.wait_gateway("ota_store_end")
+    assert gw.staged_image() == app
+    gw.deliver({"type": "ota_stored", "ok": True, "url": URL})
+
+    gw.wait_node("ota_wifi")
+    gw.deliver({"source": MAC, "type": "ota_wifi_start"})
+    gw.deliver({"source": MAC, "type": "ota_done"})
+    thread.join(timeout=5)
+    assert result and result[0][0] is True
+
+
+def test_wifi_ota_stalls_when_gateway_stops_acking(tmp_path):
+    # A large image with no acks must fail fast (not hang) once the window fills.
+    app = bytes([_ESP_APP_MAGIC]) + b"z" * (16 * 1024)
+    gw = FakeGateway()  # never acks
+    updater = _make(gw, tmp_path, app)
+    updater.STORE_ACK_TIMEOUT = 0.3
+    result, thread = _run_in_thread(updater)
+
+    gw.wait_gateway("ota_store_begin")
+    gw.deliver({"type": "ota_store_ready"})
+    thread.join(timeout=5)
+    assert result and result[0][0] is False
+    assert "Staging failed" in result[0][1]
+    # Never reached the node trigger because staging never completed.
+    assert not gw.node_sends
 
 
 def test_wifi_ota_no_psram_reports_clear_error(tmp_path):

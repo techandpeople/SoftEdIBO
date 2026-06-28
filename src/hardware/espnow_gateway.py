@@ -11,12 +11,17 @@ Protocol format (JSON over serial):
 import json
 import logging
 import threading
+import time
 import weakref
 from typing import Any, Callable
 
 import serial
 
 logger = logging.getLogger(__name__)
+
+# Seconds to wait for the peer on the serial port to prove it is a gateway
+# before giving up and reporting the connection as failed.
+VERIFY_TIMEOUT_S = 2.0
 
 
 class ESPNowGateway:
@@ -46,24 +51,118 @@ class ESPNowGateway:
         """Check if gateway is connected."""
         return self._serial is not None and self._serial.is_open
 
-    def connect(self) -> bool:
-        """Open serial connection to the gateway."""
+    def connect(self, verify: bool = True) -> bool:
+        """Open serial connection to the gateway.
+
+        Opening a serial port succeeds for *any* device that enumerates on it
+        — a node flashed over USB, an unrelated dev board, etc. ``verify``
+        (default) therefore runs a short handshake and only reports success if
+        the peer actually identifies itself as a SoftEdIBO gateway, so we never
+        mistake some other serial device for the gateway. Pass ``verify=False``
+        to skip the check (e.g. tests with a fake port).
+        """
         try:
             self._serial = serial.Serial(
                 port=self._port,
                 baudrate=self._baud_rate,
                 timeout=1,
             )
-            self._running = True
-            self._read_thread = threading.Thread(
-                target=self._read_loop, daemon=True
-            )
-            self._read_thread.start()
-            logger.info("Connected to ESP-NOW gateway on %s", self._port)
-            return True
         except serial.SerialException as e:
             logger.warning("Failed to connect to gateway on %s: %s", self._port, e)
             return False
+
+        if verify and not self._verify_is_gateway():
+            logger.warning(
+                "Device on %s did not identify as a SoftEdIBO gateway — "
+                "not connecting", self._port,
+            )
+            self._serial.close()
+            self._serial = None
+            return False
+
+        self._running = True
+        self._read_thread = threading.Thread(target=self._read_loop, daemon=True)
+        self._read_thread.start()
+        logger.info("Connected to ESP-NOW gateway on %s", self._port)
+        return True
+
+    def _is_gateway_line(self, raw: bytes) -> bool:
+        """True if ``raw`` is a line only a gateway would emit.
+
+        A gateway announces ``gateway_ready`` once at boot, always answers the
+        gateway-local ``get_ap`` probe (``ap_config`` on the SoftAP build,
+        ``ap_not_supported`` otherwise), and is the only thing that tags
+        forwarded node messages with ``source``. A node's USB serial emits
+        none of these, so any one of them confirms a real gateway.
+        """
+        try:
+            data = json.loads(raw.decode("utf-8").strip())
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return False
+        if not isinstance(data, dict):
+            return False
+        if data.get("status") == "gateway_ready":
+            return True
+        if data.get("type") in ("ap_config", "ap_set"):
+            return True
+        if data.get("type") == "error" and data.get("reason") == "ap_not_supported":
+            return True
+        return "source" in data
+
+    def _send_probe(self) -> None:
+        """Poke the gateway so it answers even if it booted long ago.
+
+        The IDF gateways (C6/S3) always reply to the gateway-local ``get_ap``;
+        the old Arduino gateway ignores it but still streams ``gateway_ready``
+        and forwarded node messages, which :meth:`_is_gateway_line` accepts.
+        """
+        try:
+            self._serial.write(b'{"cmd":"get_ap"}\n')
+        except serial.SerialException:
+            pass
+
+    def _scan_lines(self, buf: bytearray) -> bool:
+        """Consume complete newline-terminated lines from ``buf`` in place,
+        returning True as soon as one of them proves a gateway."""
+        while b"\n" in buf:
+            raw, _, rest = buf.partition(b"\n")
+            buf[:] = rest
+            if self._is_gateway_line(raw):
+                return True
+        return False
+
+    def _verify_is_gateway(self) -> bool:
+        """Block until the peer proves it is a gateway, or the timeout elapses.
+
+        Runs before the background read thread starts, so it owns the serial
+        port and can read synchronously. Partial/garbled lines simply fail the
+        JSON parse in :meth:`_is_gateway_line` and are ignored.
+        """
+        if self._serial is None:
+            return False
+        prev_timeout = self._serial.timeout
+        self._serial.timeout = 0.1
+        buf = bytearray()
+        try:
+            self._serial.reset_input_buffer()
+            self._send_probe()
+            last_probe = time.monotonic()
+            deadline = last_probe + VERIFY_TIMEOUT_S
+            while time.monotonic() < deadline:
+                try:
+                    buf.extend(self._serial.read(self._serial.in_waiting or 1))
+                except serial.SerialException:
+                    return False
+                if self._scan_lines(buf):
+                    return True
+                now = time.monotonic()
+                if now - last_probe > 0.6:  # re-prod in case the first was dropped
+                    last_probe = now
+                    self._send_probe()
+            return False
+        finally:
+            if self._serial is not None:
+                self._serial.timeout = prev_timeout
 
     def disconnect(self) -> None:
         """Close serial connection."""

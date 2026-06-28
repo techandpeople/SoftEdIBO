@@ -24,8 +24,19 @@ inline uint32_t lastShow_ = 0;
 
 constexpr uint32_t REFRESH_MS = 25;
 
+// Build a strip colour from sRGB channels, applying perceptual gamma. The PC
+// sends plain sRGB hex (what the on-screen colour picker shows), but NeoPixels
+// drive a *linear* PWM, so without correction mid-tones look too bright and hues
+// drift from the picker. gamma8() maps each channel back to the perceived value.
+inline uint32_t srgbColor(uint8_t r, uint8_t g, uint8_t b) {
+    return strip.Color(Adafruit_NeoPixel::gamma8(r),
+                       Adafruit_NeoPixel::gamma8(g),
+                       Adafruit_NeoPixel::gamma8(b));
+}
+
 inline void writeAll(uint8_t r, uint8_t g, uint8_t b) {
-    for (int i = 0; i < NUM_LEDS; i++) strip.setPixelColor(i, strip.Color(r, g, b));
+    uint32_t c = srgbColor(r, g, b);
+    for (int i = 0; i < NUM_LEDS; i++) strip.setPixelColor(i, c);
     strip.show();
 }
 
@@ -60,7 +71,7 @@ inline void set(uint8_t r, uint8_t g, uint8_t b,
 inline void setPixel(int i, uint8_t r, uint8_t g, uint8_t b) {
     if (i < 0 || i >= NUM_LEDS) return;
     pattern_ = MANUAL;
-    strip.setPixelColor(i, strip.Color(r, g, b));
+    strip.setPixelColor(i, srgbColor(r, g, b));
     strip.show();
 }
 

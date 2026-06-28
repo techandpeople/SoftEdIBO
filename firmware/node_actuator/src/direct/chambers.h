@@ -67,29 +67,30 @@ inline void setValve(int ch, int side, bool open) {
     digitalWrite(VALVE_PINS[ch * 2 + side], open ? HIGH : LOW);
 }
 
-// Drive the shared pumps from the ACTUAL open valves, not from chamber state, so
-// neither pump can ever run dead-headed (forcing against closed valves): the
-// inflate/pressure pump (PUMP1) runs only while some inflate valve is open, the
-// deflate/vacuum pump (PUMP2) only while some deflate valve is open. The instant
-// the last matching valve closes (stop(), a pressure cutoff, etc.) the pump stops.
+// Drive the shared pumps PURELY from the ACTUAL open valves, never from chamber
+// state: each pump runs as long as ANY valve of its direction is open, and stops
+// only once they are all closed. So while inflating several chambers the inflate
+// pump keeps running as the chambers finish and close their valves one by one —
+// and across a hand-off where one chamber's valve closes and the next opens, it
+// never drops (an open valve is always present). Both directions are symmetric;
+// neither can run dead-headed (no open valve of its direction ⇒ it is off).
 inline void recalcPumps() {
-    uint8_t maxInflateDuty = 0;
-    bool    anyDeflateOpen = false;
+    bool anyInflateOpen = false;
+    bool anyDeflateOpen = false;
     for (int i = 0; i < NUM_CHAMBERS; i++) {
-        if (valveOpen[i * 2 + 0] && state[i].state == INFLATING)
-            maxInflateDuty = max(maxInflateDuty, state[i].duty);
-        if (valveOpen[i * 2 + 1])
-            anyDeflateOpen = true;
+        if (valveOpen[i * 2 + 0]) anyInflateOpen = true;
+        if (valveOpen[i * 2 + 1]) anyDeflateOpen = true;
     }
+    uint8_t inflateDuty = anyInflateOpen ? DEFAULT_INFLATE_DUTY : 0;
     static uint8_t lastInflateDuty = 0xFF;
     static bool    lastDeflateOn   = true;
-    if (maxInflateDuty != lastInflateDuty || anyDeflateOpen != lastDeflateOn) {
+    if (inflateDuty != lastInflateDuty || anyDeflateOpen != lastDeflateOn) {
         DBG_PRINT("PUMPS inflate_duty=%u deflate=%s\n",
-                  maxInflateDuty, anyDeflateOpen ? "ON" : "off");
-        lastInflateDuty = maxInflateDuty;
+                  inflateDuty, anyDeflateOpen ? "ON" : "off");
+        lastInflateDuty = inflateDuty;
         lastDeflateOn   = anyDeflateOpen;
     }
-    ledcWrite(PUMP1_LEDC_CH, maxInflateDuty);
+    ledcWrite(PUMP1_LEDC_CH, inflateDuty);
     ledcWrite(PUMP2_LEDC_CH, anyDeflateOpen ? 255 : 0);
 }
 

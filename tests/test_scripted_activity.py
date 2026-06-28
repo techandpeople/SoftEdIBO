@@ -169,6 +169,76 @@ def test_touch_count_shortcut_advances_before_time(clock):
     assert activity.unit_state(unit.unit_id) == "phase2"
 
 
+def test_advance_phase_skips_timer_and_stops_at_terminal(clock):
+    activity, ctrl, skin, robot = _condition_a()
+    _start(activity, robot)
+    uid = _unit(activity).unit_id
+    assert activity.has_phases()                  # condition A is multi-phase
+    assert activity.can_advance_phase() is True
+    assert activity.can_rewind_phase() is False   # at the initial phase
+
+    # No time passes; manual advance must still move through the timeline.
+    assert activity.advance_phase() == "phase2"
+    assert activity.unit_state(uid) == "phase2"
+    assert ctrl.halves == ["#8e44ad", "#f1c40f"]
+
+    assert activity.advance_phase() == "phase3"
+    assert activity.unit_state(uid) == "phase3"
+    assert ctrl.led[0] == "#f1c40f"               # yellow
+
+    # phase3 is terminal (no transitions) → nothing left to advance.
+    assert activity.can_advance_phase() is False
+    assert activity.advance_phase() is None
+    assert activity.unit_state(uid) == "phase3"
+
+
+def test_rewind_phase_goes_back_and_stops_at_initial(clock):
+    activity, ctrl, skin, robot = _condition_a()
+    _start(activity, robot)
+    uid = _unit(activity).unit_id
+
+    activity.advance_phase()                       # phase1 → phase2
+    activity.advance_phase()                       # phase2 → phase3
+    assert activity.unit_state(uid) == "phase3"
+
+    assert activity.can_rewind_phase() is True
+    assert activity.rewind_phase() == "phase2"
+    assert activity.unit_state(uid) == "phase2"
+    assert activity.rewind_phase() == "phase1"
+    assert activity.unit_state(uid) == "phase1"
+
+    # Back at the initial phase → nothing earlier to rewind to.
+    assert activity.can_rewind_phase() is False
+    assert activity.rewind_phase() is None
+    assert activity.unit_state(uid) == "phase1"
+
+
+def test_phase_listener_fires_on_timed_and_manual_moves(clock):
+    activity, ctrl, skin, robot = _condition_a()
+    _start(activity, robot)
+    seen: list[bool] = []
+    activity.add_phase_listener(lambda: seen.append(True))
+
+    clock.advance(121)                             # timed transition phase1→2
+    activity._on_tick()
+    assert len(seen) == 1
+
+    activity.advance_phase()                       # manual transition phase2→3
+    assert len(seen) == 2
+
+
+def test_single_phase_spec_has_no_phases(clock):
+    spec = {"initial": "s", "states": {"s": {"do": [], "transitions": []}}}
+    ctrl = _FakeCtrl()
+    robot = _FakeRobot([_FakeSkin(controller=ctrl)])
+    activity = _start(ScriptedActivity("flat", "", spec), robot)
+    assert activity.has_phases() is False
+    assert activity.can_advance_phase() is False
+    assert activity.can_rewind_phase() is False
+    assert activity.advance_phase() is None
+    assert activity.rewind_phase() is None
+
+
 # ---------------------------------------------------------------------------
 # Sequence scheduler — inflate / wait / deflate plays out over time
 # ---------------------------------------------------------------------------

@@ -396,12 +396,44 @@ class TestActuatorsDialog(QDialog, Ui_TestActuatorsDialog):
         self._gateway.send(self._mac, "deflate", chamber=slot, delta=100)
 
     def _inflate_slots(self, slots: list[int]) -> None:
-        for slot in slots:
-            self._inflate_slot(slot)
+        """Inflate several chambers at once.
+
+        When ``slots`` is the whole node (the common case — node_direct is one
+        skin of 3 chambers), send a SINGLE broadcast frame (``chamber=-1``) the
+        node fans out to every chamber, so all inflate valves open together: the
+        shared pump then runs continuously while ANY valve is open and each
+        chamber closes its own valve as it reaches its max (see the node's
+        ``recalcPumps``). One frame also can't be dropped per-chamber, so we never
+        get "only one inflating" from a lost ESP-NOW frame (no command-level
+        retry). The fill is closed-loop to each chamber's configured max (a shared
+        frame can't carry per-chamber calibrated fill windows — fine for a bench
+        "fill all"). A partial selection still falls back to per-slot."""
+        if set(slots) == set(self._chamber_cfgs):
+            self._broadcast_actuate("inflate", slots)
+        else:
+            for slot in slots:
+                self._inflate_slot(slot)
 
     def _deflate_slots(self, slots: list[int]) -> None:
+        """Deflate several chambers — one broadcast frame for the whole node
+        (see :meth:`_inflate_slots`), else per-slot. Deflate has no calibrated
+        time window, so the whole-node case can always go single-frame."""
+        if set(slots) == set(self._chamber_cfgs):
+            self._broadcast_actuate("deflate", slots)
+        else:
+            for slot in slots:
+                self._deflate_slot(slot)
+
+    def _broadcast_actuate(self, command: str, slots: list[int]) -> None:
+        """Re-push every chamber's configured limits, then send ONE
+        ``chamber=-1`` inflate/deflate (delta=100 → toward each chamber's
+        configured max/min) that the node fans out to all chambers. A single
+        frame can't be partially dropped, fixing the "only one chamber actuates"
+        burst-loss."""
+        self._arm()
         for slot in slots:
-            self._deflate_slot(slot)
+            self._push_limits(slot)
+        self._gateway.send(self._mac, command, chamber=-1, delta=100)
 
     def _toggle_valve(self, chamber: int, side: int, btn: QPushButton) -> None:
         """Toggle valve open/closed and update button appearance."""

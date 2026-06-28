@@ -96,6 +96,9 @@ class ScriptedActivity(BaseActivity):
         self._units: dict[str, _Unit] = {}
         self._tick_owner: QObject | None = None
         self._tick: QTimer | None = None
+        # Callbacks fired whenever any unit changes phase (state) — manual,
+        # timed or touch-driven — so a GUI can keep phase controls in sync.
+        self._phase_listeners: list = []
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -103,6 +106,7 @@ class ScriptedActivity(BaseActivity):
 
     def _setup(self, session: "Session", robots: list[BaseRobot]) -> None:
         self._units.clear()
+        self._phase_listeners.clear()
         for robot in robots:
             for skin in getattr(robot, "skins", {}).values():
                 ctrl = getattr(skin, "_ctrl", None)
@@ -166,6 +170,87 @@ class ScriptedActivity(BaseActivity):
         unit = self._units.get(unit_id)
         return unit.state if unit is not None else ""
 
+    def has_phases(self) -> bool:
+        """True when the spec is a multi-phase timeline (any state has a
+        transition) — i.e. there is a 'next phase' to advance to. Used by the
+        GUI to decide whether to offer the manual 'Next Phase' control."""
+        return any(state.get("transitions")
+                   for state in self._states.values())
+
+    def advance_phase(self) -> str | None:
+        """Manually advance every unit to its current state's next phase.
+
+        The 'next phase' is the destination of the current state's first
+        transition (the study conditions are linear phase1 → phase2 → phase3),
+        so this fires the same transition the timer would, just now. Units
+        already in a terminal state (no transition) are left untouched.
+
+        Returns the state advanced into (for logging/UI), or None when no unit
+        had a next phase — i.e. the timeline has reached its end.
+        """
+        return self._step_phase(self._next_phase)
+
+    def rewind_phase(self) -> str | None:
+        """Manually rewind every unit to its current state's previous phase.
+
+        The 'previous phase' is the state whose first transition leads into the
+        unit's current state — the inverse of :meth:`advance_phase` along the
+        linear timeline. Units at the initial phase have no predecessor and are
+        left untouched. Returns the state rewound into, or None when no unit
+        could go back.
+        """
+        return self._step_phase(self._prev_phase)
+
+    def _step_phase(self, pick) -> str | None:
+        """Move every unit to the phase ``pick(state)`` selects (next/prev)."""
+        moved: str | None = None
+        for unit in self._units.values():
+            target = pick(unit.state)
+            if target is not None:
+                self._enter_state(unit, target)
+                moved = target
+        return moved
+
+    def can_advance_phase(self) -> bool:
+        """True when at least one unit still has a next phase to advance into."""
+        return any(self._next_phase(u.state) is not None
+                   for u in self._units.values())
+
+    def can_rewind_phase(self) -> bool:
+        """True when at least one unit has a previous phase to rewind to."""
+        return any(self._prev_phase(u.state) is not None
+                   for u in self._units.values())
+
+    def _next_phase(self, state: str) -> str | None:
+        """Destination of ``state``'s first valid transition, or None."""
+        for tr in self._states.get(state, {}).get("transitions") or []:
+            to = tr.get("to")
+            if to in self._states:
+                return to
+        return None
+
+    def _prev_phase(self, state: str) -> str | None:
+        """The state whose first transition leads into ``state`` (its
+        predecessor in the linear timeline), or None if nothing leads to it."""
+        for name in self._states:
+            if name != state and self._next_phase(name) == state:
+                return name
+        return None
+
+    def add_phase_listener(self, callback) -> None:
+        """Register ``callback()`` to fire whenever any unit changes phase.
+
+        Lets a GUI keep its phase controls in sync with the timeline whether a
+        transition was manual, timed or touch-driven."""
+        self._phase_listeners.append(callback)
+
+    def _notify_phase_listeners(self) -> None:
+        for cb in self._phase_listeners:
+            try:
+                cb()
+            except Exception:   # noqa: BLE001 — a bad listener must not kill a tick
+                logger.exception("phase listener failed")
+
     # ------------------------------------------------------------------
     # State machine
     # ------------------------------------------------------------------
@@ -186,6 +271,7 @@ class ScriptedActivity(BaseActivity):
         # Run the body's first slice immediately so on-enter visuals (LED) show
         # without waiting a tick.
         self._advance(unit)
+        self._notify_phase_listeners()
 
     def _on_tick(self) -> None:
         for unit in self._units.values():
