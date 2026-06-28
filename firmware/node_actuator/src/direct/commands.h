@@ -85,14 +85,14 @@ inline void sendDebug() {
 #endif
 
 // Actuation commands that a ``chamber == -1`` target fans out to every chamber
-// in parallel (one frame, not one per chamber). Inflate-all opens every valve
-// together for a fast coarse fill that narrows 3→2→1 as each chamber hits its
-// target (the last finishes isolated/precise; earlier ones are coupled until
-// check valves are fitted). Limit commands (set_max/set_min — each chamber has
-// its own) and the manual bench controls stay single-target.
+// in parallel (one frame, not one per chamber). Inflate is NOT here — it runs the
+// two-phase chambers::inflateAll (coarse parallel + isolated finish), because the
+// in-line gauges can't read individual chambers while several valves are open.
+// Limit commands (set_max/set_min — each chamber has its own) and the manual
+// bench controls are excluded; they stay single-target.
 inline bool isFanOut(cmd_queue::CmdType t) {
     using namespace cmd_queue;
-    return t == CMD_INFLATE || t == CMD_DEFLATE
+    return t == CMD_DEFLATE
         || t == CMD_SET_PRESSURE || t == CMD_HOLD;
 }
 
@@ -200,18 +200,24 @@ inline void process(const cmd_queue::Cmd& c) {
     if (c.type == CMD_TEST_RUN) { chambers::testRun(c.param, c.chamber); sendAck("test_run"); sendPumps(); return; }
 
     // chamber == -1 actuates EVERY chamber from ONE frame (the PC's Inflate/
-    // Deflate-All): all valves open together (fast coarse fill) and each chamber
-    // closes its OWN valve as it reaches its target, while the valve-driven pump
-    // keeps running for the rest (see chambers.h recalcPumps). The open set
-    // narrows 3→2→1, so the last chamber finishes isolated (precise) — earlier
-    // ones are coupled/approximate until per-chamber check valves are fitted. One
-    // frame also can't be dropped per-chamber (no command-level retry).
+    // Deflate-All), so a dropped per-chamber frame can't leave most un-actuated.
     int n = c.chamber;
+    if (n == -1 && c.type == CMD_INFLATE) {
+        // Two-phase fill: coarse parallel (fast) then a per-chamber isolated
+        // finish, because the in-line gauges read the shared line — not each
+        // chamber — while several valves are open. See chambers.h.
+        chambers::inflateAll(c.param, c.fill_ms);
+        return;
+    }
     if (n == -1 && isFanOut(c.type)) {
+        // Deflate/set_pressure/hold-all stay parallel (no precise per-chamber
+        // target to hit, so the coupling doesn't matter).
+        chambers::cancelInflateSeq();
         for (int i = 0; i < NUM_CHAMBERS; i++) applyChamberCmd(i, c);
         return;
     }
     if (n < 0 || n >= NUM_CHAMBERS) return;
+    chambers::cancelInflateSeq();   // a single-chamber action overrides any sequence
     applyChamberCmd(n, c);
 }
 

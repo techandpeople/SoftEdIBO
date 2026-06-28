@@ -191,6 +191,10 @@ void loop() {
         }
     }
 
+    // ---- Two-phase Inflate-All: advance coarse→finish, and the finish chamber
+    //      to chamber (see chambers.h inflateSeqTick) ----
+    chambers::inflateSeqTick(now);
+
     // ---- Time-based fill cutoff (calibrated fill_time; checked every loop) ----
     chambers::fillTimeTick(now);
     chambers::deflateTimeTick(now);
