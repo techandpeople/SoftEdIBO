@@ -185,6 +185,83 @@ inline void beginDeflate(int n, float target_kpa, uint32_t deflate_ms = 0) {
     recalcPumps();
 }
 
+// ---------------------------------------------------------------------------
+// "Inflate All" in two phases — fast AND correct on the shared pump line. The
+// gauges sit in-line with all chambers, so while several inflate valves are open
+// they all read the same common pressure: you cannot tell one chamber's true fill
+// from another's, and a per-chamber cutoff fires on the LINE pressure.
+//   Phase 1 COARSE  — open every chamber at once and dump air fast; the cutoff
+//     closes each as the common line reaches its target, so the open set narrows
+//     3→2→1. Quick, but uneven (a chamber can close while still short).
+//   Phase 2 FINISH  — go chamber by chamber with ONLY its valve open, so its gauge
+//     reads ITS OWN pressure, and top it up the rest of the way to target.
+// Driven by inflateSeqTick() from loop(). Net: bulk air in parallel (fast) + a
+// precise per-chamber finish (correct).
+// ---------------------------------------------------------------------------
+constexpr uint32_t COARSE_MAX_MS = 5000;   // cap on phase 1 (a leaky chamber can't hang it)
+
+inline uint8_t  seqMask  = 0;    // chambers still to finish in phase 2
+inline int8_t   seqCur   = -1;   // chamber currently finishing (-1 = none)
+inline uint8_t  seqPhase = 0;    // 0 = off, 1 = coarse parallel, 2 = sequential finish
+inline uint32_t seqMs    = 0;    // time-based fill window (0 = pressure target)
+inline uint32_t seqP1Ms  = 0;    // millis() when phase 1 began
+inline float    seqTarget[NUM_CHAMBERS] = {};   // each chamber's absolute target kPa
+
+inline void cancelInflateSeq() { seqMask = 0; seqCur = -1; seqPhase = 0; }
+
+// Phase 1: open every chamber that still needs filling, all together.
+inline void inflateAll(int16_t deltaPct, uint32_t fill_ms) {
+    seqMs   = fill_ms;
+    seqCur  = -1;
+    seqMask = 0;
+    seqP1Ms = millis();
+    bool any = false;
+    for (int n = 0; n < NUM_CHAMBERS; n++) {
+        float delta = (state[n].max_kpa - state[n].min_kpa)
+                    * constrain((int)deltaPct, 0, 100) / 100.0f;
+        seqTarget[n] = min(cachedKpa[n] + delta, state[n].max_kpa);
+        if (cachedKpa[n] < seqTarget[n]) {
+            seqMask |= (uint8_t)(1 << n);    // needs filling → also finish in phase 2
+            beginInflate(n, DEFAULT_INFLATE_DUTY,
+                         (seqMs > 0) ? state[n].max_kpa : seqTarget[n], seqMs);
+            any = true;
+        }
+    }
+    seqPhase = any ? 1 : 0;
+}
+
+// Phase 2: open the next queued chamber ALONE (isolated → its gauge reads ITS
+// pressure) and fill it to its target.
+inline void seqFinishNext() {
+    seqCur = -1;
+    if (seqMask) {
+        int n = __builtin_ctz(seqMask);
+        seqMask &= ~(uint8_t)(1 << n);
+        seqCur = n;
+        beginInflate(n, DEFAULT_INFLATE_DUTY,
+                     (seqMs > 0) ? state[n].max_kpa : seqTarget[n], seqMs);
+        return;
+    }
+    seqPhase = 0;   // every chamber finished
+}
+
+// Drive the two phases. Call every loop().
+inline void inflateSeqTick(uint32_t now) {
+    if (seqPhase == 1) {
+        bool anyInflating = false;
+        for (int n = 0; n < NUM_CHAMBERS; n++)
+            if (state[n].state == INFLATING) anyInflating = true;
+        if (anyInflating && now - seqP1Ms < COARSE_MAX_MS) return;   // coarse still running
+        for (int n = 0; n < NUM_CHAMBERS; n++)                       // stop any straggler
+            if (state[n].state == INFLATING) stop(n);
+        recalcPumps();
+        seqPhase = 2;
+        seqFinishNext();
+    } else if (seqPhase == 2) {
+        if (seqCur >= 0 && state[seqCur].state != INFLATING) seqFinishNext();
+    }
+}
+
 // Force-stop any chamber actuating past ACTUATION_TIMEOUT_MS (sensor failure
 // safety net — see constant above). Call periodically from loop().
 inline void actuationWatchdog(uint32_t now) {
@@ -340,6 +417,7 @@ inline bool stopped = false;
 inline void emergencyStopAll() {
     testDir     = -1;        // also cancels any continuous bench-test run
     testChamber = -1;
+    cancelInflateSeq();      // drop any in-progress two-phase inflate-all
     // Pumps off.
     ledcWrite(PUMP1_LEDC_CH, 0);
     ledcWrite(PUMP2_LEDC_CH, 0);
