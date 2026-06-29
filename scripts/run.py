@@ -1,10 +1,17 @@
 """Main entry point for the SoftEdIBO application."""
 
+import faulthandler
 import logging
 import os
 import sys
 import traceback
 from pathlib import Path
+
+# Dump every thread's Python stack to stderr on a native crash (SIGSEGV etc.).
+# Our crash_handler only catches Python exceptions; a segfault in Qt/Chromium
+# kills the process without one, so this is the only trace we get for those.
+# It is dormant until a fatal signal fires, so there is no runtime cost.
+faulthandler.enable()
 
 os.environ.setdefault("QT_LOGGING_RULES", "qt.qpa.wayland.textinput=false")
 

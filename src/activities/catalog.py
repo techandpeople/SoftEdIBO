@@ -80,6 +80,18 @@ DUTY_FIELD = VerbField(
                 "speed (no duty sent). Needs no fill calibration.",
 )
 
+# LED ring selector, shared by the verbs that drive lights. The multiplexed
+# board has four independent rings (0..3) that can animate separately; the
+# direct board has a single ring. "all" (the default) addresses every ring at
+# once, matching the prior whole-ring behaviour; single-ring boards ignore an
+# explicit 0..3 beyond ring 0.
+RING_FIELD = VerbField(
+    name="ring", type="ring", default="all",
+    description="Which LED ring to drive: 'all' (every ring) or 0..3. Only the "
+                "multiplexed board has rings 1..3 (4 independent rings); the "
+                "direct board has one ring and ignores higher indices.",
+)
+
 BEAT_MODES = ("sync", "sequential", "random", "aligned")
 
 
@@ -88,27 +100,33 @@ BEAT_MODES = ("sync", "sequential", "random", "aligned")
 # ---------------------------------------------------------------------------
 
 ACTIONS: tuple[Verb, ...] = (
-    Verb("set_led", "action", "Light the whole LED ring one colour.", (
+    Verb("set_led", "action",
+         "Light one LED ring (or all rings) one colour. Pick a 'ring' to "
+         "animate the multiplexed board's four rings independently.", (
         VerbField("color", "color", "#8e44ad"),
         VerbField("pattern", "enum", "solid",
                   choices=("solid", "pulse", "blink", "off")),
         VerbField("period_ms", "ms", 0, description="Animation period."),
+        RING_FIELD,
     )),
     Verb("set_led_halves", "action",
-         "Split the ring into equal arcs, one colour each (e.g. half purple, "
-         "half yellow).", (
+         "Split a ring into equal arcs, one colour each (e.g. half purple, "
+         "half yellow). Pick a 'ring' to target one of the four rings.", (
         VerbField("colors", "colors", ["#8e44ad", "#f1c40f"]),
         VerbField("pattern", "enum", "solid",
                   choices=("solid", "pulse", "blink", "off")),
         VerbField("period_ms", "ms", 0, description="Animation period."),
+        RING_FIELD,
     )),
     Verb("fade", "action",
-         "Smoothly cross-fade the whole ring back and forth between two "
-         "colours. Wrap in 'repeat forever' for a continuous fade.", (
+         "Smoothly cross-fade a ring back and forth between two colours. Wrap "
+         "in 'repeat forever' for a continuous fade. Pick a 'ring' to fade one "
+         "of the four rings independently.", (
         VerbField("color1", "color", "#8e44ad"),
         VerbField("color2", "color", "#f1c40f"),
         VerbField("period_ms", "ms", 2000,
                   description="One full colour1 → colour2 → colour1 cycle."),
+        RING_FIELD,
     )),
     Verb("inflate", "action", "Drive a chamber up to a pressure %.", (
         CHAMBER_FIELD,

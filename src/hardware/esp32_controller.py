@@ -163,27 +163,31 @@ class ESP32Controller:
             kwargs["ring"] = int(ring)
         return self.send_command("set_led", **kwargs)
 
-    def set_led_halves(self, colors: list[str], led_count: int = 24,
-                       pattern: str = "solid", period_ms: int = 0) -> bool:
-        """Paint the ring split into ``len(colors)`` equal contiguous arcs.
+    def set_led_halves(self, colors: list[str],
+                       pattern: str = "solid", period_ms: int = 0,
+                       ring: int | None = None) -> bool:
+        """Paint a ring split into ``len(colors)`` equal contiguous arcs.
 
-        Used for the "half purple / half yellow" behaviour look. Done purely
-        in software via per-pixel ``set_led(index=…)`` (the firmware has no
-        segment command), so this sends one frame per LED — fine because the
-        colours only change on a phase transition, never per animation tick.
-        ``pattern`` / ``period_ms`` are forwarded per pixel for animated looks
-        (e.g. a pulsing split ring).
+        Used for the "half purple / half yellow" behaviour look. Sent as a
+        single ``set_led_halves`` frame carrying the colour list; the firmware
+        splits the ring across its own LED count and renders one frame from
+        loop(). ``pattern`` / ``period_ms`` animate the whole split ring together.
+        ``ring`` selects one of the multiplexed board's four rings (0..3);
+        omitted addresses all rings, and single-ring boards ignore it.
+
+        This used to loop one ``set_led(index=…)`` per LED — a 24-frame burst
+        that reset the node, because the firmware calls ``strip.show()`` (which
+        disables interrupts) once per pixel from the ESP-NOW receive task. The
+        single-frame command does one ``show()`` off that task instead.
         """
-        n = max(1, int(led_count))
-        k = len(colors)
-        if k == 0:
+        cols = [str(c) for c in colors]
+        if not cols:
             return False
-        ok = True
-        for i in range(n):
-            seg = min(i * k // n, k - 1)
-            ok = self.set_led(colors[seg], pattern=pattern,
-                              period_ms=period_ms, index=i) and ok
-        return ok
+        kwargs: dict[str, Any] = {"colors": cols, "pattern": pattern,
+                                  "period_ms": int(period_ms)}
+        if ring is not None:
+            kwargs["ring"] = int(ring)
+        return self.send_command("set_led_halves", **kwargs)
 
     def on_touch(self, callback: Callable[[int, int], None]) -> None:
         """Register a callback for touch sensor events.

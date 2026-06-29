@@ -262,20 +262,36 @@ inline void parseAndQueue(const uint8_t* data, int len) {
 #endif
     else if (strcmp(cmd, "set_led") == 0) {
         // Handled inline (not queued): just stores the target LED state, which
-        // loop()'s leds::update() animates. {"cmd":"set_led","color":"#RRGGBB",
+        // loop()'s leds::update() renders. {"cmd":"set_led","color":"#RRGGBB",
         // "pattern":"off|solid|blink|pulse","period_ms":N,"count":N}
         const char* col = doc["color"]   | "#000000";
         const char* pat = doc["pattern"]  | "solid";
         uint32_t period = doc["period_ms"] | 0;
         int32_t  count  = doc["count"]     | 0;
-        uint8_t r = 0, g = 0, b = 0;
-        if (col[0] == '#' && strlen(col) >= 7) {
-            long v = strtol(col + 1, nullptr, 16);
-            r = (v >> 16) & 0xFF; g = (v >> 8) & 0xFF; b = v & 0xFF;
-        }
+        uint8_t r, g, b;
+        leds::parseHexColor(col, r, g, b);
+        if (strcmp(pat, "off") == 0) { r = g = b = 0; }   // "off" = dark, any colour
         int idx = doc["index"] | -1;
         if (idx >= 0) leds::setPixel(idx, r, g, b);   // single pixel (test panel)
-        else          leds::set(r, g, b, leds::patternFromStr(pat), period, count);
+        else          leds::setAll(r, g, b, leds::patternFromStr(pat), period, count);
+        return;
+    }
+    else if (strcmp(cmd, "set_led_halves") == 0) {
+        // Split the ring into len(colors) equal arcs (the purple/yellow look) in
+        // ONE frame. Replaces the PC's old per-pixel burst — 24 set_led frames
+        // that reset the node by calling strip.show() once per pixel in the recv
+        // task. {"cmd":"set_led_halves","colors":["#RRGGBB",...],"pattern":...}
+        const char* pat = doc["pattern"]   | "solid";
+        uint32_t period = doc["period_ms"] | 0;
+        int32_t  count  = doc["count"]     | 0;
+        uint8_t r[leds::MAX_SEGMENTS], g[leds::MAX_SEGMENTS], b[leds::MAX_SEGMENTS];
+        int k = 0;
+        for (JsonVariant v : doc["colors"].as<JsonArray>()) {
+            if (k >= leds::MAX_SEGMENTS) break;
+            leds::parseHexColor(v.as<const char*>(), r[k], g[k], b[k]);
+            k++;
+        }
+        if (k > 0) leds::setSegments(r, g, b, k, leds::patternFromStr(pat), period, count);
         return;
     }
     // ---- Magnet/touch board commands (handled inline, not queued) ----

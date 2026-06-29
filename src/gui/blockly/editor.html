@@ -121,6 +121,10 @@
     function defineBlocks() {
       var CH = [['current', 'current'], ['all', 'all'],
                 ['0', '0'], ['1', '1'], ['2', '2'], ['3', '3']];
+      // LED ring selector. The multiplexed board has four independent rings
+      // (0..3); the direct board has one and ignores higher indices.
+      var RING = [['all rings', 'all'], ['ring 0', '0'], ['ring 1', '1'],
+                  ['ring 2', '2'], ['ring 3', '3']];
       Blockly.defineBlocksWithJsonArray([
         { type: 'se_behaviour',
           message0: 'behaviour — starts at the first phase %1',
@@ -144,34 +148,43 @@
 
         // --- actions ---
         { type: 'se_set_led',
-          message0: 'set LED colour %1 pattern %2 period(ms) %3',
+          message0: 'set LED colour %1 pattern %2 period(ms) %3 ring %4',
           args0: [{ type: 'field_input', name: 'COLOR', text: DEFAULT_COLOUR },
                   { type: 'field_dropdown', name: 'PATTERN', options: PATTERN_OPTIONS },
-                  { type: 'field_number', name: 'PERIOD', value: 0, min: 0 }],
+                  { type: 'field_number', name: 'PERIOD', value: 0, min: 0 },
+                  { type: 'field_dropdown', name: 'RING', options: RING }],
           previousStatement: 'Step', nextStatement: 'Step', colour: 230,
-          tooltip: 'Light the whole ring. The colour is a "#rrggbb" tag — use '
+          tooltip: 'Light a ring. The colour is a "#rrggbb" tag — use '
                  + 'the Colour helper panel on the right to pick one and copy '
                  + 'it. "period" is the pulse/blink speed in ms (ignored for '
-                 + 'solid/off).' },
+                 + 'solid/off). "ring" picks one of the multiplexed board\'s '
+                 + 'four rings (0..3) or "all rings"; the direct board has one '
+                 + 'ring and ignores higher numbers.' },
 
         { type: 'se_set_led_halves',
-          message0: 'set LED halves %1 %2 pattern %3 period(ms) %4',
+          message0: 'set LED halves %1 %2 pattern %3 period(ms) %4 ring %5',
           args0: [{ type: 'field_input', name: 'C1', text: '#8e44ad' },
                   { type: 'field_input', name: 'C2', text: '#f1c40f' },
                   { type: 'field_dropdown', name: 'PATTERN', options: PATTERN_OPTIONS },
-                  { type: 'field_number', name: 'PERIOD', value: 0, min: 0 }],
+                  { type: 'field_number', name: 'PERIOD', value: 0, min: 0 },
+                  { type: 'field_dropdown', name: 'RING', options: RING }],
           previousStatement: 'Step', nextStatement: 'Step', colour: 230,
-          tooltip: 'Split the ring into two colours (e.g. half purple, half '
-                 + 'yellow). Pattern/period animate both halves together.' },
+          tooltip: 'Split a ring into two colours (e.g. half purple, half '
+                 + 'yellow). Pattern/period animate both halves together. '
+                 + '"ring" picks one of the multiplexed board\'s four rings or '
+                 + '"all rings".' },
 
         { type: 'se_fade',
-          message0: 'fade between %1 and %2 over %3 ms',
+          message0: 'fade between %1 and %2 over %3 ms on ring %4',
           args0: [{ type: 'field_input', name: 'C1', text: '#8e44ad' },
                   { type: 'field_input', name: 'C2', text: '#f1c40f' },
-                  { type: 'field_number', name: 'PERIOD', value: 2000, min: 200 }],
+                  { type: 'field_number', name: 'PERIOD', value: 2000, min: 200 },
+                  { type: 'field_dropdown', name: 'RING', options: RING }],
           previousStatement: 'Step', nextStatement: 'Step', colour: 230,
-          tooltip: 'Smoothly cross-fade the whole ring back and forth between '
-                 + 'two colours. Wrap in "repeat forever" for a continuous fade.' },
+          tooltip: 'Smoothly cross-fade a ring back and forth between two '
+                 + 'colours. Wrap in "repeat forever" for a continuous fade. '
+                 + '"ring" picks one of the multiplexed board\'s four rings '
+                 + '(0..3) or "all rings".' },
 
         { type: 'se_inflate',
           message0: 'inflate chamber %1 to %2 %% over %3 ms pump %4',
@@ -381,6 +394,14 @@
       return obj;
     }
 
+    // 'all' rings is the default whole-ring behaviour, so omit it to keep
+    // specs clean (and back-compatible with behaviours authored before rings).
+    function withRing(obj, b) {
+      var r = b.getFieldValue('RING');
+      if (r && r !== 'all') obj.ring = r;
+      return obj;
+    }
+
     function stepsFromStack(block) {
       var out = [];
       while (block) {
@@ -394,16 +415,16 @@
     function stepToObj(b) {
       switch (b.type) {
         case 'se_set_led':
-          return { set_led: { color: b.getFieldValue('COLOR'),
+          return { set_led: withRing({ color: b.getFieldValue('COLOR'),
                               pattern: b.getFieldValue('PATTERN'),
-                              period_ms: num(b, 'PERIOD') } };
+                              period_ms: num(b, 'PERIOD') }, b) };
         case 'se_set_led_halves':
-          return { set_led_halves: { colors: [b.getFieldValue('C1'), b.getFieldValue('C2')],
+          return { set_led_halves: withRing({ colors: [b.getFieldValue('C1'), b.getFieldValue('C2')],
                                      pattern: b.getFieldValue('PATTERN'),
-                                     period_ms: num(b, 'PERIOD') } };
+                                     period_ms: num(b, 'PERIOD') }, b) };
         case 'se_fade':
-          return { fade: { color1: b.getFieldValue('C1'), color2: b.getFieldValue('C2'),
-                           period_ms: num(b, 'PERIOD') } };
+          return { fade: withRing({ color1: b.getFieldValue('C1'), color2: b.getFieldValue('C2'),
+                           period_ms: num(b, 'PERIOD') }, b) };
         case 'se_beat':
           return { beat: withDuty({ mode: b.getFieldValue('MODE'), pct: num(b, 'PCT'),
                            pct2: num(b, 'PCT2'), aligned: num(b, 'ALIGNED'),
@@ -557,16 +578,17 @@
         case 'set_led':
           b = newStepBlock('se_set_led');
           setF(b, 'COLOR', p.color); setF(b, 'PATTERN', p.pattern);
-          setF(b, 'PERIOD', p.period_ms); break;
+          setF(b, 'PERIOD', p.period_ms); setF(b, 'RING', p.ring); break;
         case 'set_led_halves':
           b = newStepBlock('se_set_led_halves');
           var cols = p.colors || [];
           setF(b, 'C1', cols[0]); setF(b, 'C2', cols[1]);
-          setF(b, 'PATTERN', p.pattern); setF(b, 'PERIOD', p.period_ms); break;
+          setF(b, 'PATTERN', p.pattern); setF(b, 'PERIOD', p.period_ms);
+          setF(b, 'RING', p.ring); break;
         case 'fade':
           b = newStepBlock('se_fade');
           setF(b, 'C1', p.color1); setF(b, 'C2', p.color2);
-          setF(b, 'PERIOD', p.period_ms); break;
+          setF(b, 'PERIOD', p.period_ms); setF(b, 'RING', p.ring); break;
         case 'beat':
           b = newStepBlock('se_beat');
           setF(b, 'MODE', p.mode);

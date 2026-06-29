@@ -196,14 +196,16 @@ class SimulatedController(QObject):
                      color, pattern, period_ms, count, index, ring)
         return True
 
-    def set_led_halves(self, colors: list[str], led_count: int = 24,
-                       pattern: str = "solid", period_ms: int = 0) -> bool:
+    def set_led_halves(self, colors: list[str],
+                       pattern: str = "solid", period_ms: int = 0,
+                       ring: int | None = None) -> bool:
         """No-op shim mirroring :meth:`ESP32Controller.set_led_halves` so the
         behaviour engine drives simulation and hardware through one code path.
-        Stores the last colours so a monitor view could reflect them."""
+        Stores the last colours so a monitor view could reflect them. ``ring``
+        mirrors the real controller's signature (one of four rings, or all)."""
         self._led_halves = list(colors)
-        logger.debug("SIM set_led_halves(%s, pattern=%s, period=%dms)",
-                     colors, pattern, period_ms)
+        logger.debug("SIM set_led_halves(%s, pattern=%s, period=%dms, ring=%s)",
+                     colors, pattern, period_ms, ring)
         return True
 
     def stop_all(self) -> None:
