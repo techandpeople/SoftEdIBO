@@ -71,6 +71,15 @@ CHAMBER_FIELD = VerbField(
                 "binding). Defaults to the current chamber.",
 )
 
+# Direct pump-PWM control, shared by the verbs that drive a chamber up. A lower
+# duty makes a gentler / lower-energy stroke; 0 (or None) means "full speed".
+# Unlike period_ms it needs no calibrated fill curve.
+DUTY_FIELD = VerbField(
+    name="duty", type="int", default=0,
+    description="Pump PWM 1-255 — lower = gentler, slower stroke. 0 = full "
+                "speed (no duty sent). Needs no fill calibration.",
+)
+
 BEAT_MODES = ("sync", "sequential", "random", "aligned")
 
 
@@ -108,6 +117,7 @@ ACTIONS: tuple[Verb, ...] = (
                   description="Fill gently over about this long (ms); the pump "
                               "slows to roughly match. 0 = full speed. Needs a "
                               "calibrated fill time, else falls back to full speed."),
+        DUTY_FIELD,
     )),
     Verb("deflate", "action", "Empty a chamber back to 0 %.", (
         CHAMBER_FIELD,
@@ -115,6 +125,7 @@ ACTIONS: tuple[Verb, ...] = (
     Verb("set_pressure", "action", "Set a chamber's absolute target %.", (
         CHAMBER_FIELD,
         VerbField("pct", "pct", 0),
+        DUTY_FIELD,
     )),
     Verb("beat", "action",
          "One heartbeat cycle across the unit's chambers. Wrap in "
@@ -129,6 +140,7 @@ ACTIONS: tuple[Verb, ...] = (
         VerbField("aligned", "int", 2,
                   description="How many chambers share 'pct' in aligned mode."),
         VerbField("period_ms", "ms", 2000, description="One full cycle."),
+        DUTY_FIELD,
     )),
     Verb("wait", "control", "Pause the sequence for a fixed time.", (
         VerbField("ms", "ms", 500),

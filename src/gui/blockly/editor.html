@@ -174,14 +174,17 @@
                  + 'two colours. Wrap in "repeat forever" for a continuous fade.' },
 
         { type: 'se_inflate',
-          message0: 'inflate chamber %1 to %2 %% over %3 ms',
+          message0: 'inflate chamber %1 to %2 %% over %3 ms pump %4',
           args0: [{ type: 'field_dropdown', name: 'CHAMBER', options: CH },
                   { type: 'field_number', name: 'PCT', value: 60, min: 0, max: 100 },
-                  { type: 'field_number', name: 'PERIOD', value: 0, min: 0 }],
+                  { type: 'field_number', name: 'PERIOD', value: 0, min: 0 },
+                  { type: 'field_number', name: 'DUTY', value: 0, min: 0, max: 255 }],
           previousStatement: 'Step', nextStatement: 'Step', colour: 230,
           tooltip: '"over (ms)" optionally fills gently over about that long by '
                  + 'slowing the pump (0 = full speed). It is approximate and needs '
-                 + 'a calibrated fill time; without one it fills at full speed.' },
+                 + 'a calibrated fill time; without one it fills at full speed. '
+                 + '"pump" sets the pump PWM directly (1-255, lower = gentler; '
+                 + '0 = full speed) and needs no calibration.' },
 
         { type: 'se_deflate',
           message0: 'deflate chamber %1',
@@ -189,12 +192,14 @@
           previousStatement: 'Step', nextStatement: 'Step', colour: 230 },
 
         { type: 'se_set_pressure',
-          message0: 'set chamber %1 to %2 %%',
+          message0: 'set chamber %1 to %2 %% pump %3',
           args0: [{ type: 'field_dropdown', name: 'CHAMBER', options: CH },
-                  { type: 'field_number', name: 'PCT', value: 0, min: 0, max: 100 }],
+                  { type: 'field_number', name: 'PCT', value: 0, min: 0, max: 100 },
+                  { type: 'field_number', name: 'DUTY', value: 0, min: 0, max: 255 }],
           previousStatement: 'Step', nextStatement: 'Step', colour: 230,
           tooltip: 'Set a chamber to an exact fill %. Set it to 0 % to empty '
-                 + '(wrinkle) the chamber.' },
+                 + '(wrinkle) the chamber. "pump" sets the pump PWM directly '
+                 + '(1-255, lower = gentler; 0 = full speed).' },
 
         { type: 'se_stop',
           message0: 'hold all chambers',
@@ -209,14 +214,6 @@
           message0: 'wait for touch on chamber %1',
           args0: [{ type: 'field_dropdown', name: 'CHAMBER',
                    options: [['any', 'current'], ['0', '0'], ['1', '1'], ['2', '2'], ['3', '3']] }],
-          previousStatement: 'Step', nextStatement: 'Step', colour: 120 },
-
-        { type: 'se_repeat',
-          message0: 'repeat %1 times %2',
-          args0: [{ type: 'field_dropdown', name: 'MODE',
-                    options: [['forever', 'forever'], ['N', 'times']] },
-                  { type: 'field_number', name: 'TIMES', value: 4, min: 1 }],
-          message1: 'do %1', args1: [{ type: 'input_statement', name: 'DO', check: 'Step' }],
           previousStatement: 'Step', nextStatement: 'Step', colour: 120 },
 
         { type: 'se_for_each',
@@ -271,6 +268,7 @@
       ]);
 
       defineBeatBlock();
+      defineRepeatBlock();
     }
 
     // ---- beat: a block whose fields change with the chosen mode --------
@@ -301,7 +299,9 @@
           this.appendDummyInput()
             .appendField('one cycle every')
             .appendField(new Blockly.FieldNumber(2000, 100), 'PERIOD')
-            .appendField('ms');
+            .appendField('ms , pump')
+            .appendField(new Blockly.FieldNumber(0, 0, 255), 'DUTY')
+            .appendField('(0 = full)');
           this.setPreviousStatement(true, 'Step');
           this.setNextStatement(true, 'Step');
           this.setColour(230);
@@ -309,7 +309,9 @@
             'One heartbeat cycle across the chambers — wrap it in '
             + '"repeat forever" for a continuous beat. "strength" is the peak '
             + 'fill %. Only "some strong, the rest soft" uses the soft-chamber '
-            + 'row (those chambers beat to the soft %, the rest to strength).');
+            + 'row (those chambers beat to the soft %, the rest to strength). '
+            + '"pump" lowers the pump PWM (1-255) for a gentler, lower-energy '
+            + 'stroke; 0 = full speed.');
           this.updateShape_(this.getFieldValue('MODE'));
         },
         updateShape_: function (mode) {
@@ -326,8 +328,58 @@
       };
     }
 
+    // ---- repeat: hide the count when looping forever ------------------
+    // "forever" ignores any count, so the "N =" box only makes sense in the
+    // "N times" mode; it is built by hand so that box can disappear instead
+    // of sitting there confusingly when the loop runs forever.
+    function defineRepeatBlock() {
+      Blockly.Blocks['se_repeat'] = {
+        init: function () {
+          var self = this;
+          this.appendDummyInput()
+            .appendField('repeat')
+            .appendField(new Blockly.FieldDropdown([
+              ['forever', 'forever'],
+              ['N times', 'times'],
+            ], function (mode) { self.updateShape_(mode); return mode; }), 'MODE');
+          this.appendDummyInput('TIMES_ROW')
+            .appendField('N =')
+            .appendField(new Blockly.FieldNumber(4, 1), 'TIMES');
+          this.appendStatementInput('DO')
+            .setCheck('Step')
+            .appendField('do');
+          this.setPreviousStatement(true, 'Step');
+          this.setNextStatement(true, 'Step');
+          this.setColour(120);
+          this.setTooltip(
+            'Repeat the nested steps forever, or a set number of times (N). '
+            + 'The "N =" box only appears when you pick "N times".');
+          this.updateShape_(this.getFieldValue('MODE'));
+        },
+        updateShape_: function (mode) {
+          var row = this.getInput('TIMES_ROW');
+          if (row) row.setVisible(mode === 'times');
+          if (this.rendered) this.render();
+        },
+        saveExtraState: function () {
+          return { mode: this.getFieldValue('MODE') };
+        },
+        loadExtraState: function (state) {
+          this.updateShape_(state && state.mode);
+        },
+      };
+    }
+
     // ---- Compile workspace -> spec ------------------------------------
     function num(b, f) { return Number(b.getFieldValue(f)); }
+
+    // A pump duty of 0 means "no duty — full speed", so omit it rather than
+    // sending 0 (which the firmware would clamp to a near-stopped pump).
+    function withDuty(obj, b) {
+      var d = num(b, 'DUTY');
+      if (d > 0) obj.duty = d;
+      return obj;
+    }
 
     function stepsFromStack(block) {
       var out = [];
@@ -353,16 +405,16 @@
           return { fade: { color1: b.getFieldValue('C1'), color2: b.getFieldValue('C2'),
                            period_ms: num(b, 'PERIOD') } };
         case 'se_beat':
-          return { beat: { mode: b.getFieldValue('MODE'), pct: num(b, 'PCT'),
+          return { beat: withDuty({ mode: b.getFieldValue('MODE'), pct: num(b, 'PCT'),
                            pct2: num(b, 'PCT2'), aligned: num(b, 'ALIGNED'),
-                           period_ms: num(b, 'PERIOD') } };
+                           period_ms: num(b, 'PERIOD') }, b) };
         case 'se_inflate':
-          return { inflate: { chamber: b.getFieldValue('CHAMBER'), pct: num(b, 'PCT'),
-                              period_ms: num(b, 'PERIOD') } };
+          return { inflate: withDuty({ chamber: b.getFieldValue('CHAMBER'), pct: num(b, 'PCT'),
+                              period_ms: num(b, 'PERIOD') }, b) };
         case 'se_deflate':
           return { deflate: { chamber: b.getFieldValue('CHAMBER') } };
         case 'se_set_pressure':
-          return { set_pressure: { chamber: b.getFieldValue('CHAMBER'), pct: num(b, 'PCT') } };
+          return { set_pressure: withDuty({ chamber: b.getFieldValue('CHAMBER'), pct: num(b, 'PCT') }, b) };
         case 'se_stop':
           return { stop: {} };
         case 'se_wait':
@@ -441,10 +493,193 @@
           renderAllBlocks();
           return;
         }
+        // A hand-authored or imported spec carries no _blockly workspace blob.
+        // Rebuild the blocks from the spec itself so it is visible, editable and
+        // re-saveable (otherwise the editor would open blank and Save would
+        // overwrite the import with an empty behaviour).
+        if (spec && spec.states) {
+          buildBlocksFromSpec(spec);
+          return;
+        }
       } catch (e) {
         console.warn('loadSpec failed, starting fresh:', e);
       }
       newWorkspace();
+    }
+
+    // ---- Rebuild blocks from a bare spec (inverse of getSpec) ----------
+    function newStepBlock(type) {
+      var b = workspace.newBlock(type);
+      b.initSvg();
+      return b;
+    }
+
+    function setF(b, name, val) {
+      if (val === undefined || val === null) return;
+      try { b.setFieldValue(String(val), name); }
+      catch (e) { console.warn('setFieldValue', name, val, e); }
+    }
+
+    function setDuty(b, p) { if (p && p.duty) setF(b, 'DUTY', p.duty); }
+
+    function connectStack(parent, inputName, firstChild) {
+      if (firstChild) {
+        parent.getInput(inputName).connection.connect(firstChild.previousConnection);
+      }
+    }
+
+    function connectCond(parent, inputName, child) {
+      if (child && child.outputConnection) {
+        parent.getInput(inputName).connection.connect(child.outputConnection);
+      }
+    }
+
+    // Build a statement stack from an array of steps; return its first block.
+    function buildStack(steps) {
+      var first = null, prev = null;
+      (steps || []).forEach(function (step) {
+        var b = buildStep(step);
+        if (!b) return;
+        if (prev) prev.nextConnection.connect(b.previousConnection);
+        else first = b;
+        prev = b;
+      });
+      return first;
+    }
+
+    function buildStep(step) {
+      if (!step || typeof step !== 'object') return null;
+      var verb = Object.keys(step)[0];
+      var p = step[verb];
+      if (!p || typeof p !== 'object') p = { _value: p };
+      var b;
+      switch (verb) {
+        case 'set_led':
+          b = newStepBlock('se_set_led');
+          setF(b, 'COLOR', p.color); setF(b, 'PATTERN', p.pattern);
+          setF(b, 'PERIOD', p.period_ms); break;
+        case 'set_led_halves':
+          b = newStepBlock('se_set_led_halves');
+          var cols = p.colors || [];
+          setF(b, 'C1', cols[0]); setF(b, 'C2', cols[1]);
+          setF(b, 'PATTERN', p.pattern); setF(b, 'PERIOD', p.period_ms); break;
+        case 'fade':
+          b = newStepBlock('se_fade');
+          setF(b, 'C1', p.color1); setF(b, 'C2', p.color2);
+          setF(b, 'PERIOD', p.period_ms); break;
+        case 'beat':
+          b = newStepBlock('se_beat');
+          setF(b, 'MODE', p.mode);
+          if (b.updateShape_) b.updateShape_(p.mode);
+          setF(b, 'PCT', p.pct); setF(b, 'PCT2', p.pct2);
+          setF(b, 'ALIGNED', p.aligned); setF(b, 'PERIOD', p.period_ms);
+          setDuty(b, p); break;
+        case 'inflate':
+          b = newStepBlock('se_inflate');
+          setF(b, 'CHAMBER', p.chamber); setF(b, 'PCT', p.pct);
+          setF(b, 'PERIOD', p.period_ms); setDuty(b, p); break;
+        case 'deflate':
+          b = newStepBlock('se_deflate'); setF(b, 'CHAMBER', p.chamber); break;
+        case 'set_pressure': case 'wrinkle':
+          b = newStepBlock('se_set_pressure');
+          setF(b, 'CHAMBER', p.chamber);
+          setF(b, 'PCT', verb === 'wrinkle' ? 0 : p.pct);
+          setDuty(b, p); break;
+        case 'stop': b = newStepBlock('se_stop'); break;
+        case 'wait':
+          b = newStepBlock('se_wait');
+          setF(b, 'MS', p.ms != null ? p.ms : p._value); break;
+        case 'wait_for_touch':
+          b = newStepBlock('se_wait_for_touch');
+          setF(b, 'CHAMBER', p.chamber != null ? p.chamber : 'current'); break;
+        case 'repeat':
+          b = newStepBlock('se_repeat');
+          if (p.forever || p.times == null) setF(b, 'MODE', 'forever');
+          else { setF(b, 'MODE', 'times'); setF(b, 'TIMES', p.times); }
+          connectStack(b, 'DO', buildStack(p.do)); break;
+        case 'for_each_chamber':
+          b = newStepBlock('se_for_each');
+          connectStack(b, 'DO', buildStack(p.do)); break;
+        default: return null;
+      }
+      return b;
+    }
+
+    function buildCond(cond) {
+      if (!cond || typeof cond !== 'object') return newStepBlock('se_always');
+      var name = Object.keys(cond)[0];
+      var v = cond[name];
+      if (name === 'or') name = 'any';
+      if (name === 'and') name = 'all';
+      var b;
+      switch (name) {
+        case 'elapsed_ms':
+          b = newStepBlock('se_elapsed');
+          setF(b, 'MS', (v && v.ms != null) ? v.ms : v); break;
+        case 'touch_count':
+          b = newStepBlock('se_touch_count');
+          setF(b, 'MIN', (v && v.min != null) ? v.min : v); break;
+        case 'organs':
+          b = newStepBlock('se_organs'); v = v || {};
+          setF(b, 'SCOPE', v.scope); setF(b, 'GOOD_OP', v.good_op);
+          setF(b, 'GOOD', v.good); setF(b, 'BAD_OP', v.bad_op);
+          setF(b, 'BAD', v.bad); break;
+        case 'any':
+          b = newStepBlock('se_any');
+          connectCond(b, 'A', buildCond((v || [])[0]));
+          connectCond(b, 'B', buildCond((v || [])[1])); break;
+        case 'all':
+          b = newStepBlock('se_all');
+          connectCond(b, 'A', buildCond((v || [])[0]));
+          connectCond(b, 'B', buildCond((v || [])[1])); break;
+        case 'not':
+          b = newStepBlock('se_not'); connectCond(b, 'C', buildCond(v)); break;
+        default:
+          b = newStepBlock('se_always'); break;
+      }
+      return b;
+    }
+
+    function buildTransitions(transitions) {
+      var first = null, prev = null;
+      (transitions || []).forEach(function (tr) {
+        var b = newStepBlock('se_transition');
+        setF(b, 'TO', tr.to);
+        connectCond(b, 'WHEN', buildCond(tr.when));
+        if (prev) prev.nextConnection.connect(b.previousConnection);
+        else first = b;
+        prev = b;
+      });
+      return first;
+    }
+
+    function buildBlocksFromSpec(spec) {
+      workspace.clear();
+      var root = newStepBlock('se_behaviour');
+      root.moveBy(30, 30);
+      var states = spec.states || {};
+      var order = Object.keys(states);
+      // Keep the declared initial phase first, so the editor's "starts at the
+      // first phase" matches the spec's initial state.
+      if (spec.initial && order.indexOf(spec.initial) > 0) {
+        order = [spec.initial].concat(order.filter(function (n) {
+          return n !== spec.initial;
+        }));
+      }
+      var prevState = null;
+      order.forEach(function (name) {
+        var st = states[name] || {};
+        var sb = newStepBlock('se_state');
+        setF(sb, 'NAME', name);
+        connectStack(sb, 'DO', buildStack(st.do));
+        connectStack(sb, 'ONTOUCH', buildStack(st.on_touch));
+        connectStack(sb, 'TRANSITIONS', buildTransitions(st.transitions));
+        if (prevState) prevState.nextConnection.connect(sb.previousConnection);
+        else connectStack(root, 'STATES', sb);
+        prevState = sb;
+      });
+      root.render();
+      renderAllBlocks();
     }
 
     // After a programmatic deserialize, Blockly 13 can leave nested blocks

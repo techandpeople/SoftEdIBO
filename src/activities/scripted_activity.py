@@ -458,6 +458,9 @@ class ScriptedActivity(BaseActivity):
         pct = int(params.get("pct", 60))
         pct2 = int(params.get("pct2", 20))
         period = max(100, int(params.get("period_ms", 2000)))
+        # An optional duty makes every up-stroke gentler/slower — the beat's
+        # "energy". The release back to 0 stays at full speed (a normal vent).
+        duty = self._duty(params)
         chambers = list(unit.chambers)
         if not chambers:
             yield ("ms", period)
@@ -469,21 +472,22 @@ class ScriptedActivity(BaseActivity):
                 random.shuffle(order)
             slot = max(50, period // (2 * len(order)))
             for c in order:
-                self._set_pressure(unit, c, pct)
+                self._set_pressure(unit, c, pct, duty=duty)
                 yield ("ms", slot)
                 self._set_pressure(unit, c, 0)
                 yield ("ms", slot)
         elif mode == "aligned":
             n_aligned = max(0, min(len(chambers), int(params.get("aligned", 2))))
             for i, c in enumerate(chambers):
-                self._set_pressure(unit, c, pct if i < n_aligned else pct2)
+                self._set_pressure(unit, c, pct if i < n_aligned else pct2,
+                                   duty=duty)
             yield ("ms", period // 2)
             for c in chambers:
                 self._set_pressure(unit, c, 0)
             yield ("ms", period - period // 2)
         else:  # sync
             for c in chambers:
-                self._set_pressure(unit, c, pct)
+                self._set_pressure(unit, c, pct, duty=duty)
             yield ("ms", period // 2)
             for c in chambers:
                 self._set_pressure(unit, c, 0)
@@ -543,7 +547,8 @@ class ScriptedActivity(BaseActivity):
         elif verb in ("inflate", "set_pressure"):
             self._set_pressure(unit, self._resolve_chamber(unit, params, ctx),
                                int(params.get("pct", 60 if verb == "inflate" else 0)),
-                               period_ms=int(params.get("period_ms", 0)))
+                               period_ms=int(params.get("period_ms", 0)),
+                               duty=self._duty(params))
         elif verb in ("deflate", "wrinkle"):
             self._set_pressure(unit, self._resolve_chamber(unit, params, ctx), 0)
         elif verb == "stop":
@@ -559,14 +564,25 @@ class ScriptedActivity(BaseActivity):
     # Hardware helpers
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _duty(params: dict) -> int | None:
+        """Read an optional pump ``duty`` (1-255) from a step's params. 0 / absent
+        means 'send no duty — run at full speed'."""
+        try:
+            duty = int(params.get("duty") or 0)
+        except (TypeError, ValueError):
+            return None
+        return duty if duty > 0 else None
+
     def _set_pressure(self, unit: _Unit, chamber, pct: int,
-                      period_ms: int = 0) -> None:
+                      period_ms: int = 0, duty: int | None = None) -> None:
         pct = max(0, min(100, int(pct)))
         try:
             if chamber == "all" or chamber is None:
-                unit.skin.set_pressure(None, pct, period_ms=period_ms)
+                unit.skin.set_pressure(None, pct, period_ms=period_ms, duty=duty)
             else:
-                unit.skin.set_pressure(int(chamber), pct, period_ms=period_ms)
+                unit.skin.set_pressure(int(chamber), pct,
+                                       period_ms=period_ms, duty=duty)
         except (TypeError, ValueError):
             logger.debug("set_pressure(%s, %s) ignored on %s",
                          chamber, pct, unit.unit_id)
