@@ -43,3 +43,27 @@ constexpr int NUM_PUMPS = 6;
 
 // Maximum chambers supported by the hardware (12 sensor channels × 2 valves).
 constexpr int MAX_CHAMBERS = 12;
+
+// ---------------------------------------------------------------------------
+// RGBW/RGB LED rings (SK6812 / WS2812). Four independent rings — one 24-LED +
+// three 16-LED — each on its OWN data pin, driven as four separate strips (see
+// leds.h). The "set_led" command's "ring" field (0..3) selects one.
+//
+// Pins were chosen by the hardware owner; the multiplexed board is not yet
+// soldered. The 16-LED rings are NOT on GPIO34/35/36: those are input-only on
+// the classic ESP32 and physically cannot output a NeoPixel data signal.
+//
+// WARNING — provisional wiring: ring 1 (IO17) and ring 2 (IO16) overlap the
+// sensor-mux select lines SMUX_S1 (17) and SMUX_S0 (16) above. While shared,
+// the mux select and the LED data line fight over the same pins at runtime, so
+// chamber pressure sensing on this board will be wrong until the mux select
+// lines are moved to other free GPIOs (the board is unsoldered, so that move is
+// still open).
+// ---------------------------------------------------------------------------
+constexpr int NUM_RINGS = 4;
+constexpr int LED_PINS[NUM_RINGS]  = {23, 17, 16, 4};
+//                                    24-LED ring  -> IO23
+//                                    16-LED ring1 -> IO17  (overlaps SMUX_S1!)
+//                                    16-LED ring2 -> IO16  (overlaps SMUX_S0!)
+//                                    16-LED ring3 -> IO4
+constexpr int RING_LEDS[NUM_RINGS] = {24, 16, 16, 16};

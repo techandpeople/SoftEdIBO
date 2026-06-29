@@ -29,7 +29,6 @@ from typing import Any
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
-    QDialog,
     QHBoxLayout,
     QLabel,
     QMessageBox,
@@ -41,6 +40,7 @@ from PySide6.QtWidgets import (
 
 from itertools import combinations
 
+from src.gui.base_dialog import BaseDialog
 from src.gui.ui_fill_calibration_dialog import Ui_FillCalibrationDialog
 from src.hardware.fill_calibration import (
     DEFAULT_STEP_MS,
@@ -73,7 +73,7 @@ _EST_SECS_PER_RUN = 12
 _STEP_LABELS = {600.0: "Coarse", 400.0: "Medium", 250.0: "Fine", 150.0: "Very fine"}
 
 
-class FillCalibrationDialog(QDialog, Ui_FillCalibrationDialog):
+class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
     """Calibrate per-chamber fill curves against the pressure sensor."""
 
     # gateway read thread → GUI thread: (mac, chamber, pressure_pct, kpa)

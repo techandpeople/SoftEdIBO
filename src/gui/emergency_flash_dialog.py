@@ -23,10 +23,11 @@ import logging
 import re
 
 from PySide6.QtCore import QProcess, QProcessEnvironment
-from PySide6.QtWidgets import QDialog, QDialogButtonBox
+from PySide6.QtWidgets import QDialogButtonBox
 
 from src.gui.async_task import run_async
 from src.gui.setup_wizard import NODE_FIRMWARES, _esptool_cmd
+from src.gui.base_dialog import BaseDialog
 from src.gui.ui_emergency_flash_dialog import Ui_EmergencyFlashDialog
 from src.hardware.serial_ports import list_esp32_ports
 
@@ -36,7 +37,7 @@ logger = logging.getLogger(__name__)
 _BAUD_RATES = ["115200", "230400", "460800", "921600"]
 
 
-class EmergencyFlashDialog(QDialog, Ui_EmergencyFlashDialog):
+class EmergencyFlashDialog(BaseDialog, Ui_EmergencyFlashDialog):
     """Cable-flash a node over a USB-serial bridge, with no esptool auto-reset."""
 
     def __init__(self, parent=None):

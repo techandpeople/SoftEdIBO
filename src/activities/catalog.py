@@ -104,6 +104,10 @@ ACTIONS: tuple[Verb, ...] = (
     Verb("inflate", "action", "Drive a chamber up to a pressure %.", (
         CHAMBER_FIELD,
         VerbField("pct", "pct", 60, description="Target pressure (0-100 %)."),
+        VerbField("period_ms", "ms", 0,
+                  description="Fill gently over about this long (ms); the pump "
+                              "slows to roughly match. 0 = full speed. Needs a "
+                              "calibrated fill time, else falls back to full speed."),
     )),
     Verb("deflate", "action", "Empty a chamber back to 0 %.", (
         CHAMBER_FIELD,

@@ -11,7 +11,7 @@ against whatever limits the node currently holds, which lag the PC config).
     100% -> max_kpa
 
 With ``min_kpa = 0`` (the default) this is just ``kpa / max_kpa``. A chamber
-fed by a vacuum reservoir uses a negative ``min_kpa`` so 0 % is its deepest
+fed by a vacuum source uses a negative ``min_kpa`` so 0 % is its deepest
 vacuum point.
 """
 

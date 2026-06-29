@@ -19,6 +19,7 @@ constexpr float DEFAULT_MIN_KPA = 0.0f;
 constexpr float HARD_MAX_KPA    =  100.0f;
 constexpr float HARD_MIN_KPA    = -100.0f;   // limit for vacuum-fed chambers
 constexpr uint8_t  DEFAULT_INFLATE_DUTY = 255;
+constexpr uint8_t  DEFAULT_DEFLATE_DUTY = 255;
 
 constexpr int PUMP_PWM_FREQ = 20000;
 constexpr int PUMP_PWM_RES  =     8;
@@ -75,23 +76,26 @@ inline void setValve(int ch, int side, bool open) {
 // never drops (an open valve is always present). Both directions are symmetric;
 // neither can run dead-headed (no open valve of its direction ⇒ it is off).
 inline void recalcPumps() {
-    bool anyInflateOpen = false;
-    bool anyDeflateOpen = false;
+    // Each shared pump runs at the HIGHEST duty requested by any chamber whose
+    // valve of that direction is open (a chamber's duty is set by beginInflate /
+    // beginDeflate). Co-active chambers share one pump line, so the fastest one
+    // wins; a chamber that wants a gentler fill gets it only while it actuates
+    // alone. duty 0 -> that direction is off.
+    uint8_t inflateDuty = 0;
+    uint8_t deflateDuty = 0;
     for (int i = 0; i < NUM_CHAMBERS; i++) {
-        if (valveOpen[i * 2 + 0]) anyInflateOpen = true;
-        if (valveOpen[i * 2 + 1]) anyDeflateOpen = true;
+        if (valveOpen[i * 2 + 0]) inflateDuty = max(inflateDuty, state[i].duty);
+        if (valveOpen[i * 2 + 1]) deflateDuty = max(deflateDuty, state[i].duty);
     }
-    uint8_t inflateDuty = anyInflateOpen ? DEFAULT_INFLATE_DUTY : 0;
     static uint8_t lastInflateDuty = 0xFF;
-    static bool    lastDeflateOn   = true;
-    if (inflateDuty != lastInflateDuty || anyDeflateOpen != lastDeflateOn) {
-        DBG_PRINT("PUMPS inflate_duty=%u deflate=%s\n",
-                  inflateDuty, anyDeflateOpen ? "ON" : "off");
+    static uint8_t lastDeflateDuty = 0xFF;
+    if (inflateDuty != lastInflateDuty || deflateDuty != lastDeflateDuty) {
+        DBG_PRINT("PUMPS inflate_duty=%u deflate_duty=%u\n", inflateDuty, deflateDuty);
         lastInflateDuty = inflateDuty;
-        lastDeflateOn   = anyDeflateOpen;
+        lastDeflateDuty = deflateDuty;
     }
     ledcWrite(PUMP1_LEDC_CH, inflateDuty);
-    ledcWrite(PUMP2_LEDC_CH, anyDeflateOpen ? 255 : 0);
+    ledcWrite(PUMP2_LEDC_CH, deflateDuty);
 }
 
 inline void stop(int n) {
@@ -173,11 +177,13 @@ inline void maintainTick(uint32_t now) {
 // ``deflate_ms`` bounds the active vacuum pump in time; 0 falls back to the hard
 // MAX_DEFLATE_MS cap. The deadline is ALWAYS armed because the gauge sensor is
 // blind below atmosphere, so pressure can't stop a runaway deflate into vacuum.
-inline void beginDeflate(int n, float target_kpa, uint32_t deflate_ms = 0) {
+inline void beginDeflate(int n, float target_kpa, uint32_t deflate_ms = 0,
+                         uint8_t duty = DEFAULT_DEFLATE_DUTY) {
     target_kpa = max(state[n].min_kpa, min(target_kpa, state[n].max_kpa));
     if (state[n].state == DEFLATING && state[n].target_kpa == target_kpa) return;
     setValve(n, 0, false);              // close inflate before opening deflate
     state[n].state         = DEFLATING;
+    state[n].duty          = duty;      // drives the shared vacuum pump (recalcPumps)
     state[n].target_kpa    = target_kpa;
     state[n].since_ms      = millis();
     state[n].fill_until_ms = fill_control::deflateUntil(deflate_ms);

@@ -29,6 +29,12 @@
     </widget>
    </item>
    <item>
+    <widget class="QCheckBox" name="rgbw_check">
+     <property name="whatsThis"><string>Flash the RGBW LED-ring build for nodes wired with an RGBW NeoPixel ring (SK6812, e.g. Adafruit 2862, 4 colour channels) instead of a plain RGB ring (WS2812, e.g. Adafruit 1586). Applies to selected node_direct boards; other node types ignore it. The two pixel types use a different data format, so the wrong build drives the ring with shifted colours.</string></property>
+     <property name="text"><string>RGBW LED ring (SK6812, node_direct only)</string></property>
+    </widget>
+   </item>
+   <item>
     <layout class="QHBoxLayout" name="transport_row">
      <item>
       <widget class="QLabel" name="transport_label">

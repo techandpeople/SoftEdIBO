@@ -4,10 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from src.hardware.air_reservoir import AirReservoir
+from typing import Any
 
 
 class RobotStatus(Enum):
@@ -29,16 +26,6 @@ class BaseRobot(ABC):
     @property
     def status(self) -> RobotStatus:
         return self._status
-
-    @property
-    def pressure_reservoir(self) -> "AirReservoir | None":
-        """Shared pressurised-air reservoir, if this robot has one."""
-        return None
-
-    @property
-    def vacuum_reservoir(self) -> "AirReservoir | None":
-        """Shared vacuum reservoir, if this robot has one."""
-        return None
 
     @abstractmethod
     def connect(self) -> bool:

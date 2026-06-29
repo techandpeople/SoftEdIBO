@@ -22,8 +22,9 @@ import time
 from typing import Any
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtWidgets import QDialog, QMessageBox, QWidget
+from PySide6.QtWidgets import QMessageBox, QWidget
 
+from src.gui.base_dialog import BaseDialog
 from src.gui.ui_touch_calibration_dialog import Ui_TouchCalibrationDialog
 from src.hardware.touch_calibration import (
     coupling_config_from_samples,
@@ -39,7 +40,7 @@ _INFLATE_DWELL_MS = 3500
 _TICK_MS = 100
 
 
-class TouchCalibrationDialog(QDialog, Ui_TouchCalibrationDialog):
+class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
     """Measure and store the per-skin touch↔chamber coupling matrix."""
 
     # gateway read thread → GUI thread (so samples are collected single-threaded)

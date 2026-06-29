@@ -3,24 +3,25 @@
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
-    QDialog,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from src.core.skin_config import FILL_MODE_PRESSURE, normalize_fill_mode
 from src.gui.led_ring_tester import LedRingTester
+from src.gui.base_dialog import BaseDialog
 from src.gui.ui_test_actuators_dialog import Ui_TestActuatorsDialog
 from src.hardware.espnow_gateway import ESPNowGateway
 from src.hardware.fill_profile import FillProfile
 from src.hardware.units import kpa_to_pct
 
 
-class TestActuatorsDialog(QDialog, Ui_TestActuatorsDialog):
+class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
     """Dialog for sending inflate/deflate commands to a node's chambers.
 
     Commands are sent directly via the gateway without going through the
@@ -36,6 +37,12 @@ class TestActuatorsDialog(QDialog, Ui_TestActuatorsDialog):
             actuation, and time-mode chambers inflate by their calibrated time
             window — mirroring how :class:`~src.hardware.skin.Skin` drives them.
         gateway: Connected ESP-NOW gateway.
+        led_count: LED count for a single-ring node (back-compat fallback when
+            ``led_rings`` is None).
+        led_rings: Per-ring LED counts for the node (e.g. ``[24, 16, 16, 16]``
+            for node_multiplexed). Each ring gets its own tester tab and is
+            addressed via the ``set_led`` ``ring`` field. None falls back to a
+            single ring of ``led_count``.
         parent: Optional parent widget.
     """
 
@@ -48,6 +55,7 @@ class TestActuatorsDialog(QDialog, Ui_TestActuatorsDialog):
         skin_cfgs: list[dict],
         gateway: ESPNowGateway,
         led_count: int = 24,
+        led_rings: list[int] | None = None,
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
@@ -101,12 +109,26 @@ class TestActuatorsDialog(QDialog, Ui_TestActuatorsDialog):
             # after that chamber is first actuated (otherwise it uses boot defaults).
             self._push_all_limits()
 
-        # WS2812 LED ring tester (node_direct boards). Insert before the
-        # Close button (the last widget in the dialog's vertical layout).
-        if led_count > 0:
-            self._led_tester = LedRingTester(led_count, self._send_led)
+        # LED ring tester(s). Insert before the Close button (last widget in the
+        # dialog's vertical layout). node_direct has a single ring; node_multiplexed
+        # drives four independently-addressable rings — one tester tab each, so the
+        # user can assign colours to each ring (and each LED) separately.
+        rings = led_rings if led_rings is not None else (
+            [led_count] if led_count > 0 else [])
+        if len(rings) == 1:
+            # Single ring: no "ring" field (back-compat with node_direct frames).
+            self._led_tester = LedRingTester(
+                rings[0], lambda idx, col, pat: self._send_led(None, idx, col, pat))
             self.verticalLayout.insertWidget(
                 self.verticalLayout.count() - 1, self._led_tester)
+        elif len(rings) > 1:
+            self._led_tabs = QTabWidget()
+            for k, size in enumerate(rings):
+                tester = LedRingTester(
+                    size, lambda idx, col, pat, r=k: self._send_led(r, idx, col, pat))
+                self._led_tabs.addTab(tester, f"Ring {k} · {size} LEDs")
+            self.verticalLayout.insertWidget(
+                self.verticalLayout.count() - 1, self._led_tabs)
 
         # Pump controls (toggle style, monospace font for fixed width)
         self._pump_states: dict[int, tuple[bool, QPushButton]] = {}  # pump => (on, button)
@@ -311,16 +333,22 @@ class TestActuatorsDialog(QDialog, Ui_TestActuatorsDialog):
     # Commands
     # ------------------------------------------------------------------
 
-    def _send_led(self, index: int | None, color_hex: str | None, pattern: str = "solid") -> None:
+    def _send_led(self, ring: int | None, index: int | None,
+                  color_hex: str | None, pattern: str = "solid") -> None:
         """Forward an LED change to the node. color_hex None => turn off;
-        index None => whole ring; otherwise a single pixel."""
+        index None => whole ring; otherwise a single pixel. ``ring`` selects one
+        of a multi-ring node's rings (node_multiplexed); None addresses the
+        node's single ring (and is omitted from the frame for node_direct
+        back-compat)."""
+        payload: dict = {} if ring is None else {"ring": ring}
         if color_hex is None:
-            self._gateway.send(self._mac, "set_led", pattern="off")
+            self._gateway.send(self._mac, "set_led", pattern="off", **payload)
         elif index is None:
-            self._gateway.send(self._mac, "set_led", color=color_hex, pattern=pattern)
+            self._gateway.send(self._mac, "set_led", color=color_hex,
+                               pattern=pattern, **payload)
         else:
             self._gateway.send(self._mac, "set_led", color=color_hex,
-                               index=index, pattern=pattern)
+                               index=index, pattern=pattern, **payload)
 
     def _arm(self) -> None:
         """Release the STOP ALL latch (if set) before the next actuation.

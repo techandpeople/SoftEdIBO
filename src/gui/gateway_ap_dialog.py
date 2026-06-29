@@ -16,8 +16,9 @@ import logging
 from typing import Any
 
 from PySide6.QtCore import QTimer, Signal
-from PySide6.QtWidgets import QDialog, QDialogButtonBox, QLineEdit
+from PySide6.QtWidgets import QDialogButtonBox, QLineEdit
 
+from src.gui.base_dialog import BaseDialog
 from src.gui.ui_gateway_ap_dialog import Ui_GatewayApDialog
 from src.hardware.espnow_gateway import ESPNowGateway
 
@@ -33,7 +34,7 @@ _SAVE_ERRORS = {
 }
 
 
-class GatewayApDialog(QDialog, Ui_GatewayApDialog):
+class GatewayApDialog(BaseDialog, Ui_GatewayApDialog):
     """Read/write the gateway's WiFi access-point name and password."""
 
     # Marshals a gateway message from the serial read thread to the GUI thread.

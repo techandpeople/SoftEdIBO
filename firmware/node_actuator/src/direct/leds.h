@@ -13,7 +13,16 @@ namespace leds {
 
 enum Pattern : uint8_t { OFF, SOLID, BLINK, PULSE, MANUAL };
 
+// Pixel type is chosen at flash time. RGB rings (e.g. Adafruit 1586) send 3
+// bytes/pixel; RGBW rings (e.g. Adafruit 2862, SK6812) send 4. Build the
+// matching env (-DLED_RGBW) for the ring that's actually wired — the byte count
+// differs, so an RGB build drives an RGBW ring with shifted colours and vice
+// versa. The colour code below is unchanged: Color()/setPixelColor leave W at 0.
+#ifdef LED_RGBW
+inline Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_GRBW + NEO_KHZ800);
+#else
 inline Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
+#endif
 
 inline uint8_t  r_ = 0, g_ = 0, b_ = 0;
 inline Pattern  pattern_  = OFF;

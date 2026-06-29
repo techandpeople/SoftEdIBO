@@ -14,7 +14,7 @@ from src.gui.session_panel import SessionPanel
 from src.gui.session_setup_dialog import SessionSetupDialog
 from src.hardware.espnow_gateway import ESPNowGateway
 from src.robots.base_robot import RobotStatus
-from src.robots.turtle.turtle_robot import TurtleRobot
+from src.robots.turtle_tree.turtle_tree_robot import TurtleTreeRobot
 
 
 # ---------------------------------------------------------------------------
@@ -35,7 +35,7 @@ def db(tmp_path):
 # ---------------------------------------------------------------------------
 
 def _mock_turtle(name: str = "Turtle-1") -> MagicMock:
-    robot = MagicMock(spec=TurtleRobot)
+    robot = MagicMock(spec=TurtleTreeRobot)
     robot.name = name
     robot.robot_id = name.lower().replace(" ", "-")
     robot.status = RobotStatus.CONNECTED
@@ -46,7 +46,7 @@ def _mock_settings() -> MagicMock:
     settings = MagicMock()
     settings.gateway_baud = 115200
     settings.gateway_port = "/dev/ttyUSB0"
-    settings.data = {"robots": {"turtles": [], "trees": [], "thymios": []}, "gateway": {}}
+    settings.data = {"robots": {"turtle_trees": [], "thymios": []}, "gateway": {}}
     return settings
 
 
@@ -97,7 +97,7 @@ class TestSessionSetupDialog:
     def test_robot_type_label_set_on_open(self, qtbot, db):
         dlg = SessionSetupDialog(robots=[], db=db)
         qtbot.addWidget(dlg)
-        assert dlg.robot_type_label.text() == TurtleRobot.__name__
+        assert dlg.robot_type_label.text() == TurtleTreeRobot.__name__
 
     def test_no_robots_label_shown_when_empty(self, qtbot, db):
         dlg = SessionSetupDialog(robots=[], db=db)
@@ -140,15 +140,14 @@ class TestRobotPanel:
     def test_lists_start_empty(self, qtbot):
         panel = RobotPanel(ESPNowGateway("/dev/null"), _mock_settings())
         qtbot.addWidget(panel)
-        assert panel.turtle_tree.topLevelItemCount() == 0
+        assert panel.turtle_tree_tree.topLevelItemCount() == 0
         assert panel.thymio_tree.topLevelItemCount() == 0
-        assert panel.tree_tree.topLevelItemCount() == 0
 
     def test_refresh_populates_turtle_list(self, qtbot):
         panel = RobotPanel(ESPNowGateway("/dev/null"), _mock_settings())
         qtbot.addWidget(panel)
         panel.refresh([_mock_turtle("Turtle-1"), _mock_turtle("Turtle-2")])
-        assert panel.turtle_tree.topLevelItemCount() == 0
+        assert panel.turtle_tree_tree.topLevelItemCount() == 0
         assert panel.thymio_tree.topLevelItemCount() == 0
 
     def test_gateway_connect_btn_present(self, qtbot):

@@ -1,18 +1,16 @@
 """EspRobot — concrete base for any robot that drives ESP32 nodes via the gateway.
 
-Houses everything that's identical across TurtleRobot, TreeRobot, ThymioRobot:
+Houses everything that's identical across TurtleTreeRobot, ThymioRobot:
   * Controller dictionary built from ``node_configs``
   * ``configure`` push for ``node_multiplexed`` nodes
   * Skin dictionary built from ``skin_configs``
-  * Optional pressure / vacuum reservoirs auto-derived from multiplexed nodes
-    with ``has_reservoirs: true``
   * ``pause()`` (calls ``hold`` on every chamber)
   * ``send_command()`` dispatching to skins (inflate / deflate / set_pressure / hold)
   * ``get_status_data()`` skeleton
   * Default ``connect()`` / ``disconnect()`` (subclasses override if they need more)
 
-Subclasses contribute their own behaviour on top: Turtle has bulk skin helpers,
-Tree has owner / sharing logic, Thymio adds tdm-client motors and LEDs.
+Subclasses contribute their own behaviour on top: Turtle & Tree adds owner /
+sharing logic, Thymio adds tdm-client motors and LEDs.
 """
 
 from __future__ import annotations
@@ -20,12 +18,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from src.hardware.air_reservoir import AirReservoir
 from src.hardware.esp32_controller import ESP32Controller
 from src.hardware.espnow_gateway import ESPNowGateway
 from src.hardware.skin import Skin
 from src.robots._robot_builder import (
-    build_reservoirs,
     build_skins,
     configure_multiplexed_nodes,
     set_pump_counts,
@@ -40,15 +36,12 @@ class EspRobot(BaseRobot):
 
     Args:
         robot_id:          Unique identifier.
-        kind:              Display name ("Turtle", "Tree", ...).
+        kind:              Display name ("Turtle & Tree", "Thymio", ...).
         gateway:           Shared ESP-NOW gateway. Required for hardware mode;
                            may be ``None`` for robots that boot in
                            "no-hardware" mode (e.g. ThymioRobot without nodes).
         node_configs:      List of ``{"mac": ..., "node_type": ...}`` dicts.
         skin_configs:      List of skin dicts (see ``build_skins``).
-        reservoir_configs: Optional explicit reservoir block. Auto-derived from
-                           any ``node_multiplexed`` node with
-                           ``has_reservoirs: true`` when omitted.
     """
 
     def __init__(
@@ -58,7 +51,6 @@ class EspRobot(BaseRobot):
         gateway: ESPNowGateway | None,
         node_configs: list[dict[str, Any]] | None,
         skin_configs: list[dict[str, Any]] | None,
-        reservoir_configs: dict[str, Any] | None = None,
     ):
         super().__init__(robot_id, kind)
         self._gateway = gateway
@@ -73,13 +65,9 @@ class EspRobot(BaseRobot):
             set_pump_counts(nodes, self._controllers)
             configure_multiplexed_nodes(nodes, self._controllers)
             self._skins: dict[str, Skin] = build_skins(skins, self._controllers)
-            self._reservoirs: dict[str, AirReservoir] = build_reservoirs(
-                nodes, reservoir_configs, self._controllers,
-            )
         else:
             self._controllers = {}
             self._skins = {}
-            self._reservoirs = {}
 
     # ------------------------------------------------------------------
     # Public model accessors
@@ -88,14 +76,6 @@ class EspRobot(BaseRobot):
     @property
     def skins(self) -> dict[str, Skin]:
         return self._skins
-
-    @property
-    def pressure_reservoir(self) -> AirReservoir | None:
-        return self._reservoirs.get("pressure")
-
-    @property
-    def vacuum_reservoir(self) -> AirReservoir | None:
-        return self._reservoirs.get("vacuum")
 
     @property
     def total_chambers(self) -> int:
@@ -179,8 +159,7 @@ class EspRobot(BaseRobot):
 
     def get_status_data(self) -> dict[str, Any]:
         return {
-            "robot_id":   self.robot_id,
-            "status":     self._status.value,
-            "skins":      {sid: s.get_status() for sid, s in self._skins.items()},
-            "reservoirs": {k: r.get_status() for k, r in self._reservoirs.items()},
+            "robot_id": self.robot_id,
+            "status":   self._status.value,
+            "skins":    {sid: s.get_status() for sid, s in self._skins.items()},
         }

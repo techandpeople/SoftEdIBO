@@ -184,6 +184,6 @@ def test_skin_geometry_registry_and_filtering():
     from src.hardware.skin_geometry import geometry_for, skin_types_for
     assert geometry_for("turtle_square").shape == "rect"
     assert geometry_for("tree_round").shape == "round"
-    assert set(skin_types_for("turtle")) == {
-        "turtle_square", "turtle_side", "turtle_triangle"}
+    assert set(skin_types_for("turtle_tree")) == {
+        "turtle_square", "turtle_side", "turtle_triangle", "tree_round"}
     assert geometry_for("") is None

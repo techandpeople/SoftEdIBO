@@ -48,7 +48,7 @@ class _FakeSkin:
         self.touch_controller = None
         self._ctrl = controller
 
-    def set_pressure(self, chamber_id, value):
+    def set_pressure(self, chamber_id, value, period_ms=0):
         self.pressures.append((chamber_id, value))
         return True
 

@@ -67,12 +67,12 @@
     </widget>
    </item>
    <item>
-    <widget class="QGroupBox" name="turtle_group">
-     <property name="title"><string>Turtles</string></property>
-     <property name="whatsThis"><string>Configured Turtle robots and their skins/nodes. Expand a robot to edit its skins, or use the row actions to test and configure it.</string></property>
-     <layout class="QVBoxLayout" name="turtle_layout">
+    <widget class="QGroupBox" name="turtle_tree_group">
+     <property name="title"><string>Turtle &amp; Tree</string></property>
+     <property name="whatsThis"><string>Configured Turtle &amp; Tree robots and their skins/nodes. Turtle and Tree share the same hardware — they only differ in the skins fitted on top, so a single robot can carry both turtle and tree skins. Expand a robot to edit its skins, or use the row actions to test and configure it.</string></property>
+     <layout class="QVBoxLayout" name="turtle_tree_layout">
       <item>
-       <widget class="QTreeWidget" name="turtle_tree">
+       <widget class="QTreeWidget" name="turtle_tree_tree">
         <property name="headerHidden"><bool>true</bool></property>
         <property name="rootIsDecorated"><bool>true</bool></property>
         <column><property name="text"><string notr="true">Name</string></property></column>
@@ -80,30 +80,8 @@
        </widget>
       </item>
       <item>
-       <widget class="QPushButton" name="add_turtle_btn">
-        <property name="whatsThis"><string>Create a new Turtle robot and open its configuration to add skins and nodes.</string></property>
-        <property name="text"><string>+ Add Robot</string></property>
-       </widget>
-      </item>
-     </layout>
-    </widget>
-   </item>
-   <item>
-    <widget class="QGroupBox" name="tree_group">
-     <property name="title"><string>Trees</string></property>
-     <property name="whatsThis"><string>Configured Tree robots and their skins/nodes. Expand a robot to edit its skins, or use the row actions to test and configure it.</string></property>
-     <layout class="QVBoxLayout" name="tree_layout">
-      <item>
-       <widget class="QTreeWidget" name="tree_tree">
-        <property name="headerHidden"><bool>true</bool></property>
-        <property name="rootIsDecorated"><bool>true</bool></property>
-        <column><property name="text"><string notr="true">Name</string></property></column>
-        <column><property name="text"><string notr="true">Action</string></property></column>
-       </widget>
-      </item>
-      <item>
-       <widget class="QPushButton" name="add_tree_btn">
-        <property name="whatsThis"><string>Create a new Tree robot and open its configuration to add skins and nodes.</string></property>
+       <widget class="QPushButton" name="add_turtle_tree_btn">
+        <property name="whatsThis"><string>Create a new Turtle &amp; Tree robot and open its configuration to add skins and nodes.</string></property>
         <property name="text"><string>+ Add Robot</string></property>
        </widget>
       </item>

@@ -4,11 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-# Tank simulation constants (adjust to taste).
-TANK_CHAMBER_RATIO: float = 6.0  # 1 unit of chamber pressure uses 1/12 of tank
-TANK_REFILL_RATE: int = 1         # % per 300 ms tick (0→100 in 30 s)
-
-from src.hardware.air_reservoir import AirReservoir
 from src.hardware.simulated_controller import SimulatedController
 from src.hardware.simulated_magnet_sensor import SimulatedMagnetSensor
 from src.hardware.skin import Skin
@@ -17,12 +12,7 @@ from src.robots.base_robot import BaseRobot, RobotStatus
 
 
 class SimulatedRobot(BaseRobot):
-    """Mock robot — skins backed by SimulatedController instead of real ESP32.
-
-    Optionally exposes simulated pressure/vacuum reservoirs so the monitor can
-    show tank widgets in simulation mode. Each simulated tank just holds a
-    static percentage — useful as a visual placeholder, not a true simulation.
-    """
+    """Mock robot — skins backed by SimulatedController instead of real ESP32."""
 
     def __init__(
         self,
@@ -30,7 +20,6 @@ class SimulatedRobot(BaseRobot):
         name: str,
         skin_configs: list[dict[str, Any]],
         *,
-        tank_kinds: list[str] | None = None,
         sim_params: dict[str, Any] | None = None,
     ) -> None:
         """Initialize a simulated robot.
@@ -39,10 +28,6 @@ class SimulatedRobot(BaseRobot):
             robot_id:     Mirrors the original robot's id.
             name:         Display name.
             skin_configs: List of skin dicts in the standard format.
-            tank_kinds:   Optional kinds of reservoir tanks to expose (any of
-                          ``"pressure"``, ``"vacuum"``). Used by the monitor in
-                          simulation mode to show tank widgets when the original
-                          robot had reservoirs.
             sim_params:   Optional dict of simulation knobs (sim_inflate_speed,
                           sim_deflate_speed, sim_touch_release_delay_ms, …).
                           Forwarded to each SimulatedController so the operator-
@@ -77,14 +62,6 @@ class SimulatedRobot(BaseRobot):
         self._skins: dict[str, Skin] = build_skins(
             skin_configs, self._controllers, touch_controllers=self._magnet_sensors,
         )
-        self._reservoirs: dict[str, AirReservoir] = self._build_simulated_reservoirs(
-            tank_kinds or []
-        )
-        # skin_id → local_idx → last seen chamber.pressure (blue bar)
-        self._prev_pressures: dict[str, dict[int, int]] = {
-            sid: dict.fromkeys(skin.chambers, 0)
-            for sid, skin in self._skins.items()
-        }
 
     # ------------------------------------------------------------------
     # Properties
@@ -93,14 +70,6 @@ class SimulatedRobot(BaseRobot):
     @property
     def skins(self) -> dict[str, Skin]:
         return self._skins
-
-    @property
-    def pressure_reservoir(self) -> AirReservoir | None:
-        return self._reservoirs.get("pressure")
-
-    @property
-    def vacuum_reservoir(self) -> AirReservoir | None:
-        return self._reservoirs.get("vacuum")
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -134,30 +103,6 @@ class SimulatedRobot(BaseRobot):
         for ctrl in self._controllers.values():
             ctrl.resume()
 
-    def tick(self) -> None:
-        """Update simulated tank pressures based on chamber pressure deltas."""
-        pressure_tank = self._reservoirs.get("pressure")
-        vacuum_tank   = self._reservoirs.get("vacuum")
-
-        p_level = pressure_tank._pressure if pressure_tank else 0  # noqa: SLF001
-        v_level = vacuum_tank._pressure   if vacuum_tank   else 0  # noqa: SLF001
-
-        for sid, skin in self._skins.items():
-            prev = self._prev_pressures.setdefault(sid, dict.fromkeys(skin.chambers, 0))
-            for idx, chamber in skin.chambers.items():
-                current = chamber.pressure
-                delta   = current - prev.get(idx, 0)
-                if delta > 0:
-                    p_level -= round(delta / TANK_CHAMBER_RATIO)
-                elif delta < 0:
-                    v_level -= round(abs(delta) / TANK_CHAMBER_RATIO)
-                prev[idx] = current
-
-        if pressure_tank is not None:
-            pressure_tank._pressure = max(0, min(100, p_level + TANK_REFILL_RATE))  # noqa: SLF001
-        if vacuum_tank is not None:
-            vacuum_tank._pressure = max(0, min(100, v_level + TANK_REFILL_RATE))  # noqa: SLF001
-
     def disconnect(self) -> None:
         for ctrl in self._controllers.values():
             ctrl.stop_all()
@@ -180,25 +125,7 @@ class SimulatedRobot(BaseRobot):
 
     def get_status_data(self) -> dict[str, Any]:
         return {
-            "robot_id":   self.robot_id,
-            "status":     self._status.value,
-            "skins":      {sid: s.get_status() for sid, s in self._skins.items()},
-            "reservoirs": {k: r.get_status() for k, r in self._reservoirs.items()},
+            "robot_id": self.robot_id,
+            "status":   self._status.value,
+            "skins":    {sid: s.get_status() for sid, s in self._skins.items()},
         }
-
-    # ------------------------------------------------------------------
-    # Internal
-    # ------------------------------------------------------------------
-
-    def _build_simulated_reservoirs(self, tank_kinds: list[str]) -> dict[str, AirReservoir]:
-        reservoirs: dict[str, AirReservoir] = {}
-        for kind in tank_kinds:
-            if kind not in ("pressure", "vacuum"):
-                continue
-            sim_mac = f"SIM:TANK:{self.robot_id}:{kind}"
-            ctrl = SimulatedController(sim_mac, sim_params=self._sim_params)
-            self._controllers[sim_mac] = ctrl
-            res = AirReservoir(kind=kind, controller=ctrl)  # type: ignore[arg-type]
-            res._pressure = 100  # noqa: SLF001  — full tank on sim start
-            reservoirs[kind] = res
-        return reservoirs

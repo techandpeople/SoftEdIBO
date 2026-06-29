@@ -3,7 +3,6 @@
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
-    QDialog,
     QFormLayout,
     QListWidgetItem,
     QWidget,
@@ -13,11 +12,12 @@ from src.activities import available_activities
 from src.activities.base_activity import BaseActivity
 from src.data.database import Database
 from src.data.models import ParticipantRecord
+from src.gui.base_dialog import BaseDialog
 from src.gui.ui_session_setup_dialog import Ui_SessionSetupDialog
 from src.robots.base_robot import BaseRobot
 
 
-class SessionSetupDialog(QDialog, Ui_SessionSetupDialog):
+class SessionSetupDialog(BaseDialog, Ui_SessionSetupDialog):
     """Dialog that collects session ID, activity, robot, and participant selection.
 
     Args:

@@ -38,8 +38,7 @@ from src.gui.ui_main_window import Ui_MainWindow
 from src.hardware.espnow_gateway import ESPNowGateway
 from src.robots.base_robot import BaseRobot
 from src.robots.thymio.thymio_robot import ThymioRobot
-from src.robots.tree.tree_robot import TreeRobot
-from src.robots.turtle.turtle_robot import TurtleRobot
+from src.robots.turtle_tree.turtle_tree_robot import TurtleTreeRobot
 
 logger = logging.getLogger(__name__)
 
@@ -183,26 +182,14 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         robots: list[BaseRobot] = []
         robot_data = self._settings.data.get("robots", {})
 
-        # Turtles
-        for turtle_cfg in robot_data.get("turtles", []):
-            if turtle_cfg.get("skins"):
-                robots.append(TurtleRobot(
-                    robot_id=turtle_cfg.get("id", "turtle"),
+        # Turtle & Tree robots (one kind, skins differ)
+        for tt_cfg in robot_data.get("turtle_trees", []):
+            if tt_cfg.get("skins"):
+                robots.append(TurtleTreeRobot(
+                    robot_id=tt_cfg.get("id", "turtle_tree"),
                     gateway=self._gateway,
-                    node_configs=turtle_cfg.get("nodes", []),
-                    skin_configs=turtle_cfg["skins"],
-                    reservoir_configs=turtle_cfg.get("reservoirs") or None,
-                ))
-
-        # Trees
-        for tree_cfg in robot_data.get("trees", []):
-            if tree_cfg.get("skins"):
-                robots.append(TreeRobot(
-                    robot_id=tree_cfg.get("id", "tree"),
-                    gateway=self._gateway,
-                    node_configs=tree_cfg.get("nodes", []),
-                    skin_configs=tree_cfg["skins"],
-                    reservoir_configs=tree_cfg.get("reservoirs") or None,
+                    node_configs=tt_cfg.get("nodes", []),
+                    skin_configs=tt_cfg["skins"],
                 ))
 
         # Thymios
@@ -214,7 +201,6 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                 gateway=self._gateway,
                 node_configs=thymio_cfg.get("nodes", []),
                 skin_configs=thymio_cfg.get("skins", []),
-                reservoir_configs=thymio_cfg.get("reservoirs") or None,
             ))
 
         return robots

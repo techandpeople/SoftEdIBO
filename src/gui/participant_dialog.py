@@ -1,13 +1,14 @@
 """Dialog for adding or editing a participant."""
 
-from PySide6.QtWidgets import QDialog, QMessageBox, QWidget
+from PySide6.QtWidgets import QMessageBox, QWidget
 
 from src.data.database import Database
 from src.data.models import ParticipantRecord
+from src.gui.base_dialog import BaseDialog
 from src.gui.ui_participant_dialog import Ui_ParticipantDialog
 
 
-class ParticipantDialog(QDialog, Ui_ParticipantDialog):
+class ParticipantDialog(BaseDialog, Ui_ParticipantDialog):
     """Dialog to create or edit a participant.
 
     Args:

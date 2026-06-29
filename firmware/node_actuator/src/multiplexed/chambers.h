@@ -5,13 +5,18 @@
 #include "pca_valves.h"
 #include "fill_control.h"   // shared time-based fill + idle leak-maintenance policy
 
-// Per-chamber state: each chamber inflates by opening its inflate valve to
-// the pressure tank, deflates by opening the deflate valve to the vacuum tank.
-// No per-chamber pumps — pumps maintain the shared tanks.
+// Per-chamber state. No reservoir tanks: the shared pumps push air directly into
+// the chambers. A chamber inflates by opening its inflate valve (connecting it to
+// the pressure-role pump manifold) and deflates by opening its deflate valve (to
+// the vacuum-role pumps). main.cpp's recalcPumps() runs each role's pumps from the
+// live chamber states — at the highest ``duty`` any chamber of that direction asks
+// for — so a lower duty fills/empties that chamber more slowly.
 // Board-agnostic fill policy (time-based fill, leak maintenance, safety ceilings)
 // lives in firmware/common/fill_control.h, shared with node_direct.
 
 namespace chambers {
+
+constexpr uint8_t DEFAULT_DUTY = 255;   // full pump speed (8-bit PWM)
 
 enum State : uint8_t {
     IDLE, INFLATING, DEFLATING
@@ -25,6 +30,7 @@ constexpr uint32_t ACTUATION_TIMEOUT_MS = 10000;
 
 struct Chamber {
     State    state         = IDLE;
+    uint8_t  duty          = DEFAULT_DUTY;  // pump PWM while INFLATING/DEFLATING (recalcPumps)
     float    target_kpa    = 0.0f;
     float    min_kpa       = config::DEFAULT_CHAMBER_MIN_KPA;
     float    max_kpa       = config::DEFAULT_CHAMBER_MAX_KPA;
@@ -50,12 +56,14 @@ inline void stop(int n) {
 // pressure tank for that long (clamped to MAX_FILL_MS) regardless of the mux
 // pressure reading, with max_kpa as the only pressure cutoff (caller passes
 // target_kpa = max_kpa). ``fill_ms`` == 0 keeps the pressure-target behaviour.
-inline void beginInflate(int n, float target_kpa, uint32_t fill_ms = 0) {
+inline void beginInflate(int n, float target_kpa, uint32_t fill_ms = 0,
+                         uint8_t duty = DEFAULT_DUTY) {
     target_kpa = max(state[n].min_kpa, min(target_kpa, state[n].max_kpa));
     uint32_t until = fill_control::fillUntil(fill_ms);
     if (state[n].state == INFLATING && state[n].target_kpa == target_kpa
         && state[n].fill_until_ms == 0 && until == 0) return;
     state[n].state         = INFLATING;
+    state[n].duty          = duty;         // pressure-role pumps run at this duty
     state[n].target_kpa    = target_kpa;
     state[n].since_ms      = millis();
     state[n].fill_until_ms = until;
@@ -99,10 +107,12 @@ inline void maintainTick(uint32_t now) {
 
 // ``deflate_ms`` bounds the active vacuum valving in time; 0 falls back to the
 // hard MAX_DEFLATE_MS cap. Always armed — the gauge sensor cannot bound vacuum.
-inline void beginDeflate(int n, float target_kpa, uint32_t deflate_ms = 0) {
+inline void beginDeflate(int n, float target_kpa, uint32_t deflate_ms = 0,
+                         uint8_t duty = DEFAULT_DUTY) {
     target_kpa = max(state[n].min_kpa, min(target_kpa, state[n].max_kpa));
     if (state[n].state == DEFLATING && state[n].target_kpa == target_kpa) return;
     state[n].state         = DEFLATING;
+    state[n].duty          = duty;         // vacuum-role pumps run at this duty
     state[n].target_kpa    = target_kpa;
     state[n].since_ms      = millis();
     state[n].fill_until_ms = fill_control::deflateUntil(deflate_ms);

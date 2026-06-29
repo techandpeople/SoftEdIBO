@@ -6,8 +6,12 @@
 #   firmware/gateway/firmware-esp32.bin        (ESP32-WROOM,   bootloader @ 0x1000)
 #   firmware/node_actuator/firmware-direct-release.bin
 #   firmware/node_actuator/firmware-direct-debug.bin
+#   firmware/node_actuator/firmware-direct-rgbw-release.bin   (RGBW LED ring)
+#   firmware/node_actuator/firmware-direct-rgbw-debug.bin
 #   firmware/node_actuator/firmware-multiplexed-release.bin
 #   firmware/node_actuator/firmware-multiplexed-debug.bin
+#   firmware/node_actuator/firmware-multiplexed-rgbw-release.bin   (RGBW LED rings)
+#   firmware/node_actuator/firmware-multiplexed-rgbw-debug.bin
 #   firmware/node_magnet_sensor/firmware-release.bin
 #
 # Every output is a MERGED image (bootloader + partitions + app) because the
@@ -77,11 +81,17 @@ merge_node firmware/gateway seeed_xiao_esp32s3    firmware-s3.bin    esp32s3 0x0
 merge_node firmware/gateway seeed_xiao_esp32s3_ap firmware-s3-ap.bin esp32s3 0x0    80m
 merge_node firmware/gateway esp32dev              firmware-esp32.bin esp32   0x1000 40m
 
-# Actuator node — direct + multiplexed, each release/debug.
-merge_node firmware/node_actuator direct            firmware-direct-release.bin
-merge_node firmware/node_actuator direct_debug      firmware-direct-debug.bin
-merge_node firmware/node_actuator multiplexed       firmware-multiplexed-release.bin
-merge_node firmware/node_actuator multiplexed_debug firmware-multiplexed-debug.bin
+# Actuator node — direct + multiplexed, each release/debug. Both boards also
+# ship RGBW-ring variants (-DLED_RGBW); same source, different NeoPixel pixel
+# type (SK6812 RGBW vs WS2812 RGB). See firmware/node_actuator/src/*/leds.h.
+merge_node firmware/node_actuator direct                 firmware-direct-release.bin
+merge_node firmware/node_actuator direct_debug           firmware-direct-debug.bin
+merge_node firmware/node_actuator direct_rgbw            firmware-direct-rgbw-release.bin
+merge_node firmware/node_actuator direct_rgbw_debug      firmware-direct-rgbw-debug.bin
+merge_node firmware/node_actuator multiplexed            firmware-multiplexed-release.bin
+merge_node firmware/node_actuator multiplexed_debug      firmware-multiplexed-debug.bin
+merge_node firmware/node_actuator multiplexed_rgbw       firmware-multiplexed-rgbw-release.bin
+merge_node firmware/node_actuator multiplexed_rgbw_debug firmware-multiplexed-rgbw-debug.bin
 
 # Magnet/touch sensor node.
 merge_node firmware/node_magnet_sensor release firmware-release.bin

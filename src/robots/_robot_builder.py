@@ -1,6 +1,6 @@
-"""Internal helpers for constructing Skin and AirReservoir objects from config dicts.
+"""Internal helpers for constructing Skin objects from config dicts.
 
-Used by TurtleRobot, TreeRobot, ThymioRobot, and SimulatedRobot so the
+Used by TurtleTreeRobot, ThymioRobot, and SimulatedRobot so the
 config-parsing logic lives in one place.
 """
 
@@ -9,7 +9,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from src.hardware.air_reservoir import AirReservoir
 from src.hardware.skin import Skin
 
 logger = logging.getLogger(__name__)
@@ -23,21 +22,14 @@ def set_pump_counts(
 
     Drives the shared-pump fill-time scaling (see
     :mod:`src.hardware.fill_scaling`): concurrent inflations on a node split its
-    pumps' airflow. ``node_direct`` has two onboard pumps; ``node_multiplexed``
-    shares ``pump_inflate_count`` pumps when it has reservoirs (else there are no
-    chamber pumps, so the count is left at the default 1).
+    pumps' airflow. ``node_direct`` has two onboard pumps; every other node type
+    is treated as a single shared pump.
     """
     for node_cfg in node_configs:
         ctrl = controllers.get(node_cfg.get("mac", ""))
         if ctrl is None or not hasattr(ctrl, "fill_load"):
             continue
-        node_type = node_cfg.get("node_type")
-        if node_type == "node_direct":
-            count = 2
-        elif node_type == "node_multiplexed" and node_cfg.get("has_reservoirs"):
-            count = int(node_cfg.get("pump_inflate_count", 3))
-        else:
-            count = 1
+        count = 2 if node_cfg.get("node_type") == "node_direct" else 1
         ctrl.fill_load.pump_count = max(1, count)
 
 
@@ -48,12 +40,7 @@ def configure_multiplexed_nodes(
     """Send runtime `configure` to every node_multiplexed controller.
 
     The multiplexed firmware is runtime-sized by gateway config. This helper
-    keeps chamber sizing and tank safety limits in one place and ensures safe
-    defaults are pushed at connect time.
-
-    Tank limits and pump groups are only included when the node config has
-    ``has_reservoirs: true`` — multiplexed nodes without reservoirs only
-    receive ``num_chambers``.
+    pushes the chamber count (and any organ channels) at connect time.
     """
     for node_cfg in node_configs:
         if node_cfg.get("node_type") != "node_multiplexed":
@@ -70,44 +57,7 @@ def configure_multiplexed_nodes(
         # (I13..I15) so they stay clear of the chamber autodetect.
         organ_channels = [int(c) for c in node_cfg.get("organ_channels", [])] or None
 
-        if not node_cfg.get("has_reservoirs", False):
-            ctrl.configure(num_chambers=max_slots, organ_channels=organ_channels)
-            continue
-
-        pump_inflate_count = max(0, min(int(node_cfg.get("pump_inflate_count", 3)), 6))
-        pump_deflate_count = max(0, min(int(node_cfg.get("pump_deflate_count", 3)), 6))
-        tank_pressure_min_kpa = float(node_cfg.get("tank_pressure_min_kpa", 0.0))
-        tank_pressure_max_kpa = float(node_cfg.get("tank_pressure_max_kpa", 50.0))
-        tank_vacuum_min_kpa   = float(node_cfg.get("tank_vacuum_min_kpa", -50.0))
-        tank_vacuum_max_kpa   = float(node_cfg.get("tank_vacuum_max_kpa", 0.0))
-
-        # Operational set-point: take from YAML if present, otherwise default
-        # to the midpoint of [min, max] so the pumps have headroom to work in.
-        tank_pressure_target_kpa = float(node_cfg.get(
-            "tank_pressure_target_kpa",
-            (tank_pressure_min_kpa + tank_pressure_max_kpa) / 2.0))
-        tank_vacuum_target_kpa = float(node_cfg.get(
-            "tank_vacuum_target_kpa",
-            (tank_vacuum_min_kpa + tank_vacuum_max_kpa) / 2.0))
-
-        pressure_group = list(range(1, pump_inflate_count + 1))
-        vacuum_start = pump_inflate_count + 1
-        vacuum_end = min(vacuum_start + pump_deflate_count - 1, 6)
-        vacuum_group = list(range(vacuum_start, vacuum_end + 1))
-
-        ctrl.configure(
-            num_chambers=max_slots,
-            pump_inflate_count=pump_inflate_count,
-            pump_deflate_count=pump_deflate_count,
-            tank_pressure_min_kpa=tank_pressure_min_kpa,
-            tank_pressure_max_kpa=tank_pressure_max_kpa,
-            tank_pressure_target_kpa=tank_pressure_target_kpa,
-            tank_vacuum_min_kpa=tank_vacuum_min_kpa,
-            tank_vacuum_max_kpa=tank_vacuum_max_kpa,
-            tank_vacuum_target_kpa=tank_vacuum_target_kpa,
-            pump_groups={"pressure": pressure_group, "vacuum": vacuum_group},
-            organ_channels=organ_channels,
-        )
+        ctrl.configure(num_chambers=max_slots, organ_channels=organ_channels)
 
 
 def build_skins(
@@ -201,74 +151,3 @@ def _resolve_touch_ctrl(skin_cfg: dict[str, Any],
     """Return the controller for the magnet sensor referenced by ``skin_cfg.touch``."""
     touch_cfg = skin_cfg.get("touch") or {}
     return controllers.get(touch_cfg.get("node_mac")) if touch_cfg else None
-
-
-def build_reservoirs(
-    node_configs: list[dict[str, Any]],
-    reservoir_configs: dict[str, Any] | None,
-    controllers: dict[str, Any],
-) -> dict[str, AirReservoir]:
-    """Construct AirReservoir objects.
-
-    Args:
-        node_configs: Node list from robot settings.
-        reservoir_configs:  Dict with optional ``"pressure"`` and ``"vacuum"`` keys::
-
-            {"pressure": {"mac": "AA:BB:...", "node_type": "reservoir",
-                           "pump_count": 2},
-             "vacuum":   {"mac": "BB:CC:...", "pump_count": 1}}
-
-        controllers:  Pre-built ``{mac: controller}`` dict.
-
-    Returns:
-        ``{"pressure": AirReservoir, "vacuum": AirReservoir}`` (only present keys).
-    """
-    reservoirs: dict[str, AirReservoir] = {}
-    if reservoir_configs:
-        for kind in ("pressure", "vacuum"):
-            cfg = reservoir_configs.get(kind)
-            if not cfg:
-                continue
-            mac = cfg.get("mac", "")
-            ctrl = controllers.get(mac)
-            if ctrl is None:
-                continue
-            reservoirs[kind] = AirReservoir(
-                kind=kind,  # type: ignore[arg-type]
-                controller=ctrl,
-                node_slot=int(cfg.get("node_slot", 0)),
-                pump_count=int(cfg.get("pump_count", 1)),
-            )
-
-    # Auto-derive internal shared reservoirs from node_multiplexed nodes that
-    # have has_reservoirs: true.
-    for node_cfg in node_configs:
-        if node_cfg.get("node_type") != "node_multiplexed":
-            continue
-        if not node_cfg.get("has_reservoirs", False):
-            continue
-        mac = node_cfg.get("mac", "")
-        ctrl = controllers.get(mac)
-        if ctrl is None:
-            continue
-        max_slots = max(1, min(int(node_cfg.get("max_slots", 12)), 16))
-        reservoirs.setdefault(
-            "pressure",
-            AirReservoir(
-                kind="pressure",
-                controller=ctrl,
-                node_slot=max_slots,
-                pump_count=int(node_cfg.get("pump_inflate_count", 3)),
-            ),
-        )
-        reservoirs.setdefault(
-            "vacuum",
-            AirReservoir(
-                kind="vacuum",
-                controller=ctrl,
-                node_slot=max_slots + 1,
-                pump_count=int(node_cfg.get("pump_deflate_count", 3)),
-            ),
-        )
-
-    return reservoirs

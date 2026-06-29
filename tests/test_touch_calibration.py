@@ -9,7 +9,7 @@ from src.hardware.touch_calibration import (
 
 
 def _settings():
-    return {"robots": {"turtles": [{
+    return {"robots": {"turtle_trees": [{
         "id": "turtle_1",
         "nodes": [
             {"mac": "AA:01", "node_type": "node_direct"},      # actuator + magnet merged
@@ -46,7 +46,7 @@ def test_set_touch_coupling_and_compensation_round_trip():
     skins = {s["skin_id"]: s for s in iter_touch_skins(data)}
     assert skins["belly"]["coupling"] == cfg
     assert skins["belly"]["enabled"] is True
-    touch = data["robots"]["turtles"][0]["skins"][0]["touch"]
+    touch = data["robots"]["turtle_trees"][0]["skins"][0]["touch"]
     assert touch["compensation"]["threshold_ut"] == 120.0
 
 
@@ -58,13 +58,13 @@ def test_clear_coupling_drops_key():
     data = _settings()
     set_touch_coupling(data, "turtle_1", "belly", {"deltas": {"0": [1]}})
     set_touch_coupling(data, "turtle_1", "belly", None)
-    assert "coupling" not in data["robots"]["turtles"][0]["skins"][0]["touch"]
+    assert "coupling" not in data["robots"]["turtle_trees"][0]["skins"][0]["touch"]
 
 
 def test_suppress_pct_sentinel_leaves_unchanged_then_clears():
     data = _settings()
     set_compensation(data, "turtle_1", "belly", suppress_pct=90.0)
-    comp = data["robots"]["turtles"][0]["skins"][0]["touch"]["compensation"]
+    comp = data["robots"]["turtle_trees"][0]["skins"][0]["touch"]["compensation"]
     assert comp["suppress_pct"] == 90.0
     set_compensation(data, "turtle_1", "belly", enabled=True)   # sentinel default
     assert comp["suppress_pct"] == 90.0                         # unchanged

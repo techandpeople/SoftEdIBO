@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 # YAML list key under ``robots`` for each robot kind.
-YAML_KEY: dict[str, str] = {"turtle": "turtles", "tree": "trees", "thymio": "thymios"}
+YAML_KEY: dict[str, str] = {"turtle_tree": "turtle_trees", "thymio": "thymios"}
 
 DEFAULT_MAX_KPA = 8.0
 # Upper/lower bound for the per-chamber Max/Min the config dialog accepts. These
@@ -24,7 +24,7 @@ DEFAULT_MAX_KPA = 8.0
 # actuation watchdog), not by an artificial pressure ceiling. Kept in sync with
 # the firmware HARD_*_KPA constants.
 MAX_ALLOWED_KPA = 100.0
-# Lower cap: 0 by default; negative for chambers fed from a vacuum reservoir.
+# Lower cap: 0 by default; negative for chambers fed from a vacuum source.
 DEFAULT_MIN_KPA = 0.0
 MIN_ALLOWED_KPA = -100.0
 CONFIRM_DELTA = 2.0
@@ -53,6 +53,16 @@ ACTUATOR_NODE_TYPES = ("node_direct", "node_multiplexed")
 # the MLX90393 sensing into the actuator firmware (same board, same MAC, so the
 # touch node is the actuator's own MAC). ``node_multiplexed`` has no magnet bus.
 MAGNET_NODE_TYPES = ("node_magnet_sensor", "node_direct")
+
+# LED ring layout per node type — the LED count of each independently
+# addressable ring, mirroring the firmware's RING_LEDS. node_direct drives a
+# single ring; node_multiplexed drives four (one 24-LED + three 16-LED), each
+# selected via set_led's "ring" field. The Test Actuators dialog builds one ring
+# tester per entry. Node types absent here have no LED rings.
+NODE_LED_RINGS: dict[str, tuple[int, ...]] = {
+    "node_direct": (24,),
+    "node_multiplexed": (24, 16, 16, 16),
+}
 
 
 # ---------------------------------------------------------------------------

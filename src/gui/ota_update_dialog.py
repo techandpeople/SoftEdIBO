@@ -20,7 +20,6 @@ from typing import Any
 
 from PySide6.QtCore import QThread, QTimer, Signal
 from PySide6.QtWidgets import (
-    QDialog,
     QHeaderView,
     QMessageBox,
     QProgressBar,
@@ -31,6 +30,7 @@ from PySide6.QtCore import Qt
 
 from src.config.settings import Settings
 from src.gui.setup_wizard import firmware_for_node_type
+from src.gui.base_dialog import BaseDialog
 from src.gui.ui_ota_update_dialog import Ui_OTAUpdateDialog
 from src.hardware.espnow_gateway import ESPNowGateway
 from src.hardware.node_ota_updater import NodeOTAUpdater
@@ -100,7 +100,7 @@ class _OTAWorker(QThread):
         self.done.emit()
 
 
-class OTAUpdateDialog(QDialog, Ui_OTAUpdateDialog):
+class OTAUpdateDialog(BaseDialog, Ui_OTAUpdateDialog):
     """Multi-select node firmware updater (ESP-NOW or WiFi transport)."""
 
     def __init__(self, gateway: ESPNowGateway, settings: Settings,
@@ -218,12 +218,15 @@ class OTAUpdateDialog(QDialog, Ui_OTAUpdateDialog):
 
     def _selected_jobs(self) -> list[tuple[str, Path]]:
         debug = self.debug_check.isChecked()
+        # RGBW applies only to node types with an RGBW build (node_direct);
+        # firmware_for_node_type falls back to the plain bin for the others.
+        rgbw = self.rgbw_check.isChecked()
         jobs: list[tuple[str, Path]] = []
         for mac, row in self._row_by_mac.items():
             if self.table.item(row, _COL_SEL).checkState() != Qt.CheckState.Checked:
                 continue
             ntype = self.table.item(row, _COL_TYPE).text()
-            fw = firmware_for_node_type(ntype, debug)
+            fw = firmware_for_node_type(ntype, debug, rgbw)
             if fw is None or not fw.exists():
                 self.table.item(row, _COL_STATUS).setText(
                     f"✗ firmware not found: {fw}"
@@ -268,6 +271,7 @@ class OTAUpdateDialog(QDialog, Ui_OTAUpdateDialog):
         self.flash_btn.setEnabled(not running)
         self.select_all_btn.setEnabled(not running)
         self.debug_check.setEnabled(not running)
+        self.rgbw_check.setEnabled(not running)
         self.transport_combo.setEnabled(not running)
         self.ap_ssid_edit.setEnabled(not running)
         self.ap_pass_edit.setEnabled(not running)
