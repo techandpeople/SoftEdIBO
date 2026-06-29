@@ -3,7 +3,6 @@
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QCheckBox,
-    QDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -16,14 +15,14 @@ from PySide6.QtWidgets import (
 )
 
 from src.config.settings import Settings
+from src.gui.base_dialog import BaseDialog
 from src.gui.ui_robot_config_dialog import Ui_RobotConfigDialog
 from src.robots.base_robot import BaseRobot
 from src.robots.thymio.thymio_robot import ThymioRobot
-from src.robots.tree.tree_robot import TreeRobot
-from src.robots.turtle.turtle_robot import TurtleRobot
+from src.robots.turtle_tree.turtle_tree_robot import TurtleTreeRobot
 
 
-class RobotConfigDialog(QDialog, Ui_RobotConfigDialog):
+class RobotConfigDialog(BaseDialog, Ui_RobotConfigDialog):
     """Dialog for editing a robot's hardware configuration and testing its actuators.
 
     The top section shows editable skin entries loaded from ``settings.yaml``
@@ -57,11 +56,8 @@ class RobotConfigDialog(QDialog, Ui_RobotConfigDialog):
 
         # The static frame (intro, scroll area, button box) lives in the .ui;
         # the per-robot config groups are built here into ``content_layout``.
-        if isinstance(robot, TurtleRobot):
-            self._build_skin_config("turtle")
-            self._build_test_section()
-        elif isinstance(robot, TreeRobot):
-            self._build_skin_config("tree")
+        if isinstance(robot, TurtleTreeRobot):
+            self._build_skin_config("turtle_tree")
             self._build_test_section()
         elif isinstance(robot, ThymioRobot):
             self._build_thymio_config()
@@ -108,12 +104,12 @@ class RobotConfigDialog(QDialog, Ui_RobotConfigDialog):
         _inflate()
 
     # ------------------------------------------------------------------
-    # Skin config (Turtle + Tree share the same flat skins[] structure)
+    # Skin config (Turtle & Tree share the same flat skins[] structure)
     # ------------------------------------------------------------------
 
     def _find_robot_cfg(self, robot_key: str) -> dict | None:
         """Find the settings dict for self._robot by matching robot_id."""
-        yaml_key = {"turtle": "turtles", "tree": "trees"}[robot_key]
+        yaml_key = {"turtle_tree": "turtle_trees"}[robot_key]
         robots_list = self._settings.data.get("robots", {}).get(yaml_key, [])
         for cfg in robots_list:
             if cfg.get("id") == self._robot.robot_id:
@@ -216,7 +212,7 @@ class RobotConfigDialog(QDialog, Ui_RobotConfigDialog):
         return skins
 
     # ------------------------------------------------------------------
-    # Test section (Turtle + Tree)
+    # Test section (Turtle & Tree)
     # ------------------------------------------------------------------
 
     def _build_test_section(self) -> None:
@@ -350,12 +346,8 @@ class RobotConfigDialog(QDialog, Ui_RobotConfigDialog):
         data = self._settings.data
         robots_data = data.setdefault("robots", {})
 
-        if isinstance(self._robot, TurtleRobot):
-            robot_cfg = self._find_robot_cfg("turtle")
-            if robot_cfg is not None:
-                robot_cfg["skins"] = self._collect_skins()
-        elif isinstance(self._robot, TreeRobot):
-            robot_cfg = self._find_robot_cfg("tree")
+        if isinstance(self._robot, TurtleTreeRobot):
+            robot_cfg = self._find_robot_cfg("turtle_tree")
             if robot_cfg is not None:
                 robot_cfg["skins"] = self._collect_skins()
         elif isinstance(self._robot, ThymioRobot):

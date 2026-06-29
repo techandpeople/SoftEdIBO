@@ -25,14 +25,12 @@ class ThymioRobot(EspRobot):
         gateway: ESPNowGateway | None = None,
         node_configs: list[dict[str, Any]] | None = None,
         skin_configs: list[dict[str, Any]] | None = None,
-        reservoir_configs: dict[str, Any] | None = None,
     ):
         super().__init__(
             robot_id, f"Thymio-{robot_id}",
             gateway=gateway,
             node_configs=node_configs,
             skin_configs=skin_configs,
-            reservoir_configs=reservoir_configs,
         )
         self._tdm_host = tdm_host
         self._tdm_port = tdm_port

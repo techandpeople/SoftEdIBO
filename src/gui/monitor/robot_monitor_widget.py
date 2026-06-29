@@ -1,8 +1,7 @@
-"""RobotMonitorWidget — visualises all Skins (and reservoir tanks) of a robot.
+"""RobotMonitorWidget — visualises all Skins of a robot.
 
-Layout: tanks (if any) on the left, then one SkinWidget per Skin in robot.skins.
-Works for any robot that exposes a ``skins: dict[str, Skin]`` attribute, plus
-optional ``pressure_reservoir`` / ``vacuum_reservoir`` properties.
+Layout: one SkinWidget per Skin in robot.skins. Works for any robot that
+exposes a ``skins: dict[str, Skin]`` attribute.
 """
 
 from __future__ import annotations
@@ -11,13 +10,12 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QGroupBox, QHBoxLayout, QLabel, QSizePolicy
 
 from src.gui.monitor.skin_widget import SkinWidget
-from src.gui.monitor.tank_widget import TankWidget
 from src.hardware.skin import Skin
 from src.robots.base_robot import BaseRobot
 
 
 class RobotMonitorWidget(QGroupBox):
-    """Widget for a single robot — tank widgets + one SkinWidget per Skin."""
+    """Widget for a single robot — one SkinWidget per Skin."""
 
     touch_event = Signal(str, int, str)  # (skin_id, chamber_id, action)
 
@@ -26,17 +24,10 @@ class RobotMonitorWidget(QGroupBox):
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         self._robot = robot
         self._skin_widgets: list[SkinWidget] = []
-        self._tank_widgets: list[TankWidget] = []
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(4)
-
-        for tank in (robot.pressure_reservoir, robot.vacuum_reservoir):
-            if tank is not None:
-                tw = TankWidget(tank)
-                self._tank_widgets.append(tw)
-                layout.addWidget(tw)
 
         skins: dict[str, Skin] = getattr(robot, "skins", {})
         for skin in skins.values():
@@ -45,7 +36,7 @@ class RobotMonitorWidget(QGroupBox):
             self._skin_widgets.append(sw)
             layout.addWidget(sw)
 
-        if not skins and not self._tank_widgets:
+        if not skins:
             layout.addWidget(QLabel(f"{robot.robot_id} — nothing configured"))
 
     def organ_view_for(self, skin_id: str):
@@ -55,17 +46,10 @@ class RobotMonitorWidget(QGroupBox):
                 return sw.organ_view
         return None
 
-    def tick(self) -> None:
-        fn = getattr(self._robot, "tick", None)
-        if fn is not None:
-            fn()
-
     def set_paused(self, paused: bool) -> None:
         for sw in self._skin_widgets:
             sw.set_paused(paused)
 
     def refresh(self) -> None:
-        for tw in self._tank_widgets:
-            tw.refresh()
         for sw in self._skin_widgets:
             sw.refresh()

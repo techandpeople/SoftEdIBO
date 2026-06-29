@@ -542,7 +542,8 @@ class ScriptedActivity(BaseActivity):
                                  int(params.get("period_ms", 0)))
         elif verb in ("inflate", "set_pressure"):
             self._set_pressure(unit, self._resolve_chamber(unit, params, ctx),
-                               int(params.get("pct", 60 if verb == "inflate" else 0)))
+                               int(params.get("pct", 60 if verb == "inflate" else 0)),
+                               period_ms=int(params.get("period_ms", 0)))
         elif verb in ("deflate", "wrinkle"):
             self._set_pressure(unit, self._resolve_chamber(unit, params, ctx), 0)
         elif verb == "stop":
@@ -558,13 +559,14 @@ class ScriptedActivity(BaseActivity):
     # Hardware helpers
     # ------------------------------------------------------------------
 
-    def _set_pressure(self, unit: _Unit, chamber, pct: int) -> None:
+    def _set_pressure(self, unit: _Unit, chamber, pct: int,
+                      period_ms: int = 0) -> None:
         pct = max(0, min(100, int(pct)))
         try:
             if chamber == "all" or chamber is None:
-                unit.skin.set_pressure(None, pct)
+                unit.skin.set_pressure(None, pct, period_ms=period_ms)
             else:
-                unit.skin.set_pressure(int(chamber), pct)
+                unit.skin.set_pressure(int(chamber), pct, period_ms=period_ms)
         except (TypeError, ValueError):
             logger.debug("set_pressure(%s, %s) ignored on %s",
                          chamber, pct, unit.unit_id)

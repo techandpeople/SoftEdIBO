@@ -23,7 +23,6 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
-    QDialog,
     QFileDialog,
     QMessageBox,
     QTableWidget,
@@ -33,6 +32,7 @@ from PySide6.QtWidgets import (
 
 from src.config.settings import Settings
 from src.gui.async_task import run_async
+from src.gui.base_dialog import BaseDialog
 from src.gui.ui_train_touch_dialog import Ui_TrainTouchDialog
 from src.ml import labeling
 from src.ml.gesture_taxonomy import GESTURE_CLASSES
@@ -40,7 +40,7 @@ from src.ml.touch_classifier import model_path
 from src.hardware.skin_geometry import known_skin_types
 
 
-class TrainTouchDialog(QDialog, Ui_TrainTouchDialog):
+class TrainTouchDialog(BaseDialog, Ui_TrainTouchDialog):
     """Label recorded touch segments and train per-skin-type gesture models."""
 
     # Emitted from the training worker thread; delivered (queued) on the GUI

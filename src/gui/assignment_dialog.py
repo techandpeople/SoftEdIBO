@@ -2,7 +2,6 @@
 
 from PySide6.QtWidgets import (
     QCheckBox,
-    QDialog,
     QDialogButtonBox,
     QGroupBox,
     QHBoxLayout,
@@ -13,6 +12,7 @@ from PySide6.QtWidgets import (
 )
 
 from src.data.models import ParticipantRecord, SessionAssignment
+from src.gui.base_dialog import BaseDialog
 from src.gui.ui_assignment_dialog import Ui_AssignmentDialog
 from src.robots.base_robot import BaseRobot
 
@@ -20,7 +20,7 @@ from src.robots.base_robot import BaseRobot
 def _units_for_robot(robot: BaseRobot) -> list[str]:
     """Return the list of assignable unit IDs for a robot.
 
-    - TurtleRobot / TreeRobot / ThymioRobot => skin IDs
+    - TurtleTreeRobot / ThymioRobot => skin IDs
     - Other => single unit with the robot's own ID
     """
     skins = getattr(robot, "skins", None)
@@ -29,7 +29,7 @@ def _units_for_robot(robot: BaseRobot) -> list[str]:
     return [robot.robot_id]
 
 
-class AssignmentDialog(QDialog, Ui_AssignmentDialog):
+class AssignmentDialog(BaseDialog, Ui_AssignmentDialog):
     """Let the operator assign robot units (skins / branches) to participants.
 
     For every selected robot a group box is shown.  Inside, each participant

@@ -4,7 +4,6 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
-    QDialog,
     QFileDialog,
     QFormLayout,
     QGroupBox,
@@ -15,10 +14,11 @@ from PySide6.QtWidgets import (
 
 from src.config.settings import Settings
 from src.hardware.serial_ports import list_esp32_ports
+from src.gui.base_dialog import BaseDialog
 from src.gui.ui_settings_dialog import Ui_SettingsDialog
 
 
-class SettingsDialog(QDialog, Ui_SettingsDialog):
+class SettingsDialog(BaseDialog, Ui_SettingsDialog):
     """Dialog for editing application settings stored in settings.yaml.
 
     Signals:

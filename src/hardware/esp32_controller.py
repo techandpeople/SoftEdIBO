@@ -22,7 +22,6 @@ class ESP32Controller:
         self._last_status: dict[str, Any] = {}
         self._touch_callbacks:    list[Callable[[int, int], None]] = []
         self._pressure_callbacks: list[Callable[[int, int], None]] = []
-        self._tank_pressure_callbacks: list[Callable[[str, int], None]] = []
         self._magnet_callbacks: list[Callable[[dict[str, Any]], None]] = []
         self._organ_callbacks: list[Callable[[float, int], None]] = []
         # Latest magnet sensor geometry, captured from a `node_magnet_sensor_ready` boot announce.
@@ -41,22 +40,35 @@ class ESP32Controller:
         return self._gateway.send(self.mac_address, command, **kwargs)
 
     def inflate(self, chamber: int, delta: int = 10,
-                ms: int | None = None) -> bool:
+                ms: int | None = None, duty: int | None = None) -> bool:
         """Inflate a chamber by delta % of its max pressure (0-100).
 
         When ``ms`` is given, the node inflates for that many milliseconds
         (time-based fill from a calibrated ``fill_time_ms``) instead of closing
         the loop on the pressure sensor; the firmware still caps at 5 s and at
         the chamber's HARD_MAX pressure.
-        """
-        if ms is not None:
-            return self.send_command("inflate", chamber=chamber, delta=delta,
-                                     ms=int(ms))
-        return self.send_command("inflate", chamber=chamber, delta=delta)
 
-    def deflate(self, chamber: int, delta: int = 10) -> bool:
-        """Deflate a chamber by delta % of its max pressure (0-100)."""
-        return self.send_command("deflate", chamber=chamber, delta=delta)
+        ``duty`` (1-255) optionally lowers the inflate pump's PWM duty so the
+        chamber fills more slowly; omit it (or pass None) for full speed.
+        """
+        payload: dict[str, Any] = {"chamber": chamber, "delta": delta}
+        if ms is not None:
+            payload["ms"] = int(ms)
+        if duty is not None:
+            payload["duty"] = max(1, min(255, int(duty)))
+        return self.send_command("inflate", **payload)
+
+    def deflate(self, chamber: int, delta: int = 10,
+                duty: int | None = None) -> bool:
+        """Deflate a chamber by delta % of its max pressure (0-100).
+
+        ``duty`` (1-255) optionally lowers the deflate (vacuum) pump's PWM duty
+        so the chamber empties more slowly; omit it for full speed.
+        """
+        payload: dict[str, Any] = {"chamber": chamber, "delta": delta}
+        if duty is not None:
+            payload["duty"] = max(1, min(255, int(duty)))
+        return self.send_command("deflate", **payload)
 
     def hold(self, chamber: int) -> bool:
         """Hold pressure — stop pump, close inflate and deflate valves for this chamber."""
@@ -75,9 +87,17 @@ class ESP32Controller:
         """Re-arm the node after an :meth:`emergency_stop` so it accepts commands again."""
         return self.send_command("resume")
 
-    def set_pressure(self, chamber: int, value: int) -> bool:
-        """Set target pressure for a chamber as 0-100 % of that chamber max."""
-        return self.send_command("set_pressure", chamber=chamber, value=value)
+    def set_pressure(self, chamber: int, value: int,
+                     duty: int | None = None) -> bool:
+        """Set target pressure for a chamber as 0-100 % of that chamber max.
+
+        ``duty`` (1-255) optionally lowers the pump's PWM duty so the chamber
+        approaches the target gently; the pressure cutoff still stops at target.
+        """
+        payload: dict[str, Any] = {"chamber": chamber, "value": value}
+        if duty is not None:
+            payload["duty"] = max(1, min(255, int(duty)))
+        return self.send_command("set_pressure", **payload)
 
     def set_max_pressure(self, chamber: int, value: float) -> bool:
         """Set per-chamber max pressure on the ESP32 node (kPa).
@@ -99,61 +119,16 @@ class ESP32Controller:
         self,
         num_chambers: int,
         *,
-        pump_inflate_count: int | None = None,
-        pump_deflate_count: int | None = None,
-        tank_pressure_min_kpa: float | None = None,
-        tank_pressure_max_kpa: float | None = None,
-        tank_pressure_target_kpa: float | None = None,
-        tank_vacuum_min_kpa: float | None = None,
-        tank_vacuum_max_kpa: float | None = None,
-        tank_vacuum_target_kpa: float | None = None,
-        pump_groups: dict[str, list[int]] | None = None,
         organ_channels: list[int] | None = None,
     ) -> bool:
         """Configure a multiplexed node at runtime.
 
-        Tank- and pump-related kwargs are optional and only included in the
-        outgoing payload when not None. A multiplexed node without reservoirs
-        only needs ``num_chambers``.
-
         Args:
             num_chambers: Active chamber count for this node.
-            pump_inflate_count: Number of pumps assigned to pressure tank fill.
-            pump_deflate_count: Number of pumps assigned to vacuum generation.
-            tank_pressure_min_kpa: Lowest acceptable pressure-tank reading.
-            tank_pressure_max_kpa: Hard upper safety cap for pressure tank.
-            tank_pressure_target_kpa: Operational set-point for the pressure
-                tank (kPa). Firmware clamps it inside [min, max].
-            tank_vacuum_min_kpa: Hard lower safety cap for the vacuum tank
-                (typically negative — deepest vacuum the firmware will pump to).
-            tank_vacuum_max_kpa: Highest acceptable vacuum-tank reading
-                (typically near 0; pump turns off above).
-            tank_vacuum_target_kpa: Operational set-point for the vacuum tank
-                (kPa, typically negative). Firmware clamps it inside [min, max].
-            pump_groups: Optional explicit mapping, e.g.
-                ``{"pressure":[1,3], "vacuum":[2,4]}``.
             organ_channels: Mux channels carrying organ+cover circuits; the
                 index in this list becomes the ``slot`` in organ broadcasts.
         """
         payload: dict[str, Any] = {"num_chambers": int(num_chambers)}
-        if pump_inflate_count is not None:
-            payload["pump_inflate_count"] = int(pump_inflate_count)
-        if pump_deflate_count is not None:
-            payload["pump_deflate_count"] = int(pump_deflate_count)
-        if tank_pressure_min_kpa is not None:
-            payload["tank_pressure_min_kpa"] = float(tank_pressure_min_kpa)
-        if tank_pressure_max_kpa is not None:
-            payload["tank_pressure_max_kpa"] = float(tank_pressure_max_kpa)
-        if tank_pressure_target_kpa is not None:
-            payload["tank_pressure_target_kpa"] = float(tank_pressure_target_kpa)
-        if tank_vacuum_min_kpa is not None:
-            payload["tank_vacuum_min_kpa"] = float(tank_vacuum_min_kpa)
-        if tank_vacuum_max_kpa is not None:
-            payload["tank_vacuum_max_kpa"] = float(tank_vacuum_max_kpa)
-        if tank_vacuum_target_kpa is not None:
-            payload["tank_vacuum_target_kpa"] = float(tank_vacuum_target_kpa)
-        if pump_groups:
-            payload["pump_groups"] = pump_groups
         if organ_channels:
             payload["organ_channels"] = [int(c) for c in organ_channels]
         return self.send_command("configure", **payload)
@@ -168,13 +143,15 @@ class ESP32Controller:
 
     def set_led(self, color: str, pattern: str = "solid",
                 period_ms: int = 0, count: int | None = None,
-                index: int | None = None) -> bool:
-        """Drive the node's WS2812 LED ring.
+                index: int | None = None, ring: int | None = None) -> bool:
+        """Drive the node's LED ring(s).
 
         color:   "#RRGGBB". pattern: "off" | "solid" | "blink" | "pulse".
         period_ms/count: animation timing (whole-ring patterns only).
         index:   when given, set just that pixel (solid); otherwise the whole
                  ring. Per-pixel is used by the LED test panel.
+        ring:    multi-ring nodes (node_multiplexed: 4 rings) only — selects ring
+                 0..3; omitted addresses all rings. Single-ring nodes ignore it.
         """
         kwargs: dict[str, Any] = {"color": color, "pattern": pattern,
                                   "period_ms": int(period_ms)}
@@ -182,6 +159,8 @@ class ESP32Controller:
             kwargs["count"] = int(count)
         if index is not None:
             kwargs["index"] = int(index)
+        if ring is not None:
+            kwargs["ring"] = int(ring)
         return self.send_command("set_led", **kwargs)
 
     def set_led_halves(self, colors: list[str], led_count: int = 24,
@@ -227,14 +206,6 @@ class ESP32Controller:
                 ``(chamber_id, pressure)`` still work.
         """
         self._pressure_callbacks.append(callback)
-
-    def on_tank_pressure(self, callback: Callable[[str, int], None]) -> None:
-        """Register a callback for tank pressure status messages.
-
-        Args:
-            callback: Called with (kind, pressure), where kind is "pressure" or "vacuum".
-        """
-        self._tank_pressure_callbacks.append(callback)
 
     @property
     def magnet_geometry(self) -> dict[str, Any] | None:
@@ -305,11 +276,6 @@ class ESP32Controller:
         kpa = float(raw_kpa) if isinstance(raw_kpa, (int, float)) else float("nan")
         self._call_callbacks(self._pressure_callbacks, chamber_id, pressure, state, kpa)
 
-    def _dispatch_tank_pressure(self, data: dict[str, Any]) -> None:
-        kind = str(data["kind"])
-        pressure = int(data["pressure"])
-        self._call_callbacks(self._tank_pressure_callbacks, kind, pressure)
-
     def _dispatch_magnet(self, data: dict[str, Any]) -> None:
         self._call_callbacks(self._magnet_callbacks, data)
 
@@ -344,9 +310,6 @@ class ESP32Controller:
 
             elif data.get("type") == "status" and "chamber" in data and "pressure" in data:
                 self._dispatch_chamber_pressure(data)
-
-            elif data.get("type") == "tank_status" and "kind" in data and "pressure" in data:
-                self._dispatch_tank_pressure(data)
 
             elif data.get("type") == "magnet":
                 self._dispatch_magnet(data)

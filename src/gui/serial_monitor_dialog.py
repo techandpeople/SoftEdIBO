@@ -8,15 +8,16 @@ import time
 
 from PySide6.QtCore import Signal
 from PySide6.QtGui import QFont
-from PySide6.QtWidgets import QDialog, QWidget
+from PySide6.QtWidgets import QWidget
 
+from src.gui.base_dialog import BaseDialog
 from src.gui.ui_serial_monitor_dialog import Ui_SerialMonitorDialog
 from src.hardware.espnow_gateway import ESPNowGateway
 
 _PREFIX = {"rx": "«", "tx": "»"}
 
 
-class SerialMonitorDialog(QDialog, Ui_SerialMonitorDialog):
+class SerialMonitorDialog(BaseDialog, Ui_SerialMonitorDialog):
     """Live raw serial monitor for the gateway link.
 
     The gateway's RX tap fires on its read thread, so incoming lines are routed

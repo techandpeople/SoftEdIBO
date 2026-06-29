@@ -20,7 +20,6 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QButtonGroup,
     QComboBox,
-    QDialog,
     QDoubleSpinBox,
     QFormLayout,
     QGroupBox,
@@ -38,6 +37,7 @@ from src.config.settings import Settings
 from src.core import skin_config as skincfg
 from src.data.models import SkinTemplate
 from src.gui.skin_grid_editor import SkinGridEditor
+from src.gui.base_dialog import BaseDialog
 from src.gui.ui_skin_config_dialog import Ui_SkinConfigDialog
 from src.hardware.espnow_gateway import ESPNowGateway
 from src.hardware.skin_geometry import max_organs_for
@@ -104,7 +104,7 @@ class _ChamberRow(QWidget):
         self._min_spin.setFixedWidth(75)
         self._min_spin.setWhatsThis(
             "Lowest pressure for this chamber (0% maps here). Leave at 0 for a "
-            "normal chamber; set negative for one fed from a vacuum reservoir.")
+            "normal chamber; set negative for one fed from a vacuum source.")
 
         self._max_spin = QDoubleSpinBox()
         self._max_spin.setDecimals(1)
@@ -214,11 +214,11 @@ class _OrganRow(QWidget):
         return self._good_spin.value(), self._bad_spin.value()
 
 
-class SkinConfigDialog(QDialog, Ui_SkinConfigDialog):
+class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
     """Dialog for adding or editing a single skin entry.
 
     Args:
-        robot_type:  One of ``"turtle"``, ``"tree"``, or ``"thymio"``.
+        robot_type:  One of ``"turtle_tree"`` or ``"thymio"``.
         robot_index: Index of the parent robot in the settings list.
         skin_index:  Index of this skin in the robot's ``skins`` list,
                      or ``-1`` to add a new skin.
@@ -971,10 +971,15 @@ class SkinConfigDialog(QDialog, Ui_SkinConfigDialog):
                     cfg["fill_time_ms"] = saved["fill_time_ms"]
             chambers.append(cfg)
         skin_cfgs = [{"skin_id": skin_id, "chambers": chambers}]
+        # LED ring layout for this node's type, so the dialog shows one tester per
+        # ring (node_multiplexed has four). Defaults to a single ring if unknown.
+        node_types = {n.get("mac"): n.get("node_type") for n in self._robot_nodes()}
+        led_rings = list(skincfg.NODE_LED_RINGS.get(node_types.get(mac), (24,)))
         dlg = TestActuatorsDialog(
             mac=mac,
             skin_cfgs=skin_cfgs,
             gateway=self._gateway,
+            led_rings=led_rings,
             parent=self,
         )
         dlg.exec()

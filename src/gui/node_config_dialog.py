@@ -5,16 +5,16 @@ A node has three attributes: MAC address, node_type, and max_slots.
 
 Node types and their default slot counts:
     node_direct       — 3   (fixed: 3 chambers, GPIO valves, onboard pumps)
-    node_multiplexed  — 12  (default; up to 16 chambers, optional shared
-                              pressure/vacuum tanks via has_reservoirs)
+    node_multiplexed  — 12  (default; up to 16 chambers)
 """
 
-from PySide6.QtWidgets import QDialog, QMessageBox, QWidget
+from PySide6.QtWidgets import QMessageBox, QWidget
 
 from src.config.settings import Settings
+from src.gui.base_dialog import BaseDialog
 from src.gui.ui_node_config_dialog import Ui_NodeConfigDialog
 
-_YAML_KEY = {"turtle": "turtles", "tree": "trees", "thymio": "thymios"}
+_YAML_KEY = {"turtle_tree": "turtle_trees", "thymio": "thymios"}
 
 NODE_TYPES: dict[str, int] = {
     "node_direct": 3,
@@ -23,11 +23,11 @@ NODE_TYPES: dict[str, int] = {
 }
 
 
-class NodeConfigDialog(QDialog, Ui_NodeConfigDialog):
+class NodeConfigDialog(BaseDialog, Ui_NodeConfigDialog):
     """Dialog for adding or editing a single node entry.
 
     Args:
-        robot_type:  One of ``"turtle"``, ``"tree"``, or ``"thymio"``.
+        robot_type:  One of ``"turtle_tree"`` or ``"thymio"``.
         robot_index: Index of the parent robot in the settings list.
         node_index:  Index of this node in the robot's ``nodes`` list,
                      or ``-1`` to add a new node.
@@ -60,10 +60,6 @@ class NodeConfigDialog(QDialog, Ui_NodeConfigDialog):
             self.type_combo.addItem(nt)
         self.type_combo.currentTextChanged.connect(self._on_type_changed)
 
-        # Tank limit/target spinboxes live in the .ui (object name == config key).
-        self._tank_spins = {key: getattr(self, key) for key in self._TANK_KEYS}
-
-        self.reservoirs_chk.toggled.connect(self._update_tank_visibility)
         self.delete_btn.setVisible(not is_new)
 
         # Populate from existing config
@@ -74,10 +70,6 @@ class NodeConfigDialog(QDialog, Ui_NodeConfigDialog):
         if idx >= 0:
             self.type_combo.setCurrentIndex(idx)
         stored_slots = node_cfg.get("max_slots", NODE_TYPES.get(stored_type, 3))
-        self.reservoirs_chk.setChecked(bool(node_cfg.get("has_reservoirs", False)))
-        for key, spin in self._tank_spins.items():
-            if key in node_cfg:
-                spin.setValue(float(node_cfg[key]))
         self._on_type_changed(self.type_combo.currentText())
         if self.slots_spin.isEnabled():
             self.slots_spin.setValue(int(stored_slots))
@@ -87,14 +79,11 @@ class NodeConfigDialog(QDialog, Ui_NodeConfigDialog):
         self.cancel_btn.clicked.connect(self.reject)
         self.delete_btn.clicked.connect(self._on_delete)
 
-    # ------------------------------------------------------------------
-    # Tank limit / target widgets
-    # ------------------------------------------------------------------
-
-    # Config keys for the reservoir limit/target spinboxes; each matches the
-    # object name of a QDoubleSpinBox defined in the .ui (ranges/defaults there).
-    # Hard caps mirror firmware's config::HARD_TANK_{MIN,MAX}_KPA (±80 kPa).
-    _TANK_KEYS = (
+    # Legacy reservoir/tank keys dropped on save (the feature was removed).
+    _LEGACY_RESERVOIR_KEYS = (
+        "has_reservoirs",
+        "pump_inflate_count",
+        "pump_deflate_count",
         "tank_pressure_min_kpa",
         "tank_pressure_max_kpa",
         "tank_pressure_target_kpa",
@@ -102,51 +91,6 @@ class NodeConfigDialog(QDialog, Ui_NodeConfigDialog):
         "tank_vacuum_max_kpa",
         "tank_vacuum_target_kpa",
     )
-
-    def _update_tank_visibility(self) -> None:
-        is_multiplexed = self.type_combo.currentText() == "node_multiplexed"
-        has_reservoirs = self.reservoirs_chk.isChecked()
-        self.tank_group.setVisible(is_multiplexed and has_reservoirs)
-
-    def _apply_tank_fields(self, node_entry: dict, node_type: str) -> bool:
-        """Validate + write the tank fields into ``node_entry``.
-
-        Returns False if validation fails (caller should abort the save).
-        """
-        if node_type != "node_multiplexed":
-            node_entry.pop("has_reservoirs", None)
-            for key in self._tank_spins:
-                node_entry.pop(key, None)
-            return True
-
-        has_reservoirs = bool(self.reservoirs_chk.isChecked())
-        node_entry["has_reservoirs"] = has_reservoirs
-
-        if not has_reservoirs:
-            for key in self._tank_spins:
-                node_entry.pop(key, None)
-            return True
-
-        p_min = self._tank_spins["tank_pressure_min_kpa"].value()
-        p_max = self._tank_spins["tank_pressure_max_kpa"].value()
-        v_min = self._tank_spins["tank_vacuum_min_kpa"].value()
-        v_max = self._tank_spins["tank_vacuum_max_kpa"].value()
-        if p_min >= p_max:
-            QMessageBox.warning(
-                self, "Invalid pressure tank range",
-                "Pressure tank min must be less than max.",
-            )
-            return False
-        if v_min >= v_max:
-            QMessageBox.warning(
-                self, "Invalid vacuum tank range",
-                "Vacuum tank min must be less than max.",
-            )
-            return False
-
-        for key, spin in self._tank_spins.items():
-            node_entry[key] = float(spin.value())
-        return True
 
     # ------------------------------------------------------------------
     # Helpers
@@ -168,24 +112,15 @@ class NodeConfigDialog(QDialog, Ui_NodeConfigDialog):
             self.slots_spin.setRange(3, 3)
             self.slots_spin.setValue(3)
             self.slots_spin.setEnabled(False)
-            self.reservoirs_chk.setChecked(False)
-            self.reservoirs_chk.setVisible(False)
-            self.reservoirs_label.setVisible(False)
         elif node_type == "node_magnet_sensor":
-            # magnet sensor node: 4 fixed sensors, no chambers/reservoirs.
+            # magnet sensor node: 4 fixed sensors, no chambers.
             self.slots_spin.setRange(4, 4)
             self.slots_spin.setValue(4)
             self.slots_spin.setEnabled(False)
-            self.reservoirs_chk.setChecked(False)
-            self.reservoirs_chk.setVisible(False)
-            self.reservoirs_label.setVisible(False)
         else:
             self.slots_spin.setRange(1, 16)
             self.slots_spin.setEnabled(True)
             self.slots_spin.setValue(NODE_TYPES.get(node_type, 12))
-            self.reservoirs_chk.setVisible(True)
-            self.reservoirs_label.setVisible(True)
-        self._update_tank_visibility()
         self._update_note()
 
     def _update_note(self) -> None:
@@ -193,9 +128,7 @@ class NodeConfigDialog(QDialog, Ui_NodeConfigDialog):
         notes = {
             "node_direct": "3 chambers, direct ADC sensors, onboard pumps.",
             "node_multiplexed": (
-                "Up to 16 chambers (default 12). Multiplexed valves/sensors. "
-                "Optional shared pressure/vacuum tanks — enable 'Reservoirs' "
-                "and set tank limits in settings.yaml."
+                "Up to 16 chambers (default 12). Multiplexed valves/sensors."
             ),
             "node_magnet_sensor": (
                 "4-sensor magnet sensor. Sends raw / magnitudes / baseline-adjusted / "
@@ -233,14 +166,15 @@ class NodeConfigDialog(QDialog, Ui_NodeConfigDialog):
                     )
                     return
 
-        # Preserve any extra fields (tank kpa, pump counts, ...) from the
-        # existing entry so YAML-only edits aren't lost when saving from the UI.
+        # Preserve any extra fields from the existing entry so YAML-only edits
+        # aren't lost when saving from the UI, but drop the removed reservoir/
+        # tank keys so old configs migrate cleanly.
         node_entry: dict = dict(self._load_node_cfg())
+        for key in self._LEGACY_RESERVOIR_KEYS:
+            node_entry.pop(key, None)
         node_entry.update(
             {"mac": mac, "node_type": node_type, "max_slots": max_slots}
         )
-        if not self._apply_tank_fields(node_entry, node_type):
-            return
 
         data = self._settings.data
         robots_list = (

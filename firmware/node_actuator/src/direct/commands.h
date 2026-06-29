@@ -105,11 +105,12 @@ inline void applyChamberCmd(int n, const cmd_queue::Cmd& c) {
 
     switch (c.type) {
     case CMD_INFLATE: {
+        // duty 0 (unset) -> full speed; a lower duty fills the chamber slower.
+        uint8_t duty = c.duty ? c.duty : chambers::DEFAULT_INFLATE_DUTY;
         if (c.fill_ms > 0) {
             // Time-based fill: open for the calibrated window; HARD_MAX (max_kpa)
             // is the only pressure cutoff.
-            chambers::beginInflate(n, chambers::DEFAULT_INFLATE_DUTY,
-                                   ch.max_kpa, c.fill_ms);
+            chambers::beginInflate(n, duty, ch.max_kpa, c.fill_ms);
         } else {
             float delta  = (ch.max_kpa - ch.min_kpa) * constrain(c.param, 0, 100) / 100.0f;
             float target = min(chambers::cachedKpa[n] + delta, ch.max_kpa);
@@ -119,23 +120,28 @@ inline void applyChamberCmd(int n, const cmd_queue::Cmd& c) {
             // pressure check), so repeated inflates at the cap creep past max_kpa a
             // pulse at a time. set_pressure already guards this way.
             if (chambers::cachedKpa[n] < target)
-                chambers::beginInflate(n, chambers::DEFAULT_INFLATE_DUTY, target);
+                chambers::beginInflate(n, duty, target);
         }
         break;
     }
     case CMD_DEFLATE: {
+        // duty 0 (unset) -> full speed; a lower duty empties the chamber slower
+        // (the deflate side runs the vacuum pump).
+        uint8_t duty = c.duty ? c.duty : chambers::DEFAULT_DEFLATE_DUTY;
         float delta  = (ch.max_kpa - ch.min_kpa) * constrain(c.param, 0, 100) / 100.0f;
         float target = max(chambers::cachedKpa[n] - delta, ch.min_kpa);
-        chambers::beginDeflate(n, target, c.fill_ms);
+        chambers::beginDeflate(n, target, c.fill_ms, duty);
         break;
     }
     case CMD_SET_PRESSURE: {
+        // duty 0 (unset) -> full speed; a lower duty approaches the target gently
+        // (the pressure cutoff still stops the pump at the target level).
         float target = units::pctToKpa(constrain(c.param, 0, 100),
                                        ch.min_kpa, ch.max_kpa);
         if      (chambers::cachedKpa[n] < target)
-            chambers::beginInflate(n, chambers::DEFAULT_INFLATE_DUTY, target);
+            chambers::beginInflate(n, c.duty ? c.duty : chambers::DEFAULT_INFLATE_DUTY, target);
         else if (chambers::cachedKpa[n] > target)
-            chambers::beginDeflate(n, target);
+            chambers::beginDeflate(n, target, 0, c.duty ? c.duty : chambers::DEFAULT_DEFLATE_DUTY);
         else { chambers::stop(n); chambers::recalcPumps(); }
         break;
     }
@@ -230,9 +236,9 @@ inline void parseAndQueue(const uint8_t* data, int len) {
     Cmd c{};
 
     if      (strcmp(cmd, "ping") == 0)             { c.type = CMD_PING;         c.chamber = -1; }
-    else if (strcmp(cmd, "inflate") == 0)           { c.type = CMD_INFLATE;      c.chamber = doc["chamber"] | -1; c.param = doc["delta"] | 10; c.fill_ms = doc["ms"] | 0; }
-    else if (strcmp(cmd, "deflate") == 0)           { c.type = CMD_DEFLATE;      c.chamber = doc["chamber"] | -1; c.param = doc["delta"] | 10; c.fill_ms = doc["ms"] | 0; }
-    else if (strcmp(cmd, "set_pressure") == 0)      { c.type = CMD_SET_PRESSURE; c.chamber = doc["chamber"] | -1; c.param = doc["value"] | 0; }
+    else if (strcmp(cmd, "inflate") == 0)           { c.type = CMD_INFLATE;      c.chamber = doc["chamber"] | -1; c.param = doc["delta"] | 10; c.fill_ms = doc["ms"] | 0; c.duty = doc["duty"] | 0; }
+    else if (strcmp(cmd, "deflate") == 0)           { c.type = CMD_DEFLATE;      c.chamber = doc["chamber"] | -1; c.param = doc["delta"] | 10; c.fill_ms = doc["ms"] | 0; c.duty = doc["duty"] | 0; }
+    else if (strcmp(cmd, "set_pressure") == 0)      { c.type = CMD_SET_PRESSURE; c.chamber = doc["chamber"] | -1; c.param = doc["value"] | 0; c.duty = doc["duty"] | 0; }
     else if (strcmp(cmd, "set_max_pressure") == 0)  { c.type = CMD_SET_MAX;      c.chamber = doc["chamber"] | -1; c.param_kpa = doc["value"] | chambers::DEFAULT_MAX_KPA; }
     else if (strcmp(cmd, "set_min_pressure") == 0)  { c.type = CMD_SET_MIN;      c.chamber = doc["chamber"] | -1; c.param_kpa = doc["value"] | chambers::DEFAULT_MIN_KPA; }
     else if (strcmp(cmd, "hold") == 0)              { c.type = CMD_HOLD;         c.chamber = doc["chamber"] | -1; }

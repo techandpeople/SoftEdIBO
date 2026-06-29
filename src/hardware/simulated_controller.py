@@ -90,11 +90,11 @@ class SimulatedController(QObject):
         return True
 
     def inflate(self, chamber: int, delta: int = 10,
-                ms: int | None = None) -> bool:
+                ms: int | None = None, duty: int | None = None) -> bool:
         """Inflate by delta % (relative to current target).
 
-        ``ms`` (time-based fill on real hardware) is accepted for interface
-        parity and ignored — the simulation models pressure directly."""
+        ``ms`` (time-based fill) and ``duty`` (pump PWM speed) are accepted for
+        interface parity and ignored — the simulation models pressure directly."""
         if self._stopped:
             return False
         self._current.setdefault(chamber, 0)
@@ -107,8 +107,11 @@ class SimulatedController(QObject):
             self._timer.start()
         return True
 
-    def deflate(self, chamber: int, delta: int = 10) -> bool:
-        """Deflate by delta % (relative to current target)."""
+    def deflate(self, chamber: int, delta: int = 10,
+                duty: int | None = None) -> bool:
+        """Deflate by delta % (relative to current target).
+
+        ``duty`` is accepted for interface parity and ignored."""
         if self._stopped:
             return False
         self._current.setdefault(chamber, 0)
@@ -121,8 +124,11 @@ class SimulatedController(QObject):
             self._timer.start()
         return True
 
-    def set_pressure(self, chamber: int, value: int) -> bool:
-        """Set absolute target pressure (clamped to chamber limits)."""
+    def set_pressure(self, chamber: int, value: int,
+                     duty: int | None = None) -> bool:
+        """Set absolute target pressure (clamped to chamber limits).
+
+        ``duty`` is accepted for interface parity and ignored."""
         if self._stopped:
             return False
         value = max(0, min(100, value))
@@ -181,12 +187,13 @@ class SimulatedController(QObject):
             cb(value, slot)
 
     def set_led(self, color: str, pattern: str = "solid",
-                period_ms: int = 0, count: int | None = None) -> bool:
-        """No-op shim — simulation has no WS2818 strip but activities call
-        this on enter/exit so we accept and log to keep the code paths
-        symmetric with real hardware."""
-        logger.debug("SIM set_led(%s, pattern=%s, period=%dms, count=%s)",
-                     color, pattern, period_ms, count)
+                period_ms: int = 0, count: int | None = None,
+                index: int | None = None, ring: int | None = None) -> bool:
+        """No-op shim — simulation has no LED strip but activities call this on
+        enter/exit so we accept and log to keep the code paths symmetric with
+        real hardware. ``index``/``ring`` mirror the real controller's signature."""
+        logger.debug("SIM set_led(%s, pattern=%s, period=%dms, count=%s, index=%s, ring=%s)",
+                     color, pattern, period_ms, count, index, ring)
         return True
 
     def set_led_halves(self, colors: list[str], led_count: int = 24,

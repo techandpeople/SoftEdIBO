@@ -174,10 +174,14 @@
                  + 'two colours. Wrap in "repeat forever" for a continuous fade.' },
 
         { type: 'se_inflate',
-          message0: 'inflate chamber %1 to %2 %%',
+          message0: 'inflate chamber %1 to %2 %% over %3 ms',
           args0: [{ type: 'field_dropdown', name: 'CHAMBER', options: CH },
-                  { type: 'field_number', name: 'PCT', value: 60, min: 0, max: 100 }],
-          previousStatement: 'Step', nextStatement: 'Step', colour: 230 },
+                  { type: 'field_number', name: 'PCT', value: 60, min: 0, max: 100 },
+                  { type: 'field_number', name: 'PERIOD', value: 0, min: 0 }],
+          previousStatement: 'Step', nextStatement: 'Step', colour: 230,
+          tooltip: '"over (ms)" optionally fills gently over about that long by '
+                 + 'slowing the pump (0 = full speed). It is approximate and needs '
+                 + 'a calibrated fill time; without one it fills at full speed.' },
 
         { type: 'se_deflate',
           message0: 'deflate chamber %1',
@@ -353,7 +357,8 @@
                            pct2: num(b, 'PCT2'), aligned: num(b, 'ALIGNED'),
                            period_ms: num(b, 'PERIOD') } };
         case 'se_inflate':
-          return { inflate: { chamber: b.getFieldValue('CHAMBER'), pct: num(b, 'PCT') } };
+          return { inflate: { chamber: b.getFieldValue('CHAMBER'), pct: num(b, 'PCT'),
+                              period_ms: num(b, 'PERIOD') } };
         case 'se_deflate':
           return { deflate: { chamber: b.getFieldValue('CHAMBER') } };
         case 'se_set_pressure':
@@ -433,12 +438,29 @@
         var spec = (typeof json === 'string') ? JSON.parse(json) : json;
         if (spec && spec._blockly) {
           Blockly.serialization.workspaces.load(spec._blockly, workspace);
+          renderAllBlocks();
           return;
         }
       } catch (e) {
         console.warn('loadSpec failed, starting fresh:', e);
       }
       newWorkspace();
+    }
+
+    // After a programmatic deserialize, Blockly 13 can leave nested blocks
+    // unmeasured (width/height 0) so only the last phase's body renders and the
+    // earlier phases look empty. Queue a render on EVERY block (not just the
+    // top-level one) and flush, so the whole tree lays out.
+    function renderAllBlocks() {
+      try {
+        workspace.getAllBlocks(false).forEach(function (b) {
+          if (b.queueRender) b.queueRender();
+        });
+        var rm = Blockly.renderManagement;
+        if (rm && rm.triggerQueuedRenders) rm.triggerQueuedRenders();
+      } catch (e) {
+        console.warn('renderAllBlocks failed:', e);
+      }
     }
 
     function newWorkspace() {

@@ -2,9 +2,8 @@
 
 Time-based inflation uses a per-chamber **base** fill time, measured by the
 calibrator with the chamber inflating *alone* (see
-:mod:`src.hardware.fill_calibration`). On real hardware the pumps — or, on a
-reservoir node, the shared tank that the pumps maintain — are shared by every
-chamber on a node *per robot*. So when several chambers inflate at once each one
+:mod:`src.hardware.fill_calibration`). On real hardware the pumps are shared by
+every chamber on a node *per robot*. So when several chambers inflate at once each one
 fills proportionally slower. The effective fill window therefore scales with the
 number of concurrently-active chambers and (down to a floor) inversely with the
 pump count::
@@ -40,6 +39,34 @@ def scale_fill_ms(base_ms: float, active_chambers: int, pump_count: int) -> int:
     p = max(1, int(pump_count))
     load = max(1.0, n / p)
     return max(1, int(round(max(0.0, float(base_ms)) * load)))
+
+
+# PWM duty (8-bit) the inflate/deflate pumps run at full speed, and a safe floor
+# below which a diaphragm pump tends to stall and move no air. The floor keeps a
+# requested "slow" fill from picking a duty so low the chamber never reaches its
+# target (the pressure cutoff is still the real backstop). A future
+# calibrate-at-several-dutys sweep would replace this rough linear model with a
+# measured duty->flow curve per chamber.
+FULL_DUTY = 255
+MIN_PUMP_DUTY = 60
+
+
+def duty_for_period(natural_ms: float, period_ms: float,
+                    min_duty: int = MIN_PUMP_DUTY) -> int:
+    """Approximate the pump PWM duty (1-255) that stretches a fill to ``period_ms``.
+
+    ``natural_ms`` is how long this actuation takes at full duty (e.g. from a
+    measured :class:`~src.hardware.fill_profile.FillProfile`). Air moved per ms is
+    assumed roughly proportional to duty, so to make a fill that naturally takes
+    ``natural_ms`` last ``period_ms`` instead, run the pump at
+    ``FULL_DUTY * natural_ms / period_ms`` — clamped to ``[min_duty, FULL_DUTY]``.
+    A ``period_ms`` at or below ``natural_ms`` (can't go faster than full) or a
+    non-positive ``natural_ms`` returns full duty. The mapping is deliberately
+    approximate; the firmware's pressure cutoff decides the final level."""
+    if period_ms <= 0 or natural_ms <= 0 or period_ms <= natural_ms:
+        return FULL_DUTY
+    duty = int(round(FULL_DUTY * float(natural_ms) / float(period_ms)))
+    return max(int(min_duty), min(FULL_DUTY, duty))
 
 
 def effective_fill_ms(base_ms: float, value_pct: float,

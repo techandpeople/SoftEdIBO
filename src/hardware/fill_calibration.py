@@ -228,7 +228,7 @@ def iter_actuator_nodes(settings_data: dict) -> list[dict]:
     """Group calibratable chambers by node (``mac``), one entry per node.
 
     Each entry: ``{mac, node_type, slots, chambers}``. Combinations only matter
-    within a node (pumps/reservoir are shared per node), so the calibration
+    within a node (pumps are shared per node), so the calibration
     enumerates concurrent subsets from each node's ``slots``."""
     nodes: dict[str, dict] = {}
     for ch in iter_actuator_chambers(settings_data):

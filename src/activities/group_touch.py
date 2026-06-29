@@ -1,6 +1,6 @@
 """Group touch activity - all participants interact with a robot together.
 
-This activity is designed for the Turtle robot where the entire group
+This activity is designed for the Turtle & Tree robot where the entire group
 touches and interacts with the air chambers simultaneously.
 """
 
@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from src.activities.base_activity import BaseActivity
 from src.robots.base_robot import BaseRobot
-from src.robots.turtle.turtle_robot import TurtleRobot
+from src.robots.turtle_tree.turtle_tree_robot import TurtleTreeRobot
 
 if TYPE_CHECKING:
     from src.core.session import Session
@@ -18,9 +18,9 @@ logger = logging.getLogger(__name__)
 
 
 class GroupTouchActivity(BaseActivity):
-    """Activity where the whole group interacts with a Turtle robot through touch."""
+    """Activity where the whole group interacts with a Turtle & Tree robot through touch."""
 
-    robot_type = TurtleRobot
+    robot_type = TurtleTreeRobot
 
     def __init__(self):
         super().__init__(
@@ -28,11 +28,11 @@ class GroupTouchActivity(BaseActivity):
             description="All participants interact with the robot's air chambers together.",
         )
         self._session: "Session | None" = None
-        self._robots: list[TurtleRobot] = []
+        self._robots: list[TurtleTreeRobot] = []
         self._is_running = False
 
     def _setup(self, session: "Session", robots: list[BaseRobot]) -> None:
-        """Configure the activity with the given session and Turtle robots."""
+        """Configure the activity with the given session and Turtle & Tree robots."""
         self._session = session
         self._robots = robots  # type: ignore[assignment]  # validated by BaseActivity.setup()
         logger.info("Group Touch activity set up with %d robots", len(robots))

@@ -28,7 +28,7 @@ from src.core.touch_compensation import compensator_from_config
 from src.hardware.air_chamber import AirChamber, ChamberState
 from src.hardware.fill_calibration import combo_key, parse_combo_key
 from src.hardware.fill_profile import FillProfile
-from src.hardware.fill_scaling import scale_fill_ms
+from src.hardware.fill_scaling import duty_for_period, scale_fill_ms
 from src.hardware.touch_event_router import TouchEventRouter
 from src.hardware.touch_source import CompensatedMagnetSource
 
@@ -349,11 +349,18 @@ class Skin:
             return all(self._apply(i, "deflate", delta) for i in self._chambers)
         return self._apply(local_idx, "deflate", delta)
 
-    def set_pressure(self, local_idx: int | None = None, value: int = 100) -> bool:
-        """Set absolute target pressure (0-100 %). Pass None for all chambers."""
+    def set_pressure(self, local_idx: int | None = None, value: int = 100,
+                     period_ms: int = 0) -> bool:
+        """Set absolute target pressure (0-100 %). Pass None for all chambers.
+
+        ``period_ms`` > 0 asks the chamber to reach the target gently over roughly
+        that long: the pump runs at a reduced duty derived from the chamber's
+        measured fill time (the pressure cutoff still decides the final level).
+        Needs a calibrated fill curve; without one it falls back to full speed."""
         if local_idx is None:
-            return all(self._apply(i, "set_pressure", value) for i in self._chambers)
-        return self._apply(local_idx, "set_pressure", value)
+            return all(self._apply(i, "set_pressure", value, period_ms=period_ms)
+                       for i in self._chambers)
+        return self._apply(local_idx, "set_pressure", value, period_ms=period_ms)
 
     def hold(self, local_idx: int) -> bool:
         chamber = self._chambers.get(local_idx)
@@ -397,7 +404,7 @@ class Skin:
             self._chambers[local_idx].target_pressure = target
 
     def _apply(self, local_idx: int, kind: str, value: int,
-               co_active: set[int] | None = None) -> bool:
+               co_active: set[int] | None = None, period_ms: int = 0) -> bool:
         chamber = self._chambers.get(local_idx)
         if chamber is None:
             logger.error("Skin %s: no chamber at local index %d", self.skin_id, local_idx)
@@ -435,6 +442,9 @@ class Skin:
             chamber.state = ChamberState.IDLE
         # set_pressure overrides any time-based fill window for this slot.
         self._ctrl.fill_load.note_stop(slot)
+        duty = self._duty_for_period(local_idx, chamber.pressure, v, period_ms)
+        if duty is not None:
+            return self._ctrl.set_pressure(slot, v, duty=duty)
         return self._ctrl.set_pressure(slot, v)
 
     def _inflate(self, local_idx: int, chamber: AirChamber, slot: int,
@@ -488,6 +498,23 @@ class Skin:
             load.note_inflate(slot, ms)
             return self._ctrl.inflate(slot, value, ms=ms)
         return self._ctrl.inflate(slot, value)
+
+    def _duty_for_period(self, local_idx: int, cur_pct: float, target_pct: float,
+                         period_ms: int) -> int | None:
+        """Pump duty that stretches an inflate to ~``period_ms`` (None = full speed).
+
+        Returns None — meaning "send no duty, run at full speed" — when no period
+        was asked, when the move is a deflate (no inflate curve applies), or when
+        the chamber has no measured fill curve to time the move with."""
+        if not period_ms or period_ms <= 0 or target_pct <= cur_pct:
+            return None
+        profile = self._fill_profiles.get(local_idx)
+        if profile is None or profile.is_empty:
+            logger.debug("Skin %s ch %d: period_ms ignored (no fill curve)",
+                         self.skin_id, local_idx)
+            return None
+        natural_ms = profile.time_for_pct(target_pct) - profile.time_for_pct(cur_pct)
+        return duty_for_period(natural_ms, period_ms)
 
     # ------------------------------------------------------------------
     # Touch events (press/release per chamber)

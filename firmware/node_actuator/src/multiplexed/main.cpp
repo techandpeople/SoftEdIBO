@@ -8,6 +8,7 @@
 #include "cmd_queue.h"
 #include "config.h"
 #include "dbg.h"
+#include "leds.h"
 #include "mux.h"
 #include "organ.h"
 #include "pca_valves.h"
@@ -19,7 +20,6 @@ namespace {
 
 constexpr uint32_t PRESSURE_CHECK_MS = 200;
 constexpr uint32_t STATUS_REPORT_MS  = 500;
-constexpr float DETECT_DELTA_KPA     = 0.3f;
 
 // The closed-loop chamber cutoff runs MUCH tighter than tank control / telemetry.
 // A chamber's inflate pump runs at full duty the whole time it is INFLATING, so
@@ -126,77 +126,20 @@ void detectSensors(int valid_channels[], int& valid_count, int tank_candidates[]
     LOG("TODO: valid sensors detected at mux channels: %s — confirm\n", channels);
 }
 
-void detectPumpToTank(const int tank_candidates[], int tank_count) {
+// No reservoir tanks: the pumps push directly into the chambers, so their role
+// (pressure = inflate, vacuum = deflate) can't be discovered by watching a tank
+// sensor. Split the pumps evenly by default — first half PRESSURE, second half
+// VACUUM (e.g. 3 + 3 of NUM_PUMPS = 6) — which the gateway's `configure`
+// (pump_groups / pump_inflate_count / pump_deflate_count) overrides with the real
+// wiring. There are no tank sensors to assign.
+void assignDefaultPumpRoles() {
     config::state.pressure_tank_mux_ch = -1;
     config::state.vacuum_tank_mux_ch = -1;
-
     for (int i = 0; i < NUM_PUMPS; i++) {
-        pumps::roles[i] = pumps::ROLE_UNKNOWN;
+        pumps::roles[i] = (i < NUM_PUMPS / 2) ? pumps::ROLE_PRESSURE : pumps::ROLE_VACUUM;
     }
-
-    if (tank_count <= 0) {
-        LOG("TODO: no tank sensor candidates found on mux channels I12..I15 — confirm wiring\n");
-        return;
-    }
-
-    float baseline[4] = {0};
-    for (int i = 0; i < tank_count && i < 4; i++) {
-        baseline[i] = mux::readKpa(tank_candidates[i]);
-    }
-
-    pca_valves::closeAllValves();
-
-    for (int p = 0; p < NUM_PUMPS; p++) {
-        pumps::setDuty(p, 160);
-        delay(300);
-        pumps::setDuty(p, 0);
-        delay(120);
-
-        float bestAbs = 0.0f;
-        float bestDelta = 0.0f;
-        int bestIdx = -1;
-
-        for (int i = 0; i < tank_count && i < 4; i++) {
-            float after = mux::readKpa(tank_candidates[i]);
-            float delta = after - baseline[i];
-            if (fabsf(delta) > bestAbs) {
-                bestAbs = fabsf(delta);
-                bestDelta = delta;
-                bestIdx = i;
-            }
-            baseline[i] = after;
-        }
-
-        if (bestIdx >= 0 && bestAbs >= DETECT_DELTA_KPA) {
-            int ch = tank_candidates[bestIdx];
-            if (bestDelta > 0.0f) {
-                pumps::roles[p] = pumps::ROLE_PRESSURE;
-                if (config::state.pressure_tank_mux_ch < 0) {
-                    config::state.pressure_tank_mux_ch = ch;
-                }
-            } else {
-                pumps::roles[p] = pumps::ROLE_VACUUM;
-                if (config::state.vacuum_tank_mux_ch < 0) {
-                    config::state.vacuum_tank_mux_ch = ch;
-                }
-            }
-        }
-
-        const char* roleName = "?";
-        if (pumps::roles[p] == pumps::ROLE_PRESSURE) roleName = "pressure";
-        if (pumps::roles[p] == pumps::ROLE_VACUUM) roleName = "vacuum";
-        LOG("TODO: pump i (PUMP%d / IO%d) -> %s tank\n", p + 1, PUMP_PINS[p], roleName);
-    }
-
-    if (config::state.pressure_tank_mux_ch < 0 && tank_count > 0) {
-        config::state.pressure_tank_mux_ch = tank_candidates[0];
-    }
-    if (config::state.vacuum_tank_mux_ch < 0 && tank_count > 1) {
-        config::state.vacuum_tank_mux_ch = tank_candidates[1];
-    }
-
-    LOG("TODO: pressure tank on mux ch %d, vacuum tank on mux ch %d\n",
-        config::state.pressure_tank_mux_ch, config::state.vacuum_tank_mux_ch);
+    LOG("Default pump roles: PUMP1..%d pressure, rest vacuum (override via configure)\n",
+        NUM_PUMPS / 2);
 }
 
 void applyPumpGroups(uint8_t pressure_mask, uint8_t vacuum_mask) {
@@ -228,15 +171,18 @@ void parseAndQueue(const uint8_t* data, int len) {
         c.chamber = doc["chamber"] | -1;
         c.param = doc["delta"] | 10;
         c.fill_ms = doc["ms"] | 0;
+        c.duty = doc["duty"] | 0;
     } else if (strcmp(cmd, "deflate") == 0) {
         c.type = cmd_queue::CMD_DEFLATE;
         c.chamber = doc["chamber"] | -1;
         c.param = doc["delta"] | 10;
         c.fill_ms = doc["ms"] | 0;
+        c.duty = doc["duty"] | 0;
     } else if (strcmp(cmd, "set_pressure") == 0) {
         c.type = cmd_queue::CMD_SET_PRESSURE;
         c.chamber = doc["chamber"] | -1;
         c.param = doc["value"] | 0;
+        c.duty = doc["duty"] | 0;
     } else if (strcmp(cmd, "set_max_pressure") == 0) {
         c.type = cmd_queue::CMD_SET_MAX;
         c.chamber = doc["chamber"] | -1;
@@ -315,6 +261,26 @@ void parseAndQueue(const uint8_t* data, int len) {
     } else if (strcmp(cmd, "debug") == 0) {
         c.type = cmd_queue::CMD_DEBUG;
 #endif
+    } else if (strcmp(cmd, "set_led") == 0) {
+        // Handled inline (not queued): just stores each ring's target LED state,
+        // which loop()'s leds::update() animates. "ring" (0..3) selects one of
+        // the four rings; omitted / -1 addresses all four at once.
+        // {"cmd":"set_led","ring":0..3,"color":"#RRGGBB",
+        //  "pattern":"off|solid|blink|pulse","period_ms":N,"count":N,"index":N}
+        const char* col = doc["color"]     | "#000000";
+        const char* pat = doc["pattern"]   | "solid";
+        uint32_t period = doc["period_ms"] | 0;
+        int32_t  count  = doc["count"]     | 0;
+        int      ring   = doc["ring"]      | -1;
+        uint8_t r = 0, g = 0, b = 0;
+        if (col[0] == '#' && strlen(col) >= 7) {
+            long v = strtol(col + 1, nullptr, 16);
+            r = (v >> 16) & 0xFF; g = (v >> 8) & 0xFF; b = v & 0xFF;
+        }
+        int idx = doc["index"] | -1;
+        if (idx >= 0) leds::setPixel(ring, idx, r, g, b);   // single pixel (test panel)
+        else          leds::set(ring, r, g, b, leds::patternFromStr(pat), period, count);
+        return;
     } else {
         return;
     }
@@ -395,12 +361,16 @@ void applyChamberCmd(int n, const cmd_queue::Cmd& c) {
     using namespace cmd_queue;
     auto& ch = chambers::state[n];
 
+    // duty 0 (unset) -> full speed; a lower duty runs this chamber's role pumps
+    // slower so it fills/empties more gently (recalcPumps picks it up).
+    uint8_t duty = c.duty ? c.duty : chambers::DEFAULT_DUTY;
+
     switch (c.type) {
     case CMD_INFLATE: {
         if (c.fill_ms > 0) {
             // Time-based fill: open for the calibrated window; max_kpa is the
             // only pressure cutoff.
-            chambers::beginInflate(n, ch.max_kpa, c.fill_ms);
+            chambers::beginInflate(n, ch.max_kpa, c.fill_ms, duty);
         } else {
             float delta  = (ch.max_kpa - ch.min_kpa) * constrain(c.param, 0, 100) / 100.0f;
             float target = min(chambers::cachedKpa[n] + delta, ch.max_kpa);
@@ -410,22 +380,22 @@ void applyChamberCmd(int n, const cmd_queue::Cmd& c) {
             // pressure check), so repeated inflates at the cap creep past max_kpa a
             // pulse at a time. set_pressure already guards this way.
             if (chambers::cachedKpa[n] < target)
-                chambers::beginInflate(n, target);
+                chambers::beginInflate(n, target, 0, duty);
         }
         break;
     }
     case CMD_DEFLATE: {
         float delta  = (ch.max_kpa - ch.min_kpa) * constrain(c.param, 0, 100) / 100.0f;
         float target = max(chambers::cachedKpa[n] - delta, ch.min_kpa);
-        chambers::beginDeflate(n, target, c.fill_ms);
+        chambers::beginDeflate(n, target, c.fill_ms, duty);
         break;
     }
     case CMD_SET_PRESSURE: {
         float target = units::pctToKpa(constrain(c.param, 0, 100), ch.min_kpa, ch.max_kpa);
         if (chambers::cachedKpa[n] < target) {
-            chambers::beginInflate(n, target);
+            chambers::beginInflate(n, target, 0, duty);
         } else if (chambers::cachedKpa[n] > target) {
-            chambers::beginDeflate(n, target);
+            chambers::beginDeflate(n, target, 0, duty);
         } else {
             chambers::stop(n);
         }
@@ -538,19 +508,12 @@ void processCommand(const cmd_queue::Cmd& c) {
     applyChamberCmd(n, c);
 }
 
-float readTankKpa(int mux_ch) {
-    if (mux_ch < 0 || mux_ch >= mux::MUX_CHANNELS) return 0.0f;
-    return mux::readKpa(mux_ch);
-}
-
 // Enforce hard limits while in manual override (called at the pressure cadence
-// with freshly-read chamber pressures). Cuts any manual actuator that would push
-// a tank or chamber past its hard cap. Dead-man timeout is handled in loop().
+// with freshly-read chamber pressures). Cuts any manual valve that would push a
+// chamber past its hard cap. Dead-man timeout is handled in loop(). (No tank
+// checks: the pumps push straight into chambers, so the per-chamber caps are the
+// limit that matters.)
 void manualPressureSafety() {
-    float p = readTankKpa(config::state.pressure_tank_mux_ch);
-    float v = readTankKpa(config::state.vacuum_tank_mux_ch);
-    if (manualPumpOn[0] && p >= config::HARD_TANK_MAX_KPA) applyManualPump(0, false);
-    if (manualPumpOn[1] && v <= config::HARD_TANK_MIN_KPA) applyManualPump(1, false);
     for (int i = 0; i < config::state.num_chambers; i++) {
         float k = chambers::cachedKpa[i];
         if (manualValveOpen[i][0] && k >= config::HARD_CHAMBER_MAX_KPA) applyManualValve(i, 0, false);
@@ -558,67 +521,23 @@ void manualPressureSafety() {
     }
 }
 
-// True while at least one chamber is in the given state. Used to refill the
-// shared tanks ONLY when no chamber is drawing from / dumping into them, so a
-// chamber's calibrated fill time isn't disturbed by a concurrent tank refill
-// (the PC fill-time calibration assumes a steady tank).
-bool anyChamberInState(chambers::State want) {
+// Drive the shared pumps directly from the live chamber states (no tanks): the
+// pressure-role pumps run while ANY chamber is inflating, the vacuum-role pumps
+// while ANY chamber is deflating — each at the HIGHEST duty its chambers ask for.
+// Co-active chambers share a pump manifold, so the fastest one wins; a gentler
+// (lower-duty) fill only happens while that chamber actuates alone. Mirrors
+// node_direct's recalcPumps(), role-based for the 3 pressure + 3 vacuum pumps.
+// setRoleDuty change-detects, so calling this every loop is cheap.
+void recalcPumps() {
+    uint8_t pressureDuty = 0;
+    uint8_t vacuumDuty   = 0;
     for (int i = 0; i < config::state.num_chambers; i++) {
-        if (chambers::state[i].state == want) return true;
+        const auto& ch = chambers::state[i];
+        if (ch.state == chambers::INFLATING)      pressureDuty = max(pressureDuty, ch.duty);
+        else if (ch.state == chambers::DEFLATING) vacuumDuty   = max(vacuumDuty, ch.duty);
     }
-    return false;
-}
-
-void tankControlStep() {
-    float pressure_kpa = readTankKpa(config::state.pressure_tank_mux_ch);
-    float vacuum_kpa   = readTankKpa(config::state.vacuum_tank_mux_ch);
-
-    // Refill the tanks only while idle: pause the pressure pump whenever a
-    // chamber is inflating (drawing from the pressure tank) and the vacuum pump
-    // whenever a chamber is deflating. The tank simply droops during a fill and
-    // is topped back up once the chambers settle.
-    bool inflating = anyChamberInState(chambers::INFLATING);
-    bool deflating = anyChamberInState(chambers::DEFLATING);
-
-    // Pressure tank — pump fills it when below target. Stop at hard max.
-    // Also stop if reading drops below min (sensor or seal failure).
-    if (inflating ||
-        pressure_kpa >= config::state.tank_pressure_max_kpa ||
-        pressure_kpa <  config::state.tank_pressure_min_kpa) {
-        pumps::setRoleDuty(pumps::ROLE_PRESSURE, 0);
-    } else {
-        bool need_pressure = pressure_kpa < config::state.tank_pressure_target_kpa;
-        pumps::setRoleDuty(pumps::ROLE_PRESSURE, need_pressure ? pumps::PUMP_DEFAULT_DUTY : 0);
-    }
-
-    // Vacuum tank — pump evacuates (pulls pressure DOWN) when above target.
-    // Stop at hard min (deepest vacuum). Also stop if above max (broken seal).
-    if (deflating ||
-        vacuum_kpa <= config::state.tank_vacuum_min_kpa ||
-        vacuum_kpa >  config::state.tank_vacuum_max_kpa) {
-        pumps::setRoleDuty(pumps::ROLE_VACUUM, 0);
-    } else {
-        bool need_vacuum = vacuum_kpa > config::state.tank_vacuum_target_kpa;
-        pumps::setRoleDuty(pumps::ROLE_VACUUM, need_vacuum ? pumps::PUMP_DEFAULT_DUTY : 0);
-    }
-
-    // Status broadcasts: report percent over each tank's [min, max] range so the
-    // UI can show 0-100 even when limits are negative (vacuum tank).
-    if (gatewayKnown) {
-        char buf[80];
-        int p_pct = units::kpaToPct(pressure_kpa,
-                                    config::state.tank_pressure_min_kpa,
-                                    config::state.tank_pressure_max_kpa);
-        int v_pct = units::kpaToPct(vacuum_kpa,
-                                    config::state.tank_vacuum_min_kpa,
-                                    config::state.tank_vacuum_max_kpa);
-        int len = snprintf(buf, sizeof(buf),
-                           "{\"type\":\"tank_status\",\"kind\":\"pressure\",\"pressure\":%d}", p_pct);
-        esp_now_send(gatewayMac, reinterpret_cast<uint8_t*>(buf), len);
-        len = snprintf(buf, sizeof(buf),
-                       "{\"type\":\"tank_status\",\"kind\":\"vacuum\",\"pressure\":%d}", v_pct);
-        esp_now_send(gatewayMac, reinterpret_cast<uint8_t*>(buf), len);
-    }
+    pumps::setRoleDuty(pumps::ROLE_PRESSURE, pressureDuty);
+    pumps::setRoleDuty(pumps::ROLE_VACUUM, vacuumDuty);
 }
 
 void chamberControlStep(uint32_t now) {
@@ -688,7 +607,7 @@ void autodetect() {
     int tank_count = 0;
 
     detectSensors(valid_channels, valid_count, tank_candidates, tank_count);
-    detectPumpToTank(tank_candidates, tank_count);
+    assignDefaultPumpRoles();
 
     config::state.ready = true;
 }
@@ -702,6 +621,7 @@ void setup() {
     mux::hardware_init();
     pumps::hardware_init();
     pumps::stopAll();
+    leds::hardware_init();
 
     if (!se::begin(onReceived)) {
         LOG("{\"error\":\"esp_now_init_failed\"}\n");
@@ -737,6 +657,9 @@ void loop() {
     // Run a pending WiFi OTA from the main task (never returns if it starts —
     // the node reboots into the new firmware).
     se::ota::pollWifi();
+
+    // Animate the LED rings (non-blocking, throttled).
+    leds::update();
 
     cmd_queue::Cmd c;
     while (cmd_queue::pop(c)) {
@@ -774,27 +697,28 @@ void loop() {
     // ---- Idle leak maintenance: top up a drooping held chamber (self-throttled) ----
     if (!manualActive) chambers::maintainTick(now);
 
-    if (now - lastPressureMs >= PRESSURE_CHECK_MS) {
+    if (manualActive && now - lastPressureMs >= PRESSURE_CHECK_MS) {
         lastPressureMs = now;
-        if (manualActive) {
-            // Autonomous control suspended. Refresh chamber pressures and enforce
-            // hard limits on whatever the operator is driving manually.
-            for (int i = 0; i < config::state.num_chambers; i++) {
-                int m = config::state.chamber_mux_ch[i];
-                if (m >= 0) chambers::cachedKpa[i] = mux::readKpa(m);
-            }
-            manualPressureSafety();
-        } else {
-            tankControlStep();
+        // Autonomous control suspended. Refresh chamber pressures and enforce
+        // hard limits on whatever the operator is driving manually.
+        for (int i = 0; i < config::state.num_chambers; i++) {
+            int m = config::state.chamber_mux_ch[i];
+            if (m >= 0) chambers::cachedKpa[i] = mux::readKpa(m);
         }
+        manualPressureSafety();
     }
 
     // Closed-loop chamber cutoff on its own tight cadence (see CHAMBER_CHECK_MS):
-    // the slow tank/telemetry cadence let a small inflate step overshoot badly.
+    // the slow telemetry cadence let a small inflate step overshoot badly.
     if (!manualActive && now - lastChamberMs >= CHAMBER_CHECK_MS) {
         lastChamberMs = now;
         chamberControlStep(now);
     }
+
+    // Drive the role pumps straight from the current chamber states (no tanks).
+    // Cheap (change-detected) so it runs every loop, picking up command-driven
+    // actuations, time-based fill cutoffs and the closed-loop cutoff above.
+    if (!manualActive) recalcPumps();
 
     if (now - lastStatusMs >= STATUS_REPORT_MS) {
         lastStatusMs = now;

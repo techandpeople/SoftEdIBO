@@ -30,7 +30,10 @@ from src.hardware.latency_monitor import LatencyMonitor
 from src.hardware.serial_ports import list_esp32_ports
 from src.robots.base_robot import BaseRobot
 
-_YAML_KEY = {"turtle": "turtles", "tree": "trees", "thymio": "thymios"}
+_YAML_KEY = {"turtle_tree": "turtle_trees", "thymio": "thymios"}
+
+# Human-friendly label per robot type (used in dialog titles / default IDs).
+_ROBOT_LABEL = {"turtle_tree": "Turtle & Tree", "thymio": "Thymio"}
 
 # Known node types and their default slot counts (fallback only — each node
 # stores its own ``max_slots`` in settings.yaml).
@@ -75,7 +78,7 @@ class RobotPanel(QWidget, Ui_RobotPanel):
 
         self.setupUi(self)
 
-        for tree in (self.turtle_tree, self.tree_tree, self.thymio_tree):
+        for tree in (self.turtle_tree_tree, self.thymio_tree):
             tree.setColumnCount(2)
             tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
             tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
@@ -91,15 +94,13 @@ class RobotPanel(QWidget, Ui_RobotPanel):
         self.scan_btn.clicked.connect(self._on_scan)
         self.serial_monitor_btn.clicked.connect(self._on_serial_monitor)
 
-        self.add_turtle_btn.clicked.connect(lambda: self._on_add_robot("turtle"))
-        self.add_tree_btn.clicked.connect(lambda: self._on_add_robot("tree"))
+        self.add_turtle_tree_btn.clicked.connect(lambda: self._on_add_robot("turtle_tree"))
         self.add_thymio_btn.clicked.connect(lambda: self._on_add_robot("thymio"))
 
-        _all_trees = (self.turtle_tree, self.tree_tree, self.thymio_tree)
+        _all_trees = (self.turtle_tree_tree, self.thymio_tree)
         for tree, robot_type in (
-            (self.turtle_tree, "turtle"),
-            (self.tree_tree,   "tree"),
-            (self.thymio_tree, "thymio"),
+            (self.turtle_tree_tree, "turtle_tree"),
+            (self.thymio_tree,      "thymio"),
         ):
             others = [t for t in _all_trees if t is not tree]
             tree.itemPressed.connect(
@@ -359,8 +360,8 @@ class RobotPanel(QWidget, Ui_RobotPanel):
         known      = self._gateway.known_macs if self._gateway.is_connected else frozenset()
         robot_data = self._settings.data.get("robots", {})
         self._node_items.clear()
-        self._fill_tree(self.turtle_tree, "turtle", robot_data.get("turtles", []), known)
-        self._fill_tree(self.tree_tree,   "tree",   robot_data.get("trees",   []), known)
+        self._fill_tree(self.turtle_tree_tree, "turtle_tree",
+                        robot_data.get("turtle_trees", []), known)
         self._fill_tree(self.thymio_tree, "thymio", robot_data.get("thymios", []), known)
 
     def _fill_tree(
@@ -707,8 +708,9 @@ class RobotPanel(QWidget, Ui_RobotPanel):
                 self._settings.data.get("robots", {}).get(_YAML_KEY[robot_type], [])
             )
             default  = f"{robot_type}-{len(existing) + 1}"
+            label    = _ROBOT_LABEL.get(robot_type, robot_type.capitalize())
             name, ok = QInputDialog.getText(
-                self, f"Add {robot_type.capitalize()}", "Robot ID:", text=default
+                self, f"Add {label}", "Robot ID:", text=default
             )
             if not ok or not name.strip():
                 return

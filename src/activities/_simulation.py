@@ -53,18 +53,10 @@ def wrap_robots_in_simulation(
             }
             for skin in skins.values()
         ]
-        tank_kinds: list[str] = []
-        if getattr(robot, "pressure_reservoir", None) is not None:
-            tank_kinds.append("pressure")
-        if getattr(robot, "vacuum_reservoir", None) is not None:
-            tank_kinds.append("vacuum")
-
         sim: SimulatedRobot = SimulatedRobot(
             robot.robot_id, robot.name, skin_configs,
-            tank_kinds=tank_kinds,
             sim_params=sim_params,
         )
         sims.append(sim)
-        logger.debug("Simulating %s (tanks=%s, sim_params=%s)",
-                     robot.robot_id, tank_kinds, sim_params)
+        logger.debug("Simulating %s (sim_params=%s)", robot.robot_id, sim_params)
     return sims

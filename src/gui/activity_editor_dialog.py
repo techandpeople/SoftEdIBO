@@ -12,10 +12,11 @@ panel preview picked LED colours live on them (cleared again on close).
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QDialog, QWidget
+from PySide6.QtWidgets import QWidget
 
 from src.data.database import Database
 from src.gui.behavior_editor_panel import BehaviorEditorPanel
+from src.gui.base_dialog import BaseDialog
 from src.gui.ui_activity_editor_dialog import Ui_ActivityEditorDialog
 
 from typing import TYPE_CHECKING
@@ -24,7 +25,7 @@ if TYPE_CHECKING:
     from src.robots.base_robot import BaseRobot
 
 
-class ActivityEditorDialog(QDialog, Ui_ActivityEditorDialog):
+class ActivityEditorDialog(BaseDialog, Ui_ActivityEditorDialog):
     """Author block-based behaviours; preview LED colours on connected robots."""
 
     def __init__(self, db: Database, parent: QWidget | None = None, *,

@@ -64,10 +64,22 @@ NODE_TYPE_FIRMWARES: dict[str, dict[str, Path]] = {
     "node_direct": {
         "release": Settings.BUNDLE / "firmware" / "node_actuator" / "firmware-direct-release.bin",
         "debug":   Settings.BUNDLE / "firmware" / "node_actuator" / "firmware-direct-debug.bin",
+        # RGBW LED-ring variants (SK6812, e.g. Adafruit 2862). Same direct board;
+        # only the NeoPixel pixel type differs (-DLED_RGBW). The flash wizard and
+        # OTA dialog expose an "RGBW LED ring" toggle that selects these; node
+        # types without these keys fall back to the plain release/debug bins.
+        "release_rgbw": Settings.BUNDLE / "firmware" / "node_actuator" / "firmware-direct-rgbw-release.bin",
+        "debug_rgbw":   Settings.BUNDLE / "firmware" / "node_actuator" / "firmware-direct-rgbw-debug.bin",
     },
     "node_multiplexed": {
         "release": Settings.BUNDLE / "firmware" / "node_actuator" / "firmware-multiplexed-release.bin",
         "debug":   Settings.BUNDLE / "firmware" / "node_actuator" / "firmware-multiplexed-debug.bin",
+        # RGBW LED-ring variants (SK6812). The multiplexed board drives four rings
+        # (one 24-LED + three 16-LED) as separate strips on GPIO23/17/16/4; only the
+        # NeoPixel pixel type differs (-DLED_RGBW). Selected by the same "RGBW LED
+        # ring" toggle as node_direct.
+        "release_rgbw": Settings.BUNDLE / "firmware" / "node_actuator" / "firmware-multiplexed-rgbw-release.bin",
+        "debug_rgbw":   Settings.BUNDLE / "firmware" / "node_actuator" / "firmware-multiplexed-rgbw-debug.bin",
     },
     # node_magnet_sensor ships a single build (no separate debug variant), so both
     # keys point at the same bin — the debug checkbox is a no-op for it.
@@ -90,16 +102,23 @@ NODE_FIRMWARES: dict[str, dict[str, Path]] = {
 }
 
 
-def firmware_for_node_type(node_type: str, debug: bool = False) -> Path | None:
+def firmware_for_node_type(node_type: str, debug: bool = False,
+                           rgbw: bool = False) -> Path | None:
     """Return the bundled firmware bin for a ``node_type``, or None if unknown.
 
     ``node_magnet_sensor`` has no separate debug build, so ``debug`` is a no-op
-    for it. Used by both the setup wizard and the OTA updater dialog.
+    for it. ``rgbw`` selects the RGBW LED-ring variant (``node_direct`` and
+    ``node_multiplexed``); node types without an RGBW build ignore it and fall
+    back to the plain release/debug bin. Used by both the setup wizard and the
+    OTA dialog.
     """
     entry = NODE_TYPE_FIRMWARES.get(node_type)
     if entry is None:
         return None
-    return entry["debug" if debug else "release"]
+    base = "debug" if debug else "release"
+    if rgbw:
+        return entry.get(f"{base}_rgbw", entry[base])
+    return entry[base]
 
 
 def _esptool_cmd(port: str, firmware: Path, chip: str = "esp32", *,
@@ -394,6 +413,20 @@ class FlashNodePage(_FlashPage):
         self._debug_check.toggled.connect(self._update_firmware_path)
         self.extra_layout.addWidget(self._debug_check)
 
+        # RGBW-ring checkbox — switches to the -DLED_RGBW build. Only enabled for
+        # node types that ship an RGBW variant (node_direct); see _on_type_changed.
+        self._rgbw_check = QCheckBox("RGBW LED ring (SK6812, e.g. Adafruit 2862)")
+        self._rgbw_check.setWhatsThis(
+            "Flash the RGBW build for boards wired with an RGBW NeoPixel ring "
+            "(SK6812, e.g. Adafruit 2862, 4 colour channels). Leave unchecked for "
+            "plain RGB rings (WS2812, e.g. Adafruit 1586). The two pixel types use "
+            "a different data format, so the wrong build drives the ring with "
+            "shifted colours. Only available for node types that have an RGBW ring."
+        )
+        self._rgbw_check.toggled.connect(self._update_firmware_path)
+        self.extra_layout.addWidget(self._rgbw_check)
+        self._on_type_changed(self._type_combo.currentText())
+
         # "Flash another node" button — enabled after each successful flash,
         # into the .ui's extra_bottom_layout (just above the log).
         self._another_btn = QPushButton("Flash Another Node")
@@ -402,11 +435,20 @@ class FlashNodePage(_FlashPage):
         self.extra_bottom_layout.addWidget(self._another_btn)
 
     def _on_type_changed(self, _label: str) -> None:
+        # The RGBW toggle only makes sense for node types with an RGBW build.
+        fw = NODE_FIRMWARES[self._type_combo.currentText()]
+        has_rgbw = "release_rgbw" in fw
+        self._rgbw_check.setEnabled(has_rgbw)
+        if not has_rgbw:
+            self._rgbw_check.setChecked(False)
         self._update_firmware_path()
 
     def _update_firmware_path(self) -> None:
-        variant = "debug" if self._debug_check.isChecked() else "release"
-        self._firmware = NODE_FIRMWARES[self._type_combo.currentText()][variant]
+        fw = NODE_FIRMWARES[self._type_combo.currentText()]
+        base = "debug" if self._debug_check.isChecked() else "release"
+        if self._rgbw_check.isChecked() and f"{base}_rgbw" in fw:
+            base = f"{base}_rgbw"
+        self._firmware = fw[base]
 
     def _on_finished(self, exit_code: int, exit_status) -> None:
         super()._on_finished(exit_code, exit_status)

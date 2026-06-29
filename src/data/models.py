@@ -29,7 +29,7 @@ class SessionAssignment:
     session_id: str
     robot_id: str
     participant_id: str
-    unit_ids: list[str]  # skin_ids (Turtle) or branch ids (Tree) assigned to this participant
+    unit_ids: list[str]  # skin_ids / branch ids assigned to this participant
 
 
 @dataclass
@@ -38,7 +38,7 @@ class InteractionEvent:
     event_id: int | None = None
     session_id: str = ""
     participant_id: str = ""
-    type: str = ""  # "turtle", "thymio", "tree"
+    type: str = ""  # "turtle_tree", "thymio"
     action: str = ""  # "inflate", "deflate", "touch", "share", etc.
     target: str = ""  # chamber ID, branch ID, etc.
     timestamp: datetime = field(default_factory=datetime.now)

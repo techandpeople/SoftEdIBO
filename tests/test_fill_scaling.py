@@ -80,3 +80,24 @@ def test_tracker_drives_scaling_for_concurrent_fills():
     # Second starts while the first is still filling → sees 2 active.
     ms2 = effective_fill_ms(1000, 100, t.active_count() + 1, t.pump_count)
     assert ms2 == 2000
+
+
+def test_duty_for_period_full_speed_when_no_slowdown_wanted():
+    from src.hardware.fill_scaling import duty_for_period, FULL_DUTY
+    # period <= natural (can't go faster than full), or missing inputs -> full duty.
+    assert duty_for_period(1000, 0) == FULL_DUTY
+    assert duty_for_period(0, 2000) == FULL_DUTY
+    assert duty_for_period(1000, 1000) == FULL_DUTY
+    assert duty_for_period(1000, 800) == FULL_DUTY
+
+
+def test_duty_for_period_scales_down_proportionally():
+    from src.hardware.fill_scaling import duty_for_period, FULL_DUTY
+    # Twice as long -> roughly half duty.
+    assert duty_for_period(1000, 2000) == round(FULL_DUTY * 0.5)
+
+
+def test_duty_for_period_floors_at_min_duty():
+    from src.hardware.fill_scaling import duty_for_period, MIN_PUMP_DUTY
+    # A very long period would compute a stalling duty; clamp to the floor.
+    assert duty_for_period(100, 100000) == MIN_PUMP_DUTY
