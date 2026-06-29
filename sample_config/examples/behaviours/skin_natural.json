@@ -1,0 +1,45 @@
+{
+  "format": "softedibo.activity",
+  "version": 1,
+  "name": "Skin Natural — study timeline",
+  "description": "Natural skin, 3 timed phases (advances by time, or manually with Prev/Next phase). Phase 1 (0:00): purple, very slow random beat across the 3 chambers (inflate & deflate, one at a time). Phase 2 (after 2 min): half purple / half yellow, aligned beat — 2 chambers strong, 1 soft. Phase 3 (after a further 5 min): yellow, rhythmic beat with all 3 chambers together. Pump duty sets the beat's energy.",
+  "spec": {
+    "initial": "phase1",
+    "states": {
+      "phase1": {
+        "do": [
+          { "set_led": { "color": "#8e44ad", "pattern": "solid", "period_ms": 0 } },
+          { "repeat": { "forever": true, "do": [
+            { "beat": { "mode": "random", "pct": 60, "period_ms": 6000, "duty": 110 } }
+          ] } }
+        ],
+        "on_touch": [],
+        "transitions": [
+          { "to": "phase2", "when": { "elapsed_ms": 120000 } }
+        ]
+      },
+      "phase2": {
+        "do": [
+          { "set_led_halves": { "colors": ["#8e44ad", "#f1c40f"], "pattern": "solid", "period_ms": 0 } },
+          { "repeat": { "forever": true, "do": [
+            { "beat": { "mode": "aligned", "pct": 60, "pct2": 20, "aligned": 2, "period_ms": 2500, "duty": 170 } }
+          ] } }
+        ],
+        "on_touch": [],
+        "transitions": [
+          { "to": "phase3", "when": { "elapsed_ms": 300000 } }
+        ]
+      },
+      "phase3": {
+        "do": [
+          { "set_led": { "color": "#f1c40f", "pattern": "solid", "period_ms": 0 } },
+          { "repeat": { "forever": true, "do": [
+            { "beat": { "mode": "sync", "pct": 60, "period_ms": 2000, "duty": 230 } }
+          ] } }
+        ],
+        "on_touch": [],
+        "transitions": []
+      }
+    }
+  }
+}

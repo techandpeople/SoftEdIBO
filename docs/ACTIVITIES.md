@@ -79,6 +79,9 @@ hospital study's behaviours. Two layers:
   `wait`, `wait_for_touch`) and conditions (`elapsed_ms`, `touch_count`,
   `organs`, `any`/`all`/`not`, `always`). The catalogue is the single source of
   truth and also drives the editor blocks. Specs are validated by `validate_spec`.
+  `inflate`/`set_pressure`/`beat` also take an optional `duty` (1-255): the pump
+  PWM, lower = a gentler / lower-energy stroke, `0` = full speed. Unlike
+  `period_ms` it needs no fill calibration, so it tunes a beat's energy directly.
   The `organs` condition compares how many of the skin's plugged organs resolve
   to good/bad (decomposed from the organ circuit by `OrganResolver`): `scope`
   `all_good`/`all_bad` mean "every organ matches", `count` compares the good and
@@ -91,7 +94,10 @@ hospital study's behaviours. Two layers:
   Scratch-like **block editor** (Blockly in a `QWebEngineView`). Blocks compile
   to a spec on Save and are stored in the `declarative_activities` table; the
   exact workspace is stashed under the spec's ignored `_blockly` key for exact
-  round-trip editing. **Blockly / QtWebEngine load only inside the editor** —
+  round-trip editing. A spec **without** `_blockly` (hand-authored, or imported
+  from a `.json` file like those in `config/examples/behaviours/`) is rebuilt
+  into blocks from the spec itself, so it opens editable and re-saveable rather
+  than blank. **Blockly / QtWebEngine load only inside the editor** —
   never during a session. Blockly is loaded from a vendored copy
   (`scripts/fetch_blockly.sh`) or the CDN as a fallback. Its **Presets** tab
   ([`activity_preset_panel.py`](../src/gui/activity_preset_panel.py)) is the

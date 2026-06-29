@@ -44,12 +44,14 @@ class _FakeSkin:
         self.skin_id = skin_id
         self.chambers = {i: object() for i in range(n_chambers)}
         self.pressures: list[tuple] = []
+        self.duties: list[tuple] = []
         self.touch = None
         self.touch_controller = None
         self._ctrl = controller
 
-    def set_pressure(self, chamber_id, value, period_ms=0):
+    def set_pressure(self, chamber_id, value, period_ms=0, duty=None):
         self.pressures.append((chamber_id, value))
+        self.duties.append((chamber_id, duty))
         return True
 
     def hold(self, chamber_id):
@@ -288,6 +290,23 @@ def test_beat_sync_sets_all_chambers(clock):
     _start(activity, robot)
     # First half-cycle drives every chamber to the peak.
     assert set(skin.pressures) == {(0, 70), (1, 70), (2, 70)}
+
+
+def test_duty_flows_through_beat_and_set_pressure(clock):
+    spec = {"initial": "s", "states": {"s": {"do": [
+        {"set_pressure": {"chamber": 0, "pct": 50, "duty": 120}},
+        {"beat": {"mode": "sync", "pct": 70, "period_ms": 2000, "duty": 200}},
+    ], "transitions": []}}}
+    ctrl = _FakeCtrl()
+    skin = _FakeSkin(controller=ctrl, n_chambers=3)
+    robot = _FakeRobot([skin])
+    activity = ScriptedActivity("duty", "", spec)
+    _start(activity, robot)
+    # The explicit set_pressure duty and every beat up-stroke carry the duty;
+    # the release back to 0 stays at full speed (duty None).
+    assert (0, 120) in skin.duties
+    assert {(0, 200), (1, 200), (2, 200)}.issubset(set(skin.duties))
+    assert (0, None) not in skin.duties[:1]   # the 50 % stroke used its duty
 
 
 def test_fade_cross_fades_between_two_colours(clock):

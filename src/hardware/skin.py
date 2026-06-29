@@ -350,17 +350,23 @@ class Skin:
         return self._apply(local_idx, "deflate", delta)
 
     def set_pressure(self, local_idx: int | None = None, value: int = 100,
-                     period_ms: int = 0) -> bool:
+                     period_ms: int = 0, duty: int | None = None) -> bool:
         """Set absolute target pressure (0-100 %). Pass None for all chambers.
 
         ``period_ms`` > 0 asks the chamber to reach the target gently over roughly
         that long: the pump runs at a reduced duty derived from the chamber's
         measured fill time (the pressure cutoff still decides the final level).
-        Needs a calibrated fill curve; without one it falls back to full speed."""
+        Needs a calibrated fill curve; without one it falls back to full speed.
+
+        ``duty`` (1-255) sets the pump PWM directly — a gentler/slower stroke at
+        a lower value — and takes precedence over the ``period_ms``-derived duty.
+        Unlike ``period_ms`` it needs no fill curve, so it works uncalibrated."""
         if local_idx is None:
-            return all(self._apply(i, "set_pressure", value, period_ms=period_ms)
+            return all(self._apply(i, "set_pressure", value,
+                                   period_ms=period_ms, duty=duty)
                        for i in self._chambers)
-        return self._apply(local_idx, "set_pressure", value, period_ms=period_ms)
+        return self._apply(local_idx, "set_pressure", value,
+                           period_ms=period_ms, duty=duty)
 
     def hold(self, local_idx: int) -> bool:
         chamber = self._chambers.get(local_idx)
@@ -404,7 +410,8 @@ class Skin:
             self._chambers[local_idx].target_pressure = target
 
     def _apply(self, local_idx: int, kind: str, value: int,
-               co_active: set[int] | None = None, period_ms: int = 0) -> bool:
+               co_active: set[int] | None = None, period_ms: int = 0,
+               duty: int | None = None) -> bool:
         chamber = self._chambers.get(local_idx)
         if chamber is None:
             logger.error("Skin %s: no chamber at local index %d", self.skin_id, local_idx)
@@ -442,7 +449,10 @@ class Skin:
             chamber.state = ChamberState.IDLE
         # set_pressure overrides any time-based fill window for this slot.
         self._ctrl.fill_load.note_stop(slot)
-        duty = self._duty_for_period(local_idx, chamber.pressure, v, period_ms)
+        # An explicit duty wins; otherwise derive one from the fill curve so a
+        # period_ms still stretches the stroke when the chamber is calibrated.
+        if duty is None:
+            duty = self._duty_for_period(local_idx, chamber.pressure, v, period_ms)
         if duty is not None:
             return self._ctrl.set_pressure(slot, v, duty=duty)
         return self._ctrl.set_pressure(slot, v)

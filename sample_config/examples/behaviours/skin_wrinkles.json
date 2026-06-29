@@ -1,0 +1,46 @@
+{
+  "format": "softedibo.activity",
+  "version": 1,
+  "name": "Skin Wrinkles — study timeline",
+  "description": "Wrinkles skin, 3 timed phases (advances by time, or manually with Prev/Next phase). Phase 1 (0:00): purple, skin emptied of air — wrinkled and still. Phase 2 (after 2 min): half purple / half yellow, half-inflated — 2 chambers wrinkled (0 %), 1 smooth (~50 %). Phase 3 (after a further 5 min): yellow, inflated so the wrinkles smooth out, with a rhythmic beat that never fully deflates (70 % ↔ 45 %). Pump duty keeps the strokes gentle.",
+  "spec": {
+    "initial": "phase1",
+    "states": {
+      "phase1": {
+        "do": [
+          { "set_led": { "color": "#8e44ad", "pattern": "solid", "period_ms": 0 } },
+          { "set_pressure": { "chamber": "all", "pct": 0 } }
+        ],
+        "on_touch": [],
+        "transitions": [
+          { "to": "phase2", "when": { "elapsed_ms": 120000 } }
+        ]
+      },
+      "phase2": {
+        "do": [
+          { "set_led_halves": { "colors": ["#8e44ad", "#f1c40f"], "pattern": "solid", "period_ms": 0 } },
+          { "set_pressure": { "chamber": 0, "pct": 0 } },
+          { "set_pressure": { "chamber": 1, "pct": 0 } },
+          { "set_pressure": { "chamber": 2, "pct": 50, "duty": 140 } }
+        ],
+        "on_touch": [],
+        "transitions": [
+          { "to": "phase3", "when": { "elapsed_ms": 300000 } }
+        ]
+      },
+      "phase3": {
+        "do": [
+          { "set_led": { "color": "#f1c40f", "pattern": "solid", "period_ms": 0 } },
+          { "repeat": { "forever": true, "do": [
+            { "set_pressure": { "chamber": "all", "pct": 70, "duty": 230 } },
+            { "wait": { "ms": 1000 } },
+            { "set_pressure": { "chamber": "all", "pct": 45, "duty": 230 } },
+            { "wait": { "ms": 1000 } }
+          ] } }
+        ],
+        "on_touch": [],
+        "transitions": []
+      }
+    }
+  }
+}
