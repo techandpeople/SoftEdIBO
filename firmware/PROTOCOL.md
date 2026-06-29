@@ -48,6 +48,7 @@ runtime `set_tank_pressure` command; re-send `configure` to change them.
 | `cmd` | Fields | Notes |
 |---|---|---|
 | `set_led` | `color` ("#RRGGBB"), `pattern` ("off"/"solid"/"blink"/"pulse"), `period_ms`, `count`, `index` | WS2812 ring. `index` sets a single pixel (solid); omit it for the whole ring. `period_ms`/`count` apply to blink/pulse (count ≤ 0 = forever). |
+| `set_led_halves` | `colors` (["#RRGGBB", …], up to 8), `pattern`, `period_ms`, `count` | Splits the ring into `len(colors)` equal contiguous arcs in ONE frame (e.g. half purple / half yellow), rendered from loop(). `pattern`/`period_ms` animate the whole split together. Prefer this over a burst of per-pixel `set_led` frames — those call `strip.show()` once per pixel in the receive task and reset the node. Multiplexed nodes also accept `ring` (0..3; omit = all). |
 
 ### Sensor / magnet sensor-node only
 

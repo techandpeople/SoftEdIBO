@@ -82,6 +82,13 @@ hospital study's behaviours. Two layers:
   `inflate`/`set_pressure`/`beat` also take an optional `duty` (1-255): the pump
   PWM, lower = a gentler / lower-energy stroke, `0` = full speed. Unlike
   `period_ms` it needs no fill calibration, so it tunes a beat's energy directly.
+  The LED verbs `set_led` / `set_led_halves` / `fade` take an optional `ring`
+  (`"all"` default, or `0..3`): the multiplexed board has **four independent LED
+  rings** that can animate separately, so a multiplexed activity can drive each
+  ring on its own, while the direct board has a single ring and ignores higher
+  indices. `ring` omitted / `"all"` keeps the prior whole-ring behaviour; the
+  firmware sizes the selected ring itself (24- vs 16-LED). A multiplexed-authored
+  behaviour run on a direct board degrades gracefully (only ring 0 shows).
   The `organs` condition compares how many of the skin's plugged organs resolve
   to good/bad (decomposed from the organ circuit by `OrganResolver`): `scope`
   `all_good`/`all_bad` mean "every organ matches", `count` compares the good and

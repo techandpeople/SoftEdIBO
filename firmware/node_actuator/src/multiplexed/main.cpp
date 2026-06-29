@@ -263,8 +263,8 @@ void parseAndQueue(const uint8_t* data, int len) {
 #endif
     } else if (strcmp(cmd, "set_led") == 0) {
         // Handled inline (not queued): just stores each ring's target LED state,
-        // which loop()'s leds::update() animates. "ring" (0..3) selects one of
-        // the four rings; omitted / -1 addresses all four at once.
+        // which loop()'s leds::update() renders. "ring" (0..3) selects one of the
+        // four rings; omitted / -1 addresses all four at once.
         // {"cmd":"set_led","ring":0..3,"color":"#RRGGBB",
         //  "pattern":"off|solid|blink|pulse","period_ms":N,"count":N,"index":N}
         const char* col = doc["color"]     | "#000000";
@@ -272,14 +272,30 @@ void parseAndQueue(const uint8_t* data, int len) {
         uint32_t period = doc["period_ms"] | 0;
         int32_t  count  = doc["count"]     | 0;
         int      ring   = doc["ring"]      | -1;
-        uint8_t r = 0, g = 0, b = 0;
-        if (col[0] == '#' && strlen(col) >= 7) {
-            long v = strtol(col + 1, nullptr, 16);
-            r = (v >> 16) & 0xFF; g = (v >> 8) & 0xFF; b = v & 0xFF;
-        }
+        uint8_t r, g, b;
+        leds::parseHexColor(col, r, g, b);
+        if (strcmp(pat, "off") == 0) { r = g = b = 0; }   // "off" = dark, any colour
         int idx = doc["index"] | -1;
         if (idx >= 0) leds::setPixel(ring, idx, r, g, b);   // single pixel (test panel)
         else          leds::set(ring, r, g, b, leds::patternFromStr(pat), period, count);
+        return;
+    } else if (strcmp(cmd, "set_led_halves") == 0) {
+        // Split ring(s) into len(colors) equal arcs (the purple/yellow look) in
+        // ONE frame. Replaces the PC's old per-pixel burst — 24 set_led frames
+        // that reset the node by calling show() once per pixel in the recv task.
+        // {"cmd":"set_led_halves","ring":0..3,"colors":["#RRGGBB",...],"pattern":...}
+        const char* pat = doc["pattern"]   | "solid";
+        uint32_t period = doc["period_ms"] | 0;
+        int32_t  count  = doc["count"]     | 0;
+        int      ring   = doc["ring"]      | -1;
+        uint8_t r[leds::MAX_SEGMENTS], g[leds::MAX_SEGMENTS], b[leds::MAX_SEGMENTS];
+        int k = 0;
+        for (JsonVariant v : doc["colors"].as<JsonArray>()) {
+            if (k >= leds::MAX_SEGMENTS) break;
+            leds::parseHexColor(v.as<const char*>(), r[k], g[k], b[k]);
+            k++;
+        }
+        if (k > 0) leds::setSegments(ring, r, g, b, k, leds::patternFromStr(pat), period, count);
         return;
     } else {
         return;

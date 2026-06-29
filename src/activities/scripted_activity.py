@@ -494,11 +494,13 @@ class ScriptedActivity(BaseActivity):
             yield ("ms", period - period // 2)
 
     def _run_fade(self, unit: _Unit, params: dict) -> Generator:
-        """One smooth colour1 → colour2 → colour1 cross-fade across the whole
-        ring. Authors wrap this in 'repeat forever' for a continuous fade."""
+        """One smooth colour1 → colour2 → colour1 cross-fade across a ring
+        (``ring`` selects one of the four, default all). Authors wrap this in
+        'repeat forever' for a continuous fade."""
         c1 = self._parse_rgb(params.get("color1", "#000000"))
         c2 = self._parse_rgb(params.get("color2", "#ffffff"))
         period = max(200, int(params.get("period_ms", 2000)))
+        ring = self._parse_ring(params)
         half = period // 2
         # The scheduler ticks every _TICK_MS, so a frame can't be finer than
         # that; pick the frame count that fits whole ticks into each half.
@@ -508,7 +510,8 @@ class ScriptedActivity(BaseActivity):
             start = c1 if target is c2 else c2
             for i in range(frames):
                 t = i / (frames - 1) if frames > 1 else 1.0
-                self._set_led(unit, self._lerp_hex(start, target, t), "solid", 0)
+                self._set_led(unit, self._lerp_hex(start, target, t),
+                              "solid", 0, ring=ring)
                 yield ("ms", step_ms)
 
     @staticmethod
@@ -538,12 +541,14 @@ class ScriptedActivity(BaseActivity):
         if verb == "set_led":
             self._set_led(unit, params.get("color", "#000000"),
                           params.get("pattern", "solid"),
-                          int(params.get("period_ms", 0)))
+                          int(params.get("period_ms", 0)),
+                          ring=self._parse_ring(params))
         elif verb == "set_led_halves":
             colors = params.get("colors", params.get("_value", []))
             self._set_led_halves(unit, list(colors),
                                  params.get("pattern", "solid"),
-                                 int(params.get("period_ms", 0)))
+                                 int(params.get("period_ms", 0)),
+                                 ring=self._parse_ring(params))
         elif verb in ("inflate", "set_pressure"):
             self._set_pressure(unit, self._resolve_chamber(unit, params, ctx),
                                int(params.get("pct", 60 if verb == "inflate" else 0)),
@@ -587,29 +592,43 @@ class ScriptedActivity(BaseActivity):
             logger.debug("set_pressure(%s, %s) ignored on %s",
                          chamber, pct, unit.unit_id)
 
+    @staticmethod
+    def _parse_ring(params: dict) -> int | None:
+        """Read an optional LED ``ring`` (0..3) from a step's params. ``"all"`` /
+        absent / invalid means 'every ring' (sent as ``None``), matching the
+        prior whole-ring behaviour."""
+        val = params.get("ring", "all")
+        if val in (None, "all"):
+            return None
+        try:
+            return int(val)
+        except (TypeError, ValueError):
+            return None
+
     def _set_led(self, unit: _Unit, color: str, pattern: str,
-                 period_ms: int) -> None:
+                 period_ms: int, ring: int | None = None) -> None:
         set_led = getattr(unit.ctrl, "set_led", None)
         if set_led is None:
             return
         try:
-            set_led(color, pattern=pattern, period_ms=period_ms)
+            set_led(color, pattern=pattern, period_ms=period_ms, ring=ring)
         except Exception:   # noqa: BLE001
             logger.exception("set_led failed on %s", unit.unit_id)
 
     def _set_led_halves(self, unit: _Unit, colors: list[str],
-                        pattern: str = "solid", period_ms: int = 0) -> None:
+                        pattern: str = "solid", period_ms: int = 0,
+                        ring: int | None = None) -> None:
         if not colors:
             return
         halves = getattr(unit.ctrl, "set_led_halves", None)
         if halves is not None:
             try:
-                halves(colors, pattern=pattern, period_ms=period_ms)
+                halves(colors, pattern=pattern, period_ms=period_ms, ring=ring)
                 return
             except Exception:   # noqa: BLE001
                 logger.exception("set_led_halves failed on %s", unit.unit_id)
         # Fallback: a controller without the helper at least shows one colour.
-        self._set_led(unit, colors[0], pattern, period_ms)
+        self._set_led(unit, colors[0], pattern, period_ms, ring=ring)
 
     @staticmethod
     def _resolve_chamber(unit: _Unit, params: dict, ctx: dict):

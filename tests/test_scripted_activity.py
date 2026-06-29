@@ -29,13 +29,17 @@ class _FakeCtrl:
     def __init__(self):
         self.led = None
         self.halves = None
+        self.led_ring = None       # ring of the last set_led
+        self.halves_ring = None    # ring of the last set_led_halves
 
-    def set_led(self, color, pattern="solid", period_ms=0, **kw):
+    def set_led(self, color, pattern="solid", period_ms=0, ring=None, **kw):
         self.led = (color, pattern)
+        self.led_ring = ring
         return True
 
-    def set_led_halves(self, colors, **kw):
+    def set_led_halves(self, colors, ring=None, **kw):
         self.halves = list(colors)
+        self.halves_ring = ring
         return True
 
 
@@ -328,6 +332,51 @@ def test_fade_cross_fades_between_two_colours(clock):
     # It reaches colour 2 (white) and passes through an interpolated midtone.
     assert "#ffffff" in seen
     assert any(c not in ("#000000", "#ffffff") for c in seen)
+
+
+# ---------------------------------------------------------------------------
+# LED ring selection — multiplexed board's four independent rings
+# ---------------------------------------------------------------------------
+
+def _ring_activity(do_steps):
+    ctrl = _FakeCtrl()
+    skin = _FakeSkin(controller=ctrl)
+    robot = _FakeRobot([skin])
+    spec = {"initial": "s", "states": {"s": {"do": do_steps, "transitions": []}}}
+    activity = ScriptedActivity("ring", "", spec)
+    _start(activity, robot)
+    return ctrl
+
+
+def test_set_led_ring_passes_through(clock):
+    ctrl = _ring_activity([{"set_led": {"color": "#ff0000", "ring": 2}}])
+    assert ctrl.led == ("#ff0000", "solid")
+    assert ctrl.led_ring == 2
+
+
+def test_set_led_without_ring_means_all(clock):
+    # Omitted ring → None (every ring), matching the prior whole-ring behaviour.
+    ctrl = _ring_activity([{"set_led": {"color": "#ff0000"}}])
+    assert ctrl.led_ring is None
+
+
+def test_set_led_ring_all_is_none(clock):
+    ctrl = _ring_activity([{"set_led": {"color": "#ff0000", "ring": "all"}}])
+    assert ctrl.led_ring is None
+
+
+def test_set_led_halves_ring_passes_through(clock):
+    ctrl = _ring_activity([{"set_led_halves":
+                            {"colors": ["#111111", "#222222"], "ring": 3}}])
+    assert ctrl.halves == ["#111111", "#222222"]
+    assert ctrl.halves_ring == 3
+
+
+def test_fade_ring_passes_through(clock):
+    ctrl = _ring_activity([{"fade": {"color1": "#000000", "color2": "#ffffff",
+                                     "period_ms": 2000, "ring": 1}}])
+    # The first fade frame already drives the selected ring.
+    assert ctrl.led_ring == 1
 
 
 def test_wait_for_touch_blocks_until_touched(clock):
