@@ -13,11 +13,17 @@ Protocol::
     PC -> node  {"cmd":"ota_data","seq":S,"data":"<base64>"}
     node -> PC  {"type":"ota_ack","seq":S}
     PC -> node  {"cmd":"ota_end"}
-    node -> PC  {"type":"ota_done"} (node reboots) | {"type":"ota_error",...}
+    node        verify MD5 + reboot; the *new* firmware broadcasts
+                {"type":"ota_done"} once it boots | {"type":"ota_error",...}
 
 A small sliding window pipelines chunks to hide the round-trip latency; lost or
 reordered chunks are retransmitted on a per-sequence timeout. The node tolerates
 duplicates and drops future chunks, so the window stays correct under loss.
+
+``ota_done`` is sent by the freshly-booted new firmware, not before the reboot,
+so it confirms the image actually boots: an image that passes the MD5 check but
+fails to boot never confirms and is reported as a timeout/failure, never a false
+success.
 
 This class is framework-agnostic (no Qt). The GUI runs :meth:`run` in a worker
 thread and surfaces ``on_progress`` / ``on_log`` to the user.
@@ -79,11 +85,14 @@ class NodeOTAUpdater:
     ACK_TIMEOUT = 0.4    # seconds before retransmitting an unacked chunk
     MAX_RETRIES = 8      # per-chunk retransmit attempts before aborting
     READY_TIMEOUT = 5.0  # seconds to wait for ota_ready
-    # The end phase needs more slack: the node verifies the MD5, then emits a
-    # burst of ota_done frames (~0.5 s) before rebooting. ESP-NOW relay latency
-    # plus that burst can exceed READY_TIMEOUT, so give it a wider window before
-    # declaring a (false) timeout.
-    DONE_TIMEOUT = 12.0  # seconds to wait for ota_done after ota_end
+    # The end phase needs much more slack: the node verifies the MD5, *reboots*,
+    # and only the freshly-booted new firmware confirms (ota_done broadcast / a
+    # not_active reply to a resent ota_end). That proves the image really boots,
+    # so an image that passes MD5 but bricks never confirms and we time out here
+    # — a real failure, not a false success. A reboot plus ESP-NOW re-init takes a
+    # few seconds; a healthy node confirms in ~2-3 s, so this window only fully
+    # elapses on an actual failure.
+    DONE_TIMEOUT = 20.0  # seconds to wait for the rebooted node to confirm
     END_RESEND = 1.0     # seconds between ota_end retransmits while finishing
 
     def __init__(
@@ -235,12 +244,17 @@ class NodeOTAUpdater:
         and the PC timing out at 100 %. So we *resend* ``ota_end`` every
         :attr:`END_RESEND` seconds until the node confirms.
 
-        Two confirmations count as success:
-          * ``ota_done`` — the node finalized and is rebooting (normal case);
-          * ``not_active`` — a previous ``ota_end`` already finalized the image
-            (its ``ota_done`` burst was lost, or the node already rebooted into
-            the new firmware). The flash is written and MD5-verified either way,
-            so a late ``not_active`` is a success, not a failure.
+        The node does NOT confirm before rebooting: ``ota_end`` makes it verify
+        the MD5 and reboot, and only the freshly-booted *new* firmware reports
+        back. So both success tokens prove the new image actually boots — an
+        image that passes MD5 but bricks produces neither and we time out (a real
+        failure) rather than reporting a false success:
+          * ``ota_done`` — broadcast by the new firmware from ``checkBootDone()``
+            on its first boot (normal case);
+          * ``not_active`` — a resent ``ota_end`` reached the rebooted node,
+            whose new firmware has no transfer in progress. Only a running new
+            firmware can reply this, so it is a genuine boot confirmation too
+            (it covers a lost ``ota_done`` broadcast).
         """
         deadline = time.monotonic() + timeout
         next_send = 0.0  # send immediately on the first pass

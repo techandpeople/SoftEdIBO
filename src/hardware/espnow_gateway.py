@@ -23,6 +23,12 @@ logger = logging.getLogger(__name__)
 # before giving up and reporting the connection as failed.
 VERIFY_TIMEOUT_S = 2.0
 
+# Seconds a serial write may block before giving up. Without this, a write to a
+# vanished gateway (e.g. just after flashing, while the USB CDC device resets and
+# re-enumerates) blocks the calling thread forever. A short cap turns that into a
+# SerialTimeoutException the senders already treat as a failed write.
+WRITE_TIMEOUT_S = 1.0
+
 
 class ESPNowGateway:
     """Manages serial communication with the ESP-NOW gateway."""
@@ -40,6 +46,11 @@ class ESPNowGateway:
         self._raw_callbacks: list[Callable[[str, str], None]] = []
         self._logged_disconnected = False
         self._known_macs: set[str] = set()
+        # Strong refs to "the link dropped on its own" listeners (e.g. the panel
+        # repainting itself as disconnected). Fired only on an *unexpected* loss
+        # — the gateway unplugged or reset (e.g. just after a flash) — not on a
+        # caller-initiated :meth:`disconnect`.
+        self._disconnect_callbacks: list[Callable[[], None]] = []
 
     @property
     def known_macs(self) -> frozenset[str]:
@@ -66,6 +77,7 @@ class ESPNowGateway:
                 port=self._port,
                 baudrate=self._baud_rate,
                 timeout=1,
+                write_timeout=WRITE_TIMEOUT_S,
             )
         except serial.SerialException as e:
             logger.warning("Failed to connect to gateway on %s: %s", self._port, e)
@@ -175,8 +187,19 @@ class ESPNowGateway:
         self._known_macs.clear()
         logger.info("Disconnected from ESP-NOW gateway")
 
-    def send(self, target_mac: str, command: str, **kwargs: Any) -> bool:
-        """Send a command to a remote ESP32 node via the gateway."""
+    def send(self, target_mac: str, command: str, repeat: int = 1,
+             **kwargs: Any) -> bool:
+        """Send a command to a remote ESP32 node via the gateway.
+
+        ``repeat`` writes the same frame more than once. ESP-NOW delivery is
+        best-effort and the node's radio competes with its own telemetry, so an
+        occasional command frame is dropped — the "didn't go on the first try"
+        symptom. Sending an *idempotent* command a few times makes it very likely
+        one lands without the node acting on it twice: setting limits is
+        idempotent, inflate/deflate target a level (the firmware no-ops once it is
+        reached), and a valve/pump toggle just re-asserts a state. Do NOT use
+        repeat for commands that accumulate per frame.
+        """
         if not self.is_connected:
             if not self._logged_disconnected:
                 logger.debug("Gateway not connected — commands will be dropped")
@@ -187,8 +210,11 @@ class ESPNowGateway:
         message = {"target": target_mac, "cmd": command, **kwargs}
         try:
             line = json.dumps(message)
-            self._serial.write((line + "\n").encode("utf-8"))
-            logger.debug("Sent to %s: %s", target_mac, command)
+            payload = (line + "\n").encode("utf-8")
+            for _ in range(max(1, repeat)):
+                self._serial.write(payload)
+            logger.debug("Sent to %s: %s%s", target_mac, command,
+                         f" (x{repeat})" if repeat > 1 else "")
             self._emit_raw("tx", line)
             return True
         except serial.SerialException:
@@ -264,6 +290,23 @@ class ESPNowGateway:
         if callback in self._raw_callbacks:
             self._raw_callbacks.remove(callback)
 
+    def on_disconnect(self, callback: Callable[[], None]) -> None:
+        """Register a listener for an *unexpected* loss of the gateway link.
+
+        Fired from the serial read thread when the port dies on its own (the
+        gateway unplugged or reset — e.g. right after flashing). Not fired on a
+        caller-initiated :meth:`disconnect`. Consumers that touch the GUI must
+        marshal to the GUI thread (e.g. via a Qt signal).
+        """
+        self._disconnect_callbacks.append(callback)
+
+    def _notify_disconnected(self) -> None:
+        for cb in list(self._disconnect_callbacks):
+            try:
+                cb()
+            except Exception:
+                logger.exception("Disconnect callback failed")
+
     def _emit_raw(self, direction: str, text: str) -> None:
         for cb in list(self._raw_callbacks):
             try:
@@ -331,4 +374,5 @@ class ESPNowGateway:
                     self._serial.close()
                     self._serial = None
                 self._running = False
+                self._notify_disconnected()
                 break

@@ -41,7 +41,9 @@ constexpr mlx90393_oversampling_t OSR    = MLX90393_OSR_2;
 constexpr mlx90393_filter_t       FILTER = MLX90393_FILTER_3;
 
 constexpr uint16_t BASELINE_SAMPLES     = 70;     // running-average reads to auto-zero
-constexpr uint32_t STREAM_INTERVAL_MS   = 35;     // ~28 Hz
+constexpr uint32_t STREAM_INTERVAL_MS   = 100;    // ~10 Hz (was 35/28 Hz — the
+                                                  // flood was crowding the radio
+                                                  // and dropping actuation commands)
 constexpr uint32_t ANNOUNCE_INTERVAL_MS = 2000;   // re-announce until gateway known
 
 // Tunables (overridable at runtime via "configure")

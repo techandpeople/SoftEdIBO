@@ -27,10 +27,16 @@ inline void sendStatus(int ch, float kpa) {
     // "st" is the real actuation state (0 idle, 1 inflating, 2 deflating) so the
     // PC reflects whether a pump is actually driving the chamber rather than
     // inferring it from pressure-vs-target (which never settles with pumps off).
-    char buf[80];
+    // "vi"/"vd" are the ACTUAL inflate/deflate valve outputs (chambers::valveOpen,
+    // the mirror every valve write goes through), so the PC shows a valve as open
+    // whoever opened it — a manual toggle, an inflate/deflate, the closed-loop
+    // control, or the firmware's own dead-man closing it again.
+    char buf[96];
     int  len = snprintf(buf, sizeof(buf),
-                        "{\"type\":\"status\",\"chamber\":%d,\"pressure\":%d,\"kpa\":%.2f,\"st\":%d}",
-                        ch, pct, kpa, (int)chambers::state[ch].state);
+                        "{\"type\":\"status\",\"chamber\":%d,\"pressure\":%d,\"kpa\":%.2f,\"st\":%d,\"vi\":%d,\"vd\":%d}",
+                        ch, pct, kpa, (int)chambers::state[ch].state,
+                        chambers::valveOpen[ch * 2 + 0] ? 1 : 0,
+                        chambers::valveOpen[ch * 2 + 1] ? 1 : 0);
     esp_now_send(gatewayMac, reinterpret_cast<uint8_t*>(buf), len);
 }
 
@@ -48,6 +54,76 @@ inline void sendAck(const char* cmd) {
     int  len = snprintf(buf, sizeof(buf), "{\"type\":\"ack\",\"cmd\":\"%s\"}", cmd);
     esp_now_send(gatewayMac, reinterpret_cast<uint8_t*>(buf), len);
 }
+
+// Wireless diagnostic for Inflate/Deflate-All: the live engine phase + the set of
+// chambers each engine still wants (pendingMask), plus per-chamber kpa/max. Sent
+// over ESP-NOW so it shows in the PC log without a USB cable. Lets us see why a
+// chamber did/didn't actuate and watch the round/measure cycle shrink the set.
+inline void sendSeq() {
+    if (!gatewayKnown) return;
+    char buf[220];
+    int  pos = snprintf(buf, sizeof(buf),
+        "{\"type\":\"seq\",\"inf_ph\":%d,\"inf_mask\":%d,\"def_ph\":%d,\"def_mask\":%d,\"ch\":[",
+        chambers::inflateEng.phase, chambers::inflateEng.pendingMask,
+        chambers::deflateEng.phase, chambers::deflateEng.pendingMask);
+    for (int i = 0; i < NUM_CHAMBERS; i++) {
+        if (i) buf[pos++] = ',';
+        pos += snprintf(buf + pos, sizeof(buf) - pos,
+            "{\"k\":%.1f,\"mx\":%.1f}",
+            chambers::cachedKpa[i], chambers::state[i].max_kpa);
+    }
+    pos += snprintf(buf + pos, sizeof(buf) - pos, "]}");
+    esp_now_send(gatewayMac, reinterpret_cast<uint8_t*>(buf), pos);
+}
+
+#ifdef DEBUG_BUILD
+// Which valves are open the moment an actuation command arrives — the info the
+// user explicitly wants kept (e.g. "a new inflate landed while these were still
+// open"). Streamed over ESP-NOW so it lands in the PC log without a cable.
+inline void sendRxOpen(const char* cmd, int chamber) {
+    if (!gatewayKnown) return;
+    uint16_t inf = 0, def = 0;
+    for (int i = 0; i < NUM_CHAMBERS; i++) {
+        if (chambers::valveOpen[i * 2 + 0]) inf |= (uint16_t)(1u << i);
+        if (chambers::valveOpen[i * 2 + 1]) def |= (uint16_t)(1u << i);
+    }
+    char buf[112];
+    int  len = snprintf(buf, sizeof(buf),
+        "{\"type\":\"dbg\",\"ev\":\"rx\",\"cmd\":\"%s\",\"ch\":%d,\"open_inf\":%d,\"open_def\":%d}",
+        cmd, chamber, inf, def);
+    esp_now_send(gatewayMac, reinterpret_cast<uint8_t*>(buf), len);
+}
+
+// Engine round/measure trace (coupled_fill::Event). Registered as chambers::dbgHook.
+inline void sendEngEvent(uint8_t ev, uint16_t mask, uint8_t dir) {
+    if (!gatewayKnown) return;
+    char buf[80];
+    int  len = snprintf(buf, sizeof(buf),
+        "{\"type\":\"dbg\",\"ev\":\"eng\",\"dir\":%d,\"code\":%d,\"mask\":%d}", dir, ev, mask);
+    esp_now_send(gatewayMac, reinterpret_cast<uint8_t*>(buf), len);
+}
+
+// A pump must never spin without an open valve of its direction (the "running
+// dry / forcing" failure). recalcPumps() makes that impossible by construction,
+// so this only fires on a regression — report it loudly over ESP-NOW.
+inline void checkDryPumps() {
+    if (!gatewayKnown) return;
+    bool anyInf = false, anyDef = false;
+    for (int i = 0; i < NUM_CHAMBERS; i++) {
+        if (chambers::valveOpen[i * 2 + 0]) anyInf = true;
+        if (chambers::valveOpen[i * 2 + 1]) anyDef = true;
+    }
+    bool dryInf = ledcRead(chambers::PUMP1_LEDC_CH) > 0 && !anyInf;
+    bool dryDef = ledcRead(chambers::PUMP2_LEDC_CH) > 0 && !anyDef;
+    if (!dryInf && !dryDef) return;
+    char buf[80];
+    int  len = snprintf(buf, sizeof(buf),
+        "{\"type\":\"dbg\",\"ev\":\"dry\",\"inf\":%d,\"def\":%d}", dryInf, dryDef);
+    esp_now_send(gatewayMac, reinterpret_cast<uint8_t*>(buf), len);
+}
+
+inline void installDebugHook() { chambers::dbgHook = &sendEngEvent; }
+#endif
 
 // Report the live pump PWM duties (read straight from the LEDC registers, so it
 // reflects whatever last drove them — recalcPumps, manual, or emergencyStopAll).
@@ -84,16 +160,17 @@ inline void sendDebug() {
 }
 #endif
 
-// Actuation commands that a ``chamber == -1`` target fans out to every chamber
-// in parallel (one frame, not one per chamber). Inflate is NOT here — it runs the
-// two-phase chambers::inflateAll (coarse parallel + isolated finish), because the
-// in-line gauges can't read individual chambers while several valves are open.
-// Limit commands (set_max/set_min — each chamber has its own) and the manual
-// bench controls are excluded; they stay single-target.
+// Actuation commands that a ``chamber == -1`` target fans out to every chamber in
+// parallel (one frame, not one per chamber). Inflate and Deflate are NOT here —
+// "Inflate/Deflate All" run the two-phase chambers::inflateAll / deflateAll (coarse
+// parallel + isolated finish when 2+ chambers actuate) because the in-line gauges
+// read the shared line, not each chamber, while several valves are open. Only
+// set_pressure / hold-all stay a plain fan-out (no precise per-chamber target on the
+// coupled line). Limit commands (set_max/set_min) and the manual bench controls are
+// excluded; they stay single-target.
 inline bool isFanOut(cmd_queue::CmdType t) {
     using namespace cmd_queue;
-    return t == CMD_DEFLATE
-        || t == CMD_SET_PRESSURE || t == CMD_HOLD;
+    return t == CMD_SET_PRESSURE || t == CMD_HOLD;
 }
 
 // Apply one already-parsed command to a single (assumed valid) chamber ``n``.
@@ -103,79 +180,67 @@ inline void applyChamberCmd(int n, const cmd_queue::Cmd& c) {
     using namespace cmd_queue;
     auto& ch = chambers::state[n];
 
+    // duty 0 (unset) -> full speed. (Direct runs its single pump on/off at full
+    // duty; the value is kept for telemetry.) ``fill_ms`` is no longer a separate
+    // time-fill path: the engine's coupled measure gives a trustworthy per-chamber
+    // pressure, so all targeting is pressure-based, with the engine's chamber_max_ms
+    // as the time backstop.
     switch (c.type) {
     case CMD_INFLATE: {
-        // duty 0 (unset) -> full speed; a lower duty fills the chamber slower.
         uint8_t duty = c.duty ? c.duty : chambers::DEFAULT_INFLATE_DUTY;
-        if (c.fill_ms > 0) {
-            // Time-based fill: open for the calibrated window; HARD_MAX (max_kpa)
-            // is the only pressure cutoff.
-            chambers::beginInflate(n, duty, ch.max_kpa, c.fill_ms);
-        } else {
-            float delta  = (ch.max_kpa - ch.min_kpa) * constrain(c.param, 0, 100) / 100.0f;
-            float target = min(chambers::cachedKpa[n] + delta, ch.max_kpa);
-            // Only actuate if we are actually below the target. Without this guard
-            // each inflate opens the valve and runs the pump for one control cycle
-            // regardless of current pressure (the stop fires only at the next
-            // pressure check), so repeated inflates at the cap creep past max_kpa a
-            // pulse at a time. set_pressure already guards this way.
-            if (chambers::cachedKpa[n] < target)
-                chambers::beginInflate(n, duty, target);
-        }
+        float delta  = (ch.max_kpa - ch.min_kpa) * constrain(c.param, 0, 100) / 100.0f;
+        float target = min(chambers::cachedKpa[n] + delta, ch.max_kpa);
+        // Only actuate if actually below target (else a repeated "+" at the cap
+        // would creep past max one round at a time).
+        if (chambers::cachedKpa[n] < target)
+            chambers::requestInflate(n, target, duty);
         break;
     }
     case CMD_DEFLATE: {
-        // duty 0 (unset) -> full speed; a lower duty empties the chamber slower
-        // (the deflate side runs the vacuum pump).
         uint8_t duty = c.duty ? c.duty : chambers::DEFAULT_DEFLATE_DUTY;
         float delta  = (ch.max_kpa - ch.min_kpa) * constrain(c.param, 0, 100) / 100.0f;
         float target = max(chambers::cachedKpa[n] - delta, ch.min_kpa);
-        chambers::beginDeflate(n, target, c.fill_ms, duty);
+        if (chambers::cachedKpa[n] > target)
+            chambers::requestDeflate(n, target, duty);
         break;
     }
     case CMD_SET_PRESSURE: {
-        // duty 0 (unset) -> full speed; a lower duty approaches the target gently
-        // (the pressure cutoff still stops the pump at the target level).
         float target = units::pctToKpa(constrain(c.param, 0, 100),
                                        ch.min_kpa, ch.max_kpa);
         if      (chambers::cachedKpa[n] < target)
-            chambers::beginInflate(n, c.duty ? c.duty : chambers::DEFAULT_INFLATE_DUTY, target);
+            chambers::requestInflate(n, target, c.duty ? c.duty : chambers::DEFAULT_INFLATE_DUTY);
         else if (chambers::cachedKpa[n] > target)
-            chambers::beginDeflate(n, target, 0, c.duty ? c.duty : chambers::DEFAULT_DEFLATE_DUTY);
-        else { chambers::stop(n); chambers::recalcPumps(); }
+            chambers::requestDeflate(n, target, c.duty ? c.duty : chambers::DEFAULT_DEFLATE_DUTY);
+        else chambers::holdChamber(n);
         break;
     }
     case CMD_SET_MAX: {
         float new_max = constrain(c.param_kpa, ch.min_kpa + 0.1f, chambers::HARD_MAX_KPA);
         ch.max_kpa = new_max;
-        if (ch.state == chambers::INFLATING && chambers::cachedKpa[n] >= ch.max_kpa) {
-            chambers::stop(n);
-            chambers::recalcPumps();
-        }
+        if (ch.state == chambers::INFLATING && chambers::cachedKpa[n] >= ch.max_kpa)
+            chambers::holdChamber(n);
         break;
     }
     case CMD_SET_MIN: {
         float new_min = constrain(c.param_kpa, chambers::HARD_MIN_KPA, ch.max_kpa - 0.1f);
         ch.min_kpa = new_min;
-        if (ch.state == chambers::DEFLATING && chambers::cachedKpa[n] <= ch.min_kpa) {
-            chambers::stop(n);
-            chambers::recalcPumps();
-        }
+        if (ch.state == chambers::DEFLATING && chambers::cachedKpa[n] <= ch.min_kpa)
+            chambers::holdChamber(n);
         break;
     }
     case CMD_HOLD:
-        chambers::stop(n);
-        chambers::recalcPumps();
+        chambers::holdChamber(n);
         break;
     case CMD_VALVE_MANUAL: {
         // chamber = chamber, param = side (0=inflate, 1=deflate), cfg_chambers = open (0/1)
-        // Routed through setManualValve so manualSafetyTick() can auto-off it.
+        // Manual (dev) override takes the chamber out of the engine's hands.
+        chambers::inflateEng.drop(n, [](int i) { chambers::stop(i); });
+        chambers::deflateEng.drop(n, [](int i) { chambers::stop(i); });
         chambers::setManualValve(n, c.param, c.cfg_chambers != 0);
         break;
     }
     case CMD_PUMP_MANUAL: {
         // param = pump (0=inflate, 1=deflate), cfg_chambers = on (0/1)
-        // Routed through setManualPump so manualSafetyTick() can auto-off it.
         chambers::setManualPump(c.param, c.cfg_chambers != 0);
         break;
     }
@@ -202,28 +267,46 @@ inline void process(const cmd_queue::Cmd& c) {
     if (chambers::stopped) return;
 
     // Start a continuous bench-test run (param = direction). Targetless, so it
-    // must be handled before the per-chamber index guard below.
-    if (c.type == CMD_TEST_RUN) { chambers::testRun(c.param, c.chamber); sendAck("test_run"); sendPumps(); return; }
+    // must be handled before the per-chamber index guard below. The bench test
+    // owns the hardware directly, so drop any engine sequence first.
+    if (c.type == CMD_TEST_RUN) {
+        chambers::inflateEng.abort();
+        chambers::deflateEng.abort();
+        chambers::testRun(c.param, c.chamber); sendAck("test_run"); sendPumps(); return;
+    }
 
-    // chamber == -1 actuates EVERY chamber from ONE frame (the PC's Inflate/
-    // Deflate-All), so a dropped per-chamber frame can't leave most un-actuated.
+#ifdef DEBUG_BUILD
+    // Record which valves are open the instant an actuation command lands.
+    if (c.type == CMD_INFLATE || c.type == CMD_DEFLATE
+        || c.type == CMD_SET_PRESSURE || c.type == CMD_HOLD) {
+        const char* name = c.type == CMD_INFLATE      ? "inflate"
+                         : c.type == CMD_DEFLATE      ? "deflate"
+                         : c.type == CMD_SET_PRESSURE ? "set_pressure" : "hold";
+        sendRxOpen(name, c.chamber);
+    }
+#endif
+
+    // chamber == -1 actuates EVERY chamber. Inflate/Deflate-All request every
+    // chamber that still needs to move; the engine batches them into one coupled
+    // round (open together → fill to lowest target → close → measure isolated).
     int n = c.chamber;
     if (n == -1 && c.type == CMD_INFLATE) {
-        // Two-phase fill: coarse parallel (fast) then a per-chamber isolated
-        // finish, because the in-line gauges read the shared line — not each
-        // chamber — while several valves are open. See chambers.h.
-        chambers::inflateAll(c.param, c.fill_ms);
+        chambers::inflateAll(c.param);
+        sendSeq();              // wireless diagnostic: engine phase + pending masks
+        return;
+    }
+    if (n == -1 && c.type == CMD_DEFLATE) {
+        chambers::deflateAll(c.param);
+        sendSeq();
         return;
     }
     if (n == -1 && isFanOut(c.type)) {
-        // Deflate/set_pressure/hold-all stay parallel (no precise per-chamber
-        // target to hit, so the coupling doesn't matter).
-        chambers::cancelInflateSeq();
+        // set_pressure / hold-all fan out per chamber; each routes through the
+        // engine (which groups co-active same-direction chambers itself).
         for (int i = 0; i < NUM_CHAMBERS; i++) applyChamberCmd(i, c);
         return;
     }
     if (n < 0 || n >= NUM_CHAMBERS) return;
-    chambers::cancelInflateSeq();   // a single-chamber action overrides any sequence
     applyChamberCmd(n, c);
 }
 
