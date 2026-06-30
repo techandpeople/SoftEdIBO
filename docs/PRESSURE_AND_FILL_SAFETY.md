@@ -4,6 +4,14 @@ How chambers are driven and what stops them from bursting or imploding.
 Applies to both actuator firmwares (`node_direct`, `node_multiplexed`), whose
 shared policy lives in `firmware/common/fill_control.h`.
 
+> **Note:** inflate/deflate **targeting** is now done by the coupled-fill
+> supervisor (`firmware/common/coupled_fill.h`) — open the group together, fill to
+> the lowest target, close, measure each chamber isolated, repeat — because the
+> chambers share one check-valve-less line and the gauges read the shared line
+> while coupled. See `docs/COUPLED_FILL_CONTROL.md`. The pressure model, the
+> vacuum blind spot and the hard caps below still apply; the time-based `ms` fill
+> described here is superseded as the primary path on the actuator boards.
+
 ## Pressure baseline — there is none in software
 
 The XGZP6847A is read as a **gauge** sensor (`pressure.h`: `P_MIN = 0`): it
