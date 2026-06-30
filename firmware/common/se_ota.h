@@ -12,11 +12,16 @@
  *   PC -> node  {"cmd":"ota_data","seq":S,"data":"<base64>"}   (seq 0,1,2,…)
  *   node -> PC  {"type":"ota_ack","seq":S}      | {"type":"ota_error","reason":..}
  *   PC -> node  {"cmd":"ota_end"}
- *   node -> PC  {"type":"ota_done"} then ESP.restart()  | ota_error verify_failed
+ *   node        verify MD5, arm the boot-done flag, reboot. The *new* firmware
+ *               broadcasts {"type":"ota_done"} from checkBootDone() once it
+ *               actually boots  | {"type":"ota_error","reason":"verify_failed"}
  *
  * Chunks are written inline in the ESP-NOW recv callback (WiFi task). A 144-byte
  * flash write is a few ms — acceptable, and far simpler than buffering through a
- * queue. Integrity is verified by Update via the MD5 supplied in ota_begin.
+ * queue. Integrity is verified by Update via the MD5 supplied in ota_begin, and
+ * success is confirmed only after the new image boots (not before the reboot),
+ * so an image that passes MD5 but fails to boot is reported as a failure rather
+ * than a false success.
  *
  * Requires an OTA partition layout (app0/app1/otadata). esp32dev's default
  * partition table provides it; see each node's platformio.ini.
@@ -74,13 +79,15 @@ inline char wifiSsid[33] = {};
 inline char wifiPass[65] = {};
 inline char wifiUrl[160] = {};
 
-// Armed before a WiFi update; survives the software reset that HTTPUpdate
-// triggers (RTC_NOINIT memory is not cleared on a restart, only on power loss).
-// Deliberately NOT inline/initialised: a zero-init would defeat the noinit
-// section, and exactly one translation unit (a node's single main.cpp) includes
-// this header, so there is no ODR clash.
-RTC_NOINIT_ATTR uint32_t wifiDoneFlag;
-constexpr uint32_t WIFI_DONE_MAGIC = 0xB007D02E;  // "boot done"
+// Armed before any OTA-triggered reboot (the WiFi HTTPUpdate path and the
+// ESP-NOW ota_end path both set it), so the freshly-booted new firmware can
+// confirm success from checkBootDone() — proving the image actually boots, not
+// just that it verified. Survives the software reset (RTC_NOINIT memory is not
+// cleared on a restart, only on power loss). Deliberately NOT inline/initialised:
+// a zero-init would defeat the noinit section, and exactly one translation unit
+// (a node's single main.cpp) includes this header, so there is no ODR clash.
+RTC_NOINIT_ATTR uint32_t otaDoneFlag;
+constexpr uint32_t OTA_DONE_MAGIC = 0xB007D02E;  // "boot done"
 
 inline void reply(const char* s) { se::node::toGateway(s); }
 
@@ -131,7 +138,7 @@ inline int b64decode(const char* in, size_t inlen, uint8_t* out, size_t outcap) 
 // ota_done via checkBootDone(). On any failure the flag is cleared and the node
 // restarts into its current firmware to recover the ESP-NOW link.
 inline void doWifiUpdate(const char* ssid, const char* pass, const char* url) {
-    wifiDoneFlag = WIFI_DONE_MAGIC;   // confirmed by checkBootDone() after reboot
+    otaDoneFlag = OTA_DONE_MAGIC;   // confirmed by checkBootDone() after reboot
 
     esp_now_deinit();                 // free the shared radio for dedicated STA use
     WiFi.persistent(false);
@@ -140,7 +147,7 @@ inline void doWifiUpdate(const char* ssid, const char* pass, const char* url) {
     uint32_t start = millis();
     while (WiFi.status() != WL_CONNECTED && millis() - start < 15000) delay(200);
     if (WiFi.status() != WL_CONNECTED) {
-        wifiDoneFlag = 0;
+        otaDoneFlag = 0;
         ESP.restart();
     }
 
@@ -150,7 +157,7 @@ inline void doWifiUpdate(const char* ssid, const char* pass, const char* url) {
     httpUpdate.update(client, url);
 
     // Reached only if the update failed (success rebooted inside update()).
-    wifiDoneFlag = 0;
+    otaDoneFlag = 0;
     ESP.restart();
 }
 
@@ -222,13 +229,13 @@ inline bool tryHandle(const uint8_t* data, int len) {
         bool ok = Update.end(true);   // true => verify MD5 + set boot partition
         active = false;
         if (!ok) { fail("verify_failed"); return true; }
-        // ota_done is a single unacked frame and we reboot right after, so a lost
-        // frame would make the PC time out even though the update succeeded. Send
-        // it a few times spaced out to survive ESP-NOW packet loss.
-        for (int i = 0; i < 4; i++) {
-            reply("{\"type\":\"ota_done\"}");
-            delay(120);               // let each reply leave; total ~0.5 s
-        }
+        // Do NOT confirm success here: Update.end() only proves the image was
+        // written and MD5-verified, not that it actually boots. Arm the done flag
+        // and reboot; the freshly-booted *new* firmware broadcasts ota_done from
+        // checkBootDone(). A merged/wrong-type image that passes MD5 but bricks
+        // never reaches that boot, so the PC times out instead of seeing a false
+        // success. (Same scheme as the WiFi path.)
+        otaDoneFlag = OTA_DONE_MAGIC;
         ESP.restart();
         return true;
     }
@@ -248,15 +255,17 @@ inline void pollWifi() {
     doWifiUpdate(wifiSsid, wifiPass, wifiUrl);
 }
 
-// Call once from setup() after se::begin(): if a WiFi OTA just completed, the
-// flag armed before the reboot survived in RTC memory — announce success to the
-// PC and clear it. Broadcast (not toGateway) because a fresh boot has not learned
-// the gateway MAC yet; the gateway forwards broadcasts to the PC all the same.
-// A cold boot leaves the flag uninitialised, so a spurious match is ~1 in 2^32
-// and harmless (the PC only listens for ota_done during an update).
+// Call once from setup() after se::begin(): if an OTA just completed (either the
+// WiFi or the ESP-NOW path), the flag armed before the reboot survived in RTC
+// memory — announce success to the PC and clear it. This is the *only* ota_done:
+// it fires from the new firmware, so it proves the image booted, not merely that
+// it verified. Broadcast (not toGateway) because a fresh boot has not learned the
+// gateway MAC yet; the gateway forwards broadcasts to the PC all the same. A cold
+// boot leaves the flag uninitialised, so a spurious match is ~1 in 2^32 and
+// harmless (the PC only listens for ota_done during an update).
 inline void checkBootDone() {
-    if (wifiDoneFlag != WIFI_DONE_MAGIC) return;
-    wifiDoneFlag = 0;
+    if (otaDoneFlag != OTA_DONE_MAGIC) return;
+    otaDoneFlag = 0;
     for (int i = 0; i < 4; i++) {
         se::broadcast("{\"type\":\"ota_done\"}");
         delay(100);

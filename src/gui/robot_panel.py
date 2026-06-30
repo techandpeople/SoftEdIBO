@@ -62,6 +62,10 @@ class RobotPanel(QWidget, Ui_RobotPanel):
     # so its callback emits this signal to hop onto the GUI thread before the
     # tree is touched. ``object`` carries the RTT (float ms, or None when stale).
     _latency_update  = Signal(str, object)   # (mac, rtt_ms)
+    # Thread-safe bridge for an unexpected gateway loss: the gateway's read
+    # thread fires its disconnect callback, which emits this to hop to the GUI
+    # thread before the panel is repainted.
+    _gateway_lost    = Signal()
 
     # How often each known node is pinged for a fresh latency reading.
     _LATENCY_POLL_MS = 3000
@@ -88,6 +92,12 @@ class RobotPanel(QWidget, Ui_RobotPanel):
         idx  = self.baud_rate_combo.findText(baud)
         if idx >= 0:
             self.baud_rate_combo.setCurrentIndex(idx)
+
+        # Repaint as disconnected if the gateway drops on its own (unplug/reset,
+        # e.g. after a flash). The callback fires on the serial read thread, so
+        # bounce through a queued signal to reach the GUI thread.
+        self._gateway.on_disconnect(self._gateway_lost.emit)
+        self._gateway_lost.connect(self._on_gateway_lost)
 
         self.refresh_ports_btn.clicked.connect(self._refresh_ports)
         self.connect_btn.clicked.connect(self._on_gateway_connect)
@@ -256,15 +266,37 @@ class RobotPanel(QWidget, Ui_RobotPanel):
                 self.port_combo.setCurrentIndex(i)
                 break
 
+    def _reflect_disconnected(self) -> None:
+        """Repaint the panel as disconnected. Assumes the link is already down.
+
+        Shared by the explicit Disconnect button and the unexpected-loss handler
+        (gateway unplugged/reset), so both leave the UI in the same state. Resets
+        the scan button too: a scan may be mid-flight (button still reading
+        "Scanning…"), and leaving it that way looks like a hang.
+        """
+        self.gateway_status_label.setText("Disconnected")
+        self.connect_btn.setText("Connect")
+        self.scan_btn.setText("Scan Nodes")
+        self.scan_btn.setEnabled(False)
+        self._set_latency_polling(False)
+        self._refresh_all_trees()
+        self.gateway_changed.emit(False)
+
+    def _on_gateway_lost(self) -> None:
+        """GUI-thread handler for an unexpected gateway disconnect.
+
+        The serial read thread already tore the link down, so there's nothing to
+        close — just reflect it. Without this the panel would keep showing
+        "Connected" after the gateway is unplugged or reset (e.g. after a flash).
+        """
+        if self._gateway.is_connected:
+            return  # reconnected already, or a stale notification
+        self._reflect_disconnected()
+
     def _on_gateway_connect(self) -> None:
         if self._gateway.is_connected:
             self._gateway.disconnect()
-            self.gateway_status_label.setText("Disconnected")
-            self.connect_btn.setText("Connect")
-            self.scan_btn.setEnabled(False)
-            self._set_latency_polling(False)
-            self._refresh_all_trees()
-            self.gateway_changed.emit(False)
+            self._reflect_disconnected()
         else:
             port = self.port_combo.currentData() or self.port_combo.currentText()
             baud = int(self.baud_rate_combo.currentText())
@@ -344,8 +376,14 @@ class RobotPanel(QWidget, Ui_RobotPanel):
         dlg.show()
 
     def _on_scan_done(self) -> None:
-        self.scan_btn.setEnabled(True)
         self.scan_btn.setText("Scan Nodes")
+        # The gateway may have dropped (disconnected, or unplugged after a flash)
+        # while this scan's timer was pending. Don't re-enable the button or
+        # relabel the status as "Connected" in that case.
+        if not self._gateway.is_connected:
+            self.scan_btn.setEnabled(False)
+            return
+        self.scan_btn.setEnabled(True)
         self._refresh_all_trees()
         n    = len(self._gateway.known_macs)
         port = self.port_combo.currentData() or self.port_combo.currentText()

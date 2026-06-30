@@ -64,4 +64,30 @@ inline int countByRole(Role role) {
     return n;
 }
 
+// Run only the FIRST `activeCount` pumps of a role at `duty`, the rest off.
+// Common-manifold scaling: with all role pumps feeding one shared line, only the
+// NUMBER running matters (not which), so we keep the same pumps spun up as the
+// open-valve count rises/falls. `activeCount` is clamped to [0, pumps-of-role].
+// Running fewer pumps than open valves can vent keeps the fill speed per chamber
+// roughly constant AND stops spare pumps dead-heading the manifold (the "pump
+// running dry / forcing" failure): a pump only spins when valves can take its air.
+inline void setRoleActiveCount(Role role, int activeCount, uint8_t duty) {
+    static uint8_t lastCount[3] = {0xFF, 0xFF, 0xFF};
+    int seen = 0;
+    for (int i = 0; i < NUM_PUMPS; i++) {
+        if (roles[i] != role) continue;
+        bool on = seen < activeCount;
+        ledcWrite(i, on ? duty : 0);
+        if (on) _anyOn = true;
+        seen++;
+    }
+    int clamped = (activeCount < 0) ? 0 : (activeCount > seen ? seen : activeCount);
+    if (role < 3 && lastCount[role] != (uint8_t)clamped) {
+        const char* name = role == ROLE_PRESSURE ? "pressure"
+                         : role == ROLE_VACUUM   ? "vacuum" : "?";
+        DBG_PRINT("PUMPS role=%s active=%d/%d duty=%u\n", name, clamped, seen, duty);
+        lastCount[role] = (uint8_t)clamped;
+    }
+}
+
 }  // namespace pumps

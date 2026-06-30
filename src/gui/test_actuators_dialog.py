@@ -48,6 +48,17 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
 
     # Emitted from the gateway read thread; connected to _update_pressure (main thread)
     _pressure_received = Signal(int, int, float)   # chamber, pressure_pct, kpa
+    # Emitted from the gateway read thread with the node's ACTUAL valve outputs, so
+    # a valve shows open whoever opened it (manual toggle, inflate/deflate, the
+    # closed-loop control, or the firmware dead-man closing it). Main thread.
+    _valves_received = Signal(int, int, int)       # chamber, inflate_open, deflate_open
+
+    # Monospace valve/pump button base; the open variant adds a green fill so an
+    # actually-open valve is obvious at a glance.
+    _VALVE_STYLE = "font-family: Courier; font-size: 10pt;"
+    _VALVE_OPEN_STYLE = (
+        "font-family: Courier; font-size: 10pt; "
+        "background-color: #8FD98F; font-weight: bold;")
 
     def __init__(
         self,
@@ -68,7 +79,14 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         # lazily right before the next actuation. See _stop_all / _arm.
         self._stopped = False
         self._pressure_labels: dict[int, QLabel] = {}   # slot => label
-        self._valve_states: dict[tuple[int, int], tuple[bool, QPushButton]] = {}  # (slot, side) => (open, button)
+        # (slot, side) => (last-reported-open, button). The open flag is the node's
+        # ACTUAL valve state from status (display), NOT what the user clicked.
+        self._valve_states: dict[tuple[int, int], tuple[bool, QPushButton]] = {}
+        # (slot, side) => True while the user holds a manual valve override open.
+        # Kept apart from _valve_states (display) so a transient firmware close
+        # (e.g. a dropped keepalive frame) doesn't drop the user's intent; the
+        # keepalive re-asserts these to refresh the firmware dead-man.
+        self._valve_intent: dict[tuple[int, int], bool] = {}
         # Per-chamber inflate/deflate buttons, so the continuous-run toggle can
         # update their text. (slot, direction) => button; direction 0=inflate, 1=deflate.
         self._chamber_btns: dict[tuple[int, int], QPushButton] = {}
@@ -202,7 +220,17 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         self.verticalLayout.insertWidget(
             self.verticalLayout.count() - 1, run_group)
 
+        # Manual valve/pump dead-man keepalive. The firmware auto-closes a manually
+        # opened valve / pump after MANUAL_MAX_ON_MS (~5 s) so a lost "off" frame
+        # can't leave it running. Re-assert the held overrides well inside that
+        # window so they stay put while the dialog is open; the timer stops on
+        # close / STOP ALL, so the dead-man still fires if the link drops.
+        self._manual_keepalive = QTimer(self)
+        self._manual_keepalive.setInterval(1500)
+        self._manual_keepalive.timeout.connect(self._send_manual_keepalive)
+
         self._pressure_received.connect(self._update_pressure)
+        self._valves_received.connect(self._update_valves)
         self._gateway.on_message(self._on_gateway_message)
         self.finished.connect(self._on_closed)
 
@@ -244,19 +272,29 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
             slot_row.addWidget(inf_btn)
             slot_row.addWidget(def_btn)
 
-            # Manual valve toggle controls (monospace font for fixed width)
-            monospace_style = "font-family: Courier; font-size: 10pt;"
+            # Manual valve toggle controls (monospace font for fixed width). The
+            # displayed open/closed state is driven by the node's status (see
+            # _update_valves), not just by clicks; whatsThis explains both.
+            valve_help = (
+                "Toggle this valve's manual override. The label and green fill "
+                "follow the node's ACTUAL valve state reported ~2×/s, so it also "
+                "lights up when an inflate/deflate or the closed-loop control "
+                "opens the valve — not only when you click here. While held open "
+                "the dialog re-asserts it so the firmware dead-man doesn't close "
+                "it after ~5 s; closing the dialog or STOP ALL releases it.")
 
             val_inf_btn = QPushButton("Inflate Valve: CLOSED")
             val_inf_btn.setMaximumWidth(180)
-            val_inf_btn.setStyleSheet(monospace_style)
+            val_inf_btn.setStyleSheet(self._VALVE_STYLE)
+            val_inf_btn.setWhatsThis(valve_help)
             val_inf_btn.clicked.connect(lambda _=False, s=slot, btn=val_inf_btn: self._toggle_valve(s, 0, btn))
             self._valve_states[(slot, 0)] = (False, val_inf_btn)
             slot_row.addWidget(val_inf_btn)
 
             val_def_btn = QPushButton("Deflate Valve: CLOSED")
             val_def_btn.setMaximumWidth(180)
-            val_def_btn.setStyleSheet(monospace_style)
+            val_def_btn.setStyleSheet(self._VALVE_STYLE)
+            val_def_btn.setWhatsThis(valve_help)
             val_def_btn.clicked.connect(lambda _=False, s=slot, btn=val_def_btn: self._toggle_valve(s, 1, btn))
             self._valve_states[(slot, 1)] = (False, val_def_btn)
             slot_row.addWidget(val_def_btn)
@@ -289,6 +327,13 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
             self._pressure_received.emit(
                 chamber, pressure,
                 float(kpa) if isinstance(kpa, (int, float)) else float("nan"))
+        # ``vi``/``vd`` (actual inflate/deflate valve outputs) only arrive from
+        # firmware new enough to send them; older nodes simply leave the valve
+        # buttons driven by clicks alone (no regression).
+        vi = data.get("vi")
+        vd = data.get("vd")
+        if isinstance(chamber, int) and isinstance(vi, int) and isinstance(vd, int):
+            self._valves_received.emit(chamber, vi, vd)
 
     def _update_pressure(self, chamber: int, pressure: int, kpa: float) -> None:
         """Called in the main thread via Signal.
@@ -320,8 +365,36 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
                           float(cfg.get("min_pressure", 0.0)),
                           float(cfg.get("max_pressure", 8.0)))
 
+    def _update_valves(self, chamber: int, inflate_open: int, deflate_open: int) -> None:
+        """Reflect the node's ACTUAL valve outputs on the per-chamber buttons.
+
+        Called in the main thread via Signal from each status broadcast. This is
+        display only — it never sends a command — so a valve shows open whoever
+        opened it (a manual toggle, an inflate/deflate, the closed-loop control,
+        or the firmware's own dead-man closing it again)."""
+        self._set_valve_button((chamber, 0), bool(inflate_open))
+        self._set_valve_button((chamber, 1), bool(deflate_open))
+
+    def _set_valve_button(self, key: tuple[int, int], is_open: bool) -> None:
+        """Set one valve button's stored display state, label and colour.
+
+        Display only: stores the open flag in ``_valve_states`` (the actual state,
+        for the readout) and never touches ``_valve_intent`` (the user's hold) or
+        sends a command."""
+        entry = self._valve_states.get(key)
+        if entry is None:
+            return
+        _, btn = entry
+        self._valve_states[key] = (is_open, btn)
+        side_name = "Inflate" if key[1] == 0 else "Deflate"
+        btn.setText(f"{side_name} Valve: {'OPEN  ' if is_open else 'CLOSED'}")
+        btn.setStyleSheet(self._VALVE_OPEN_STYLE if is_open else self._VALVE_STYLE)
+
     def _on_closed(self) -> None:
         self._active = False
+        # Stop re-asserting manual overrides; the firmware dead-man then closes any
+        # held valve/pump within ~5 s of the last keepalive.
+        self._manual_keepalive.stop()
         # A continuous run ignores the firmware dead-man, so it would keep going
         # after the dialog closes — always stop it on the way out.
         self._stop_run()
@@ -464,24 +537,24 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         self._gateway.send(self._mac, command, chamber=-1, delta=100)
 
     def _toggle_valve(self, chamber: int, side: int, btn: QPushButton) -> None:
-        """Toggle valve open/closed and update button appearance."""
+        """Toggle the manual valve override.
+
+        Flips the user's *intent* (held vs released), which the keepalive then
+        re-asserts so the firmware dead-man doesn't close a held valve after
+        ~5 s. The button's authoritative open/closed display comes from the
+        node's status (see :meth:`_update_valves`); we set it optimistically here
+        so the click feels immediate, and the next status confirms or corrects."""
         key = (chamber, side)
-        is_open, _ = self._valve_states.get(key, (False, btn))
-        is_open = not is_open
-
-        # Update state
-        self._valve_states[key] = (is_open, btn)
-
-        # Update button appearance (fixed-width for consistent size)
-        side_name = "Inflate" if side == 0 else "Deflate"
-        status = "OPEN  " if is_open else "CLOSED"
-        btn.setText(f"{side_name} Valve: {status}")
+        want_open = not self._valve_intent.get(key, False)
+        self._valve_intent[key] = want_open
 
         # Send command to firmware (re-arm first if STOP ALL latched the node)
-        if is_open:
+        if want_open:
             self._arm()
         self._gateway.send(self._mac, "valve_manual", chamber=chamber,
-                          side=side, open=1 if is_open else 0)
+                          side=side, open=1 if want_open else 0)
+        self._set_valve_button(key, want_open)   # optimistic; status confirms
+        self._refresh_manual_keepalive()
 
     def _toggle_pump(self, pump: int, btn: QPushButton) -> None:
         """Toggle pump on/off and update button appearance."""
@@ -500,6 +573,8 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         if is_on:
             self._arm()
         self._gateway.send(self._mac, "pump_manual", pump=pump, on=1 if is_on else 0)
+        # A manual pump shares the firmware dead-man (~5 s); keep it alive while on.
+        self._refresh_manual_keepalive()
 
     def _chamber_dir(self, slot: int, direction: int) -> None:
         """Per-chamber Inflate (``direction`` 0) / Deflate (1) button.
@@ -564,6 +639,34 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         direction, chamber = run
         self._gateway.send(self._mac, "test_run", dir=direction, chamber=chamber)
 
+    def _refresh_manual_keepalive(self) -> None:
+        """Run the manual dead-man keepalive only while a valve/pump is held on."""
+        any_on = (any(self._valve_intent.values())
+                  or any(on for on, _ in self._pump_states.values()))
+        if any_on and not self._manual_keepalive.isActive():
+            self._manual_keepalive.start()
+        elif not any_on and self._manual_keepalive.isActive():
+            self._manual_keepalive.stop()
+
+    def _send_manual_keepalive(self) -> None:
+        """Re-assert every held manual valve/pump to refresh the firmware dead-man.
+
+        ``valve_manual`` / ``pump_manual`` only reset the node's per-override
+        timeout (they're idempotent), so this keeps the held overrides open
+        without re-driving anything. Stops itself once nothing is held."""
+        sent = False
+        for (chamber, side), want_open in self._valve_intent.items():
+            if want_open:
+                self._gateway.send(self._mac, "valve_manual", chamber=chamber,
+                                   side=side, open=1)
+                sent = True
+        for pump, (on, _) in self._pump_states.items():
+            if on:
+                self._gateway.send(self._mac, "pump_manual", pump=pump, on=1)
+                sent = True
+        if not sent:
+            self._manual_keepalive.stop()
+
     def _refresh_run_buttons(self) -> None:
         run = self._run
         self._run_inf_btn.setText(
@@ -575,16 +678,18 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
             btn.setText("⏹ Stop" if run == (direction, slot) else default)
 
     def _reset_manual_ui(self) -> None:
-        """Reset the manual valve/pump toggle buttons to OFF/CLOSED (UI only)."""
-        for key, (_, btn) in self._valve_states.items():
-            _, side = key
-            self._valve_states[key] = (False, btn)
-            side_name = "Inflate" if side == 0 else "Deflate"
-            btn.setText(f"{side_name} Valve: CLOSED")
+        """Reset the manual valve/pump toggle buttons + intent to OFF/CLOSED.
+
+        Releases every held valve override and stops the keepalive; the next
+        status broadcast then drives the valve buttons from the real state."""
+        self._valve_intent.clear()
+        for key in self._valve_states:
+            self._set_valve_button(key, False)
         for pump, (_, btn) in self._pump_states.items():
             self._pump_states[pump] = (False, btn)
             pump_name = "Inflate" if pump == 0 else "Deflate"
             btn.setText(f"{pump_name} Pump: OFF")
+        self._refresh_manual_keepalive()
 
     def _stop_all(self) -> None:
         """Halt everything and LATCH the node off until the next actuation.

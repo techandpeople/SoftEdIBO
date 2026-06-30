@@ -73,12 +73,74 @@ void sendStatus(int chamber, float kpa) {
     // "st" is the real actuation state (0 idle, 1 inflating, 2 deflating) so the
     // PC reflects whether a chamber is actually being driven rather than
     // inferring it from pressure-vs-target (which never settles with pumps off).
-    char buf[80];
+    // "vi"/"vd" are the ACTUAL inflate/deflate valve outputs (pca_valves mirror),
+    // so the PC shows a valve as open whoever opened it — manual toggle, an
+    // inflate/deflate, or the firmware closing it again.
+    char buf[96];
     int len = snprintf(buf, sizeof(buf),
-                       "{\"type\":\"status\",\"chamber\":%d,\"pressure\":%d,\"kpa\":%.2f,\"st\":%d}",
-                       chamber, pct, kpa, (int)ch.state);
+                       "{\"type\":\"status\",\"chamber\":%d,\"pressure\":%d,\"kpa\":%.2f,\"st\":%d,\"vi\":%d,\"vd\":%d}",
+                       chamber, pct, kpa, (int)ch.state,
+                       pca_valves::isOpen(chamber, 0) ? 1 : 0,
+                       pca_valves::isOpen(chamber, 1) ? 1 : 0);
     esp_now_send(gatewayMac, reinterpret_cast<const uint8_t*>(buf), len);
 }
+
+#ifdef DEBUG_BUILD
+// Which valves are open the instant an actuation command lands (the info the user
+// wants kept), streamed over ESP-NOW so it lands in the PC log without a cable.
+void sendRxOpen(const char* cmd, int chamber) {
+    if (!gatewayKnown) return;
+    uint16_t inf = 0, def = 0;
+    for (int i = 0; i < MAX_CHAMBERS; i++) {
+        if (pca_valves::isOpen(i, 0)) inf |= (uint16_t)(1u << i);
+        if (pca_valves::isOpen(i, 1)) def |= (uint16_t)(1u << i);
+    }
+    char buf[112];
+    int len = snprintf(buf, sizeof(buf),
+        "{\"type\":\"dbg\",\"ev\":\"rx\",\"cmd\":\"%s\",\"ch\":%d,\"open_inf\":%d,\"open_def\":%d}",
+        cmd, chamber, inf, def);
+    esp_now_send(gatewayMac, reinterpret_cast<const uint8_t*>(buf), len);
+}
+
+// Engine round/measure trace (coupled_fill::Event), registered as chambers::dbgHook.
+void sendEngEvent(uint8_t ev, uint16_t mask, uint8_t dir) {
+    if (!gatewayKnown) return;
+    char buf[80];
+    int len = snprintf(buf, sizeof(buf),
+        "{\"type\":\"dbg\",\"ev\":\"eng\",\"dir\":%d,\"code\":%d,\"mask\":%d}", dir, ev, mask);
+    esp_now_send(gatewayMac, reinterpret_cast<const uint8_t*>(buf), len);
+}
+
+// Pump-vs-valve sanity: report a pump role running with NO open valve (dead-head,
+// the "running dry / forcing" failure) OR more pumps running than the open valves
+// should need (forcing the manifold). recalcPumps() should make both impossible —
+// this only fires on a regression.
+void checkDryPumps() {
+    if (!gatewayKnown) return;
+    int openInf = 0, openDef = 0;
+    for (int i = 0; i < MAX_CHAMBERS; i++) {
+        if (pca_valves::isOpen(i, 0)) openInf++;
+        if (pca_valves::isOpen(i, 1)) openDef++;
+    }
+    int runP = 0, runV = 0;
+    for (int i = 0; i < NUM_PUMPS; i++) {
+        if (ledcRead(i) == 0) continue;
+        if (pumps::roles[i] == pumps::ROLE_PRESSURE) runP++;
+        else if (pumps::roles[i] == pumps::ROLE_VACUUM) runV++;
+    }
+    const int VPP = chambers::VALVES_PER_PUMP;
+    int wantP = openInf > 0 ? (openInf + VPP - 1) / VPP : 0;
+    int wantV = openDef > 0 ? (openDef + VPP - 1) / VPP : 0;
+    if (runP <= wantP && runV <= wantV) return;
+    char buf[136];
+    int len = snprintf(buf, sizeof(buf),
+        "{\"type\":\"dbg\",\"ev\":\"dry\",\"runP\":%d,\"wantP\":%d,\"openInf\":%d,\"runV\":%d,\"wantV\":%d,\"openDef\":%d}",
+        runP, wantP, openInf, runV, wantV, openDef);
+    esp_now_send(gatewayMac, reinterpret_cast<const uint8_t*>(buf), len);
+}
+
+void installDebugHook() { chambers::dbgHook = &sendEngEvent; }
+#endif
 
 bool isDisconnectedRail(int raw) {
     return raw < 40 || raw > 4055;
@@ -354,6 +416,7 @@ void manualClearAll() {
 // Emergency stop — slam everything off immediately. loop() keeps it that way
 // (and skips all control) while emergencyStopped is set.
 void emergencyStopAll() {
+    chambers::abortSequences();   // drop any in-progress coupled-fill sequence
     pumps::stopAll();
     pca_valves::closeAllValves();
     manualClearAll();
@@ -377,66 +440,55 @@ void applyChamberCmd(int n, const cmd_queue::Cmd& c) {
     using namespace cmd_queue;
     auto& ch = chambers::state[n];
 
-    // duty 0 (unset) -> full speed; a lower duty runs this chamber's role pumps
-    // slower so it fills/empties more gently (recalcPumps picks it up).
+    // duty 0 (unset) -> full speed. ``fill_ms`` is no longer a separate time-fill
+    // path: the engine's coupled measure gives a trustworthy per-chamber pressure,
+    // so targeting is pressure-based (chamber_max_ms is the time backstop).
     uint8_t duty = c.duty ? c.duty : chambers::DEFAULT_DUTY;
 
     switch (c.type) {
     case CMD_INFLATE: {
-        if (c.fill_ms > 0) {
-            // Time-based fill: open for the calibrated window; max_kpa is the
-            // only pressure cutoff.
-            chambers::beginInflate(n, ch.max_kpa, c.fill_ms, duty);
-        } else {
-            float delta  = (ch.max_kpa - ch.min_kpa) * constrain(c.param, 0, 100) / 100.0f;
-            float target = min(chambers::cachedKpa[n] + delta, ch.max_kpa);
-            // Only actuate if we are actually below the target. Without this guard
-            // each inflate opens the valve and runs the pump for one control cycle
-            // regardless of current pressure (the stop fires only at the next
-            // pressure check), so repeated inflates at the cap creep past max_kpa a
-            // pulse at a time. set_pressure already guards this way.
-            if (chambers::cachedKpa[n] < target)
-                chambers::beginInflate(n, target, 0, duty);
-        }
+        float delta  = (ch.max_kpa - ch.min_kpa) * constrain(c.param, 0, 100) / 100.0f;
+        float target = min(chambers::cachedKpa[n] + delta, ch.max_kpa);
+        // Only actuate if actually below target (else a repeated "+" at the cap
+        // would creep past max one round at a time).
+        if (chambers::cachedKpa[n] < target)
+            chambers::requestInflate(n, target, duty);
         break;
     }
     case CMD_DEFLATE: {
         float delta  = (ch.max_kpa - ch.min_kpa) * constrain(c.param, 0, 100) / 100.0f;
         float target = max(chambers::cachedKpa[n] - delta, ch.min_kpa);
-        chambers::beginDeflate(n, target, c.fill_ms, duty);
+        if (chambers::cachedKpa[n] > target)
+            chambers::requestDeflate(n, target, duty);
         break;
     }
     case CMD_SET_PRESSURE: {
         float target = units::pctToKpa(constrain(c.param, 0, 100), ch.min_kpa, ch.max_kpa);
-        if (chambers::cachedKpa[n] < target) {
-            chambers::beginInflate(n, target, 0, duty);
-        } else if (chambers::cachedKpa[n] > target) {
-            chambers::beginDeflate(n, target, 0, duty);
-        } else {
-            chambers::stop(n);
-        }
+        if      (chambers::cachedKpa[n] < target) chambers::requestInflate(n, target, duty);
+        else if (chambers::cachedKpa[n] > target) chambers::requestDeflate(n, target, duty);
+        else chambers::holdChamber(n);
         break;
     }
     case CMD_SET_MAX: {
         ch.max_kpa = constrain(c.param_kpa, ch.min_kpa + 0.1f, config::HARD_CHAMBER_MAX_KPA);
-        if (ch.state == chambers::INFLATING && chambers::cachedKpa[n] >= ch.max_kpa) {
-            chambers::stop(n);
-        }
+        if (ch.state == chambers::INFLATING && chambers::cachedKpa[n] >= ch.max_kpa)
+            chambers::holdChamber(n);
         break;
     }
     case CMD_SET_MIN: {
         ch.min_kpa = constrain(c.param_kpa, config::HARD_CHAMBER_MIN_KPA, ch.max_kpa - 0.1f);
-        if (ch.state == chambers::DEFLATING && chambers::cachedKpa[n] <= ch.min_kpa) {
-            chambers::stop(n);
-        }
+        if (ch.state == chambers::DEFLATING && chambers::cachedKpa[n] <= ch.min_kpa)
+            chambers::holdChamber(n);
         break;
     }
     case CMD_HOLD:
-        chambers::stop(n);
+        chambers::holdChamber(n);
         break;
     case CMD_VALVE_MANUAL: {
         // chamber = chamber, param = side (0=inflate, 1=deflate), cfg_chambers = open (0/1)
-        // Enter manual override (suspends autonomous control); auto-cleared by dead-man.
+        // Enter manual override: drop the engine sequences + close everything first
+        // so the manual action starts from a clean slate; auto-cleared by dead-man.
+        if (!manualActive) { chambers::abortSequences(); chambers::closeAll(); }
         manualActive = true;
         manualTs     = millis();
         applyManualValve(n, c.param, c.cfg_chambers != 0);
@@ -444,6 +496,7 @@ void applyChamberCmd(int n, const cmd_queue::Cmd& c) {
     }
     case CMD_PUMP_MANUAL: {
         // param = pump role (0=pressure, 1=vacuum), cfg_chambers = on (0/1)
+        if (!manualActive) { chambers::abortSequences(); chambers::closeAll(); }
         manualActive = true;
         manualTs     = millis();
         applyManualPump(c.param, c.cfg_chambers != 0);
@@ -510,6 +563,16 @@ void processCommand(const cmd_queue::Cmd& c) {
         return;
     }
 
+#ifdef DEBUG_BUILD
+    if (c.type == CMD_INFLATE || c.type == CMD_DEFLATE
+        || c.type == CMD_SET_PRESSURE || c.type == CMD_HOLD) {
+        const char* name = c.type == CMD_INFLATE      ? "inflate"
+                         : c.type == CMD_DEFLATE      ? "deflate"
+                         : c.type == CMD_SET_PRESSURE ? "set_pressure" : "hold";
+        sendRxOpen(name, c.chamber);
+    }
+#endif
+
     // chamber == -1 fans an actuation out to EVERY chamber, so the PC's
     // Inflate/Deflate-All travels as ONE ESP-NOW frame instead of one per
     // chamber. With no command-level retry a single dropped per-chamber frame
@@ -534,53 +597,6 @@ void manualPressureSafety() {
         float k = chambers::cachedKpa[i];
         if (manualValveOpen[i][0] && k >= config::HARD_CHAMBER_MAX_KPA) applyManualValve(i, 0, false);
         if (manualValveOpen[i][1] && k <= config::HARD_CHAMBER_MIN_KPA) applyManualValve(i, 1, false);
-    }
-}
-
-// Drive the shared pumps directly from the live chamber states (no tanks): the
-// pressure-role pumps run while ANY chamber is inflating, the vacuum-role pumps
-// while ANY chamber is deflating — each at the HIGHEST duty its chambers ask for.
-// Co-active chambers share a pump manifold, so the fastest one wins; a gentler
-// (lower-duty) fill only happens while that chamber actuates alone. Mirrors
-// node_direct's recalcPumps(), role-based for the 3 pressure + 3 vacuum pumps.
-// setRoleDuty change-detects, so calling this every loop is cheap.
-void recalcPumps() {
-    uint8_t pressureDuty = 0;
-    uint8_t vacuumDuty   = 0;
-    for (int i = 0; i < config::state.num_chambers; i++) {
-        const auto& ch = chambers::state[i];
-        if (ch.state == chambers::INFLATING)      pressureDuty = max(pressureDuty, ch.duty);
-        else if (ch.state == chambers::DEFLATING) vacuumDuty   = max(vacuumDuty, ch.duty);
-    }
-    pumps::setRoleDuty(pumps::ROLE_PRESSURE, pressureDuty);
-    pumps::setRoleDuty(pumps::ROLE_VACUUM, vacuumDuty);
-}
-
-void chamberControlStep(uint32_t now) {
-    for (int i = 0; i < config::state.num_chambers; i++) {
-        int mux_ch = config::state.chamber_mux_ch[i];
-        if (mux_ch < 0) continue;
-
-        chambers::cachedKpa[i] = mux::readKpa(mux_ch);
-
-        auto& ch = chambers::state[i];
-        if (ch.state == chambers::INFLATING) {
-            // A time-based fill (fill_until_ms set) deliberately ignores the
-            // per-chamber pressure target — that is the whole point of timing the
-            // fill when the gauge sensor is laggy or reads high. Only the absolute
-            // HARD_MAX backstops it; fillTimeTick() ends it on time. A closed-loop
-            // fill still stops at its sensor target as before.
-            float ceiling = (ch.fill_until_ms != 0)
-                            ? config::HARD_CHAMBER_MAX_KPA : ch.target_kpa;
-            if (chambers::cachedKpa[i] >= ceiling) {
-                chambers::stop(i);
-                ch.hold_kpa = chambers::cachedKpa[i];   // maintain the achieved level
-            }
-        }
-        if (ch.state == chambers::DEFLATING &&
-            (chambers::cachedKpa[i] <= ch.target_kpa || chambers::cachedKpa[i] <= ch.min_kpa)) {
-            chambers::stop(i);
-        }
     }
 }
 
@@ -638,6 +654,7 @@ void setup() {
     pumps::hardware_init();
     pumps::stopAll();
     leds::hardware_init();
+    chambers::enginesInit();
 
     if (!se::begin(onReceived)) {
         LOG("{\"error\":\"esp_now_init_failed\"}\n");
@@ -649,6 +666,10 @@ void setup() {
     // node off the air, and announce a WiFi OTA that just completed (see se_ota.h).
     se::ota::beforeWifiHook = &emergencyStopAll;
     se::ota::checkBootDone();
+
+#ifdef DEBUG_BUILD
+    installDebugHook();   // stream the engine round/measure trace over ESP-NOW
+#endif
 
     bool pca_ok = pca_valves::init();
     if (!pca_ok) {
@@ -663,7 +684,7 @@ void setup() {
     // Broadcast the ready message so the gateway can forward it to the PC
     // even before the node has received its first command (and therefore
     // doesn't yet know the gateway's MAC).
-    static const char ready_msg[] = "{\"status\":\"node_multiplexed_ready\"}";
+    static const char ready_msg[] = "{\"status\":\"node_multiplexed_ready\",\"fw\":\"coupled-fill-1\"}";
     se::broadcast(ready_msg);
 
     LOG("%s\n", ready_msg);
@@ -705,14 +726,6 @@ void loop() {
     // ---- Child-safety watchdog: stop runaway actuations (sensor failure) ----
     if (!manualActive) chambers::actuationWatchdog(now);
 
-    // ---- Time-based fill cutoff (calibrated fill_time; every loop, not gated
-    //      by the slow mux pressure cadence) ----
-    if (!manualActive) chambers::fillTimeTick(now);
-    if (!manualActive) chambers::deflateTimeTick(now);
-
-    // ---- Idle leak maintenance: top up a drooping held chamber (self-throttled) ----
-    if (!manualActive) chambers::maintainTick(now);
-
     if (manualActive && now - lastPressureMs >= PRESSURE_CHECK_MS) {
         lastPressureMs = now;
         // Autonomous control suspended. Refresh chamber pressures and enforce
@@ -724,22 +737,23 @@ void loop() {
         manualPressureSafety();
     }
 
-    // Closed-loop chamber cutoff on its own tight cadence (see CHAMBER_CHECK_MS):
-    // the slow telemetry cadence let a small inflate step overshoot badly.
+    // ---- Coupled-fill engines on their own (tight) cadence: open the group
+    //      together → fill to the lowest open target → close → settle → measure
+    //      each isolated → repeat. Reads the mux gauges itself (median-filtered)
+    //      and recalcs the count-scaled pumps when valves change. ----
     if (!manualActive && now - lastChamberMs >= CHAMBER_CHECK_MS) {
         lastChamberMs = now;
-        chamberControlStep(now);
+        chambers::controlTick(now);
+        chambers::recalcPumps();
     }
-
-    // Drive the role pumps straight from the current chamber states (no tanks).
-    // Cheap (change-detected) so it runs every loop, picking up command-driven
-    // actuations, time-based fill cutoffs and the closed-loop cutoff above.
-    if (!manualActive) recalcPumps();
 
     if (now - lastStatusMs >= STATUS_REPORT_MS) {
         lastStatusMs = now;
         for (int i = 0; i < config::state.num_chambers; i++) {
             sendStatus(i, chambers::cachedKpa[i]);
         }
+#ifdef DEBUG_BUILD
+        checkDryPumps();
+#endif
     }
 }

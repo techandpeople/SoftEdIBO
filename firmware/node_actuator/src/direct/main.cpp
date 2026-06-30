@@ -38,15 +38,11 @@
 #include "commands.h"
 #include "dbg.h"
 
-// How often the closed-loop pressure cutoff (loop() below) samples each gauge
-// and stops a chamber that has reached its target. This is the control loop, NOT
-// telemetry — keep it tight. The inflate pump runs at full duty the whole time a
-// chamber is INFLATING, so the achieved pressure overshoots the target by however
-// much the pump delivers between two checks: at the old 200 ms a single "+" step
-// (e.g. +10 % of range) blew past to ~30 % before the cutoff ever looked at the
-// sensor. At 20 ms that overshoot window is ~10x smaller, so the measured level
-// settles on the commanded target instead of sailing past it. A read is cheap
-// (3 dedicated ADC pins, 4 samples each ≈ 100 µs); telemetry stays at 500 ms.
+// How often the gauges are refreshed for telemetry and the command-time
+// "below/above target?" guards. The actual closed-loop cutoff lives in the
+// coupled-fill engine (chambers::controlTick), which does its own fresh
+// median-filtered reads while a round is filling/measuring — so this cadence only
+// keeps cachedKpa warm for idle telemetry and is cheap (3 dedicated ADC pins).
 constexpr uint32_t PRESSURE_CHECK_MS = 20;
 constexpr uint32_t STATUS_REPORT_MS  = 500;
 
@@ -92,13 +88,20 @@ void setup() {
     se::ota::beforeWifiHook = &chambers::emergencyStopAll;
     se::ota::checkBootDone();
 
+#ifdef DEBUG_BUILD
+    commands::installDebugHook();   // stream the engine round/measure trace over ESP-NOW
+#endif
+
     for (int i = 0; i < NUM_CHAMBERS; i++)
         chambers::cachedKpa[i] = pressure::readKpa(PSENSOR_PINS[i]);
 
     // Broadcast the ready message so the gateway can forward it to the PC
     // even before the node has received its first command (and therefore
     // doesn't yet know the gateway's MAC).
-    static const char ready_msg[] = "{\"status\":\"node_direct_ready\"}";
+    // The "fw" tag is a build marker: it lets us confirm from the PC log which
+    // firmware actually booted, so a flash that silently didn't take can't be
+    // mistaken for the new code. Bump it whenever the actuator logic changes.
+    static const char ready_msg[] = "{\"status\":\"node_direct_ready\",\"fw\":\"coupled-fill-1\"}";
     se::broadcast(ready_msg);
 
     LOG("%s\n", ready_msg);
@@ -163,44 +166,20 @@ void loop() {
         }
     }
 
-    // ---- Pressure read + safety stop ----
+    // ---- Refresh gauges for telemetry + command-time guards ----
+    // The actual closed-loop cutoff is the coupled-fill engine below (it does its
+    // own fresh median reads while filling/measuring); this just keeps cachedKpa
+    // warm for idle telemetry and the "below/above target?" command guards.
     if (now - lastPressureMs >= PRESSURE_CHECK_MS) {
         lastPressureMs = now;
-        for (int i = 0; i < NUM_CHAMBERS; i++) {
+        for (int i = 0; i < NUM_CHAMBERS; i++)
             chambers::cachedKpa[i] = pressure::readKpa(PSENSOR_PINS[i]);
-            float kpa = chambers::cachedKpa[i];
-            auto& ch  = chambers::state[i];
-            if (ch.state == chambers::INFLATING) {
-                // A time-based fill (fill_until_ms set) deliberately ignores the
-                // per-chamber pressure target — that is the whole point of timing
-                // the fill when the gauge sensor is laggy or reads high. Only the
-                // absolute HARD_MAX backstops it; fillTimeTick() ends it on time.
-                // A closed-loop fill still stops at its sensor target as before.
-                float ceiling = (ch.fill_until_ms != 0)
-                                ? chambers::HARD_MAX_KPA : ch.target_kpa;
-                if (kpa >= ceiling) {
-                    chambers::stop(i);
-                    ch.hold_kpa = chambers::cachedKpa[i];   // maintain the achieved level
-                    chambers::recalcPumps();
-                }
-            }
-            if (ch.state == chambers::DEFLATING && kpa <= ch.target_kpa) {
-                chambers::stop(i);
-                chambers::recalcPumps();
-            }
-        }
     }
 
-    // ---- Two-phase Inflate-All: advance coarse→finish, and the finish chamber
-    //      to chamber (see chambers.h inflateSeqTick) ----
-    chambers::inflateSeqTick(now);
-
-    // ---- Time-based fill cutoff (calibrated fill_time; checked every loop) ----
-    chambers::fillTimeTick(now);
-    chambers::deflateTimeTick(now);
-
-    // ---- Idle leak maintenance: top up a drooping held chamber (self-throttled) ----
-    chambers::maintainTick(now);
+    // ---- Coupled-fill engines: open the group together → fill to the lowest open
+    //      target → close → settle → measure each isolated → repeat. Drives single
+    //      and multi-chamber inflate/deflate uniformly (the manifold is shared). ----
+    chambers::controlTick(now);
 
     // ---- Manual (dev) actuation safety: dead-man auto-off + HARD_MAX cutoff ----
     chambers::manualSafetyTick(now);
@@ -214,11 +193,45 @@ void loop() {
     // ---- Magnet/touch sensing (streams ~28 Hz; no-op if no sensors) ----
     magnet::tick(now);
 
+    // ---- High-resolution actuation trace -------------------------------------
+    // Emit a status/pump frame the INSTANT a chamber's actuation state or a pump
+    // duty changes, on top of the 500 ms heartbeat. The heartbeat is far too
+    // coarse to see an Inflate-All: each chamber can open AND cut between two
+    // heartbeats, so the PC only ever samples st:0 / pump:0 and the fill looks
+    // like it never ran. On-change frames are sparse (only at transitions), so
+    // they add little traffic but expose the real valve/pump timeline.
+    {
+        // Signature per chamber = actuation state + BOTH valve outputs, so a frame
+        // is emitted the instant ANY of them changes — including a valve that opens
+        // and closes without the chamber state settling differently, and a manual
+        // valve toggle. This is what makes vi/vd precise enough to see a brief pulse.
+        static uint8_t  prevSig[NUM_CHAMBERS] = {0xFF, 0xFF, 0xFF};
+        static uint32_t prevInf = 0xFFFFFFFF, prevDef = 0xFFFFFFFF;
+        for (int i = 0; i < NUM_CHAMBERS; i++) {
+            uint8_t sig = (uint8_t)(chambers::state[i].state << 2)
+                        | (chambers::valveOpen[i * 2 + 0] ? 2 : 0)
+                        | (chambers::valveOpen[i * 2 + 1] ? 1 : 0);
+            if (sig != prevSig[i]) {
+                prevSig[i] = sig;
+                commands::sendStatus(i, chambers::cachedKpa[i]);
+            }
+        }
+        uint32_t inf = ledcRead(chambers::PUMP1_LEDC_CH);
+        uint32_t def = ledcRead(chambers::PUMP2_LEDC_CH);
+        if (inf != prevInf || def != prevDef) {
+            prevInf = inf; prevDef = def;
+            commands::sendPumps();
+        }
+    }
+
     // ---- Status broadcast ----
     if (now - lastStatusMs >= STATUS_REPORT_MS) {
         lastStatusMs = now;
         for (int i = 0; i < NUM_CHAMBERS; i++)
             commands::sendStatus(i, chambers::cachedKpa[i]);
         commands::sendPumps();   // live pump state (debug: stop-latency hunt)
+#ifdef DEBUG_BUILD
+        commands::checkDryPumps();   // warn if a pump spins with no open valve
+#endif
     }
 }

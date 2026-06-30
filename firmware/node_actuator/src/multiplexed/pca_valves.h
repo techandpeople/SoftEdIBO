@@ -32,6 +32,18 @@ inline uint8_t pca1_addr = 0;
 inline uint8_t pca2_addr = 0;
 inline bool    initialized = false;
 
+// Software mirror of the actual valve outputs, kept in sync by every write path
+// (setChamberValve / closeAllValves). There is no readback from the PCA9685, so
+// this is the single source of truth for "is this valve open" — reported in the
+// status broadcast so the PC reflects the real valve state. Index: chamber*2 +
+// side, side 0 = inflate, 1 = deflate.
+inline bool valveOpen[MAX_CHAMBERS * 2] = {};
+
+inline bool isOpen(int chamber, int side) {
+    if (chamber < 0 || chamber >= MAX_CHAMBERS || side < 0 || side > 1) return false;
+    return valveOpen[chamber * 2 + side];
+}
+
 // I2C scan: returns count of devices found in [SCAN_RANGE_LO, SCAN_RANGE_HI]
 // and writes their addresses (sorted ascending) into `out`.
 inline int scanI2C(uint8_t out[], int max_out) {
@@ -94,6 +106,10 @@ inline void setChamberValve(int chamber, bool inflate_open, bool deflate_open) {
     DBG_PRINT("VALVE ch=%d inflate=%s deflate=%s\n",
               chamber, inflate_open ? "OPEN" : "close",
               deflate_open ? "OPEN" : "close");
+    if (chamber >= 0 && chamber < MAX_CHAMBERS) {
+        valveOpen[chamber * 2 + 0] = inflate_open;
+        valveOpen[chamber * 2 + 1] = deflate_open;
+    }
     if (chamber < 8) {
         setBinary(pca1, chamber * 2,     inflate_open);
         setBinary(pca1, chamber * 2 + 1, deflate_open);
@@ -113,6 +129,7 @@ inline void closeAllValves() {
         setBinary(pca1, ch, false);
         setBinary(pca2, ch, false);
     }
+    for (int i = 0; i < MAX_CHAMBERS * 2; i++) valveOpen[i] = false;
 }
 
 }  // namespace pca_valves
