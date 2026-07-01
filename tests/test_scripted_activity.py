@@ -508,7 +508,9 @@ def test_available_activities_includes_db_behaviour(db):
 
     names = [a.name for a in available_activities(db)]
     assert "My Saved Behaviour" in names
-    assert "Group Touch" in names                # static ones still present
+    # No code-defined activities ship anymore — only the DB behaviour is offered.
+    assert names == ["My Saved Behaviour"]
+    assert available_activities() == []        # nothing without a database
 
     resolved = get_activity("My Saved Behaviour", db)
     assert resolved is not None

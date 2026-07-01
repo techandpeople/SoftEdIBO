@@ -75,9 +75,10 @@ class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
 
         self.run_btn.clicked.connect(self._run)
         self.stop_btn.clicked.connect(self._stop)
-        self.save_btn.clicked.connect(self._save)
+        self.apply_btn.clicked.connect(self._on_apply)
+        self.save_btn.clicked.connect(self._on_save)
         self.suppress_check.toggled.connect(self.suppress_spin.setEnabled)
-        self.save_btn.setEnabled(False)
+        self._set_save_enabled(False)
 
         self._tick = QTimer(self)
         self._tick.setInterval(_TICK_MS)
@@ -102,7 +103,7 @@ class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
         self._samples.clear()
         self._pressures.clear()
         self._result = None
-        self.save_btn.setEnabled(False)
+        self._set_save_enabled(False)
         self.preview.clear()
         self._job = {
             "skin": skin, "queue": list(skin["slots"]),
@@ -166,7 +167,12 @@ class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
             f"Done — {len(self._samples)} samples over {len(job['done'])} "
             "chamber(s). Review, then Save.")
         self._set_running(False)
-        self.save_btn.setEnabled(True)
+        self._set_save_enabled(True)
+
+    def _set_save_enabled(self, on: bool) -> None:
+        """Apply and Save commit the same result, so they enable together."""
+        self.apply_btn.setEnabled(on)
+        self.save_btn.setEnabled(on)
 
     @staticmethod
     def _format_matrix(matrix: Any, skin: dict) -> str:
@@ -203,11 +209,14 @@ class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
     # Save
     # ------------------------------------------------------------------
 
-    def _save(self) -> None:
+    def _commit(self) -> bool:
+        """Persist the measured matrix + settings without closing. Returns True
+        on success. Shared by Save (which then closes) and Apply (which stays
+        open so the user can re-tune the threshold or re-run the sweep)."""
         skin = self._current_skin()
         if self._result is None or skin is None:
             QMessageBox.information(self, "Save", "Run a sweep first.")
-            return
+            return False
         set_touch_coupling(self._settings.data, skin["robot_id"],
                            skin["skin_id"], self._result)
         suppress = (float(self.suppress_spin.value())
@@ -219,9 +228,16 @@ class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
             suppress_pct=suppress)
         self._settings.save()
         self.saved.emit()
-        QMessageBox.information(
-            self, "Save",
+        self.status_label.setText(
             f"Saved touch coupling for {skin['robot_id']}/{skin['skin_id']}.")
+        return True
+
+    def _on_apply(self) -> None:
+        self._commit()
+
+    def _on_save(self) -> None:
+        if self._commit():
+            self.accept()
 
     # ------------------------------------------------------------------
     # Gateway plumbing (read thread → Signal → GUI thread)

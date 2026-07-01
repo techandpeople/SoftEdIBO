@@ -159,8 +159,7 @@ class OrganPanel(QGroupBox):
         setter(total, slot)
 
     def _organ_controller_and_slot(self) -> tuple[Any, int]:
-        """Controller + slot carrying this skin's organ circuit (mirrors
-        OrganSwapActivity._organ_controller)."""
+        """Controller + slot carrying this skin's organ circuit."""
         skin = self._skin
         ctrl = getattr(skin, "_ctrl", None)
         cfg = getattr(skin, "organ", None) or {}

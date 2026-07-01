@@ -3,6 +3,7 @@
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QCheckBox,
+    QDialogButtonBox,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -66,6 +67,13 @@ class RobotConfigDialog(BaseDialog, Ui_RobotConfigDialog):
 
         self.button_box.accepted.connect(self._on_save)
         self.button_box.rejected.connect(self.reject)
+        apply_btn = self.button_box.button(
+            QDialogButtonBox.StandardButton.Apply)
+        apply_btn.setWhatsThis(
+            "Write the edited configuration to settings.yaml without closing "
+            "this window, so you can keep editing. Same as Save but leaves the "
+            "dialog open.")
+        apply_btn.clicked.connect(lambda: self._commit())
 
     # ------------------------------------------------------------------
     # Sequential actuator test
@@ -268,6 +276,7 @@ class RobotConfigDialog(BaseDialog, Ui_RobotConfigDialog):
         host = thymio_cfg.get("host", "localhost") if thymio_cfg else "localhost"
         port = int(thymio_cfg.get("port", 8596)) if thymio_cfg else 8596
         mac = thymio_cfg.get("node_mac", "") if thymio_cfg else ""
+        wireless = bool(thymio_cfg.get("wireless", False)) if thymio_cfg else False
         skins_cfg = thymio_cfg.get("skins", []) if thymio_cfg else []
 
         box = QGroupBox(f"Thymio: {thymio_id}")
@@ -282,11 +291,21 @@ class RobotConfigDialog(BaseDialog, Ui_RobotConfigDialog):
         port_spin.setRange(1, 65535)
         port_spin.setValue(port)
         mac_edit = QLineEdit(mac)
+        wireless_check = QCheckBox("Drive wheels wirelessly (RF dongle)")
+        wireless_check.setChecked(wireless)
+        wireless_check.setWhatsThis(
+            "Drive the Thymio's wheels and top LED from the app over a wireless RF "
+            "dongle. Requires Thymio Suite (its Thymio Device Manager) running with the "
+            "dongle plugged in and this robot paired to it. Host/Port below point to that "
+            "manager — leave Host as 'localhost' for a dongle in this PC. When off, the "
+            "Thymio's air-chamber skins still work; only the wheels/LEDs stay idle."
+        )
 
         form.addRow("Thymio ID:", id_edit)
         form.addRow("Host:", host_edit)
         form.addRow("Port:", port_spin)
         form.addRow("Node MAC:", mac_edit)
+        form.addRow(wireless_check)
 
         # Test button only for the robot currently open
         is_current = thymio_cfg and thymio_cfg.get("thymio_id") == self._robot.robot_id
@@ -305,6 +324,7 @@ class RobotConfigDialog(BaseDialog, Ui_RobotConfigDialog):
             "host_edit": host_edit,
             "port_spin": port_spin,
             "mac_edit": mac_edit,
+            "wireless_check": wireless_check,
             "group": box,
             "skins_cfg": skins_cfg,
             "deleted": False,
@@ -333,6 +353,7 @@ class RobotConfigDialog(BaseDialog, Ui_RobotConfigDialog):
                     "host": host,
                     "port": port,
                     "node_mac": mac,
+                    "wireless": te["wireless_check"].isChecked(),
                     "skins": te["skins_cfg"],
                 })
         return thymios
@@ -341,8 +362,9 @@ class RobotConfigDialog(BaseDialog, Ui_RobotConfigDialog):
     # Save
     # ------------------------------------------------------------------
 
-    def _on_save(self) -> None:
-        """Write edited configuration back to settings.yaml and close."""
+    def _commit(self) -> None:
+        """Write edited configuration back to settings.yaml, without closing.
+        Shared by Save (which then closes) and Apply (which stays open)."""
         data = self._settings.data
         robots_data = data.setdefault("robots", {})
 
@@ -354,4 +376,8 @@ class RobotConfigDialog(BaseDialog, Ui_RobotConfigDialog):
             robots_data["thymios"] = self._collect_thymios()
 
         self._settings.save()
+
+    def _on_save(self) -> None:
+        """Write edited configuration back to settings.yaml and close."""
+        self._commit()
         self.accept()

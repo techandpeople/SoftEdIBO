@@ -92,6 +92,26 @@ RING_FIELD = VerbField(
                 "direct board has one ring and ignores higher indices.",
 )
 
+# Cross-fade time, shared by the LED verbs. Every LED change cross-fades; this sets
+# how long. 0 snaps instantly; the firmware default (~250 ms) is the friendly value.
+FADE_FIELD = VerbField(
+    name="fade_ms", type="ms", default=250,
+    description="Smooth-transition time (ms) for this change. Every colour/pattern "
+                "change cross-fades; 0 snaps instantly.",
+)
+
+# LED patterns shared by the LED verbs. "comet" sweeps a bright head with a fading
+# tail around the ring (one comet per colour, so a two-colour split gives two comets).
+LED_PATTERNS = ("solid", "pulse", "blink", "comet", "off")
+
+# Angular rotation of the split/comet around the ring (degrees). Lets a "halves"
+# split sit top/bottom instead of left/right, or start a comet elsewhere.
+ANGLE_FIELD = VerbField(
+    name="angle", type="int", default=0,
+    description="Rotate the split/comet around the ring (0-360°). 0 = default "
+                "orientation; e.g. 90 turns left/right halves into top/bottom.",
+)
+
 BEAT_MODES = ("sync", "sequential", "random", "aligned")
 
 
@@ -101,21 +121,29 @@ BEAT_MODES = ("sync", "sequential", "random", "aligned")
 
 ACTIONS: tuple[Verb, ...] = (
     Verb("set_led", "action",
-         "Light one LED ring (or all rings) one colour. Pick a 'ring' to "
-         "animate the multiplexed board's four rings independently.", (
+         "Light one LED ring (or all rings) one colour. 'comet' sweeps a single "
+         "rotating light. Pick a 'ring' to animate the multiplexed board's four "
+         "rings independently.", (
         VerbField("color", "color", "#8e44ad"),
-        VerbField("pattern", "enum", "solid",
-                  choices=("solid", "pulse", "blink", "off")),
-        VerbField("period_ms", "ms", 0, description="Animation period."),
+        VerbField("pattern", "enum", "solid", choices=LED_PATTERNS),
+        VerbField("period_ms", "ms", 0,
+                  description="Animation period (pulse/blink cycle or comet "
+                              "revolution)."),
+        FADE_FIELD,
+        ANGLE_FIELD,
         RING_FIELD,
     )),
     Verb("set_led_halves", "action",
          "Split a ring into equal arcs, one colour each (e.g. half purple, "
-         "half yellow). Pick a 'ring' to target one of the four rings.", (
+         "half yellow). 'comet' instead sweeps one rotating comet per colour. "
+         "Pick a 'ring' to target one of the four rings.", (
         VerbField("colors", "colors", ["#8e44ad", "#f1c40f"]),
-        VerbField("pattern", "enum", "solid",
-                  choices=("solid", "pulse", "blink", "off")),
-        VerbField("period_ms", "ms", 0, description="Animation period."),
+        VerbField("pattern", "enum", "solid", choices=LED_PATTERNS),
+        VerbField("period_ms", "ms", 0,
+                  description="Animation period (pulse/blink cycle or comet "
+                              "revolution)."),
+        FADE_FIELD,
+        ANGLE_FIELD,
         RING_FIELD,
     )),
     Verb("fade", "action",

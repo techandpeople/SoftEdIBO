@@ -133,9 +133,16 @@
       </spacer>
      </item>
      <item>
+      <widget class="QPushButton" name="apply_btn">
+       <property name="text"><string>Apply</string></property>
+       <property name="whatsThis"><string>Store the measured coupling matrix (and the chosen settings) onto the skin without closing this window, so you can adjust the threshold or re-run the sweep. Same as Save but leaves the dialog open.</string></property>
+      </widget>
+     </item>
+     <item>
       <widget class="QPushButton" name="save_btn">
        <property name="text"><string>Save</string></property>
-       <property name="whatsThis"><string>Store the measured coupling matrix (and the chosen settings) onto the skin.</string></property>
+       <property name="default"><bool>true</bool></property>
+       <property name="whatsThis"><string>Store the measured coupling matrix (and the chosen settings) onto the skin and close this window.</string></property>
       </widget>
      </item>
     </layout>

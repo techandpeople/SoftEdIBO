@@ -101,7 +101,7 @@ void setup() {
     // The "fw" tag is a build marker: it lets us confirm from the PC log which
     // firmware actually booted, so a flash that silently didn't take can't be
     // mistaken for the new code. Bump it whenever the actuator logic changes.
-    static const char ready_msg[] = "{\"status\":\"node_direct_ready\",\"fw\":\"coupled-fill-1\"}";
+    static const char ready_msg[] = "{\"status\":\"node_direct_ready\",\"fw\":\"coupled-fill-2\",\"rgbw\":" LED_RGBW_JSON "}";
     se::broadcast(ready_msg);
 
     LOG("%s\n", ready_msg);
@@ -150,7 +150,10 @@ void loop() {
         // the PC link. The dialog re-sends `test_run` ~1 Hz as a keepalive; if none
         // arrives in time (dialog gone, USB/ESP-NOW link dropped) end the run and
         // fall through to normal (now-idle) control rather than inflate forever.
-        if (now - chambers::testHeartbeatMs >= chambers::TEST_RUN_TIMEOUT_MS) {
+        // SIGNED diff: testHeartbeatMs is set (millis()) in the command drain, after
+        // loop() cached `now`, so it can be a hair ahead — unsigned would underflow
+        // and kill the run the instant it started.
+        if ((int32_t)(now - chambers::testHeartbeatMs) >= (int32_t)chambers::TEST_RUN_TIMEOUT_MS) {
             DBG_PRINT("TEST_RUN dead-man fired (no keepalive) — stopping\n");
             chambers::testStop();
         } else {

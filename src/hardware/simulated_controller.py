@@ -186,26 +186,37 @@ class SimulatedController(QObject):
         for cb in self._organ_callbacks:
             cb(value, slot)
 
+    def set_led_angles(self, angles: dict[int, float] | None) -> None:
+        """No-op shim mirroring :meth:`ESP32Controller.set_led_angles` (the robot
+        builder pushes the skin's LED mounting angles to every controller)."""
+        self._led_angles = {int(k): float(v) for k, v in (angles or {}).items()}
+
     def set_led(self, color: str, pattern: str = "solid",
                 period_ms: int = 0, count: int | None = None,
-                index: int | None = None, ring: int | None = None) -> bool:
+                index: int | None = None, ring: int | None = None,
+                fade_ms: int | None = None, angle: float | None = None) -> bool:
         """No-op shim — simulation has no LED strip but activities call this on
         enter/exit so we accept and log to keep the code paths symmetric with
-        real hardware. ``index``/``ring`` mirror the real controller's signature."""
-        logger.debug("SIM set_led(%s, pattern=%s, period=%dms, count=%s, index=%s, ring=%s)",
-                     color, pattern, period_ms, count, index, ring)
+        real hardware. ``index``/``ring``/``fade_ms``/``angle`` mirror the real
+        controller's signature."""
+        logger.debug("SIM set_led(%s, pattern=%s, period=%dms, count=%s, index=%s, "
+                     "ring=%s, fade=%s, angle=%s)",
+                     color, pattern, period_ms, count, index, ring, fade_ms, angle)
         return True
 
     def set_led_halves(self, colors: list[str],
                        pattern: str = "solid", period_ms: int = 0,
-                       ring: int | None = None) -> bool:
+                       ring: int | None = None,
+                       fade_ms: int | None = None,
+                       angle: float | None = None) -> bool:
         """No-op shim mirroring :meth:`ESP32Controller.set_led_halves` so the
         behaviour engine drives simulation and hardware through one code path.
-        Stores the last colours so a monitor view could reflect them. ``ring``
-        mirrors the real controller's signature (one of four rings, or all)."""
+        Stores the last colours so a monitor view could reflect them. ``ring`` /
+        ``fade_ms`` / ``angle`` mirror the real controller's signature."""
         self._led_halves = list(colors)
-        logger.debug("SIM set_led_halves(%s, pattern=%s, period=%dms, ring=%s)",
-                     colors, pattern, period_ms, ring)
+        logger.debug("SIM set_led_halves(%s, pattern=%s, period=%dms, ring=%s, "
+                     "fade=%s, angle=%s)",
+                     colors, pattern, period_ms, ring, fade_ms, angle)
         return True
 
     def stop_all(self) -> None:

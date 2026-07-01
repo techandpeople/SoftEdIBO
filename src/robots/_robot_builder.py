@@ -128,6 +128,13 @@ def _build_one_skin(skin_cfg: dict[str, Any],
          "fill_mode": ch.get("fill_mode")}
         for ch in chambers
     ]
+    # Per-ring LED mounting angle (from the skin config) → the node's controller,
+    # so every activity's LED look is rotated to match a physically-turned ring
+    # without the behaviour having to know about it.
+    led_angles = skin_cfg.get("led_angles")
+    if led_angles and hasattr(ctrl, "set_led_angles"):
+        ctrl.set_led_angles(led_angles)
+
     touch_ctrl = (touch_controllers or {}).get(skin_id)
     if touch_ctrl is None:
         touch_ctrl = _resolve_touch_ctrl(skin_cfg, controllers)

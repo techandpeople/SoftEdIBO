@@ -44,7 +44,7 @@ _TRANSPORT_ESPNOW, _TRANSPORT_WIFI = range(2)
 _DIALOG_TITLE = "Update Nodes"
 
 # Columns
-_COL_SEL, _COL_MAC, _COL_TYPE, _COL_ONLINE, _COL_PROGRESS, _COL_STATUS = range(6)
+_COL_SEL, _COL_MAC, _COL_TYPE, _COL_LED, _COL_ONLINE, _COL_PROGRESS, _COL_STATUS = range(7)
 
 
 class _OTAWorker(QThread):
@@ -164,6 +164,7 @@ class OTAUpdateDialog(BaseDialog, Ui_OTAUpdateDialog):
             self.table.setItem(row, _COL_SEL, sel)
             self.table.setItem(row, _COL_MAC, QTableWidgetItem(mac))
             self.table.setItem(row, _COL_TYPE, QTableWidgetItem(ntype))
+            self.table.setItem(row, _COL_LED, QTableWidgetItem("?"))
             self.table.setItem(row, _COL_ONLINE, QTableWidgetItem("?"))
 
             bar = QProgressBar()
@@ -180,6 +181,22 @@ class OTAUpdateDialog(BaseDialog, Ui_OTAUpdateDialog):
             item = self.table.item(row, _COL_ONLINE)
             if item is not None:
                 item.setText("online" if mac in known else "offline")
+            led = self.table.item(row, _COL_LED)
+            if led is not None:
+                ntype = self.table.item(row, _COL_TYPE).text()
+                led.setText(self._led_text(mac, ntype))
+
+    def _led_text(self, mac: str, ntype: str) -> str:
+        """LED-ring variant to show for a node: 'rgb'/'rgbw' if reported, '?' if
+        not yet known (offline / pre-reporting firmware), '—' for node types
+        with no distinct RGBW build."""
+        if (firmware_for_node_type(ntype, rgbw=True)
+                == firmware_for_node_type(ntype, rgbw=False)):
+            return "—"
+        rgbw = self._gateway.node_rgbw(mac) if self._gateway.is_connected else None
+        if rgbw is None:
+            return "?"
+        return "rgbw" if rgbw else "rgb"
 
     def _update_banner(self) -> None:
         if not self._gateway.is_connected:
@@ -218,14 +235,20 @@ class OTAUpdateDialog(BaseDialog, Ui_OTAUpdateDialog):
 
     def _selected_jobs(self) -> list[tuple[str, Path]]:
         debug = self.debug_check.isChecked()
-        # RGBW applies only to node types with an RGBW build (node_direct);
-        # firmware_for_node_type falls back to the plain bin for the others.
-        rgbw = self.rgbw_check.isChecked()
+        # RGBW applies only to node types with an RGBW build (node_direct/
+        # multiplexed); firmware_for_node_type falls back to the plain bin for
+        # the others. Each node self-reports its variant in its ready/pong frame,
+        # so we flash the matching bin automatically. The checkbox is only a
+        # fallback for nodes that haven't reported it (offline, or firmware from
+        # before the field existed) — e.g. the first OTA that installs it.
+        fallback_rgbw = self.rgbw_check.isChecked()
         jobs: list[tuple[str, Path]] = []
         for mac, row in self._row_by_mac.items():
             if self.table.item(row, _COL_SEL).checkState() != Qt.CheckState.Checked:
                 continue
             ntype = self.table.item(row, _COL_TYPE).text()
+            reported = self._gateway.node_rgbw(mac)
+            rgbw = fallback_rgbw if reported is None else reported
             fw = firmware_for_node_type(ntype, debug, rgbw)
             if fw is None or not fw.exists():
                 self.table.item(row, _COL_STATUS).setText(

@@ -303,12 +303,16 @@ inline void setManualValve(int ch, int side, bool open) {
 }
 
 inline void manualSafetyTick(uint32_t now) {
-    // 1. Dead-man auto-off.
+    // 1. Dead-man auto-off. SIGNED diff: manualPumpTs/manualValveTs are set with
+    //    millis() inside the command drain, which runs AFTER loop() cached `now`,
+    //    so the timestamp is a hair AHEAD of `now`. An unsigned `now - ts` would
+    //    underflow on that first tick (~4e9 >= 5000) and slam the just-opened
+    //    valve/pump shut — the "manual valve sometimes closes itself" bug.
     for (int i = 0; i < 2; i++)
-        if (manualPumpOn[i] && now - manualPumpTs[i] >= MANUAL_MAX_ON_MS)
+        if (manualPumpOn[i] && (int32_t)(now - manualPumpTs[i]) >= (int32_t)MANUAL_MAX_ON_MS)
             setManualPump(i, false);
     for (int i = 0; i < NUM_CHAMBERS * 2; i++)
-        if (manualValveOn[i] && now - manualValveTs[i] >= MANUAL_MAX_ON_MS)
+        if (manualValveOn[i] && (int32_t)(now - manualValveTs[i]) >= (int32_t)MANUAL_MAX_ON_MS)
             setManualValve(i / 2, i % 2, false);
 
     // 2. HARD limit cutoff, both directions:

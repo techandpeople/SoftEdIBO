@@ -4,6 +4,7 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDialogButtonBox,
     QFileDialog,
     QFormLayout,
     QGroupBox,
@@ -40,6 +41,13 @@ class SettingsDialog(BaseDialog, Ui_SettingsDialog):
         self.browse_btn.clicked.connect(self._browse_db)
         self.button_box.accepted.connect(self._on_save)
         self.button_box.rejected.connect(self.reject)
+        apply_btn = self.button_box.button(
+            QDialogButtonBox.StandardButton.Apply)
+        apply_btn.setWhatsThis(
+            "Write these settings to settings.yaml without closing this window, "
+            "so you can keep editing. Same as Save but leaves the dialog open. "
+            "Database changes still take effect on next launch.")
+        apply_btn.clicked.connect(lambda: self._commit())
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -139,7 +147,9 @@ class SettingsDialog(BaseDialog, Ui_SettingsDialog):
         if path:
             self.db_path_edit.setText(path)
 
-    def _on_save(self) -> None:
+    def _commit(self) -> None:
+        """Write settings to disk without closing. Shared by Save (which then
+        closes) and Apply (which stays open)."""
         d = self._settings.data
 
         d.setdefault("gateway", {})
@@ -164,4 +174,7 @@ class SettingsDialog(BaseDialog, Ui_SettingsDialog):
 
         self._settings.save()
         self.settings_saved.emit()
+
+    def _on_save(self) -> None:
+        self._commit()
         self.accept()

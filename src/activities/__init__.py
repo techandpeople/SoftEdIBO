@@ -1,19 +1,18 @@
 """Activity registry — single source of truth for all available activities.
 
-Two kinds of activity are offered to the operator:
+All activities are **declarative** behaviours authored in the block editor and
+stored in the database (``declarative_activities`` table). They are loaded on
+demand via :func:`available_activities` / :func:`get_activity` when a
+``Database`` is supplied, so the editor's behaviours appear in the session
+dropdown without any of the editor (Blockly / QtWebEngine) being imported at
+session time.
 
-- **Code-defined** activities (``ACTIVITIES``): Group Touch, Organ Swap, and
-  the three seed behaviour conditions. These ship with the app.
-- **Declarative** activities authored in the block editor and stored in the
-  database (``declarative_activities`` table). Loaded on demand via
-  :func:`available_activities` / :func:`get_activity` when a ``Database`` is
-  supplied, so the editor's behaviours appear in the session dropdown without
-  any of the editor (Blockly / QtWebEngine) being imported at session time.
-
-Note: ``SimulationActivity`` is intentionally NOT registered. Simulation is
-now a per-activity flag (``simulation_mode``) exposed as a checkbox in the
-SessionSetupDialog — any activity can run in simulation, so a separate
-"Simulation" dropdown entry would be redundant.
+There are no longer any code-defined activities (``ACTIVITIES`` is empty): the
+old hardcoded game activities (Group Touch / Organ Swap), the standalone
+``SimulationActivity``, and the seed behaviour conditions have all been
+removed — example behaviours ship as importable JSON instead. Every behaviour
+runs on the ``ScriptedActivity`` engine; simulation is a per-activity flag
+(``simulation_mode``) exposed as a checkbox in the SessionSetupDialog.
 """
 
 from __future__ import annotations
@@ -22,24 +21,16 @@ import logging
 from typing import TYPE_CHECKING
 
 from src.activities.base_activity import BaseActivity
-from src.activities.group_touch import GroupTouchActivity
-from src.activities.organ_swap import OrganSwapActivity
 from src.activities.scripted_activity import ScriptedActivity
-from src.activities.seed_behaviors import SEED_CONDITIONS
 
 if TYPE_CHECKING:
     from src.data.database import Database
 
 logger = logging.getLogger(__name__)
 
-ACTIVITIES: list[BaseActivity] = [
-    GroupTouchActivity(),
-    OrganSwapActivity(),
-    # Declarative behaviour engine — the study's 3 conditions as scripted
-    # specs. These are editable later via the block editor (Fase 2); for now
-    # they ship as code-defined seeds so the study can run.
-    *(ScriptedActivity(name, desc, spec) for name, desc, spec in SEED_CONDITIONS),
-]
+# No code-defined activities ship with the app; all behaviours come from the
+# block editor (DB) or imported JSON examples.
+ACTIVITIES: list[BaseActivity] = []
 
 
 def load_declarative_activities(db: "Database") -> list[ScriptedActivity]:

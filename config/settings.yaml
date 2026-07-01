@@ -56,6 +56,22 @@ robots:
 #             # route touches into chamber actions. Edited from the same
 #             # Skin dialog ("Sensor → Chamber mapping" table).
 #             sensor_to_chamber: {"0": 0, "1": 0, "2": 1}
+# Example Thymio entry (wheeled robot; may also carry air-chamber skins on top).
+# Easiest to set from Robot Config → Thymio (the "Drive wheels wirelessly" box);
+# this is just what it writes:
+# robots:
+#   thymios:
+#     - thymio_id: thymio_1
+#       # Drive the Thymio's wheels + top LED from the app. Needs Thymio Suite
+#       # (its Thymio Device Manager) running with the RF dongle plugged in and
+#       # this robot paired to it. Leave false to keep the wheels/LEDs idle
+#       # (air-chamber skins still work either way).
+#       wireless: true
+#       host: localhost   # Thymio Device Manager host — localhost for a dongle in this PC
+#       port: 8596        # Thymio Device Manager port (default)
+#       # Optional air-chamber skin(s) on top, same shape as turtle_trees above:
+#       # node_mac: "AA:BB:CC:DD:EE:10"
+#       # skins: [...]
 database:
   backend: sqlite
   path: data/softedibo.db

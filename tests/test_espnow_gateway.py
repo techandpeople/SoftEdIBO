@@ -47,6 +47,27 @@ def test_gateway_lines_are_recognized():
         assert gateway._is_gateway_line(line), line
 
 
+# --- LED-ring variant self-reported by nodes (drives the OTA firmware picker) -
+
+def test_node_rgbw_captured_from_reported_frames():
+    gateway = ESPNowGateway("/dev/ttyUSB0")
+    # Unknown until the node reports it.
+    assert gateway.node_rgbw("AA:BB:CC:DD:EE:01") is None
+
+    # ready/pong frames (gateway adds "source") carry the compiled LED build.
+    gateway._dispatch_line(
+        b'{"source":"AA:BB:CC:DD:EE:01","status":"node_direct_ready","rgbw":true}')
+    gateway._dispatch_line(
+        b'{"source":"AA:BB:CC:DD:EE:02","type":"pong","rgbw":false}')
+
+    assert gateway.node_rgbw("AA:BB:CC:DD:EE:01") is True
+    assert gateway.node_rgbw("AA:BB:CC:DD:EE:02") is False
+    # A frame without the field must not clobber a known value.
+    gateway._dispatch_line(
+        b'{"source":"AA:BB:CC:DD:EE:01","type":"status","chamber":0,"pressure":50}')
+    assert gateway.node_rgbw("AA:BB:CC:DD:EE:01") is True
+
+
 def test_non_gateway_lines_are_rejected():
     gateway = ESPNowGateway("/dev/ttyUSB0")
     rejected = [

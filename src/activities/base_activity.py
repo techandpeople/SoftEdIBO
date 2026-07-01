@@ -12,9 +12,8 @@ Activities are the plug-in unit of behaviour. Each concrete activity:
 Any activity can run in **simulation mode** — set ``simulation_mode = True``
 on the instance (or via the SessionPanel checkbox) before ``setup`` is
 called and the default ``prepare_robots`` will substitute real robots with
-``SimulatedRobot`` instances backed by ``SimulatedController``. This
-replaces the older standalone ``SimulationActivity``: any activity now has
-a "test-without-hardware" mode for free.
+``SimulatedRobot`` instances backed by ``SimulatedController``. Every activity
+therefore has a "test-without-hardware" mode for free.
 """
 
 from __future__ import annotations

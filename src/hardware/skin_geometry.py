@@ -171,12 +171,13 @@ def known_skin_types() -> list[str]:
 
 
 # Max pluggable organ shapes a skin type may carry (hospital study). Turtle puts
-# all organs on the central square; each Tree branch holds a single organ. Types
-# absent here default to ``DEFAULT_MAX_ORGANS``.
+# all organs on the central square; each Tree branch and each Thymio holds a
+# single organ. Types absent here default to ``DEFAULT_MAX_ORGANS``.
 DEFAULT_MAX_ORGANS = 3
 MAX_ORGANS_BY_TYPE: dict[str, int] = {
     "turtle_square": 3,
     "tree_round": 1,
+    "thymio": 1,
 }
 
 
@@ -189,12 +190,61 @@ def max_organs_for(skin_type: str | None) -> int:
 # Orthogonal to skin_type (the shape): the same shape is cast in several
 # silicone formats with different chamber sizes. Referenced across the app
 # (config, GUI, recordings) and fed to the touch ML as a feature.
-SKIN_VARIANTS: tuple[str, ...] = ("natural", "wrinkles", "organ")
+#
+# ``organ`` carries a single pluggable organ (a Tree branch); ``three_organ``
+# carries three (Turtle square, Thymio). Both are organ-bearing variants
+# (``ORGAN_VARIANTS``); the per-type cap lives in ``MAX_ORGANS_BY_TYPE``.
+# Keep the order stable — the touch ML one-hot encodes against it.
+SKIN_VARIANTS: tuple[str, ...] = ("natural", "wrinkles", "organ", "three_organ")
+
+# Variants that carry pluggable organs (the organ editor is gated on these).
+ORGAN_VARIANTS: frozenset[str] = frozenset({"organ", "three_organ"})
+
+# Human-readable labels for the GUI pickers; the stored data stays the slug.
+VARIANT_LABELS: dict[str, str] = {
+    "natural": "Natural",
+    "wrinkles": "Wrinkles",
+    "organ": "Organ",
+    "three_organ": "ThreeOrgan",
+}
+
+# Which silicone variants each skin TYPE is cast in, hardcoded per the physical
+# builds. The skin dialog offers only a type's own variants, in this order
+# (first = default). A type absent here falls back to all known variants.
+VARIANTS_BY_TYPE: dict[str, tuple[str, ...]] = {
+    "turtle_square":   ("three_organ", "wrinkles", "natural"),
+    "turtle_side":     ("natural", "wrinkles"),
+    "turtle_triangle": ("natural", "wrinkles"),
+    "tree_round":      ("organ", "wrinkles", "natural"),
+    # Each Thymio carries ONE organ; a 3-Thymio activity spreads three different
+    # organ shapes (Rect, Triangle, Ellipse) across the three robots.
+    "thymio":          ("organ", "natural", "wrinkles"),
+}
 
 
 def known_skin_variants() -> list[str]:
-    """All silicone variants (for GUI pickers / ML encoding)."""
+    """All silicone variants (for ML encoding / fallback pickers)."""
     return list(SKIN_VARIANTS)
+
+
+def skin_variants_for(skin_type: str | None) -> list[str]:
+    """Silicone variants a skin of this TYPE is cast in (for the GUI picker).
+
+    Hardcoded in ``VARIANTS_BY_TYPE`` per the physical builds; an empty or
+    unregistered ``skin_type`` falls back to all known variants."""
+    variants = VARIANTS_BY_TYPE.get(skin_type or "")
+    return list(variants) if variants is not None else known_skin_variants()
+
+
+def variant_has_organs(skin_variant: str | None) -> bool:
+    """Whether this silicone variant carries pluggable organs."""
+    return (skin_variant or "") in ORGAN_VARIANTS
+
+
+def variant_label(skin_variant: str | None) -> str:
+    """Human-readable label for a variant slug (the slug itself if unknown)."""
+    slug = skin_variant or ""
+    return VARIANT_LABELS.get(slug, slug)
 
 
 def skin_types_for(robot_kind: str | None) -> list[str]:

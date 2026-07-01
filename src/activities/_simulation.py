@@ -1,8 +1,8 @@
 """Helper: wrap any list of real BaseRobot instances in SimulatedRobot.
 
-Lives in its own module so it can be reused both by ``BaseActivity`` (when
-``simulation_mode=True``) and by the legacy ``SimulationActivity`` without
-forcing a circular import between activities and robots.
+Lives in its own module so it can be reused by ``BaseActivity`` (when
+``simulation_mode=True``) without forcing a circular import between activities
+and robots.
 """
 
 from __future__ import annotations

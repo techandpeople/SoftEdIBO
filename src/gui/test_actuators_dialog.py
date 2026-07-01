@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 
 from src.core.skin_config import FILL_MODE_PRESSURE, normalize_fill_mode
 from src.gui.led_ring_tester import LedRingTester
+from src.gui.sensor_tester import SensorTester
 from src.gui.base_dialog import BaseDialog
 from src.gui.ui_test_actuators_dialog import Ui_TestActuatorsDialog
 from src.hardware.espnow_gateway import ESPNowGateway
@@ -52,6 +53,16 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
     # a valve shows open whoever opened it (manual toggle, inflate/deflate, the
     # closed-loop control, or the firmware dead-man closing it). Main thread.
     _valves_received = Signal(int, int, int)       # chamber, inflate_open, deflate_open
+    # Emitted from the gateway read thread with the node's magnet-sensor stream
+    # (per-sensor µT). Connected to _on_magnet_data on the main thread, which
+    # lazily builds the sensor tester the first time a node actually streams it.
+    _magnet_received = Signal(list)                # per-sensor magnitudes (µT)
+
+    # A sensor is marked active on the node when adj = mag / fullscale_mt reaches
+    # act_threshold. We keep act_threshold at the firmware default and scale
+    # fullscale_mt so the µT threshold the user sets in the tester is where the
+    # node's own detection flips — see _configure_sensors.
+    _ACT_THRESHOLD = 0.3
 
     # Monospace valve/pump button base; the open variant adds a green fill so an
     # actually-open valve is obvious at a glance.
@@ -67,11 +78,18 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         gateway: ESPNowGateway,
         led_count: int = 24,
         led_rings: list[int] | None = None,
+        led_angles: dict[int, float] | None = None,
+        on_save_angle=None,
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
         self._mac = mac
         self._gateway = gateway
+        # Saved per-ring LED mounting angles (ring index → degrees), shown as each
+        # ring tester's starting angle. ``on_save_angle(ring, deg)`` persists a new
+        # one to the skin config (None = saving unavailable, hides the Save button).
+        self._led_angles = {int(k): float(v) for k, v in (led_angles or {}).items()}
+        self._on_save_angle = on_save_angle
         self._active = True
         # True while STOP ALL has the node latched off. We do NOT auto-resume
         # (that would throw away the firmware's continuous "stay-off" enforcement
@@ -95,6 +113,9 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         # inflate time-mode chambers by their calibrated time window instead of
         # closing the loop on the laggy gauge sensor — matching Skin in production.
         self._chamber_cfgs: dict[int, dict] = {}
+        # Live magnet-sensor readout. Built lazily the first time the node streams
+        # a ``magnet`` frame, so nodes without touch sensors show nothing extra.
+        self._sensor_tester: SensorTester | None = None
 
         self.setupUi(self)
         self.setWindowTitle(f"Test Actuators — {mac}")
@@ -136,14 +157,22 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         if len(rings) == 1:
             # Single ring: no "ring" field (back-compat with node_direct frames).
             self._led_tester = LedRingTester(
-                rings[0], lambda idx, col, pat: self._send_led(None, idx, col, pat))
+                rings[0],
+                lambda idx, cols, pat, fade, angle:
+                    self._send_led(None, idx, cols, pat, fade, angle),
+                initial_angle=self._led_angles.get(0, 0.0),
+                on_save_angle=self._angle_saver(0))
             self.verticalLayout.insertWidget(
                 self.verticalLayout.count() - 1, self._led_tester)
         elif len(rings) > 1:
             self._led_tabs = QTabWidget()
             for k, size in enumerate(rings):
                 tester = LedRingTester(
-                    size, lambda idx, col, pat, r=k: self._send_led(r, idx, col, pat))
+                    size,
+                    lambda idx, cols, pat, fade, angle, r=k:
+                        self._send_led(r, idx, cols, pat, fade, angle),
+                    initial_angle=self._led_angles.get(k, 0.0),
+                    on_save_angle=self._angle_saver(k))
                 self._led_tabs.addTab(tester, f"Ring {k} · {size} LEDs")
             self.verticalLayout.insertWidget(
                 self.verticalLayout.count() - 1, self._led_tabs)
@@ -231,6 +260,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
 
         self._pressure_received.connect(self._update_pressure)
         self._valves_received.connect(self._update_valves)
+        self._magnet_received.connect(self._on_magnet_data)
         self._gateway.on_message(self._on_gateway_message)
         self.finished.connect(self._on_closed)
 
@@ -314,9 +344,15 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
 
     def _on_gateway_message(self, data: dict) -> None:
         """Called from the gateway read thread."""
-        if not self._active:
+        if not self._active or data.get("source") != self._mac:
             return
-        if data.get("source") != self._mac or data.get("type") != "status":
+        msg_type = data.get("type")
+        if msg_type == "magnet":
+            mag = data.get("mag")
+            if isinstance(mag, list):
+                self._magnet_received.emit([float(v) for v in mag])
+            return
+        if msg_type != "status":
             return
         chamber = data.get("chamber")
         pressure = data.get("pressure")
@@ -334,6 +370,58 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         vd = data.get("vd")
         if isinstance(chamber, int) and isinstance(vi, int) and isinstance(vd, int):
             self._valves_received.emit(chamber, vi, vd)
+
+    def _on_magnet_data(self, mag: list) -> None:
+        """Main thread: feed the sensor tester, building it on the first frame.
+
+        The tester is created lazily (and only if the node actually streams a
+        ``magnet`` frame) so a node with no touch sensors shows no extra panel.
+        The sensor count comes from the first frame's ``mag`` length."""
+        if self._sensor_tester is None:
+            self._sensor_tester = SensorTester(
+                len(mag), self._rezero_sensors, self._configure_sensors)
+            # Insert just before the Close button row (the last layout item),
+            # matching the pump / run / LED groups.
+            self.verticalLayout.insertWidget(
+                self.verticalLayout.count() - 1, self._sensor_tester)
+            # Show it now so the layout accounts for it immediately: a widget
+            # inserted into an already-shown dialog is otherwise only shown on the
+            # next event loop pass, and until then the layout treats it as zero —
+            # so _grow_to_fit would read a too-small hint and not make room.
+            self._sensor_tester.show()
+            # The panel is always-visible bottom content (not inside the chamber
+            # scroll area), so it must not squeeze the rest: grow the dialog to
+            # fit its new preferred height rather than compress everything above.
+            self._grow_to_fit()
+        self._sensor_tester.update_values(mag)
+
+    def _grow_to_fit(self) -> None:
+        """Grow the dialog to its preferred height (never shrink, never past the
+        screen). Called when a panel is added after construction so the added
+        content doesn't compress the panels above it below their minimums."""
+        self.layout().activate()   # refresh the size hint after the insert
+        target = self.sizeHint().height()
+        screen = self.screen()
+        if screen is not None:
+            target = min(target, screen.availableGeometry().height())
+        if target > self.height():
+            self.resize(self.width(), target)
+
+    def _rezero_sensors(self) -> None:
+        """Re-zero the node's magnet baseline (sensor tester Re-zero button)."""
+        self._gateway.send(self._mac, "rebaseline")
+
+    def _configure_sensors(self, threshold_ut: float) -> None:
+        """Push the tester's µT threshold to the node so its own touch detection
+        fires at that level. The node marks a sensor active when
+        ``mag / fullscale_mt >= act_threshold``; keeping act_threshold at the
+        firmware default and setting ``fullscale_mt = threshold / act_threshold``
+        makes ``threshold_ut`` the µT at which the node flips the sensor active."""
+        if threshold_ut <= 0:
+            return
+        self._gateway.send(self._mac, "configure", repeat=2,
+                           fullscale_mt=threshold_ut / self._ACT_THRESHOLD,
+                           act_threshold=self._ACT_THRESHOLD)
 
     def _update_pressure(self, chamber: int, pressure: int, kpa: float) -> None:
         """Called in the main thread via Signal.
@@ -406,22 +494,44 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
     # Commands
     # ------------------------------------------------------------------
 
+    def _angle_saver(self, ring: int):
+        """A ``(angle) -> None`` callback that persists ``ring``'s mounting angle,
+        or None when the host provided no save hook (hides the Save button)."""
+        if self._on_save_angle is None:
+            return None
+
+        def _save(angle: float, r: int = ring) -> None:
+            self._led_angles[r] = float(angle)
+            self._on_save_angle(r, float(angle))
+
+        return _save
+
     def _send_led(self, ring: int | None, index: int | None,
-                  color_hex: str | None, pattern: str = "solid") -> None:
-        """Forward an LED change to the node. color_hex None => turn off;
-        index None => whole ring; otherwise a single pixel. ``ring`` selects one
-        of a multi-ring node's rings (node_multiplexed); None addresses the
-        node's single ring (and is omitted from the frame for node_direct
-        back-compat)."""
+                  colors: list[str] | None, pattern: str = "solid",
+                  fade_ms: int | None = None, angle: float | None = None) -> None:
+        """Forward an LED change to the node. ``colors`` None => turn off;
+        ``index`` set => a single pixel (colours[0]); one colour => whole ring
+        (``set_led``); 2+ colours => an arc split (``set_led_halves``, one comet
+        per colour when ``pattern`` is "comet"). ``ring`` selects one of a
+        multi-ring node's rings (node_multiplexed); None addresses the node's
+        single ring (and is omitted from the frame for node_direct back-compat).
+        ``fade_ms`` is the cross-fade time; ``angle`` (0-360°) rotates the split."""
         payload: dict = {} if ring is None else {"ring": ring}
-        if color_hex is None:
+        if fade_ms is not None:
+            payload["fade_ms"] = int(fade_ms)
+        if angle is not None:
+            payload["angle"] = float(angle)
+        if colors is None:
             self._gateway.send(self._mac, "set_led", pattern="off", **payload)
-        elif index is None:
-            self._gateway.send(self._mac, "set_led", color=color_hex,
+        elif index is not None:
+            self._gateway.send(self._mac, "set_led", color=colors[0],
+                               index=index, pattern=pattern, **payload)
+        elif len(colors) == 1:
+            self._gateway.send(self._mac, "set_led", color=colors[0],
                                pattern=pattern, **payload)
         else:
-            self._gateway.send(self._mac, "set_led", color=color_hex,
-                               index=index, pattern=pattern, **payload)
+            self._gateway.send(self._mac, "set_led_halves", colors=colors,
+                               pattern=pattern, **payload)
 
     def _arm(self) -> None:
         """Release the STOP ALL latch (if set) before the next actuation.

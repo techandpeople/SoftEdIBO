@@ -11,13 +11,19 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from src.config.settings import Settings
+from src.core.session_trash import SessionTrash
 from src.data.database import Database
 from src.data.export import SessionExporter
+from src.gui.trash_dialog import TrashDialog
 from src.gui.ui_data_panel import Ui_DataPanel
 
 
 class DataPanel(QWidget, Ui_DataPanel):
-    """Panel for viewing and exporting collected session data.
+    """Panel for viewing, exporting and deleting collected session data.
+
+    Deletion is recoverable: "Delete Session" moves a session to the trash, and
+    the "Trash…" button opens a dialog to restore or permanently delete it.
 
     Args:
         db: Open database instance to load sessions and events from.
@@ -29,6 +35,7 @@ class DataPanel(QWidget, Ui_DataPanel):
 
         self._db = db
         self._exporter = SessionExporter(db)
+        self._trash = SessionTrash(db, Settings().recordings_dir)
 
         for table in (self.sessions_table, self.events_table):
             h = table.horizontalHeader()
@@ -40,6 +47,8 @@ class DataPanel(QWidget, Ui_DataPanel):
         self.sessions_table.itemSelectionChanged.connect(self._on_session_selected)
         self.export_btn.clicked.connect(self._on_export)
         self.export_all_btn.clicked.connect(self._on_export_all)
+        self.delete_btn.clicked.connect(self._on_delete)
+        self.trash_btn.clicked.connect(self._on_open_trash)
 
         self.refresh()
 
@@ -47,6 +56,7 @@ class DataPanel(QWidget, Ui_DataPanel):
         """Reload all sessions from the database."""
         self.sessions_table.setRowCount(0)
         self.events_table.setRowCount(0)
+        self.delete_btn.setEnabled(False)
 
         for record in self._db.get_all_sessions():
             row = self.sessions_table.rowCount()
@@ -63,6 +73,7 @@ class DataPanel(QWidget, Ui_DataPanel):
     def _on_session_selected(self) -> None:
         """Load events for the selected session into the events table."""
         selected = self.sessions_table.selectedItems()
+        self.delete_btn.setEnabled(bool(selected))
         if not selected:
             return
 
@@ -118,3 +129,35 @@ class DataPanel(QWidget, Ui_DataPanel):
         self._db.flush_events()
         rows = self._exporter.export_all(path)
         QMessageBox.information(self, "Export", f"Exported {rows} events to {path}")
+
+    def _on_delete(self) -> None:
+        """Move the selected session to the trash (recoverable)."""
+        selected = self.sessions_table.selectedItems()
+        if not selected:
+            QMessageBox.warning(self, "Delete", "Select a session first.")
+            return
+
+        row = selected[0].row()
+        session_id = self.sessions_table.item(row, 0).text()
+        activity = self.sessions_table.item(row, 1).text()
+
+        confirm = QMessageBox(self)
+        confirm.setIcon(QMessageBox.Icon.Question)
+        confirm.setWindowTitle("Delete Session")
+        confirm.setText(f"Move session {session_id} ({activity}) to the trash?")
+        confirm.setInformativeText(
+            "It leaves the list and can be restored (or deleted for good) from "
+            "the Trash button."
+        )
+        confirm.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        confirm.setDefaultButton(QMessageBox.StandardButton.Yes)
+        if confirm.exec() != QMessageBox.StandardButton.Yes:
+            return
+
+        self._trash.trash(session_id)
+        self.refresh()
+
+    def _on_open_trash(self) -> None:
+        """Open the trash dialog, then refresh in case a session was restored."""
+        TrashDialog(self._trash, self).exec()
+        self.refresh()
