@@ -168,7 +168,10 @@ Skins without one share a single whole-robot patient.
       organ catalogues matching the physically built organs (measure real
       resistor values, set `cured_total_resistance_ohm` accordingly).
 - [ ] **Thymio movement reactions** (optional polish) — wheeled "happy dance"
-      on cure via `ThymioRobot.set_motors` once the tdm-client TODO lands.
+      on cure via `ThymioRobot.set_motors`. Wireless control without the RF dongle
+      is planned via an S3-host + C6-RCP 802.15.4 link — see
+      [THYMIO_WIRELESS_CONTROL.md](THYMIO_WIRELESS_CONTROL.md) (Phase 0 bring-up in
+      `firmware/thymio_rcp/`); the tdm-client/USB path stays the quick fallback.
 - [ ] **Tree sharing events** — log `assign_to` / `share_with` calls as
       events so branch-sharing behavior is in the same timeline.
 - [ ] **Pilot run** — full dry run in simulation, then with one real node:

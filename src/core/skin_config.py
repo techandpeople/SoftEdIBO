@@ -251,6 +251,23 @@ def save_skin_entry(data: dict, robot_type: str, robot_index: int,
     return skin_index
 
 
+def set_skin_led_angles(data: dict, robot_type: str, robot_index: int,
+                        skin_index: int, led_angles: dict[int, float]) -> bool:
+    """Patch just the ``led_angles`` of an already-saved skin entry in place.
+
+    Lets the Test Actuators dialog persist a ring's mounting angle without
+    re-committing the whole skin. Keys are stored as strings (YAML-friendly).
+    Returns True if the entry existed and was updated."""
+    robots_list = data.get("robots", {}).get(YAML_KEY[robot_type], [])
+    if 0 <= robot_index < len(robots_list):
+        skins = robots_list[robot_index].get("skins", [])
+        if 0 <= skin_index < len(skins):
+            skins[skin_index]["led_angles"] = {
+                str(int(k)): float(v) for k, v in led_angles.items()}
+            return True
+    return False
+
+
 def delete_skin(data: dict, robot_type: str, robot_index: int,
                 skin_index: int) -> None:
     """Remove the skin entry from the settings tree (no-op on bad index)."""

@@ -167,7 +167,7 @@ class SessionSetupDialog(BaseDialog, Ui_SessionSetupDialog):
             item = QListWidgetItem(f"{robot.robot_id}  [{robot.status.value}]")
             item.setData(Qt.ItemDataRole.UserRole, robot)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(Qt.CheckState.Checked)
+            item.setCheckState(Qt.CheckState.Unchecked)
             self.robots_list.addItem(item)
 
     def _populate_participants(self, records: list[ParticipantRecord]) -> None:

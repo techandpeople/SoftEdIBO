@@ -5,15 +5,18 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.activities.group_touch import GroupTouchActivity
+from src.activities.scripted_activity import ScriptedActivity
+from src.activities.seed_behaviors import SEED_CONDITIONS
+from src.core.session_trash import SessionTrash
 from src.data.database import Database
-from src.data.models import SessionRecord
+from src.data.models import DeclarativeActivity, SessionRecord
 from src.gui.data_panel import DataPanel
+from src.gui.trash_dialog import TrashDialog
 from src.gui.robot_panel import RobotPanel
 from src.gui.session_panel import SessionPanel
 from src.gui.session_setup_dialog import SessionSetupDialog
 from src.hardware.espnow_gateway import ESPNowGateway
-from src.robots.base_robot import RobotStatus
+from src.robots.base_robot import BaseRobot, RobotStatus
 from src.robots.turtle_tree.turtle_tree_robot import TurtleTreeRobot
 
 
@@ -48,6 +51,18 @@ def _mock_settings() -> MagicMock:
     settings.gateway_port = "/dev/ttyUSB0"
     settings.data = {"robots": {"turtle_trees": [], "thymios": []}, "gateway": {}}
     return settings
+
+
+def _seed_behaviour(db, name: str = "Example Behaviour") -> str:
+    """Insert one declarative behaviour so the session dropdown has an entry.
+
+    No code-defined activities ship anymore — all behaviours come from the DB
+    (block editor / imported JSON), so the dialog tests must seed their own."""
+    da = DeclarativeActivity(
+        activity_id=db.next_declarative_activity_id(),
+        name=name, spec=SEED_CONDITIONS[0][2], created_at=datetime.now())
+    db.save_declarative_activity(da)
+    return name
 
 
 # ---------------------------------------------------------------------------
@@ -89,15 +104,18 @@ class TestSessionSetupDialog:
         qtbot.addWidget(dlg)
 
     def test_activity_combo_populated(self, qtbot, db):
+        name = _seed_behaviour(db)
         dlg = SessionSetupDialog(robots=[], db=db)
         qtbot.addWidget(dlg)
         assert dlg.activity_combo.count() > 0
-        assert dlg.activity_combo.itemText(0) == "Group Touch"
+        assert dlg.activity_combo.itemText(0) == name
 
     def test_robot_type_label_set_on_open(self, qtbot, db):
+        _seed_behaviour(db)
         dlg = SessionSetupDialog(robots=[], db=db)
         qtbot.addWidget(dlg)
-        assert dlg.robot_type_label.text() == TurtleTreeRobot.__name__
+        # Scripted behaviours accept any robot, so the label shows BaseRobot.
+        assert dlg.robot_type_label.text() == BaseRobot.__name__
 
     def test_no_robots_label_shown_when_empty(self, qtbot, db):
         dlg = SessionSetupDialog(robots=[], db=db)
@@ -106,13 +124,17 @@ class TestSessionSetupDialog:
         assert dlg.robots_list.isHidden()
 
     def test_robots_list_shown_when_robots_present(self, qtbot, db):
+        _seed_behaviour(db)
         dlg = SessionSetupDialog(robots=[_mock_turtle()], db=db)
         qtbot.addWidget(dlg)
         assert dlg.no_robots_label.isHidden()
         assert not dlg.robots_list.isHidden()
         assert dlg.robots_list.count() == 1
 
-    def test_robots_filtered_by_activity_type(self, qtbot, db):
+    def test_all_robots_shown_for_scripted_activity(self, qtbot, db):
+        # A scripted behaviour's robot_type is BaseRobot, so every robot kind
+        # is compatible — no type filtering trims the list.
+        _seed_behaviour(db)
         from src.robots.thymio.thymio_robot import ThymioRobot
         thymio = MagicMock(spec=ThymioRobot)
         thymio.name = "Thymio-1"
@@ -120,12 +142,13 @@ class TestSessionSetupDialog:
         thymio.status = RobotStatus.CONNECTED
         dlg = SessionSetupDialog(robots=[_mock_turtle(), thymio], db=db)
         qtbot.addWidget(dlg)
-        assert dlg.robots_list.count() == 1
+        assert dlg.robots_list.count() == 2
 
     def test_selected_activity_returns_instance(self, qtbot, db):
+        _seed_behaviour(db)
         dlg = SessionSetupDialog(robots=[], db=db)
         qtbot.addWidget(dlg)
-        assert isinstance(dlg.selected_activity, GroupTouchActivity)
+        assert isinstance(dlg.selected_activity, ScriptedActivity)
 
 
 # ---------------------------------------------------------------------------
@@ -179,6 +202,76 @@ class TestDataPanel:
         panel = DataPanel(db)
         qtbot.addWidget(panel)
         assert panel.export_btn.text() == "Export Session to CSV"
+
+    def test_delete_button_disabled_until_selection(self, qtbot, db):
+        db.save_session(SessionRecord("s01", "Group Touch", datetime(2026, 1, 1, 9, 0)))
+        panel = DataPanel(db)
+        qtbot.addWidget(panel)
+        assert panel.delete_btn.text() == "Delete Session"
+        assert not panel.delete_btn.isEnabled()
+        panel.sessions_table.selectRow(0)
+        assert panel.delete_btn.isEnabled()
+
+    def test_trash_button_present(self, qtbot, db):
+        panel = DataPanel(db)
+        qtbot.addWidget(panel)
+        assert panel.trash_btn.text() == "Trash…"
+
+    def test_delete_moves_selected_session_to_trash(self, qtbot, db, monkeypatch):
+        from PySide6.QtWidgets import QMessageBox
+        db.save_session(SessionRecord("s01", "Group Touch", datetime(2026, 1, 1, 9, 0)))
+        panel = DataPanel(db)
+        qtbot.addWidget(panel)
+        panel.sessions_table.selectRow(0)
+        monkeypatch.setattr(QMessageBox, "exec", lambda self: QMessageBox.StandardButton.Yes)
+        panel._on_delete()
+        assert panel.sessions_table.rowCount() == 0
+        assert db.get_all_sessions() == []
+        assert [t.session_id for t in db.list_trashed_sessions()] == ["s01"]
+
+
+# ---------------------------------------------------------------------------
+# TrashDialog
+# ---------------------------------------------------------------------------
+
+class TestTrashDialog:
+    def test_lists_trashed_sessions(self, qtbot, db, tmp_path):
+        db.save_session(SessionRecord("s01", "Group Touch", datetime(2026, 1, 1, 9, 0)))
+        trash = SessionTrash(db, tmp_path)
+        trash.trash("s01")
+        dlg = TrashDialog(trash)
+        qtbot.addWidget(dlg)
+        assert dlg.trash_table.rowCount() == 1
+        assert dlg.trash_table.item(0, 0).text() == "s01"
+
+    def test_restore_puts_session_back(self, qtbot, db, tmp_path):
+        db.save_session(SessionRecord("s01", "Group Touch", datetime(2026, 1, 1, 9, 0)))
+        trash = SessionTrash(db, tmp_path)
+        trash.trash("s01")
+        dlg = TrashDialog(trash)
+        qtbot.addWidget(dlg)
+        dlg.trash_table.selectRow(0)
+        dlg._on_restore()
+        assert dlg.trash_table.rowCount() == 0
+        assert [s.session_id for s in db.get_all_sessions()] == ["s01"]
+
+    def test_empty_trash_purges_permanently(self, qtbot, db, tmp_path, monkeypatch):
+        from PySide6.QtWidgets import QMessageBox
+        db.save_session(SessionRecord("s01", "Group Touch", datetime(2026, 1, 1, 9, 0)))
+        trash = SessionTrash(db, tmp_path)
+        trash.trash("s01")
+        dlg = TrashDialog(trash)
+        qtbot.addWidget(dlg)
+        monkeypatch.setattr(QMessageBox, "exec", lambda self: QMessageBox.StandardButton.Yes)
+        dlg._on_empty()
+        assert dlg.trash_table.rowCount() == 0
+        assert db.list_trashed_sessions() == []
+
+    def test_empty_button_disabled_when_trash_empty(self, qtbot, db, tmp_path):
+        dlg = TrashDialog(SessionTrash(db, tmp_path))
+        qtbot.addWidget(dlg)
+        assert not dlg.empty_trash_btn.isEnabled()
+        assert not dlg.restore_btn.isEnabled()
 
     def test_refresh_loads_sessions_from_db(self, qtbot, db):
         db.save_session(SessionRecord(
@@ -296,3 +389,56 @@ class TestActuatorsDialogActuation:
         assert cmds[:2] == ["set_max_pressure", "set_min_pressure"]
         deflate = [kw for c, kw in gw.sent if c == "deflate"]
         assert deflate == [{"chamber": 0, "delta": 100}]
+
+
+class TestActuatorsDialogSensors:
+    """The live magnet-sensor readout embedded in the Test Actuators dialog."""
+
+    MAC = "AA:BB:CC:DD:EE:FF"
+
+    def _dialog(self, qtbot, gateway):
+        from src.gui.test_actuators_dialog import TestActuatorsDialog
+
+        dlg = TestActuatorsDialog(self.MAC, [], gateway, led_count=0)
+        qtbot.addWidget(dlg)
+        gateway.sent.clear()
+        return dlg
+
+    def test_sensor_tester_built_lazily_on_first_magnet_frame(self, qtbot):
+        dlg = self._dialog(qtbot, _RecordingGateway())
+        assert dlg._sensor_tester is None            # nothing until a frame arrives
+        dlg._on_magnet_data([10.0, 200.0, 0.0, 0.0])
+        assert dlg._sensor_tester is not None
+        assert dlg._sensor_tester._count == 4        # count follows the frame length
+
+    def test_active_highlight_follows_threshold(self, qtbot):
+        dlg = self._dialog(qtbot, _RecordingGateway())
+        dlg._on_magnet_data([10.0, 200.0, 0.0, 0.0])
+        tester = dlg._sensor_tester
+        tester.threshold_spin.setValue(100.0)
+        tester.update_values([10.0, 200.0, 0.0, 0.0])
+        # Only S1 (200 µT) clears the 100 µT threshold.
+        assert tester._active_shown == [False, True, False, False]
+        # Dropping the threshold below S0 lights it too; the two 0 µT sensors stay off.
+        tester.threshold_spin.setValue(5.0)
+        assert tester._active_shown == [True, True, False, False]
+
+    def test_rezero_sends_rebaseline(self, qtbot):
+        gw = _RecordingGateway()
+        dlg = self._dialog(qtbot, gw)
+        dlg._on_magnet_data([0.0, 0.0, 0.0, 0.0])
+        dlg._sensor_tester.rezero_btn.click()
+        assert ("rebaseline", {}) in gw.sent
+
+    def test_push_scales_fullscale_so_threshold_is_the_trigger_uT(self, qtbot):
+        gw = _RecordingGateway()
+        dlg = self._dialog(qtbot, gw)
+        dlg._on_magnet_data([0.0, 0.0, 0.0, 0.0])
+        dlg._sensor_tester.threshold_spin.setValue(120.0)
+        dlg._sensor_tester.push_btn.click()
+        cfg = [kw for c, kw in gw.sent if c == "configure"]
+        assert len(cfg) == 1
+        # fullscale_mt = threshold / act_threshold, so mag == threshold → adj ==
+        # act_threshold → the node flips the sensor active at exactly 120 µT.
+        assert cfg[0]["act_threshold"] == pytest.approx(0.3)
+        assert cfg[0]["fullscale_mt"] == pytest.approx(120.0 / 0.3)

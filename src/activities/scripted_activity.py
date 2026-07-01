@@ -49,7 +49,7 @@ WaitToken = tuple
 
 # Default match tolerance (Ω) for decomposing the organ circuit reading when a
 # spec uses an `organs` condition. Overridable per-spec via
-# ``spec["organ_tolerance_ohm"]`` (mirrors OrganSwapActivity's tunable).
+# ``spec["organ_tolerance_ohm"]``.
 _DEFAULT_ORGAN_TOLERANCE_OHM = 80.0
 
 
@@ -542,13 +542,17 @@ class ScriptedActivity(BaseActivity):
             self._set_led(unit, params.get("color", "#000000"),
                           params.get("pattern", "solid"),
                           int(params.get("period_ms", 0)),
-                          ring=self._parse_ring(params))
+                          ring=self._parse_ring(params),
+                          fade_ms=self._fade_ms(params),
+                          angle=self._angle(params))
         elif verb == "set_led_halves":
             colors = params.get("colors", params.get("_value", []))
             self._set_led_halves(unit, list(colors),
                                  params.get("pattern", "solid"),
                                  int(params.get("period_ms", 0)),
-                                 ring=self._parse_ring(params))
+                                 ring=self._parse_ring(params),
+                                 fade_ms=self._fade_ms(params),
+                                 angle=self._angle(params))
         elif verb in ("inflate", "set_pressure"):
             self._set_pressure(unit, self._resolve_chamber(unit, params, ctx),
                                int(params.get("pct", 60 if verb == "inflate" else 0)),
@@ -593,6 +597,27 @@ class ScriptedActivity(BaseActivity):
                          chamber, pct, unit.unit_id)
 
     @staticmethod
+    def _fade_ms(params: dict) -> int | None:
+        """Read an optional LED ``fade_ms`` (cross-fade time) from a step's params.
+        Absent / invalid means 'send no fade_ms — use the node default (~250 ms)'."""
+        if "fade_ms" not in params:
+            return None
+        try:
+            return max(0, int(params.get("fade_ms")))
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _angle(params: dict) -> float | None:
+        """Read an optional LED ``angle`` (split/comet rotation, degrees) from a
+        step's params. Absent / invalid / 0 means 'send no angle' (default)."""
+        try:
+            angle = float(params.get("angle") or 0)
+        except (TypeError, ValueError):
+            return None
+        return angle if angle else None
+
+    @staticmethod
     def _parse_ring(params: dict) -> int | None:
         """Read an optional LED ``ring`` (0..3) from a step's params. ``"all"`` /
         absent / invalid means 'every ring' (sent as ``None``), matching the
@@ -606,29 +631,35 @@ class ScriptedActivity(BaseActivity):
             return None
 
     def _set_led(self, unit: _Unit, color: str, pattern: str,
-                 period_ms: int, ring: int | None = None) -> None:
+                 period_ms: int, ring: int | None = None,
+                 fade_ms: int | None = None, angle: float | None = None) -> None:
         set_led = getattr(unit.ctrl, "set_led", None)
         if set_led is None:
             return
         try:
-            set_led(color, pattern=pattern, period_ms=period_ms, ring=ring)
+            set_led(color, pattern=pattern, period_ms=period_ms, ring=ring,
+                    fade_ms=fade_ms, angle=angle)
         except Exception:   # noqa: BLE001
             logger.exception("set_led failed on %s", unit.unit_id)
 
     def _set_led_halves(self, unit: _Unit, colors: list[str],
                         pattern: str = "solid", period_ms: int = 0,
-                        ring: int | None = None) -> None:
+                        ring: int | None = None,
+                        fade_ms: int | None = None,
+                        angle: float | None = None) -> None:
         if not colors:
             return
         halves = getattr(unit.ctrl, "set_led_halves", None)
         if halves is not None:
             try:
-                halves(colors, pattern=pattern, period_ms=period_ms, ring=ring)
+                halves(colors, pattern=pattern, period_ms=period_ms, ring=ring,
+                       fade_ms=fade_ms, angle=angle)
                 return
             except Exception:   # noqa: BLE001
                 logger.exception("set_led_halves failed on %s", unit.unit_id)
         # Fallback: a controller without the helper at least shows one colour.
-        self._set_led(unit, colors[0], pattern, period_ms, ring=ring)
+        self._set_led(unit, colors[0], pattern, period_ms, ring=ring,
+                      fade_ms=fade_ms, angle=angle)
 
     @staticmethod
     def _resolve_chamber(unit: _Unit, params: dict, ctx: dict):
@@ -670,8 +701,7 @@ class ScriptedActivity(BaseActivity):
 
     @staticmethod
     def _organ_controller_and_slot(skin: Any) -> tuple[Any, int]:
-        """Controller + slot carrying this skin's organ circuit (mirrors
-        OrganSwapActivity._organ_controller)."""
+        """Controller + slot carrying this skin's organ circuit."""
         ctrl = getattr(skin, "_ctrl", None)
         cfg = getattr(skin, "organ", None) or {}
         slot = int(cfg.get("slot", 0))

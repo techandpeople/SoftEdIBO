@@ -27,6 +27,10 @@ class ESP32Controller:
         # Latest magnet sensor geometry, captured from a `node_magnet_sensor_ready` boot announce.
         # Shape: {"sensors": N, "magnets": M, "variant": str|None, "geometry": {...}}.
         self._magnet_geometry: dict[str, Any] | None = None
+        # Per-ring LED mounting angle (degrees), from the skin config. Added to
+        # every LED command's angle so a physically-rotated ring shows the right
+        # orientation without every activity having to compensate. Empty = no offset.
+        self._led_angles: dict[int, float] = {}
 
         self._gateway.on_message(self._handle_message)
 
@@ -141,17 +145,38 @@ class ESP32Controller:
         """Request sensor calibration on the ESP32."""
         return self.send_command("calibrate_sensor", sensor=sensor_id)
 
+    def set_led_angles(self, angles: dict[int, float] | None) -> None:
+        """Set the per-ring LED mounting angles (degrees) from the skin config.
+
+        Keys are ring indices (0 for a single-ring node); the angle is added to
+        every LED command's ``angle`` so a physically-rotated ring reads right
+        without each activity compensating. ``None`` / empty clears the offset."""
+        self._led_angles = {int(k): float(v) for k, v in (angles or {}).items()}
+
+    def _effective_angle(self, ring: int | None, angle: float | None) -> float | None:
+        """Combine the ring's saved mounting angle with the command's angle.
+        Returns None when both are zero/absent (so no ``angle`` is sent)."""
+        base = self._led_angles.get(0 if ring is None else int(ring), 0.0)
+        total = base + (float(angle) if angle is not None else 0.0)
+        return total if total else None
+
     def set_led(self, color: str, pattern: str = "solid",
                 period_ms: int = 0, count: int | None = None,
-                index: int | None = None, ring: int | None = None) -> bool:
+                index: int | None = None, ring: int | None = None,
+                fade_ms: int | None = None, angle: float | None = None) -> bool:
         """Drive the node's LED ring(s).
 
-        color:   "#RRGGBB". pattern: "off" | "solid" | "blink" | "pulse".
-        period_ms/count: animation timing (whole-ring patterns only).
+        color:   "#RRGGBB". pattern: "off" | "solid" | "blink" | "pulse" |
+                 "comet" (a single bright head with a fading tail sweeping the ring).
+        period_ms/count: animation timing — pulse/blink cycle or comet revolution.
         index:   when given, set just that pixel (solid); otherwise the whole
                  ring. Per-pixel is used by the LED test panel.
         ring:    multi-ring nodes (node_multiplexed: 4 rings) only — selects ring
                  0..3; omitted addresses all rings. Single-ring nodes ignore it.
+        fade_ms: cross-fade time for this change. Every change cross-fades; the
+                 node's default (~250 ms) applies when omitted, 0 snaps instantly.
+        angle:   0-360° rotation of the split/comet around the ring (0 = default
+                 orientation). Lets a comet start elsewhere; more useful on halves.
         """
         kwargs: dict[str, Any] = {"color": color, "pattern": pattern,
                                   "period_ms": int(period_ms)}
@@ -161,19 +186,31 @@ class ESP32Controller:
             kwargs["index"] = int(index)
         if ring is not None:
             kwargs["ring"] = int(ring)
+        if fade_ms is not None:
+            kwargs["fade_ms"] = int(fade_ms)
+        eff_angle = self._effective_angle(ring, angle)
+        if eff_angle is not None:
+            kwargs["angle"] = eff_angle
         return self.send_command("set_led", **kwargs)
 
     def set_led_halves(self, colors: list[str],
                        pattern: str = "solid", period_ms: int = 0,
-                       ring: int | None = None) -> bool:
+                       ring: int | None = None,
+                       fade_ms: int | None = None,
+                       angle: float | None = None) -> bool:
         """Paint a ring split into ``len(colors)`` equal contiguous arcs.
 
         Used for the "half purple / half yellow" behaviour look. Sent as a
         single ``set_led_halves`` frame carrying the colour list; the firmware
         splits the ring across its own LED count and renders one frame from
-        loop(). ``pattern`` / ``period_ms`` animate the whole split ring together.
-        ``ring`` selects one of the multiplexed board's four rings (0..3);
-        omitted addresses all rings, and single-ring boards ignore it.
+        loop(). ``pattern`` / ``period_ms`` animate the whole split ring together;
+        ``pattern="comet"`` paints one rotating comet per colour (so two colours
+        give two comets 180° apart). ``ring`` selects one of the multiplexed
+        board's four rings (0..3); omitted addresses all rings, and single-ring
+        boards ignore it. ``fade_ms`` is the cross-fade time for this change
+        (node default ~250 ms when omitted, 0 snaps). ``angle`` (0-360°) rotates
+        the split around the ring, so e.g. halves can sit top/bottom instead of
+        left/right.
 
         This used to loop one ``set_led(index=…)`` per LED — a 24-frame burst
         that reset the node, because the firmware calls ``strip.show()`` (which
@@ -187,6 +224,11 @@ class ESP32Controller:
                                   "period_ms": int(period_ms)}
         if ring is not None:
             kwargs["ring"] = int(ring)
+        if fade_ms is not None:
+            kwargs["fade_ms"] = int(fade_ms)
+        eff_angle = self._effective_angle(ring, angle)
+        if eff_angle is not None:
+            kwargs["angle"] = eff_angle
         return self.send_command("set_led_halves", **kwargs)
 
     def on_touch(self, callback: Callable[[int, int], None]) -> None:

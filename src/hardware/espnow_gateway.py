@@ -46,6 +46,11 @@ class ESPNowGateway:
         self._raw_callbacks: list[Callable[[str, str], None]] = []
         self._logged_disconnected = False
         self._known_macs: set[str] = set()
+        # RGBW LED-ring variant self-reported by each node in its ready/pong frame
+        # (mac -> bool). Lets the OTA picker auto-select the right firmware bin
+        # instead of asking the user. A node absent here hasn't reported it yet
+        # (offline, or running firmware that predates the field).
+        self._node_rgbw: dict[str, bool] = {}
         # Strong refs to "the link dropped on its own" listeners (e.g. the panel
         # repainting itself as disconnected). Fired only on an *unexpected* loss
         # — the gateway unplugged or reset (e.g. just after a flash) — not on a
@@ -56,6 +61,15 @@ class ESPNowGateway:
     def known_macs(self) -> frozenset[str]:
         """MAC addresses of nodes that have sent at least one message."""
         return frozenset(self._known_macs)
+
+    def node_rgbw(self, mac: str) -> bool | None:
+        """RGBW LED-ring variant a node reported (True/False), or None if unknown.
+
+        Populated from the ``rgbw`` field in a node's ready/pong frame (a scan or
+        boot refreshes it). None means the node hasn't reported it yet — offline,
+        or running firmware from before the field existed.
+        """
+        return self._node_rgbw.get(mac)
 
     @property
     def is_connected(self) -> bool:
@@ -185,6 +199,7 @@ class ESPNowGateway:
             self._serial.close()
             self._serial = None
         self._known_macs.clear()
+        self._node_rgbw.clear()
         logger.info("Disconnected from ESP-NOW gateway")
 
     def send(self, target_mac: str, command: str, repeat: int = 1,
@@ -326,6 +341,10 @@ class ESPNowGateway:
             return
         if "source" in data:
             self._known_macs.add(data["source"])
+            # Nodes self-report their LED-ring build in ready/pong so the OTA
+            # picker can pick the matching bin without asking (see node_rgbw).
+            if "rgbw" in data:
+                self._node_rgbw[data["source"]] = bool(data["rgbw"])
         # Surface gateway-reported errors (e.g. a command the gateway couldn't
         # parse because the serial link dropped/garbled bytes) so a swallowed
         # command is visible in the console instead of failing silently.

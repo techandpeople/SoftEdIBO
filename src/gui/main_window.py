@@ -194,6 +194,12 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
         # Thymios
         for thymio_cfg in robot_data.get("thymios", []):
+            # Opt-in wheeled-base link: only build a (connecting) ThymioLink when the
+            # config asks for it, so existing configs and the sim path are untouched.
+            link = None
+            if thymio_cfg.get("wireless"):
+                from src.robots.thymio.thymio_link import ThymioLink
+                link = ThymioLink(host=thymio_cfg.get("host"), port=thymio_cfg.get("port"))
             robots.append(ThymioRobot(
                 robot_id=thymio_cfg["thymio_id"],
                 tdm_host=thymio_cfg.get("host", "localhost"),
@@ -201,6 +207,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                 gateway=self._gateway,
                 node_configs=thymio_cfg.get("nodes", []),
                 skin_configs=thymio_cfg.get("skins", []),
+                link=link,
             ))
 
         return robots

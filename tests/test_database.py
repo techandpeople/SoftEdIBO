@@ -95,3 +95,71 @@ def test_get_session_start_meta_absent_returns_empty(db):
     tracked) yields an empty dict, so resume restores no robots rather than
     wrong ones."""
     assert db.get_session_start_meta("missing") == {}
+
+
+def _seed_session_with_event(db, session_id):
+    db.save_session(SessionRecord(
+        session_id=session_id, activity_name="Group Touch", start_time=datetime.now()))
+    db.log_event(InteractionEvent(
+        session_id=session_id, participant_id="p1", type="turtle", action="inflate",
+        target="chamber_1", timestamp=datetime.now()))
+    db.flush_events()
+
+
+def test_trash_session_moves_out_of_live_into_trash(db):
+    _seed_session_with_event(db, "del-1")
+    _seed_session_with_event(db, "keep-1")
+
+    assert db.trash_session("del-1") is True
+
+    assert [s.session_id for s in db.get_all_sessions()] == ["keep-1"]
+    assert db.get_session_events("del-1") == []
+    assert [t.session_id for t in db.list_trashed_sessions()] == ["del-1"]
+
+
+def test_trash_session_missing_returns_false(db):
+    _seed_session_with_event(db, "keep-1")
+    assert db.trash_session("nope") is False
+    assert len(db.get_all_sessions()) == 1
+    assert db.list_trashed_sessions() == []
+
+
+def test_restore_session_reinstates_record_and_events(db):
+    _seed_session_with_event(db, "del-1")
+    db.trash_session("del-1")
+
+    assert db.restore_session("del-1") is True
+
+    assert [s.session_id for s in db.get_all_sessions()] == ["del-1"]
+    events = db.get_session_events("del-1")
+    assert len(events) == 1
+    assert events[0].action == "inflate"
+    assert events[0].target == "chamber_1"
+    assert db.list_trashed_sessions() == []
+
+
+def test_restore_session_missing_returns_false(db):
+    assert db.restore_session("nope") is False
+
+
+def test_purge_session_removes_from_trash_permanently(db):
+    _seed_session_with_event(db, "del-1")
+    db.trash_session("del-1")
+
+    db.purge_session("del-1")
+
+    assert db.list_trashed_sessions() == []
+    assert db.restore_session("del-1") is False  # gone for good
+    assert db.get_all_sessions() == []
+
+
+def test_empty_trash_purges_all_and_returns_ids(db):
+    _seed_session_with_event(db, "del-1")
+    _seed_session_with_event(db, "del-2")
+    db.trash_session("del-1")
+    db.trash_session("del-2")
+
+    purged = db.empty_trash()
+
+    assert sorted(purged) == ["del-1", "del-2"]
+    assert db.list_trashed_sessions() == []

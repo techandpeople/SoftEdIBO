@@ -16,6 +16,16 @@ class SessionRecord:
 
 
 @dataclass
+class TrashedSession:
+    """Summary of a session sitting in the trash, awaiting restore or purge."""
+    session_id: str
+    activity_name: str
+    start_time: datetime
+    end_time: datetime | None
+    trashed_at: datetime
+
+
+@dataclass
 class ParticipantRecord:
     """Stored record of a participant."""
     participant_id: str

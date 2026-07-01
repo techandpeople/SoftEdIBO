@@ -59,6 +59,19 @@
    <item>
     <layout class="QHBoxLayout" name="export_layout">
      <item>
+      <widget class="QPushButton" name="delete_btn">
+       <property name="whatsThis"><string>Move the selected session to the trash. It leaves the list and can be restored (or deleted for good) from the Trash button.</string></property>
+       <property name="styleSheet"><string>QPushButton { color: white; background-color: #c0392b; } QPushButton:hover { background-color: #e74c3c; } QPushButton:disabled { color: #cccccc; background-color: #b5817c; }</string></property>
+       <property name="text"><string>Delete Session</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="trash_btn">
+       <property name="whatsThis"><string>Open the trash: sessions you deleted are kept there so nothing is lost by accident. From it you can restore a session or delete it permanently.</string></property>
+       <property name="text"><string>Trash…</string></property>
+      </widget>
+     </item>
+     <item>
       <spacer>
        <property name="orientation"><enum>Qt::Horizontal</enum></property>
       </spacer>

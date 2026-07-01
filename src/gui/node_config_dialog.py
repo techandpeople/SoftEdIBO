@@ -76,6 +76,7 @@ class NodeConfigDialog(BaseDialog, Ui_NodeConfigDialog):
         self._update_note()
 
         self.save_btn.clicked.connect(self._on_save)
+        self.apply_btn.clicked.connect(self._on_apply)
         self.cancel_btn.clicked.connect(self.reject)
         self.delete_btn.clicked.connect(self._on_delete)
 
@@ -142,14 +143,17 @@ class NodeConfigDialog(BaseDialog, Ui_NodeConfigDialog):
     # Actions
     # ------------------------------------------------------------------
 
-    def _on_save(self) -> None:
+    def _commit(self) -> bool:
+        """Validate and persist the node to settings, without closing. Returns
+        True on success. Shared by Save (which then closes) and Apply (which
+        stays open so the user can keep editing)."""
         mac       = self.mac_edit.text().strip()
         node_type = self.type_combo.currentText()
         max_slots = 3 if node_type == "node_direct" else self.slots_spin.value()
 
         if not mac:
             QMessageBox.warning(self, "Missing Field", "Node MAC cannot be empty.")
-            return
+            return False
 
         # Check MAC not already used by another node in this robot
         robots_list = (
@@ -164,7 +168,7 @@ class NodeConfigDialog(BaseDialog, Ui_NodeConfigDialog):
                         self, "Duplicate MAC",
                         f"Node {mac} is already configured for this robot.",
                     )
-                    return
+                    return False
 
         # Preserve any extra fields from the existing entry so YAML-only edits
         # aren't lost when saving from the UI, but drop the removed reservoir/
@@ -185,11 +189,23 @@ class NodeConfigDialog(BaseDialog, Ui_NodeConfigDialog):
             nodes = robots_list[self._robot_index].setdefault("nodes", [])
             if self._node_index < 0:
                 nodes.append(node_entry)
+                # Adopt the appended slot so a second Apply replaces this entry
+                # instead of appending a duplicate, and flip into edit mode.
+                self._node_index = len(nodes) - 1
+                self.setWindowTitle("Configure Node")
+                self.delete_btn.setVisible(True)
             else:
                 nodes[self._node_index] = node_entry
 
         self._settings.save()
-        self.accept()
+        return True
+
+    def _on_apply(self) -> None:
+        self._commit()
+
+    def _on_save(self) -> None:
+        if self._commit():
+            self.accept()
 
     def _on_delete(self) -> None:
         reply = QMessageBox.question(

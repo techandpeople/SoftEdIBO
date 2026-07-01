@@ -6,6 +6,7 @@ from typing import Any
 from src.hardware.espnow_gateway import ESPNowGateway
 from src.robots.esp_robot import EspRobot
 from src.robots.base_robot import RobotStatus
+from src.robots.thymio.thymio_link import ThymioLink
 
 logger = logging.getLogger(__name__)
 
@@ -13,8 +14,11 @@ logger = logging.getLogger(__name__)
 class ThymioRobot(EspRobot):
     """Thymio wheeled robot with movement, sensor, and air chamber capabilities.
 
-    The ESP-NOW node side is identical to other robots and lives in EspRobot.
-    Thymio adds the tdm-client connection and motor / LED commands.
+    The ESP-NOW node side (air chambers) is identical to other robots and lives in
+    EspRobot. Thymio adds the wheeled base: motors and LEDs driven through an
+    injected :class:`ThymioLink` (tdmclient over a TDM / RF dongle). When no link is
+    given the movement commands are no-ops and ``connect`` still succeeds, so the
+    sim / no-hardware path is unchanged.
     """
 
     def __init__(
@@ -25,6 +29,7 @@ class ThymioRobot(EspRobot):
         gateway: ESPNowGateway | None = None,
         node_configs: list[dict[str, Any]] | None = None,
         skin_configs: list[dict[str, Any]] | None = None,
+        link: ThymioLink | None = None,
     ):
         super().__init__(
             robot_id, f"Thymio-{robot_id}",
@@ -34,26 +39,26 @@ class ThymioRobot(EspRobot):
         )
         self._tdm_host = tdm_host
         self._tdm_port = tdm_port
-        self._tdm_node = None
+        self._link = link
 
     # ------------------------------------------------------------------
-    # Lifecycle (overrides EspRobot to add tdm-client)
+    # Lifecycle (overrides EspRobot to add the wheeled base)
     # ------------------------------------------------------------------
 
     def connect(self) -> bool:
         self._status = RobotStatus.CONNECTING
-        try:
-            # TODO: Implement tdm-client connection.
-            self._status = RobotStatus.CONNECTED
-            logger.info("Thymio %s connected", self.robot_id)
-            return True
-        except Exception:
+        if self._link is not None and not self._link.connect():
             self._status = RobotStatus.ERROR
-            logger.exception("Failed to connect Thymio %s", self.robot_id)
+            logger.error("Thymio %s: could not reach the wheeled base (TDM/dongle)", self.robot_id)
             return False
+        self._status = RobotStatus.CONNECTED
+        logger.info("Thymio %s connected%s", self.robot_id,
+                    "" if self._link else " (no wheeled base link)")
+        return True
 
     def disconnect(self) -> None:
-        self._tdm_node = None
+        if self._link is not None:
+            self._link.close()
         super().disconnect()
 
     # ------------------------------------------------------------------
@@ -65,12 +70,26 @@ class ThymioRobot(EspRobot):
             return False
         if kwargs.get("skin"):
             return super().send_command(command, **kwargs)
-        # TODO: tdm-client movement / LED commands.
-        logger.debug("Thymio %s command: %s %s", self.robot_id, command, kwargs)
-        return True
+        if command == "motors":
+            return self.set_motors(kwargs.get("left", 0), kwargs.get("right", 0))
+        if command == "leds":
+            return self.set_leds(kwargs.get("r", 0), kwargs.get("g", 0), kwargs.get("b", 0))
+        if command == "stop":
+            return self.stop()
+        logger.debug("Thymio %s: unhandled command %r", self.robot_id, command)
+        return False
 
     def set_motors(self, left: int, right: int) -> bool:
-        return self.send_command("motors", left=left, right=right)
+        if self._link is not None:
+            return self._link.set_motors(left, right)
+        logger.debug("Thymio %s set_motors %d %d (no link)", self.robot_id, left, right)
+        return True
+
+    def set_leds(self, r: int, g: int, b: int) -> bool:
+        if self._link is not None:
+            return self._link.set_leds(r, g, b)
+        logger.debug("Thymio %s set_leds %d %d %d (no link)", self.robot_id, r, g, b)
+        return True
 
     def stop(self) -> bool:
         return self.set_motors(0, 0)
@@ -79,9 +98,6 @@ class ThymioRobot(EspRobot):
         # Stop the wheels too, then latch the air nodes off (EspRobot).
         self.stop()
         super().emergency_stop()
-
-    def set_leds(self, r: int, g: int, b: int) -> bool:
-        return self.send_command("leds", r=r, g=g, b=b)
 
     def get_status_data(self) -> dict[str, Any]:
         return {**super().get_status_data(), "sensors": {}}

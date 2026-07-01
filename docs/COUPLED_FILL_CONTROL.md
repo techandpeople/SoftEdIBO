@@ -138,11 +138,30 @@ The small future offset becomes a small **negative**, so the watchdog only fires
 on a real timeout. The engine already used signed `(int32_t)(now - phaseMs)`
 everywhere; the watchdog was the one raw-unsigned holdout.
 
-**Lesson.** Any `millis()` difference against a timestamp that was captured off
-the loop's cached `now` (or any time later than `now`) must be **signed**. Cache a
-single `now` per loop and compare with `(int32_t)(now - then) >= window`. The
-ESP-NOW trace pattern — `ev:eng code:0` (open) with no following `code:1` (end) —
-is what pinned it; keep that diagnostic.
+**Same bug, more places.** The pattern recurs anywhere a timestamp is set with
+`millis()` *during the command drain or a control tick* (both run AFTER `loop()`
+caches `now`) and is then compared `now - ts >= window` unsigned. All fixed to
+signed:
+
+- `actuationWatchdog` — `since_ms` set in `engOpen` (control tick).
+- `manualSafetyTick` — `manualPumpTs` / `manualValveTs` set in the command drain.
+  This is the **"a manually-opened valve in Test Actuators sometimes closes
+  itself"** bug: the dead-man underflowed and shut the valve the instant it
+  opened. "Sometimes", because it only triggers when a millisecond ticks over
+  between `now = millis()` and `setManualValve` (otherwise `manualValveTs == now`,
+  diff 0). (Note: a manual valve still auto-closes after `MANUAL_MAX_ON_MS` = 5 s
+  by design — the dead-man — unless the dialog keeps it alive.)
+- multiplexed manual override (`manualTs`) and the bench-test keepalive
+  (`testHeartbeatMs`) — same drain-set-then-compare pattern.
+
+The periodic throttles (`lastStatusMs`, `lastPressureMs`, `lastChamberMs`, …) are
+**not** affected: they are set to `now` when they fire, so they are always `<=
+now` (no underflow except at the 49.7-day `millis()` rollover).
+
+**Lesson.** Any `millis()` difference against a timestamp that may be later than
+the loop's cached `now` must be **signed**: `(int32_t)(now - then) >= window`.
+Cache one `now` per loop. The ESP-NOW trace pattern — `ev:eng code:0` (open) with
+no following `code:1` (end) — is what pinned the first one; keep that diagnostic.
 
 ## Diagnostics (`-DDEBUG_BUILD`)
 

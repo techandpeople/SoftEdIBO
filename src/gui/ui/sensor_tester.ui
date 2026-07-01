@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>SensorTester</class>
+ <widget class="QGroupBox" name="SensorTester">
+  <property name="geometry">
+   <rect><x>0</x><y>0</y><width>620</width><height>240</height></rect>
+  </property>
+  <property name="title"><string>Magnet sensor test</string></property>
+  <property name="whatsThis"><string>Live readout of the node's magnet/touch sensors. Each bar shows how far that sensor's field has moved from its baseline, in µT — press the skin above a sensor and its bar rises. A sensor lights green once it passes the &quot;Active threshold&quot;. Re-zero resets the baseline (do it at rest, hands off). Push to node sends this threshold to the board so its own touch detection (used by activities and the monitor) fires at the same level.</string></property>
+  <layout class="QVBoxLayout" name="main_layout">
+   <item>
+    <widget class="QLabel" name="status_label">
+     <property name="text"><string>Waiting for sensor data… (this node may have no magnet sensors)</string></property>
+    </widget>
+   </item>
+   <item>
+    <layout class="QVBoxLayout" name="sensors_vbox"/>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="controls_row">
+     <item>
+      <widget class="QLabel" name="threshold_label">
+       <property name="text"><string>Active threshold:</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QDoubleSpinBox" name="threshold_spin">
+       <property name="whatsThis"><string>A sensor counts as touched once its reading (µT) reaches this value. Lower = more sensitive. Set it above the resting values (near 0 after a Re-zero) and below a real press. Push to node applies it to the board.</string></property>
+       <property name="suffix"><string> µT</string></property>
+       <property name="decimals"><number>0</number></property>
+       <property name="minimum"><double>1.000000000000000</double></property>
+       <property name="maximum"><double>2000.000000000000000</double></property>
+       <property name="singleStep"><double>10.000000000000000</double></property>
+       <property name="value"><double>100.000000000000000</double></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="rezero_btn">
+       <property name="whatsThis"><string>Re-zero the sensors' baseline on the node so the current field reads as 0 µT. Do this at rest, with nothing pressing the skin.</string></property>
+       <property name="text"><string>Re-zero</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="push_btn">
+       <property name="whatsThis"><string>Send the active threshold above to the board so its own touch detection fires at this µT level — fixing detection everywhere (this test, activities and the monitor), not only in this readout.</string></property>
+       <property name="text"><string>Push to node</string></property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="controls_spacer">
+       <property name="orientation"><enum>Qt::Horizontal</enum></property>
+       <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+      </spacer>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

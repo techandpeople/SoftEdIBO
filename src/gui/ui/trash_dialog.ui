@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>TrashDialog</class>
+ <widget class="QDialog" name="TrashDialog">
+  <property name="geometry">
+   <rect><x>0</x><y>0</y><width>640</width><height>420</height></rect>
+  </property>
+  <property name="windowTitle"><string>Trash</string></property>
+  <property name="minimumSize">
+   <size><width>560</width><height>360</height></size>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <widget class="QLabel" name="intro_label">
+     <property name="text"><string>Deleted sessions are kept here so nothing is lost by accident. Restore one, or delete it permanently.</string></property>
+     <property name="wordWrap"><bool>true</bool></property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QTableWidget" name="trash_table">
+     <property name="whatsThis"><string>Sessions currently in the trash. Select one to restore it or delete it for good.</string></property>
+     <property name="selectionBehavior">
+      <enum>QAbstractItemView::SelectRows</enum>
+     </property>
+     <property name="editTriggers">
+      <set>QAbstractItemView::NoEditTriggers</set>
+     </property>
+     <property name="alternatingRowColors"><bool>true</bool></property>
+     <property name="columnCount"><number>4</number></property>
+     <column><property name="text"><string>Session ID</string></property></column>
+     <column><property name="text"><string>Activity</string></property></column>
+     <column><property name="text"><string>Start</string></property></column>
+     <column><property name="text"><string>Deleted</string></property></column>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="actions_layout">
+     <item>
+      <widget class="QPushButton" name="restore_btn">
+       <property name="whatsThis"><string>Put the selected trashed session back into the sessions list, exactly as it was.</string></property>
+       <property name="text"><string>Restore</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="purge_btn">
+       <property name="whatsThis"><string>Permanently delete the selected trashed session and its recording. This cannot be undone.</string></property>
+       <property name="styleSheet"><string>QPushButton { color: white; background-color: #c0392b; } QPushButton:hover { background-color: #e74c3c; } QPushButton:disabled { color: #cccccc; background-color: #b5817c; }</string></property>
+       <property name="text"><string>Delete Permanently</string></property>
+      </widget>
+     </item>
+     <item>
+      <spacer>
+       <property name="orientation"><enum>Qt::Horizontal</enum></property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="QPushButton" name="empty_trash_btn">
+       <property name="whatsThis"><string>Permanently delete every session in the trash and their recordings. This cannot be undone.</string></property>
+       <property name="styleSheet"><string>QPushButton { color: white; background-color: #c0392b; } QPushButton:hover { background-color: #e74c3c; } QPushButton:disabled { color: #cccccc; background-color: #b5817c; }</string></property>
+       <property name="text"><string>Empty Trash</string></property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <widget class="QDialogButtonBox" name="button_box">
+     <property name="standardButtons"><set>QDialogButtonBox::Close</set></property>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

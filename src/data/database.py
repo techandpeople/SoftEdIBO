@@ -32,6 +32,7 @@ from src.data.models import (
     SessionAssignment,
     SessionRecord,
     SkinTemplate,
+    TrashedSession,
 )
 
 logger = logging.getLogger(__name__)
@@ -82,6 +83,20 @@ _session_assignments = Table(
     Column("robot_id", String, primary_key=True),
     Column("participant_id", String, primary_key=True),
     Column("unit_ids", String, nullable=False, default="[]"),  # JSON list of skin/branch IDs
+)
+
+# Trash — sessions moved here (soft-delete) before a permanent purge. The whole
+# session (record + events + assignments + participant links) is preserved as a
+# JSON ``bundle`` so a restore reinstates it exactly; ``activity_name`` /
+# ``start_time`` / ``end_time`` are mirrored as columns for cheap listing.
+_trashed_sessions = Table(
+    "trashed_sessions", _metadata,
+    Column("session_id",    String, primary_key=True),
+    Column("activity_name", String, nullable=False),
+    Column("start_time",    String, nullable=False),
+    Column("end_time",      String),
+    Column("trashed_at",    String, nullable=False),
+    Column("bundle",        String, nullable=False),  # JSON snapshot for restore
 )
 
 _counters = Table(
@@ -273,6 +288,180 @@ class Database:
             n = self._extract_counter_num(session.session_id)
             if n is not None:
                 self._bump_counter(conn, "session", n)
+
+    @staticmethod
+    def _delete_live_session(conn, session_id: str) -> None:
+        """Remove a session and its dependent rows from the live tables."""
+        conn.execute(_events.delete().where(_events.c.session_id == session_id))
+        conn.execute(
+            _session_participants.delete()
+            .where(_session_participants.c.session_id == session_id)
+        )
+        conn.execute(
+            _session_assignments.delete()
+            .where(_session_assignments.c.session_id == session_id)
+        )
+        conn.execute(_sessions.delete().where(_sessions.c.session_id == session_id))
+
+    def trash_session(self, session_id: str) -> bool:
+        """Move a session to the trash (soft-delete). Returns False if unknown.
+
+        Snapshots the session (record + events + assignments + participant
+        links) into the trash table, then removes it from the live tables, all
+        in one transaction. Restore with :meth:`restore_session`; delete for
+        good with :meth:`purge_session`. The session's sensor recording (a file
+        on disk) is handled by the caller.
+        """
+        import json
+        # Make sure no queued events are still in flight for this session.
+        self.flush_events()
+        with self._db_engine.begin() as conn:
+            srow = conn.execute(
+                select(_sessions).where(_sessions.c.session_id == session_id)
+            ).first()
+            if srow is None:
+                return False
+
+            events = conn.execute(
+                select(_events).where(_events.c.session_id == session_id)
+                .order_by(_events.c.event_id)
+            ).fetchall()
+            assignments = conn.execute(
+                select(_session_assignments)
+                .where(_session_assignments.c.session_id == session_id)
+            ).fetchall()
+            links = conn.execute(
+                select(_session_participants.c.participant_id)
+                .where(_session_participants.c.session_id == session_id)
+            ).fetchall()
+
+            bundle = {
+                "session": {
+                    "session_id": srow.session_id,
+                    "activity_name": srow.activity_name,
+                    "start_time": srow.start_time,
+                    "end_time": srow.end_time,
+                    "notes": srow.notes,
+                },
+                "events": [
+                    {
+                        "participant_id": e.participant_id,
+                        "type": e.type,
+                        "action": e.action,
+                        "target": e.target,
+                        "timestamp": e.timestamp,
+                        "metadata": e.metadata,
+                    }
+                    for e in events
+                ],
+                # unit_ids kept as the raw JSON string exactly as stored.
+                "assignments": [
+                    {
+                        "robot_id": a.robot_id,
+                        "participant_id": a.participant_id,
+                        "unit_ids": a.unit_ids,
+                    }
+                    for a in assignments
+                ],
+                "participant_ids": [row.participant_id for row in links],
+            }
+
+            conn.execute(
+                _trashed_sessions.delete()
+                .where(_trashed_sessions.c.session_id == session_id)
+            )
+            conn.execute(_trashed_sessions.insert().values(
+                session_id=srow.session_id,
+                activity_name=srow.activity_name,
+                start_time=srow.start_time,
+                end_time=srow.end_time,
+                trashed_at=datetime.now().isoformat(),
+                bundle=json.dumps(bundle),
+            ))
+            self._delete_live_session(conn, session_id)
+        return True
+
+    def list_trashed_sessions(self) -> list[TrashedSession]:
+        """Return trashed sessions, most-recently-trashed first."""
+        with self._db_engine.connect() as conn:
+            rows = conn.execute(
+                select(_trashed_sessions).order_by(_trashed_sessions.c.trashed_at.desc())
+            ).fetchall()
+        return [
+            TrashedSession(
+                session_id=row.session_id,
+                activity_name=row.activity_name,
+                start_time=datetime.fromisoformat(row.start_time),
+                end_time=datetime.fromisoformat(row.end_time) if row.end_time else None,
+                trashed_at=datetime.fromisoformat(row.trashed_at),
+            )
+            for row in rows
+        ]
+
+    def restore_session(self, session_id: str) -> bool:
+        """Restore a trashed session to the live tables. False if not in trash."""
+        import json
+        with self._db_engine.begin() as conn:
+            row = conn.execute(
+                select(_trashed_sessions.c.bundle)
+                .where(_trashed_sessions.c.session_id == session_id)
+            ).first()
+            if row is None:
+                return False
+            bundle = json.loads(row.bundle)
+
+            s = bundle["session"]
+            conn.execute(_sessions.insert().values(
+                session_id=s["session_id"],
+                activity_name=s["activity_name"],
+                start_time=s["start_time"],
+                end_time=s["end_time"],
+                notes=s.get("notes", ""),
+            ))
+            for pid in bundle.get("participant_ids", []):
+                conn.execute(_session_participants.insert().values(
+                    session_id=session_id, participant_id=pid))
+            for a in bundle.get("assignments", []):
+                conn.execute(_session_assignments.insert().values(
+                    session_id=session_id,
+                    robot_id=a["robot_id"],
+                    participant_id=a["participant_id"],
+                    unit_ids=a["unit_ids"],
+                ))
+            for e in bundle.get("events", []):
+                conn.execute(_events.insert().values(
+                    session_id=session_id,
+                    participant_id=e["participant_id"],
+                    type=e["type"],
+                    action=e["action"],
+                    target=e["target"],
+                    timestamp=e["timestamp"],
+                    metadata=e["metadata"],
+                ))
+            conn.execute(
+                _trashed_sessions.delete()
+                .where(_trashed_sessions.c.session_id == session_id)
+            )
+        return True
+
+    def purge_session(self, session_id: str) -> None:
+        """Permanently delete a single trashed session (no restore possible)."""
+        with self._db_engine.begin() as conn:
+            conn.execute(
+                _trashed_sessions.delete()
+                .where(_trashed_sessions.c.session_id == session_id)
+            )
+
+    def empty_trash(self) -> list[str]:
+        """Permanently delete every trashed session. Returns the purged IDs."""
+        with self._db_engine.begin() as conn:
+            ids = [
+                row.session_id for row in conn.execute(
+                    select(_trashed_sessions.c.session_id)
+                ).fetchall()
+            ]
+            conn.execute(_trashed_sessions.delete())
+        return ids
 
     def get_all_sessions(self) -> list[SessionRecord]:
         """Return all session records ordered by start time."""

@@ -123,7 +123,8 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
         self.all_btn.setEnabled(bool(self._chambers) and gateway is not None)
         self.all_btn.clicked.connect(self._calibrate_all)
         self.stop_btn.clicked.connect(self._stop)
-        self.save_btn.clicked.connect(self._save)
+        self.apply_btn.clicked.connect(self._on_apply)
+        self.save_btn.clicked.connect(self._on_save)
 
         self._tick = QTimer(self)
         self._tick.setInterval(_TICK_MS)
@@ -430,10 +431,13 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
     # Save
     # ------------------------------------------------------------------
 
-    def _save(self) -> None:
+    def _commit(self) -> bool:
+        """Persist the measured fill curves without closing. Returns True on
+        success. Shared by Save (which then closes) and Apply (which stays open
+        so the user can keep refining other chambers)."""
         if not self._results and not self._combo_results:
             QMessageBox.information(self, "Save", "Nothing calibrated yet.")
-            return
+            return False
         for (mac, slot), profile in self._results.items():
             set_fill_profile(self._settings.data, mac, slot, profile)
         for (mac, slot), combos in self._combo_results.items():
@@ -441,8 +445,15 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
         self._settings.save()
         self.saved.emit()
         n = len(set(self._results) | set(self._combo_results))
-        QMessageBox.information(
-            self, "Save", f"Saved fill curves for {n} chamber(s).")
+        self.combo_status.setText(f"Saved fill curves for {n} chamber(s).")
+        return True
+
+    def _on_apply(self) -> None:
+        self._commit()
+
+    def _on_save(self) -> None:
+        if self._commit():
+            self.accept()
 
     # ------------------------------------------------------------------
     # Gateway plumbing (read thread → Signal → GUI thread)

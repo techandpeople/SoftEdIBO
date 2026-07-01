@@ -1,4 +1,8 @@
-"""Seed behaviour specs for the hospital study — the 3 conditions.
+"""Example behaviour specs for the hospital study — the 3 conditions.
+
+These are **no longer auto-registered** as activities (``ACTIVITIES`` is now
+empty). They are kept as reference/example ScriptedActivity specs — the basis
+for the importable JSON examples — and as fixtures for the tests.
 
 Each condition is a 3-phase timeline that heals the robot autonomously over
 time, and can be hurried along by the child's touch. All three converge on the
@@ -11,10 +15,10 @@ same "cured" look (yellow ring, all chambers beating together):
 - Condition C (Texture): the *skin* changes — emptied / rough (chambers at
   0 %) → half empty / half smooth → smooth and breathing.
 
-These are the comportamentos 1-3 / 4-6 / 7-9 from the study brief. They are
-authored here as plain data so the same specs can later be loaded into the
-Blockly block editor and tuned by the researcher. Phase transitions fire on
-time **or** on enough touches, whichever comes first.
+These are behaviours 1-3 / 4-6 / 7-9 from the study brief. They are authored
+here as plain data so the same specs can be loaded into the Blockly block
+editor and tuned by the researcher. Phase transitions fire on time **or** on
+enough touches, whichever comes first.
 """
 
 from __future__ import annotations

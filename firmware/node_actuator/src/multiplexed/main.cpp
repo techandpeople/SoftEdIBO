@@ -63,7 +63,7 @@ void sendError(const char* reason) {
 }
 
 void sendPong() {
-    sendRaw("{\"type\":\"pong\"}");
+    sendRaw("{\"type\":\"pong\",\"rgbw\":" LED_RGBW_JSON "}");
 }
 
 void sendStatus(int chamber, float kpa) {
@@ -328,27 +328,33 @@ void parseAndQueue(const uint8_t* data, int len) {
         // which loop()'s leds::update() renders. "ring" (0..3) selects one of the
         // four rings; omitted / -1 addresses all four at once.
         // {"cmd":"set_led","ring":0..3,"color":"#RRGGBB",
-        //  "pattern":"off|solid|blink|pulse","period_ms":N,"count":N,"index":N}
+        //  "pattern":"off|solid|blink|pulse|comet","period_ms":N,"count":N,
+        //  "fade_ms":N,"index":N}
         const char* col = doc["color"]     | "#000000";
         const char* pat = doc["pattern"]   | "solid";
         uint32_t period = doc["period_ms"] | 0;
         int32_t  count  = doc["count"]     | 0;
+        uint32_t fade   = doc["fade_ms"]   | leds::DEFAULT_FADE_MS;
+        float    offset = ((float)(doc["angle"] | 0.0f)) / 360.0f;   // split/comet rotation
         int      ring   = doc["ring"]      | -1;
         uint8_t r, g, b;
         leds::parseHexColor(col, r, g, b);
         if (strcmp(pat, "off") == 0) { r = g = b = 0; }   // "off" = dark, any colour
         int idx = doc["index"] | -1;
-        if (idx >= 0) leds::setPixel(ring, idx, r, g, b);   // single pixel (test panel)
-        else          leds::set(ring, r, g, b, leds::patternFromStr(pat), period, count);
+        if (idx >= 0) leds::setPixel(ring, idx, r, g, b, fade);   // single pixel (test panel)
+        else          leds::set(ring, r, g, b, leds::patternFromStr(pat), period, count, fade, offset);
         return;
     } else if (strcmp(cmd, "set_led_halves") == 0) {
         // Split ring(s) into len(colors) equal arcs (the purple/yellow look) in
         // ONE frame. Replaces the PC's old per-pixel burst — 24 set_led frames
         // that reset the node by calling show() once per pixel in the recv task.
-        // {"cmd":"set_led_halves","ring":0..3,"colors":["#RRGGBB",...],"pattern":...}
+        // {"cmd":"set_led_halves","ring":0..3,"colors":["#RRGGBB",...],"pattern":...,
+        //  "fade_ms":N}  pattern "comet" paints one comet per colour.
         const char* pat = doc["pattern"]   | "solid";
         uint32_t period = doc["period_ms"] | 0;
         int32_t  count  = doc["count"]     | 0;
+        uint32_t fade   = doc["fade_ms"]   | leds::DEFAULT_FADE_MS;
+        float    offset = ((float)(doc["angle"] | 0.0f)) / 360.0f;   // rotate the split
         int      ring   = doc["ring"]      | -1;
         uint8_t r[leds::MAX_SEGMENTS], g[leds::MAX_SEGMENTS], b[leds::MAX_SEGMENTS];
         int k = 0;
@@ -357,7 +363,7 @@ void parseAndQueue(const uint8_t* data, int len) {
             leds::parseHexColor(v.as<const char*>(), r[k], g[k], b[k]);
             k++;
         }
-        if (k > 0) leds::setSegments(ring, r, g, b, k, leds::patternFromStr(pat), period, count);
+        if (k > 0) leds::setSegments(ring, r, g, b, k, leds::patternFromStr(pat), period, count, fade, offset);
         return;
     } else {
         return;
@@ -684,7 +690,7 @@ void setup() {
     // Broadcast the ready message so the gateway can forward it to the PC
     // even before the node has received its first command (and therefore
     // doesn't yet know the gateway's MAC).
-    static const char ready_msg[] = "{\"status\":\"node_multiplexed_ready\",\"fw\":\"coupled-fill-1\"}";
+    static const char ready_msg[] = "{\"status\":\"node_multiplexed_ready\",\"fw\":\"coupled-fill-2\",\"rgbw\":" LED_RGBW_JSON "}";
     se::broadcast(ready_msg);
 
     LOG("%s\n", ready_msg);
@@ -716,8 +722,11 @@ void loop() {
     uint32_t now = millis();
 
     // Manual (dev) override: dead-man auto-off every loop (cheap, no I/O). When
-    // it fires, autonomous control resumes on the next pressure tick.
-    if (manualActive && now - manualTs >= MANUAL_MAX_ON_MS) manualClearAll();
+    // it fires, autonomous control resumes on the next pressure tick. SIGNED diff:
+    // manualTs is set (millis()) in the command drain, after loop() cached `now`,
+    // so an unsigned `now - manualTs` would underflow on the first tick and clear
+    // the override the instant it was set (manual valve closes itself).
+    if (manualActive && (int32_t)(now - manualTs) >= (int32_t)MANUAL_MAX_ON_MS) manualClearAll();
 
     // ---- Organ + cover sensing (per configured slot) ----
     applyPendingOrganChannels();

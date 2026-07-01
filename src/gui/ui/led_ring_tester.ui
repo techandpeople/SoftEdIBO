@@ -3,10 +3,10 @@
  <class>LedRingTester</class>
  <widget class="QGroupBox" name="LedRingTester">
   <property name="geometry">
-   <rect><x>0</x><y>0</y><width>620</width><height>320</height></rect>
+   <rect><x>0</x><y>0</y><width>620</width><height>270</height></rect>
   </property>
   <property name="title"><string>LED ring test</string></property>
-  <property name="whatsThis"><string>Drives the WS2812 LED ring on a node_direct board. Pick a colour and pattern and apply it to all LEDs, or click an individual LED in the ring to set it. Use it to verify the ring wiring and brightness.</string></property>
+  <property name="whatsThis"><string>Drives the WS2812 LED ring on a node_direct board. Pick a colour, a pattern (solid/blink/pulse, or comet for a rotating light) and how many segments (whole / halves / quarters); the ring updates live as you choose. Every change cross-fades smoothly; the &quot;Smooth transition&quot; box sets how long the fade takes. Use it to verify the ring wiring, brightness and animations.</string></property>
   <layout class="QHBoxLayout" name="main_layout">
    <item>
     <widget class="QWidget" name="left_panel" native="true">
@@ -17,7 +17,7 @@
       <property name="bottomMargin"><number>0</number></property>
       <item>
        <widget class="QLabel" name="select_label">
-        <property name="text"><string>Select color &amp; pattern:</string></property>
+        <property name="text"><string>Select color:</string></property>
        </widget>
       </item>
       <item>
@@ -32,17 +32,50 @@
        <layout class="QHBoxLayout" name="pattern_row"/>
       </item>
       <item>
-       <layout class="QHBoxLayout" name="control_row">
+       <widget class="QLabel" name="segment_label">
+        <property name="text"><string>Segments:</string></property>
+       </widget>
+      </item>
+      <item>
+       <layout class="QHBoxLayout" name="segment_row"/>
+      </item>
+      <item>
+       <layout class="QHBoxLayout" name="transition_row">
         <item>
-         <widget class="QPushButton" name="all_btn">
-          <property name="whatsThis"><string>Set every LED in the ring to the selected colour and pattern.</string></property>
-          <property name="text"><string>Apply to All</string></property>
+         <widget class="QLabel" name="transition_label">
+          <property name="text"><string>Smooth transition:</string></property>
          </widget>
         </item>
+        <item>
+         <widget class="QSpinBox" name="fade_spin">
+          <property name="whatsThis"><string>How long each LED change cross-fades, in milliseconds. 0 snaps instantly; higher values fade more gently. Applies to every colour/pattern change sent from this panel.</string></property>
+          <property name="suffix"><string> ms</string></property>
+          <property name="minimum"><number>0</number></property>
+          <property name="maximum"><number>5000</number></property>
+          <property name="singleStep"><number>50</number></property>
+          <property name="value"><number>250</number></property>
+         </widget>
+        </item>
+        <item>
+         <spacer name="transition_spacer">
+          <property name="orientation"><enum>Qt::Horizontal</enum></property>
+          <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+         </spacer>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <layout class="QHBoxLayout" name="control_row">
         <item>
          <widget class="QPushButton" name="off_btn">
           <property name="whatsThis"><string>Turn the whole ring off.</string></property>
           <property name="text"><string>Off</string></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="save_angle_btn">
+          <property name="whatsThis"><string>Save the current handle angle as this ring's mounting orientation. It is stored with the skin and applied to every animation (test panel and activities) so a physically-rotated ring always shows the right orientation.</string></property>
+          <property name="text"><string>Save angle</string></property>
          </widget>
         </item>
         <item>
@@ -54,14 +87,9 @@
        </layout>
       </item>
       <item>
-       <widget class="QLabel" name="click_label">
-        <property name="text"><string>Click LED to set individually:</string></property>
-       </widget>
-      </item>
-      <item>
        <spacer name="left_spacer">
         <property name="orientation"><enum>Qt::Vertical</enum></property>
-        <property name="sizeHint" stdset="0"><size><width>20</width><height>40</height></size></property>
+        <property name="sizeHint" stdset="0"><size><width>20</width><height>6</height></size></property>
        </spacer>
       </item>
      </layout>

@@ -40,7 +40,7 @@ from src.gui.skin_grid_editor import SkinGridEditor
 from src.gui.base_dialog import BaseDialog
 from src.gui.ui_skin_config_dialog import Ui_SkinConfigDialog
 from src.hardware.espnow_gateway import ESPNowGateway
-from src.hardware.skin_geometry import max_organs_for
+from src.hardware.skin_geometry import max_organs_for, variant_has_organs
 
 # Domain rules (node lookup, validation, persistence) live in src.core.skin_config;
 # these aliases keep the dialog terse while single-sourcing the values there.
@@ -52,8 +52,6 @@ _MAX_CHAMBERS      = skincfg.MAX_CHAMBERS
 _DEFAULT_FILL_MODE = skincfg.DEFAULT_FILL_MODE
 _NONE_LABEL        = "(none)"
 _MISSING_FIELD_TITLE = "Missing Field"
-# Silicone variant that carries pluggable organs (organ editor gated on it).
-_ORGAN_VARIANT     = "organ"
 
 
 class _ChamberRow(QWidget):
@@ -243,6 +241,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         self._robot_index = robot_index
         self._skin_index  = skin_index
         self._settings    = settings
+        self._led_angles: dict[int, float] = {}   # ring → mounting angle (deg)
         self._gateway     = gateway
         self._db          = db
         self._rows: list[_ChamberRow] = []
@@ -265,7 +264,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         # coordinates) and the per-type touch-gesture model. Only the types of
         # THIS robot kind are offered. When the robot has exactly one type
         # (Tree, Thymio) there is nothing to choose — preselect it, hide the row.
-        from src.hardware.skin_geometry import known_skin_variants, skin_types_for
+        from src.hardware.skin_geometry import skin_types_for
         types = skin_types_for(self._robot_type)
         single_type = len(types) == 1
         if not single_type:
@@ -274,13 +273,12 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
             self.skin_type_combo.addItem(st, st)
         self.skin_type_combo.currentIndexChanged.connect(self._on_skin_type_changed)
         # Silicone variant — orthogonal to the shape (same shape, different
-        # silicone format / chamber sizes). Fed to the touch ML as a feature.
-        self.skin_variant_combo.addItem("(none)", "")
-        for sv in known_skin_variants():
-            self.skin_variant_combo.addItem(sv, sv)
-        # Organs only exist on the "organ" silicone variant — gate the organ
-        # editor on it (the other variants have no pluggable organ slots).
+        # silicone format / chamber sizes), but the set of formats a shape is
+        # cast in is hardcoded per skin TYPE (geometry registry). The combo is
+        # rebuilt from the selected type; organs are gated on organ-bearing
+        # variants. Fed to the touch ML as a feature.
         self.skin_variant_combo.currentIndexChanged.connect(self._on_variant_changed)
+        self._rebuild_variant_combo()
         if single_type:
             try:
                 self.form.setRowVisible(self.skin_type_combo, False)
@@ -346,6 +344,10 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         self._load_organs(skin_cfg.get("organs"))
         self._sync_organ_geometry()
         self._on_variant_changed()
+        # Per-ring LED mounting angles (ring index → degrees). Edited from the Test
+        # Actuators dialog's ring handle; persisted with the skin entry.
+        self._led_angles = {int(k): float(v)
+                            for k, v in (skin_cfg.get("led_angles") or {}).items()}
         self._rebuild_palette()
 
     def _populate_chambers(self, skin_cfg: dict) -> None:
@@ -718,7 +720,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         """Simple list of the pluggable organs on this skin (hospital study):
         one row per organ with its good/bad resistance. The monitor shows each
         organ as a numbered dot (green=good, red=bad, empty=absent) beside the
-        skin grid. Only the organ silicone variant has organs."""
+        skin grid. Only organ-bearing silicone variants have organs."""
         group = QGroupBox("Organs (optional)")
         group.setWhatsThis(
             "List the pluggable organs on this skin — one row per organ with the "
@@ -726,7 +728,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
             "shows as a numbered dot (green = good, red = bad, empty = absent), "
             "inferred from the skin's organ-circuit resistance. Choose good/bad "
             "resistances well separated so different organ combinations don't "
-            "overlap. Available only on the 'organ' skin variant.")
+            "overlap. Available only on organ-bearing skin variants.")
         v = QVBoxLayout(group)
         v.addWidget(QLabel(
             "<i>Each organ is a numbered dot in the monitor: "
@@ -786,14 +788,34 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
                         "good_ohm": good, "bad_ohm": bad})
         return out
 
+    def _rebuild_variant_combo(self) -> None:
+        """Repopulate the silicone-variant picker for the current skin type.
+
+        Variants are hardcoded per type (geometry registry), so switching the
+        type swaps the offered formats. Keeps the current selection when the new
+        type still offers it, else falls back to ``(none)``."""
+        from src.hardware.skin_geometry import skin_variants_for, variant_label
+        prev = self.skin_variant_combo.currentData()
+        self.skin_variant_combo.blockSignals(True)
+        self.skin_variant_combo.clear()
+        self.skin_variant_combo.addItem("(none)", "")
+        for sv in skin_variants_for(self.skin_type_combo.currentData()):
+            self.skin_variant_combo.addItem(variant_label(sv), sv)
+        idx = self.skin_variant_combo.findData(prev)
+        self.skin_variant_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self.skin_variant_combo.blockSignals(False)
+        self._on_variant_changed()
+
     def _on_variant_changed(self, _index: int = 0) -> None:
-        """Organs only exist on the ``organ`` silicone variant — enable the
-        organ list only then."""
-        is_organ = self.skin_variant_combo.currentData() == _ORGAN_VARIANT
+        """Organs only exist on organ-bearing silicone variants — enable the
+        organ list only then. No-op until the organ group is built."""
+        if not hasattr(self, "_organ_group"):
+            return
+        is_organ = variant_has_organs(self.skin_variant_combo.currentData())
         self._organ_group.setEnabled(is_organ)
         self._organ_group.setToolTip(
             "" if is_organ
-            else "Organs are only available on the 'organ' skin variant.")
+            else "Organs are only available on organ silicone variants.")
 
     def _on_dims_changed(self, _value: int) -> None:
         """Spinbox edited → resize the layer currently being edited."""
@@ -828,8 +850,10 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
 
     def _on_skin_type_changed(self, _index: int = 0) -> None:
         """Drive the grid's outline + aspect ratio from the chosen skin type's
-        registry geometry (square vs rectangle vs round/triangle/'D')."""
+        registry geometry (square vs rectangle vs round/triangle/'D'), and
+        re-offer only the silicone variants this type is cast in."""
         from src.hardware.skin_geometry import geometry_for
+        self._rebuild_variant_combo()
         geo = geometry_for(self.skin_type_combo.currentData())
         if geo is None:
             self._grid.set_geometry("rect", None)
@@ -980,9 +1004,23 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
             skin_cfgs=skin_cfgs,
             gateway=self._gateway,
             led_rings=led_rings,
+            led_angles=dict(self._led_angles),
+            on_save_angle=self._save_led_angle,
             parent=self,
         )
         dlg.exec()
+
+    def _save_led_angle(self, ring: int, angle: float) -> None:
+        """Persist a ring's LED mounting angle (from the Test Actuators handle).
+
+        Patches the saved skin entry in place when the skin already exists;
+        otherwise keeps it in memory to be written on the next full Save."""
+        self._led_angles[int(ring)] = float(angle)
+        if self._skin_index is not None and self._skin_index >= 0:
+            if skincfg.set_skin_led_angles(
+                    self._settings.data, self._robot_type, self._robot_index,
+                    self._skin_index, self._led_angles):
+                self._settings.save()
 
     def _on_calibrate(self) -> None:
         """Calibrate fill times for just this skin's chambers.
@@ -1120,9 +1158,13 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         skin_entry = skincfg.build_skin_entry(
             skin_id, chambers, skin_type, skin_variant)
         self._apply_layout_and_touch(skin_entry)
-        # Organs are only meaningful on the organ variant; drop them otherwise.
-        organs = self._organs_from_rows() if skin_variant == _ORGAN_VARIANT else []
+        # Organs are only meaningful on organ-bearing variants; drop otherwise.
+        organs = self._organs_from_rows() if variant_has_organs(skin_variant) else []
         skincfg.apply_organs(skin_entry, organs)
+        # Carry the per-ring LED mounting angles through a full save.
+        if self._led_angles:
+            skin_entry["led_angles"] = {
+                str(k): float(v) for k, v in self._led_angles.items()}
 
         # save_skin_entry returns the written index — for a brand-new skin this
         # is the appended slot. Adopt it so a second Apply replaces the entry

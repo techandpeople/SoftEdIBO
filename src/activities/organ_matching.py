@@ -2,8 +2,9 @@
 
 Pure domain logic, no hardware or Qt: given the activity preset's parameters
 (mode, target, tolerance, catalogue) and a total resistance reading, answer
-``is_cured``. Extracted from ``OrganSwapActivity`` so the matching rules are
-testable in isolation and reusable (e.g. by a GUI organ-catalogue tool).
+``is_cured``. Kept separate from any activity so the matching rules are
+testable in isolation and reusable (e.g. by the monitor's organ panel or a
+GUI organ-catalogue tool).
 """
 
 from __future__ import annotations
