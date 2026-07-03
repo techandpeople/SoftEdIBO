@@ -16,7 +16,7 @@
    <item>
     <widget class="QLabel" name="intro_label">
      <property name="wordWrap"><bool>true</bool></property>
-     <property name="text"><string>Inflating a chamber shifts the magnet over each touch sensor, which can fake a touch. This sweep inflates each chamber alone, reads how much it moves every sensor (in µT), and stores that as a per-chamber compensation matrix that is subtracted from the live reading. Run it once per skin, without touching the skin. Keep hands clear.</string></property>
+     <property name="text"><string>Inflating a chamber shifts the magnet over each touch sensor, which can fake a touch. This sweep inflates each chamber alone through a staircase of levels, reads how much it moves every sensor (in µT) at each level, and stores that as per-chamber compensation curves that are subtracted from the live reading. Run it once per skin, without touching the skin. Keep hands clear.</string></property>
     </widget>
    </item>
    <item>
@@ -84,6 +84,72 @@
        <property name="value"><number>300</number></property>
        <property name="whatsThis"><string>After compensation, a sensor counts as touched when its residual reaches this many µT. Lower = more sensitive.</string></property>
       </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="advanced_row">
+     <item>
+      <widget class="QLabel" name="levels_label">
+       <property name="text"><string>Levels per chamber:</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QSpinBox" name="levels_spin">
+       <property name="minimum"><number>1</number></property>
+       <property name="maximum"><number>5</number></property>
+       <property name="value"><number>4</number></property>
+       <property name="whatsThis"><string>How many inflation levels to hold per chamber during the sweep (evenly spaced up to 100 %). More levels capture the nonlinear silicone response as a curve, so compensation is accurate at partial inflation too; 1 reproduces the old full-inflation-only matrix. 4 ≈ 25/50/75/100 %.</string></property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="advanced_spacer1">
+       <property name="orientation"><enum>Qt::Horizontal</enum></property>
+       <property name="sizeHint" stdset="0"><size><width>20</width><height>20</height></size></property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="QLabel" name="margin_label">
+       <property name="text"><string>Margin:</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QSpinBox" name="margin_spin">
+       <property name="minimum"><number>0</number></property>
+       <property name="maximum"><number>100</number></property>
+       <property name="singleStep"><number>5</number></property>
+       <property name="value"><number>25</number></property>
+       <property name="suffix"><string> %</string></property>
+       <property name="whatsThis"><string>Safety margin: raise a sensor's touch threshold by this fraction of the correction applied to it. Big corrections carry proportionally bigger calibration error, so this stops them flipping a sensor active on their own. 0 disables the margin (old behaviour).</string></property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="advanced_spacer2">
+       <property name="orientation"><enum>Qt::Horizontal</enum></property>
+       <property name="sizeHint" stdset="0"><size><width>20</width><height>20</height></size></property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="QLabel" name="guard_label">
+       <property name="text"><string>Transition guard:</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QSpinBox" name="guard_spin">
+       <property name="minimum"><number>0</number></property>
+       <property name="maximum"><number>3000</number></property>
+       <property name="singleStep"><number>100</number></property>
+       <property name="value"><number>800</number></property>
+       <property name="suffix"><string> ms</string></property>
+       <property name="specialValueText"><string>off</string></property>
+       <property name="whatsThis"><string>For this long after a chamber's level changes, harden the threshold of the sensors coupled to it (by that chamber's strongest measured offset). The calibration only measures steady state, so during transitions — pump running, pressure readings lagging — the compensation is least reliable and ghost touches are most likely. 0 turns the guard off.</string></property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="advanced_spacer3">
+       <property name="orientation"><enum>Qt::Horizontal</enum></property>
+       <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+      </spacer>
      </item>
     </layout>
    </item>
