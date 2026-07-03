@@ -15,23 +15,34 @@ a given skin (the sensors may sit away from actuated chambers).
 
 ## Three independent pieces
 
-### 1. Measure: which chamber moves which sensor
+### 1. Measure: which chamber moves which sensor, at which level
 
-`src/core/touch_coupling.py` (pure, Qt-free, tested) turns a *sweep* into a
-coupling matrix `[chamber × sensor]` of how much each chamber moves each sensor's
-`mag` (µT), plus a derived chamber↔sensor map:
+`src/core/touch_coupling.py` (pure, Qt-free, tested) turns a *sweep* into
+per-chamber **level→offset curves** `[chamber × level × sensor]` — how much each
+chamber moves each sensor's `mag` (µT) at each inflation level it held — plus a
+derived chamber↔sensor map. A single-level sweep yields the legacy one-point
+matrix; a staircase sweep (e.g. 25/50/75/100 %) captures the nonlinear silicone
+response:
 
-- `build_coupling(samples, sensor_count, …) -> CouplingMatrix`
+- `build_coupling(samples, sensor_count, …) -> CouplingMatrix` (`.curves`,
+  `.deltas` = the strongest-level view)
 - `build_coupling_from_recording(path, sensor_count, …)` — reads a stream JSONL
 - `CouplingMatrix.mapping(threshold)` → `chamber -> [sensors it moves]`
 - `CouplingMatrix.sensor_primary_chamber(threshold)` → `sensor -> strongest chamber`
   (with 4-sensor skins, that's per-quadrant)
 
-**Sensor-lag handling.** Chamber `status` broadcasts arrive ~every 500 ms and the
-gauge pressure sensor lags, while `magnet` samples stream at ~28 Hz. Instead of
-guessing the lag, the analyzer measures only at **steady state**: any sample
-within `settle_ms` (default 800 ms) of a change in the active-chamber
-classification is dropped, so transitions never smear the means.
+When the samples carry the firmware's 3-axis `vec` deltas (the `MAG_VECTOR`
+build of `node_magnet_sensor` — `pio run -e vector`; reflash `-e release` to
+revert), each curve point also records the per-sensor offset **vectors**,
+enabling vector compensation (below). The ready announce gains `"vec":1`.
+
+**Sensor-lag handling.** Chamber `status` broadcasts lag the true pressure,
+while `magnet` samples stream at ~28 Hz. Instead of guessing the lag, the
+analyzer measures only at **steady state**: any sample within `settle_ms`
+(default 800 ms) of a change in the active-chamber classification *or a level
+step* is dropped, so transitions never smear the means. Active samples are
+grouped into 10 %-wide level bins — one curve point per bin, at the bin's mean
+measured level.
 
 ### Collection procedure (no special tooling)
 
@@ -58,16 +69,37 @@ sweep confirms contamination. Toggle live in the Touch tuning panel.
 
 ### 3. Pressure-informed compensation (implemented, PC-side)
 
-Subtracts each chamber's expected per-sensor offset at runtime, using the full
-``[chamber x sensor]`` matrix (one chamber can move several sensors irregularly):
-for each sensor, ``residual = mag - Σ_chamber coupling[c][s] x (level_c / ref)``,
-then the active-sensor set is rederived from the residual. A real press still
-stands out; the actuation offset is removed.
+Subtracts each chamber's expected per-sensor offset at runtime (one chamber can
+move several sensors irregularly): for each sensor, the expected offset at the
+current level is read off the chamber's coupling **curve** (piecewise-linear,
+through the origin; a one-point curve reproduces the legacy
+``delta x level/ref`` scaling), and the active-sensor set is rederived from the
+residual. A real press still stands out; the actuation offset is removed.
 
-- **Core:** `src/core/touch_compensation.py` (`TouchCompensator`, pure/tested) —
-  offset subtraction, `act` recompute (``threshold_ut``), and an opt-in
-  ``suppress_pct`` fallback (blank a sensor while a strongly-coupled chamber is
-  at/above a level — the "ignore touch while inflated/vacuum" last resort).
+Three robustness layers on top of the plain subtraction:
+
+- **Margin** (``margin_frac``): a sensor's activation threshold grows by that
+  fraction of the correction applied to it — big corrections carry
+  proportionally bigger calibration error, so they can't flip a sensor active
+  on their own.
+- **Transition guard** (``guard_ms``, ``guard_level_eps``): the calibration
+  only measures steady state, so for ``guard_ms`` after a chamber's level moves
+  the compensator hardens the coupled sensors' thresholds by that chamber's
+  strongest measured offset (worst case while pressure readings lag / the pump
+  vibrates). Mirrors the analyzer's own settle window, live.
+- **Vector mode** (automatic): touch and actuation displace the magnet along
+  *different axes*; scalar magnitudes therefore under- or over-compensate (they
+  only add up when collinear). When both the calibration and the live stream
+  carry 3-axis ``vec`` deltas, the compensator subtracts the offset **vector**
+  and takes the residual's norm — the physically correct model. Falls back to
+  scalar per reading whenever either side lacks vectors.
+
+- **Core:** `src/core/touch_compensation.py` (`ChamberCoupling` +
+  `TransitionGuard` + `TouchCompensator`, pure/tested) — curve interpolation,
+  offset subtraction, `act` recompute (``threshold_ut`` + margin + guard), and
+  an opt-in ``suppress_pct`` fallback (blank a sensor while a strongly-coupled
+  chamber is at/above a level — the "ignore touch while inflated/vacuum" last
+  resort).
 - **Live wiring:** `src/hardware/touch_source.py` `CompensatedMagnetSource` wraps
   the raw controller; the Skin exposes it as `skin.touch_source` and `skin.on_magnet`.
   Detection consumers (activities, gesture ML, the skin's QuadrantDetector +
@@ -76,16 +108,22 @@ stands out; the actuation offset is removed.
   (they need uncompensated uT). The per-chamber level comes from the Skin's own
   AirChamber model, so it works regardless of fill mode.
 - **Calibration:** Tools → **Calibrate Touch Coupling…**
-  (`src/gui/touch_calibration_dialog.py`): a sweep (inflate each chamber alone,
-  dwell, deflate) collects `mag` + `status`, builds the matrix in uT via
-  `build_coupling`, and stores it as `touch.coupling`; the tuning block
-  `touch.compensation` (`enabled`, `threshold_ut`, `suppress_pct`) is written
-  alongside. Settings helpers + sample→config core in
+  (`src/gui/touch_calibration_dialog.py`): the sweep sequence is a pure
+  `SweepProgram` (rest → per chamber an ascending staircase of levels → deflate;
+  "Levels per chamber" picks the staircase, 1 = the legacy full-inflation-only
+  sweep). The dialog executes it against the gateway, holds **fast telemetry**
+  on the chamber node so level bins track the staircase closely, collects
+  `mag` (+`vec` when streamed) + `status`, builds the curves via
+  `build_coupling`, and stores them as `touch.coupling` (`curves`, plus the
+  legacy `deltas` for older readers); the tuning block `touch.compensation`
+  (`enabled`, `threshold_ut`, `margin_frac`, `guard_ms`, `suppress_pct`) is
+  written alongside. Settings helpers + sample→config core in
   `src/hardware/touch_calibration.py` (tested).
 
-The matrix is measured in **`mag` (uT)** — the same field the PC detection path
-uses. Enabled per skin; off by default, so the
-detection path is byte-for-byte identical until you calibrate and enable.
+The curves are measured in **`mag` (uT)** — the same field the PC detection path
+uses. Enabled per skin; off by default, so the detection path is byte-for-byte
+identical until you calibrate and enable. Configs saved before the curve upgrade
+(single `deltas` matrix, no margin/guard keys) load and behave exactly as before.
 
 ## Existing related mapping
 

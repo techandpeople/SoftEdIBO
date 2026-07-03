@@ -1,6 +1,7 @@
 """Tests for touch-coupling calibration settings helpers + sample→config core."""
 
 from src.hardware.touch_calibration import (
+    SweepProgram,
     coupling_config_from_samples,
     iter_touch_skins,
     set_compensation,
@@ -89,3 +90,50 @@ def test_coupling_config_from_samples():
     # chamber 0 delta on sensor 0 ≈ 200, sensor 1 ≈ 2
     assert abs(cfg["deltas"]["0"][0] - 200.0) < 1.0
     assert abs(cfg["deltas"]["0"][1] - 2.0) < 1.0
+
+
+# --- SweepProgram + curve config --------------------------------------------
+
+
+def test_levels_for_counts():
+    assert SweepProgram.levels_for(1) == (100.0,)
+    assert SweepProgram.levels_for(4) == (25.0, 50.0, 75.0, 100.0)
+    assert SweepProgram.levels_for(5)[0] == 25.0     # floored, not 20
+    assert SweepProgram.levels_for(0) == (100.0,)    # clamped
+
+
+def test_sweep_program_step_sequence():
+    prog = SweepProgram([0, 1], (50.0, 100.0))
+    assert [(s.action, s.slot, s.level) for s in prog.steps] == [
+        ("deflate_all", None, 0.0),
+        ("set_pressure", 0, 50.0), ("set_pressure", 0, 100.0), ("deflate", 0, 0.0),
+        ("set_pressure", 1, 50.0), ("set_pressure", 1, 100.0), ("deflate", 1, 0.0),
+    ]
+    progress = [s.progress for s in prog.steps]
+    assert progress[0] == 0 and progress == sorted(progress)
+    assert all(s.wait_ms > 0 for s in prog.steps)
+
+
+def test_set_compensation_margin_and_guard():
+    data = _settings()
+    set_compensation(data, "turtle_1", "belly", margin_frac=0.25, guard_ms=800.0)
+    comp = data["robots"]["turtles"][0]["skins"][0]["touch"]["compensation"]
+    assert comp["margin_frac"] == 0.25 and comp["guard_ms"] == 800.0
+    set_compensation(data, "turtle_1", "belly", enabled=True)   # None = unchanged
+    assert comp["margin_frac"] == 0.25 and comp["guard_ms"] == 800.0
+
+
+def test_coupling_config_from_samples_writes_curves():
+    samples = []
+    t = 0.0
+    for _ in range(20):
+        samples.append((t, {0: 0.0}, [10.0])); t += 100
+    for _ in range(20):
+        samples.append((t, {0: 50.0}, [110.0])); t += 100
+    for _ in range(20):
+        samples.append((t, {0: 100.0}, [210.0])); t += 100
+    cfg, matrix = coupling_config_from_samples(samples, sensor_count=1)
+    points = cfg["curves"]["0"]
+    assert [round(p["pct"]) for p in points] == [50, 100]
+    assert abs(points[0]["mag"][0] - 100.0) < 1.0
+    assert abs(cfg["deltas"]["0"][0] - 200.0) < 1.0   # legacy view at ref 100

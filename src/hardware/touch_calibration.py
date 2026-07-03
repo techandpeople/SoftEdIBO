@@ -1,25 +1,92 @@
 """Touch↔chamber coupling calibration — GUI-free core + settings helpers.
 
-Builds the pressure-informed compensation matrix (see
-:mod:`src.core.touch_compensation`) from a *sweep*: inflate one chamber at a time
-to full, hold, and read the magnet sensors at steady state. The per-(chamber,
-sensor) magnitude shift vs rest is the coupling — measured in raw uT, the same
-units the PC detection path uses.
+Builds the pressure-informed compensation model (see
+:mod:`src.core.touch_compensation`) from a *sweep*: inflate one chamber at a
+time through a staircase of levels, hold each, and read the magnet sensors at
+steady state. The per-(chamber, level, sensor) magnitude shift vs rest is the
+coupling curve — measured in raw uT, the same units the PC detection path uses.
 
-The matrix maths live in :mod:`src.core.touch_coupling` (tested); this module
-adds the settings-tree walks that persist the result onto a skin's ``touch``
-block and toggle compensation. The Qt dialog
-(``src/gui/touch_calibration_dialog.py``) drives the hardware sweep and feeds
-samples in.
+:class:`SweepProgram` is the pure step sequence of that sweep (what to send,
+how long to dwell); the Qt dialog (``src/gui/touch_calibration_dialog.py``)
+just executes it against the gateway and feeds the samples back in. The curve
+maths live in :mod:`src.core.touch_coupling` (tested); this module also adds
+the settings-tree walks that persist the result onto a skin's ``touch`` block
+and toggle compensation.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from src.core.skin_config import MAGNET_NODE_TYPES, YAML_KEY
 from src.core.touch_compensation import coupling_to_config
 from src.core.touch_coupling import CouplingMatrix, build_coupling
+
+# Sweep timing defaults. Dwell well past the coupling analyzer's steady-state
+# guard (settle_ms 800) so each level contributes plenty of settled samples.
+REST_MS = 2500
+DWELL_MS = 3500
+# The lowest staircase level: safely above touch_coupling.ACTIVE_MIN so a
+# chamber settling slightly under target still classifies as that chamber.
+MIN_SWEEP_LEVEL = 25.0
+
+
+@dataclass(frozen=True)
+class SweepStep:
+    """One hardware step of a coupling sweep.
+
+    ``action`` is what the executor sends (``deflate_all`` / ``set_pressure`` /
+    ``deflate``); ``wait_ms`` is how long to dwell before the next step;
+    ``progress`` is the 0-100 sweep completion when the step starts."""
+    action: str
+    slot: int | None
+    level: float
+    wait_ms: int
+    label: str
+    progress: int
+
+
+class SweepProgram:
+    """The pure step sequence of a coupling sweep.
+
+    Rest first (baseline), then per chamber an *ascending staircase* of
+    inflation levels (one dwell each — each level becomes a coupling-curve
+    point), then deflate back and settle. Building it here keeps the dialog a
+    dumb executor and makes the sequence unit-testable.
+    """
+
+    def __init__(self, slots: list[int],
+                 levels: tuple[float, ...] = (100.0,), *,
+                 rest_ms: int = REST_MS, dwell_ms: int = DWELL_MS) -> None:
+        self.slots = list(slots)
+        self.levels = tuple(sorted({float(lv) for lv in levels}))
+        steps: list[SweepStep] = []
+        total = max(1, len(self.slots) * (len(self.levels) + 1) + 1)
+
+        def pct() -> int:
+            return int(100 * len(steps) / total)
+
+        steps.append(SweepStep("deflate_all", None, 0.0, rest_ms,
+                               "Resting (establishing baseline)…", pct()))
+        for slot in self.slots:
+            for level in self.levels:
+                steps.append(SweepStep(
+                    "set_pressure", slot, level, dwell_ms,
+                    f"Chamber slot {slot} → {level:.0f} %…", pct()))
+            steps.append(SweepStep(
+                "deflate", slot, 0.0, rest_ms,
+                f"Chamber slot {slot} → rest…", pct()))
+        self.steps = steps
+
+    @staticmethod
+    def levels_for(count: int) -> tuple[float, ...]:
+        """``count`` staircase levels evenly spaced up to 100 %, floored at
+        :data:`MIN_SWEEP_LEVEL` (1 → the legacy full-inflation-only sweep)."""
+        count = max(1, int(count))
+        return tuple(sorted({float(max(MIN_SWEEP_LEVEL,
+                                       round(100.0 * i / count)))
+                             for i in range(1, count + 1)}))
 
 
 def _iter_robots(settings_data: dict) -> Any:
@@ -88,12 +155,17 @@ def set_touch_coupling(settings_data: dict, robot_id: str, skin_id: str,
 def set_compensation(settings_data: dict, robot_id: str, skin_id: str, *,
                      enabled: bool | None = None,
                      threshold_ut: float | None = None,
+                     margin_frac: float | None = None,
+                     guard_ms: float | None = None,
                      suppress_pct: float | None = -1.0) -> bool:
     """Update a skin's ``touch.compensation`` tuning block. Returns True if the
     skin was found.
 
     Only non-default args are written. ``suppress_pct`` uses the sentinel ``-1``
-    to mean 'leave unchanged'; pass ``None`` to clear it (disable suppression)."""
+    to mean 'leave unchanged'; pass ``None`` to clear it (disable suppression).
+    ``margin_frac`` raises the touch threshold by that fraction of the applied
+    correction; ``guard_ms`` hardens sensors for that long after a coupled
+    chamber's level changes (0 disables the guard)."""
     skin = _find_skin(settings_data, robot_id, skin_id)
     if skin is None:
         return False
@@ -102,6 +174,10 @@ def set_compensation(settings_data: dict, robot_id: str, skin_id: str, *,
         comp["enabled"] = bool(enabled)
     if threshold_ut is not None:
         comp["threshold_ut"] = float(threshold_ut)
+    if margin_frac is not None:
+        comp["margin_frac"] = round(float(margin_frac), 3)
+    if guard_ms is not None:
+        comp["guard_ms"] = float(guard_ms)
     if suppress_pct != -1.0:
         if suppress_pct is None:
             comp.pop("suppress_pct", None)
@@ -115,9 +191,18 @@ def coupling_config_from_samples(samples: Any, sensor_count: int, *,
                                  **build_kw: Any) -> tuple[dict, CouplingMatrix]:
     """Build a stored ``touch.coupling`` dict from sweep samples.
 
-    ``samples`` are ``(t_ms, {slot: pct}, mag_vector)`` tuples (the magnet vector
-    in raw uT). Returns ``(coupling_config, matrix)`` — the matrix is handy for a
-    UI preview of the per-(chamber, sensor) deltas before saving."""
+    ``samples`` are ``(t_ms, {slot: pct}, mag_vector[, vec_rows])`` tuples (the
+    magnet vector in raw uT). The config carries both the legacy single-point
+    ``deltas`` (scaled to ``ref_pct`` for older readers) and the full
+    multi-level ``curves``. Returns ``(coupling_config, matrix)`` — the matrix
+    is handy for a UI preview of the per-(chamber, sensor) deltas before
+    saving."""
     matrix = build_coupling(samples, sensor_count, **build_kw)
-    cfg = coupling_to_config(matrix.deltas, sensor_count, ref_pct=ref_pct)
+    deltas = {}
+    for chamber, points in matrix.curves.items():
+        top = points[-1]
+        scale = ref_pct / top.level_pct if top.level_pct > 0.0 else 1.0
+        deltas[chamber] = [v * scale for v in top.mag]
+    cfg = coupling_to_config(deltas, sensor_count, ref_pct=ref_pct,
+                             curves=matrix.curves_for_config())
     return cfg, matrix

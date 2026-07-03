@@ -1,19 +1,17 @@
 """Touch↔chamber coupling calibration dialog (Tools → Calibrate Touch Coupling…).
 
 Measures, per skin, how much inflating each chamber shifts every magnet/touch
-sensor (in µT), and stores it as the skin's ``touch.coupling`` matrix so the
-runtime can subtract that actuation offset and stop a chamber faking a touch
-(see :mod:`src.core.touch_compensation`).
+sensor (in µT) — at several inflation levels — and stores it as the skin's
+``touch.coupling`` curves so the runtime can subtract that actuation offset and
+stop a chamber faking a touch (see :mod:`src.core.touch_compensation`).
 
-Sweep (driven by a timer + the gateway's ``status``/``magnet`` streams):
-  1. Deflate every chamber and dwell — establishes the rest baseline.
-  2. For each chamber: inflate it alone to full, dwell (magnet samples collected),
-     then deflate back to rest.
-  3. Build the coupling matrix from the collected samples and preview it.
-
-Sample collection + the matrix maths are the Qt-free, unit-tested
-:mod:`src.core.touch_coupling` / :mod:`src.hardware.touch_calibration`; this
-dialog only drives the hardware and the UI.
+The sweep sequence itself is a pure :class:`SweepProgram` (rest → per chamber
+an ascending staircase of levels → deflate); this dialog only executes its
+steps against the gateway, holds fast telemetry on the chamber node for dense
+level tracking, collects the ``magnet`` samples (including the 3-axis ``vec``
+deltas when the node streams them), and previews/saves the result. Sample
+analysis is the Qt-free, unit-tested :mod:`src.core.touch_coupling` /
+:mod:`src.hardware.touch_calibration`.
 """
 
 from __future__ import annotations
@@ -26,17 +24,15 @@ from PySide6.QtWidgets import QMessageBox, QWidget
 
 from src.gui.base_dialog import BaseDialog
 from src.gui.ui_touch_calibration_dialog import Ui_TouchCalibrationDialog
+from src.hardware.fast_telemetry import FastTelemetry
 from src.hardware.touch_calibration import (
+    SweepProgram,
     coupling_config_from_samples,
     iter_touch_skins,
     set_compensation,
     set_touch_coupling,
 )
 
-# Sweep timing. Dwell well past the coupling analyzer's steady-state guard
-# (settle_ms 800) so each chamber contributes plenty of settled samples.
-_REST_MS = 2500
-_INFLATE_DWELL_MS = 3500
 _TICK_MS = 100
 
 
@@ -62,9 +58,14 @@ class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
                 f"{s['robot_id']}/{s['skin_id']}  ({s['touch_mac']})", userData=s)
 
         self._pressures: dict[int, float] = {}
-        self._samples: list[tuple[float, dict[int, float], list[float]]] = []
+        self._samples: list[tuple] = []
         self._result: dict | None = None
-        self._job: dict | None = None
+        # Sweep execution state: the pure step program + a cursor over it.
+        self._program: SweepProgram | None = None
+        self._skin: dict | None = None
+        self._step_idx = 0
+        self._elapsed = 0
+        self._telemetry: FastTelemetry | None = None
 
         has_targets = bool(self._skins) and gateway is not None
         self.run_btn.setEnabled(has_targets)
@@ -98,20 +99,23 @@ class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
 
     def _run(self) -> None:
         skin = self._current_skin()
-        if self._job is not None or skin is None or not skin["slots"]:
+        if self._program is not None or skin is None or not skin["slots"]:
             return
         self._samples.clear()
         self._pressures.clear()
         self._result = None
         self._set_save_enabled(False)
         self.preview.clear()
-        self._job = {
-            "skin": skin, "queue": list(skin["slots"]),
-            "done": [], "phase": "rest", "elapsed": 0,
-        }
+        self._skin = skin
+        self._program = SweepProgram(
+            skin["slots"], SweepProgram.levels_for(self.levels_spin.value()))
+        self._step_idx = -1
         self._set_running(True)
-        self._deflate_all(skin)
-        self.status_label.setText("Resting (establishing baseline)…")
+        # Dense pressure telemetry on the chamber node, so level bins track the
+        # staircase closely instead of the 500 ms status cadence.
+        self._telemetry = FastTelemetry(self._gateway, skin["chamber_mac"])
+        self._telemetry.start()
+        self._advance()
         self._tick.start()
 
     def _deflate_all(self, skin: dict) -> None:
@@ -119,55 +123,63 @@ class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
             self._gateway.send(skin["chamber_mac"], "deflate", chamber=slot,
                                delta=100)
 
+    def _execute(self, step) -> None:
+        """Send one SweepProgram step to the hardware and show its label."""
+        skin = self._skin
+        self.progress.setValue(step.progress)
+        self.status_label.setText(step.label)
+        if step.action == "deflate_all":
+            self._deflate_all(skin)
+        elif step.action == "set_pressure":
+            self._gateway.send(skin["chamber_mac"], "set_pressure",
+                               chamber=step.slot, value=step.level)
+        elif step.action == "deflate":
+            self._gateway.send(skin["chamber_mac"], "deflate",
+                               chamber=step.slot, delta=100)
+
+    def _advance(self) -> None:
+        """Move the cursor to the next program step (or finish)."""
+        self._step_idx += 1
+        self._elapsed = 0
+        if self._program is None or self._step_idx >= len(self._program.steps):
+            self._finish()
+            return
+        self._execute(self._program.steps[self._step_idx])
+
     def _on_tick(self) -> None:
-        job = self._job
-        if job is None:
+        if self._program is None:
             return
-        job["elapsed"] += _TICK_MS
-        skin = job["skin"]
-        if job["phase"] == "rest":
-            if job["elapsed"] >= _REST_MS:
-                self._next_chamber(job)
-        elif job["phase"] == "inflate":
-            if job["elapsed"] >= _INFLATE_DWELL_MS:
-                self._gateway.send(skin["chamber_mac"], "deflate",
-                                   chamber=job["slot"], delta=100)
-                job["phase"] = "settle"
-                job["elapsed"] = 0
-        elif job["phase"] == "settle":
-            if job["elapsed"] >= _REST_MS:
-                job["done"].append(job["slot"])
-                self._next_chamber(job)
+        if self._telemetry is not None:
+            self._telemetry.keepalive()
+        self._elapsed += _TICK_MS
+        if self._elapsed >= self._program.steps[self._step_idx].wait_ms:
+            self._advance()
 
-    def _next_chamber(self, job: dict) -> None:
-        if not job["queue"]:
-            self._finish(job)
+    def _finish(self) -> None:
+        skin, self._skin = self._skin, None
+        self._end_sweep()
+        if skin is None:
             return
-        slot = job["queue"].pop(0)
-        job["slot"] = slot
-        job["phase"] = "inflate"
-        job["elapsed"] = 0
-        total = len(job["skin"]["slots"])
-        self.progress.setValue(int(100 * len(job["done"]) / max(1, total)))
-        self.status_label.setText(f"Inflating chamber slot {slot}…")
-        self._gateway.send(job["skin"]["chamber_mac"], "set_pressure",
-                           chamber=slot, value=100)
-
-    def _finish(self, job: dict) -> None:
-        self._tick.stop()
-        self._job = None
-        self._deflate_all(job["skin"])
+        self._deflate_all(skin)
         self.progress.setValue(100)
-        skin = job["skin"]
         cfg, matrix = coupling_config_from_samples(
             list(self._samples), skin["sensor_count"])
         self._result = cfg
         self.preview.setPlainText(self._format_matrix(matrix, skin))
+        vec_note = " 3-axis data captured." if matrix.has_vec else ""
         self.status_label.setText(
-            f"Done — {len(self._samples)} samples over {len(job['done'])} "
-            "chamber(s). Review, then Save.")
-        self._set_running(False)
+            f"Done — {len(self._samples)} samples over "
+            f"{len(matrix.chambers)} chamber(s).{vec_note} Review, then Save.")
         self._set_save_enabled(True)
+
+    def _end_sweep(self) -> None:
+        """Stop the timer, the program cursor and fast telemetry."""
+        self._tick.stop()
+        self._program = None
+        if self._telemetry is not None:
+            self._telemetry.stop()
+            self._telemetry = None
+        self._set_running(False)
 
     def _set_save_enabled(self, on: bool) -> None:
         """Apply and Save commit the same result, so they enable together."""
@@ -177,16 +189,19 @@ class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
     @staticmethod
     def _format_matrix(matrix: Any, skin: dict) -> str:
         n = skin["sensor_count"]
-        lines = ["Coupling (µT shift per sensor at full inflation):",
+        lines = ["Coupling (µT shift per sensor at the strongest level):",
                  "chamber │ " + "  ".join(f"S{s}" for s in range(n))]
-        if not matrix.deltas:
+        deltas = matrix.deltas
+        if not deltas:
             lines.append("(no coupling measured — sensors may be away from "
                          "the chambers, or the sweep collected no samples)")
         for chamber in matrix.chambers:
-            row = matrix.deltas.get(chamber, [])
+            row = deltas.get(chamber, [])
             cells = "  ".join(f"{(row[s] if s < len(row) else 0.0):4.0f}"
                               for s in range(n))
-            lines.append(f"slot {chamber:<3}│ {cells}")
+            points = matrix.curves.get(chamber, [])
+            levels = "/".join(f"{p.level_pct:.0f}" for p in points)
+            lines.append(f"slot {chamber:<3}│ {cells}   levels: {levels}%")
         return "\n".join(lines)
 
     def _set_running(self, running: bool) -> None:
@@ -196,13 +211,13 @@ class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
 
     def _stop(self) -> None:
         """Abort the sweep and halt every chamber (hold, not vacuum-deflate)."""
-        self._tick.stop()
-        job, self._job = self._job, None
-        if self._gateway is not None and job is not None:
-            for slot in job["skin"]["slots"]:
-                self._gateway.send(job["skin"]["chamber_mac"], "hold", chamber=slot)
-        self._set_running(False)
-        if job is not None:
+        skin, self._skin = self._skin, None
+        was_running = self._program is not None
+        self._end_sweep()
+        if self._gateway is not None and skin is not None:
+            for slot in skin["slots"]:
+                self._gateway.send(skin["chamber_mac"], "hold", chamber=slot)
+        if was_running:
             self.status_label.setText("Stopped.")
 
     # ------------------------------------------------------------------
@@ -225,6 +240,8 @@ class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
             self._settings.data, skin["robot_id"], skin["skin_id"],
             enabled=self.enable_check.isChecked(),
             threshold_ut=float(self.threshold_spin.value()),
+            margin_frac=self.margin_spin.value() / 100.0,
+            guard_ms=float(self.guard_spin.value()),
             suppress_pct=suppress)
         self._settings.save()
         self.saved.emit()
@@ -248,10 +265,9 @@ class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
             self._msg.emit(data)
 
     def _on_msg(self, data: dict) -> None:
-        job = self._job
-        if job is None:
+        skin = self._skin
+        if self._program is None or skin is None:
             return
-        skin = job["skin"]
         source = data.get("source")
         if data.get("type") == "status" and source == skin["chamber_mac"]:
             ch = data.get("chamber")
@@ -260,10 +276,12 @@ class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
                 self._pressures[ch] = float(pct)
         elif data.get("type") == "magnet" and source == skin["touch_mac"]:
             mag = data.get("mag")
+            vec = data.get("vec")
             if isinstance(mag, list):
                 self._samples.append((time.monotonic() * 1000.0,
                                       dict(self._pressures),
-                                      [float(v) for v in mag]))
+                                      [float(v) for v in mag],
+                                      vec if isinstance(vec, list) else None))
 
     def closeEvent(self, ev) -> None:   # noqa: N802 (Qt override)
         self._active = False
