@@ -24,6 +24,15 @@
  * chamber inflating and pushing the magnet) is absorbed while fast touches
  * still register. Off by default — measure the actuation contamination first.
  *
+ * Optional 3-axis streaming (-DMAG_VECTOR, the [env:vector] build): each stream
+ * message also carries "vec":[[dx,dy,dz],...] — the per-sensor baseline-
+ * subtracted field delta in whole µT. The scalar "mag"/"act" fields are
+ * unchanged, so the PC pipeline works identically; "vec" just adds the
+ * direction information (touch vs actuation displace the magnet along
+ * different axes, which the magnitude collapses away). The ready announce
+ * gains "vec":1 so recordings identify vector-capable nodes. Flag off (the
+ * default build) = byte-for-byte the previous protocol.
+ *
  * Adapted from the thesis MLX90393 live-stream firmware. The offline
  * calibration protocol (CSV) was dropped: the SoftEdIBO runtime detects touch
  * with thresholds on the raw µT magnitudes, not a calibrated model.
@@ -89,7 +98,7 @@ bool     baselineReady = false;
 uint16_t baselineN     = 0;
 uint32_t lastStreamMs    = 0;
 uint32_t lastAnnounceMs  = 0;
-char     announceMsg[80] = {};
+char     announceMsg[96] = {};
 
 constexpr uint32_t ANNOUNCE_INTERVAL_MS = 2000;
 
@@ -208,6 +217,20 @@ void buildImuMessage(const Vec3* samples, const bool* valid, char* buf, size_t c
         pos += snprintf(buf + pos, cap - pos, "%s%u", first ? "" : ",", (unsigned)i);
         first = false;
     }
+#ifdef MAG_VECTOR
+    // Per-sensor baseline-subtracted delta components, whole µT — the direction
+    // information the scalar magnitude collapses away. Ints keep the frame well
+    // under the 250-byte ESP-NOW payload limit even with 5 sensors.
+    pos += snprintf(buf + pos, cap - pos, "],\"vec\":[");
+    for (size_t i = 0; i < streamCount; ++i) {
+        Vec3 d = valid[i] ? Vec3{samples[i].x - baseline[i].x,
+                                 samples[i].y - baseline[i].y,
+                                 samples[i].z - baseline[i].z}
+                          : Vec3{0.0f, 0.0f, 0.0f};
+        pos += snprintf(buf + pos, cap - pos, "%s[%.0f,%.0f,%.0f]",
+                        i ? "," : "", d.x, d.y, d.z);
+    }
+#endif
     snprintf(buf + pos, cap - pos, "]}");
 }
 
@@ -248,7 +271,11 @@ void setup() {
     se::ota::checkBootDone();
 
     snprintf(announceMsg, sizeof(announceMsg),
-             "{\"status\":\"node_magnet_sensor_ready\",\"sensors\":%u,\"variant\":\"mlx90393\"}",
+             "{\"status\":\"node_magnet_sensor_ready\",\"sensors\":%u,"
+#ifdef MAG_VECTOR
+             "\"vec\":1,"
+#endif
+             "\"variant\":\"mlx90393\"}",
              (unsigned)streamCount);
     se::broadcast(announceMsg);
     Serial.println(announceMsg);
