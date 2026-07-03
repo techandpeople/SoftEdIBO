@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>ThymioDiscoverDialog</class>
+ <widget class="QDialog" name="ThymioDiscoverDialog">
+  <property name="geometry">
+   <rect><x>0</x><y>0</y><width>420</width><height>360</height></rect>
+  </property>
+  <property name="windowTitle"><string>Discover Thymios</string></property>
+  <property name="whatsThis"><string>Finds the 802.15.4 addresses of the Thymio robots over the air — no dongle needed. The gateway's C6 listens on the Thymio channel; a Wireless Thymio announces itself when it powers on, so switch each robot on (or off and on again) while the scan runs.</string></property>
+  <layout class="QVBoxLayout" name="main_layout">
+   <item>
+    <widget class="QLabel" name="instructions_label">
+     <property name="text"><string>&lt;b&gt;Power each Thymio ON now&lt;/b&gt; (or switch it off and on again) — it announces itself at boot and appears below. No dongle needed.&lt;br&gt;&lt;br&gt;Turning robots on &lt;b&gt;one at a time&lt;/b&gt; tells you which address is which: they are listed in the order they appear.</string></property>
+     <property name="wordWrap"><bool>true</bool></property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QListWidget" name="addr_list">
+     <property name="whatsThis"><string>The Thymio addresses seen so far, in the order they first appeared. Pick this robot's address and press OK (or double-click it).</string></property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QLabel" name="status_label">
+     <property name="text"><string>Scanning…</string></property>
+     <property name="styleSheet"><string>color: palette(mid);</string></property>
+     <property name="whatsThis"><string>Scan progress: time left and how many Thymios have been seen.</string></property>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="button_row">
+     <item>
+      <widget class="QPushButton" name="rescan_btn">
+       <property name="text"><string>Scan again</string></property>
+       <property name="whatsThis"><string>Clear the list and run another scan — e.g. to power the robots on in a different order.</string></property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="button_spacer">
+       <property name="orientation"><enum>Qt::Horizontal</enum></property>
+       <property name="sizeHint" stdset="0"><size><width>20</width><height>10</height></size></property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="QDialogButtonBox" name="button_box">
+       <property name="standardButtons"><set>QDialogButtonBox::Cancel|QDialogButtonBox::Ok</set></property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

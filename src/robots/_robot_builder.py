@@ -1,6 +1,6 @@
 """Internal helpers for constructing Skin objects from config dicts.
 
-Used by TurtleTreeRobot, ThymioRobot, and SimulatedRobot so the
+Used by TurtleRobot, TreeRobot, ThymioRobot, and SimulatedRobot so the
 config-parsing logic lives in one place.
 """
 

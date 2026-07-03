@@ -216,7 +216,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
     """Dialog for adding or editing a single skin entry.
 
     Args:
-        robot_type:  One of ``"turtle_tree"`` or ``"thymio"``.
+        robot_type:  One of ``"turtle"``, ``"tree"`` or ``"thymio"``.
         robot_index: Index of the parent robot in the settings list.
         skin_index:  Index of this skin in the robot's ``skins`` list,
                      or ``-1`` to add a new skin.

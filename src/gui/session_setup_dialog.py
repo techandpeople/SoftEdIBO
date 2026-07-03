@@ -1,6 +1,26 @@
-"""Dialog for configuring a new session before it starts."""
+"""Dialog for configuring a new session before it starts.
 
-from PySide6.QtCore import Qt
+Activities are authored per SKIN condition (Natural / Wrinkles / Organs) and
+run on any robot — robot-specific steps live in the behaviour's ``if robot
+is…`` blocks — so this dialog lists every configured robot with a LIVE
+online/offline status instead of filtering by robot class:
+
+* On open it triggers a gateway node scan and repaints each robot's status as
+  the answers arrive: **Online** (all of the robot's nodes answered),
+  **Partial** (some did), **Ready** (a node-less wireless Thymio whose
+  transport is up) or **Offline**.
+* Robots that come up Online/Ready are pre-ticked once; later repaints never
+  touch the user's ticks.
+* When a ticked robot's configured skin variants don't match the selected
+  activity's target skin, a warning shows under the list — the session can
+  still start (useful when the physical skins were swapped without updating
+  the config).
+"""
+
+import time
+
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox,
     QFormLayout,
@@ -8,7 +28,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from src.activities import available_activities
+from src.activities import available_activities, skin_condition
 from src.activities.base_activity import BaseActivity
 from src.data.database import Database
 from src.data.models import ParticipantRecord
@@ -16,13 +36,27 @@ from src.gui.base_dialog import BaseDialog
 from src.gui.ui_session_setup_dialog import Ui_SessionSetupDialog
 from src.robots.base_robot import BaseRobot
 
+# Status refresh cadence after the scan: nodes answer within ~a second, so a
+# few quick repaints settle the dots without polling forever.
+_STATUS_REFRESH_MS = 500
+_STATUS_REFRESH_TICKS = 8
+
+_STATUS_COLORS = {
+    "online":  QColor("#2a9d2a"),
+    "ready":   QColor("#2a9d2a"),
+    "partial": QColor("#b36b00"),
+    "offline": QColor("#cc2222"),
+}
+
 
 class SessionSetupDialog(BaseDialog, Ui_SessionSetupDialog):
     """Dialog that collects session ID, activity, robot, and participant selection.
 
     Args:
-        robots: All currently connected robots across all types.
+        robots: All currently configured robots across all kinds.
         db: Database instance used to load the participant roster.
+        gateway: Shared SoftEdIBO gateway (scanned for live node status);
+            may be ``None`` (e.g. tests) — every ESP robot then reads Offline.
         parent: Optional parent widget.
     """
 
@@ -30,6 +64,7 @@ class SessionSetupDialog(BaseDialog, Ui_SessionSetupDialog):
         self,
         robots: list[BaseRobot],
         db: Database,
+        gateway=None,
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
@@ -37,6 +72,13 @@ class SessionSetupDialog(BaseDialog, Ui_SessionSetupDialog):
 
         self._robots = robots
         self._db = db
+        self._gateway = gateway
+        # Robots already auto-ticked once when first seen Online/Ready, so a
+        # later repaint (or the user unticking) is never overridden.
+        self._auto_ticked: set[str] = set()
+        # Liveness reference: nodes heard from after this instant count as
+        # alive. Refreshed by _start_status_scan just before the scan goes out.
+        self._scan_ref = time.monotonic()
 
         for activity in available_activities(self._db):
             self.activity_combo.addItem(activity.name, userData=activity)
@@ -79,13 +121,16 @@ class SessionSetupDialog(BaseDialog, Ui_SessionSetupDialog):
             self.activity_combo.parentWidget().layout().addWidget(self._record_check)
 
         self.activity_combo.currentIndexChanged.connect(self._on_activity_changed)
+        self.robots_list.itemChanged.connect(lambda _item: self._update_skin_warning())
         self.button_box.accepted.connect(self.accept)
         self.button_box.rejected.connect(self.reject)
 
         self.session_id_input.setText(db.next_session_id())
 
+        self._populate_robots()
         self._on_activity_changed(0)
         self._populate_participants(db.get_all_participants())
+        self._start_status_scan()
 
     # ------------------------------------------------------------------
     # Public result accessors (call after exec() == QDialog.Accepted)
@@ -136,39 +181,128 @@ class SessionSetupDialog(BaseDialog, Ui_SessionSetupDialog):
         return result
 
     # ------------------------------------------------------------------
-    # Private helpers
+    # Activity → target skin + mismatch warning
     # ------------------------------------------------------------------
 
     def _on_activity_changed(self, index: int) -> None:
-        """Refresh the robot list when the activity changes."""
+        """Show the new activity's target skin and re-check skin mismatches."""
         activity: BaseActivity | None = self.activity_combo.itemData(index)
-        if activity is None:
-            self.robot_type_label.setText("—")
-            self._populate_robots([])
-            return
+        skin = getattr(activity, "skin", None)
+        self.target_skin_label.setText(
+            skin_condition.label(skin) if skin else "Any")
+        self._update_skin_warning()
 
-        self.robot_type_label.setText(activity.robot_type.__name__)
-        compatible = [r for r in self._robots if isinstance(r, activity.robot_type)]
-        self._populate_robots(compatible)
+    def _update_skin_warning(self) -> None:
+        """Warn (without blocking) when a ticked robot's configured skin
+        variants don't match the activity's target skin condition."""
+        activity = self.selected_activity
+        skin = getattr(activity, "skin", None)
+        lines: list[str] = []
+        if skin:
+            for robot in self.selected_robots:
+                mismatches = skin_condition.skin_mismatches(
+                    skin, getattr(robot, "skins", {}).values())
+                lines += [f"{robot.robot_id} — {m}" for m in mismatches]
+            if lines:
+                lines.insert(0, "⚠ Skins don't match the activity's target "
+                                f"({skin_condition.label(skin)}):")
+        # Legacy robot-kind-targeted behaviours only run on one robot class;
+        # ticking another would fail at start, so call it out here instead.
+        robot_type = getattr(activity, "robot_type", BaseRobot)
+        if robot_type is not BaseRobot:
+            wrong = [r.robot_id for r in self.selected_robots
+                     if not isinstance(r, robot_type)]
+            if wrong:
+                lines.append(
+                    f"⚠ This activity only runs on {robot_type.__name__}: "
+                    + ", ".join(wrong))
+        self.skin_warning_label.setText("\n".join(lines))
+        self.skin_warning_label.setVisible(bool(lines))
 
-    def _populate_robots(self, robots: list[BaseRobot]) -> None:
-        """Fill the list widget with checkable robot entries."""
+    # ------------------------------------------------------------------
+    # Robot list + live status
+    # ------------------------------------------------------------------
+
+    def _populate_robots(self) -> None:
+        """Fill the list with every configured robot (status painted later)."""
         self.robots_list.clear()
-
-        if not robots:
+        if not self._robots:
             self.no_robots_label.setVisible(True)
             self.robots_list.setVisible(False)
             return
-
         self.no_robots_label.setVisible(False)
         self.robots_list.setVisible(True)
-
-        for robot in robots:
-            item = QListWidgetItem(f"{robot.robot_id}  [{robot.status.value}]")
+        for robot in self._robots:
+            item = QListWidgetItem()
             item.setData(Qt.ItemDataRole.UserRole, robot)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Unchecked)
             self.robots_list.addItem(item)
+        self._refresh_statuses()
+
+    def _start_status_scan(self) -> None:
+        """Scan the gateway's nodes and repaint statuses as answers arrive."""
+        self._scan_ref = time.monotonic()
+        if self._gateway is not None and self._gateway.is_connected:
+            self._gateway.scan()
+        self._refresh_ticks = 0
+        self._status_timer = QTimer(self)
+        self._status_timer.setInterval(_STATUS_REFRESH_MS)
+        self._status_timer.timeout.connect(self._on_status_tick)
+        self._status_timer.start()
+
+    def _on_status_tick(self) -> None:
+        self._refresh_ticks += 1
+        self._refresh_statuses()
+        if self._refresh_ticks >= _STATUS_REFRESH_TICKS:
+            self._status_timer.stop()
+
+    def _refresh_statuses(self) -> None:
+        """Repaint every robot row's status dot/label (ticks left alone)."""
+        for i in range(self.robots_list.count()):
+            item = self.robots_list.item(i)
+            robot = item.data(Qt.ItemDataRole.UserRole)
+            if robot is None:
+                continue
+            status, detail = self._robot_status(robot)
+            dot = "●" if status in ("online", "ready", "partial") else "○"
+            kind = getattr(robot, "robot_kind", "") or "?"
+            item.setText(f"{dot} {robot.robot_id}  [{kind.capitalize()}]"
+                         f"  —  {detail}")
+            item.setForeground(_STATUS_COLORS.get(status, QColor("#cc2222")))
+            # Pre-tick a robot the first time it shows up usable, then leave
+            # the tick to the user.
+            if (status in ("online", "ready")
+                    and robot.robot_id not in self._auto_ticked):
+                self._auto_ticked.add(robot.robot_id)
+                item.setCheckState(Qt.CheckState.Checked)
+
+    def _robot_status(self, robot: BaseRobot) -> tuple[str, str]:
+        """``(status, human detail)`` for a robot row.
+
+        Node-owning robots are judged by which of THEIR nodes answered the
+        scan (``nodes_seen_since``); a node-less wireless Thymio is "ready"
+        whenever its transport (the gateway link) is up.
+        """
+        gateway_up = self._gateway is not None and self._gateway.is_connected
+        seen = getattr(robot, "nodes_seen_since", None)
+        alive, total = seen(self._scan_ref) if seen is not None else (0, 0)
+        if total == 0:
+            if getattr(robot, "gateway", None) is not None and gateway_up:
+                return "ready", "Ready (no nodes; transport up)"
+            return "offline", ("Offline (gateway disconnected)"
+                               if not gateway_up else "Offline")
+        if not gateway_up:
+            return "offline", "Offline (gateway disconnected)"
+        if alive == total:
+            return "online", f"Online ({alive}/{total} nodes)"
+        if alive > 0:
+            return "partial", f"Partial ({alive}/{total} nodes)"
+        return "offline", f"Offline (0/{total} nodes)"
+
+    # ------------------------------------------------------------------
+    # Participants
+    # ------------------------------------------------------------------
 
     def _populate_participants(self, records: list[ParticipantRecord]) -> None:
         """Fill the participants list with checkable entries."""

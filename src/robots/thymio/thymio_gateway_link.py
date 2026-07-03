@@ -91,5 +91,21 @@ class ThymioGatewayLink:
         return self._gateway.send("thymio", "thymio_leds", idx=self._index,
                                   r=int(r), g=int(g), b=int(b))
 
+    def play_sound(self, system: int | None = None, freq: int | None = None,
+                   duration_ms: int = 500) -> bool:
+        """Beep: a built-in ``system`` sound (0-7, -1 stops) or a ``freq`` Hz tone.
+
+        The C6 loads a tiny Aseba program that calls sound.system / sound.freq and
+        runs it — the motor targets are untouched, so a driving robot keeps driving.
+        """
+        if not self.connected:
+            return False
+        if freq is not None:
+            dur60 = max(1, round(duration_ms * 60 / 1000))   # Thymio dur unit = 1/60 s
+            return self._gateway.send("thymio", "thymio_sound", idx=self._index,
+                                      freq=int(freq), dur=dur60)
+        return self._gateway.send("thymio", "thymio_sound", idx=self._index,
+                                  sys=int(system if system is not None else 0))
+
     def stop(self) -> bool:
         return self.set_motors(0, 0)

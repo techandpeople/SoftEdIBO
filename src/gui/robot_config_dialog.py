@@ -19,8 +19,8 @@ from src.gui.base_dialog import BaseDialog
 from src.gui.thymio_config_form import ThymioConfigForm
 from src.gui.ui_robot_config_dialog import Ui_RobotConfigDialog
 from src.robots.base_robot import BaseRobot
+from src.robots.esp_robot import EspRobot
 from src.robots.thymio.thymio_robot import ThymioRobot
-from src.robots.turtle_tree.turtle_tree_robot import TurtleTreeRobot
 
 _TEST_ACTUATORS = "Test Actuators"
 _TEST_DRIVE = "Test Drive"
@@ -60,11 +60,12 @@ class RobotConfigDialog(BaseDialog, Ui_RobotConfigDialog):
 
         # The static frame (intro, scroll area, button box) lives in the .ui;
         # the per-robot config groups are built here into ``content_layout``.
-        if isinstance(robot, TurtleTreeRobot):
-            self._build_skin_config("turtle_tree")
-            self._build_test_section()
-        elif isinstance(robot, ThymioRobot):
+        # Thymio first: it is an EspRobot too, but configures its wheeled base.
+        if isinstance(robot, ThymioRobot):
             self._build_thymio_config()
+        elif isinstance(robot, EspRobot):
+            self._build_skin_config(robot.robot_kind)
+            self._build_test_section()
 
         self.content_layout.addStretch()
 
@@ -137,7 +138,7 @@ class RobotConfigDialog(BaseDialog, Ui_RobotConfigDialog):
 
     def _find_robot_cfg(self, robot_key: str) -> dict | None:
         """Find the settings dict for self._robot by matching robot_id."""
-        yaml_key = {"turtle_tree": "turtle_trees"}[robot_key]
+        yaml_key = {"turtle": "turtles", "tree": "trees"}[robot_key]
         robots_list = self._settings.data.get("robots", {}).get(yaml_key, [])
         for cfg in robots_list:
             if cfg.get("id") == self._robot.robot_id:
@@ -376,12 +377,12 @@ class RobotConfigDialog(BaseDialog, Ui_RobotConfigDialog):
         data = self._settings.data
         robots_data = data.setdefault("robots", {})
 
-        if isinstance(self._robot, TurtleTreeRobot):
-            robot_cfg = self._find_robot_cfg("turtle_tree")
+        if isinstance(self._robot, ThymioRobot):
+            robots_data["thymios"] = self._collect_thymios()
+        elif isinstance(self._robot, EspRobot):
+            robot_cfg = self._find_robot_cfg(self._robot.robot_kind)
             if robot_cfg is not None:
                 robot_cfg["skins"] = self._collect_skins()
-        elif isinstance(self._robot, ThymioRobot):
-            robots_data["thymios"] = self._collect_thymios()
 
         self._settings.save()
 

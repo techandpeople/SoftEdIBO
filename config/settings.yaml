@@ -2,14 +2,15 @@ gateway:
   serial_port: /dev/ttyACM0
   baud_rate: 115200
 robots:
-  turtle_trees: []
+  turtles: []
+  trees: []
   thymios: []
-# Turtle and Tree are one robot kind ("turtle_trees"): same nodes, the only
-# difference is the skins fitted on top (skin_type turtle_* vs tree_round).
-# Example node_multiplexed entry:
+# Turtle and Tree use the same node hardware but are separate robots, each
+# with its own hardware set ("turtles" / "trees") and its own skins on top
+# (skin_type turtle_* vs tree_round). Example node_multiplexed entry:
 # robots:
-#   turtle_trees:
-#     - id: turtle_tree_1
+#   turtles:
+#     - id: turtle_1
 #       nodes:
 #         - mac: "AA:BB:CC:DD:EE:01"
 #           node_type: "node_multiplexed"

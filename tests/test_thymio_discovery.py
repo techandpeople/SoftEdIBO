@@ -67,7 +67,7 @@ def test_discover_returns_distinct_addresses():
     ]
     gw = _FakeSniffGateway(frames)
     addrs = discover_thymios(gw, channel=25, secs=0.01)
-    assert addrs == ["6a25", "7b31"]                     # sorted, deduped, hex
+    assert addrs == ["6a25", "7b31"]                     # first-seen order, deduped, hex
     # it drove the C6 sniffer and put it back
     assert ("thymio", "sniff_start", {"ch": 25}) in gw.sent
     assert ("thymio", "sniff_stop", {}) in gw.sent
@@ -77,3 +77,28 @@ def test_discover_returns_distinct_addresses():
 def test_discover_no_gateway():
     assert discover_thymios(None) == []
     assert discover_thymios(_FakeSniffGateway([], connected=False)) == []
+
+
+def test_discover_reports_each_new_address_live():
+    frames = [
+        "6188388144256a373283006a25",   # Thymio 6a25
+        "61888081443732256a8300",       # 6a25 again — no second callback
+        "6188018144317b373283ff",       # Thymio 7b31
+    ]
+    live: list[str] = []
+    gw = _FakeSniffGateway(frames)
+    discover_thymios(gw, channel=25, secs=0.01, on_found=live.append)
+    assert live == ["6a25", "7b31"]                      # once per robot, in order
+
+
+def test_discover_stop_event_ends_the_scan_early():
+    import threading
+    import time
+
+    stop = threading.Event()
+    stop.set()                                           # already stopped
+    gw = _FakeSniffGateway([])
+    t0 = time.monotonic()
+    discover_thymios(gw, channel=25, secs=5.0, stop=stop)
+    assert time.monotonic() - t0 < 2.0                   # didn't sit out the 5 s
+    assert ("thymio", "sniff_stop", {}) in gw.sent       # C6 put back cleanly

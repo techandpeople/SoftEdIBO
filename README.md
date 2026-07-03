@@ -16,7 +16,8 @@ The system supports multiple robot types (Turtle, Tree, Thymio) and activity mod
 
 | Component | Quantity | Notes |
 |-----------|----------|-------|
-| ESP32-WROOM-32 (gateway) | 1 | Connected to PC via USB |
+| Seeed XIAO ESP32-S3 (gateway) | 1 | Connected to PC via USB; also runs a WiFi SoftAP (WiFi-OTA) + a UART link to a companion XIAO ESP32-C6 for dongle-free Thymio control |
+| Seeed XIAO ESP32-C6 (Thymio RCP) | 0-1 | Optional — impersonates the Thymio RF dongle over 802.15.4 (drive wheels/LEDs/sound, no dongle). See [docs/THYMIO_WIRELESS_CONTROL.md](docs/THYMIO_WIRELESS_CONTROL.md) |
 | ESP32-WROOM-32 (`node_direct`) | 1 per direct board | 3 chambers, direct ADC sensors, onboard pumps |
 | ESP32-WROOM-32 (`node_multiplexed`) | 1 per multiplexed board | Up to 12 chambers; optional shared pressure/vacuum tanks |
 | DRV3297 motor driver | 1 (`node_direct`) / up to 3 (`node_multiplexed`) | Drives pumps with PWM |
@@ -24,9 +25,10 @@ The system supports multiple robot types (Turtle, Tree, Thymio) and activity mod
 | XGZP6847A pressure sensor | 1 per chamber | Analog output (0-3.3 V) |
 | Solenoid valves | 2 per chamber | Inflate + deflate via ULN2803A |
 
-Flash the [gateway firmware](firmware/gateway/) to the USB-connected board —
-two variants are built: **Seeed XIAO ESP32-C6** (ESP-IDF) and the classic
-**ESP32-WROOM-32** (Arduino). For each node, choose the matching firmware target:
+Flash the [gateway firmware](firmware/gateway/) to the USB-connected board — one
+build, a **Seeed XIAO ESP32-S3** (ESP-IDF), which does everything: ESP-NOW chamber
+control + a WiFi SoftAP (for WiFi-OTA) + a UART link to a companion C6 for Thymios.
+For each node, choose the matching firmware target:
 
 | Firmware | Path | When to use |
 |----------|------|-------------|
@@ -39,8 +41,9 @@ two variants are built: **Seeed XIAO ESP32-C6** (ESP-IDF) and the classic
 ## Architecture
 
 ```
-PC --USB--> Gateway (ESP32) --ESP-NOW--> node_direct      (3 chambers, direct GPIO valves + own pumps)
-                                     └-> node_multiplexed (up to 12 chambers, optional shared pressure/vacuum tanks)
+PC --USB--> Gateway (XIAO ESP32-S3) --ESP-NOW--> node_direct      (3 chambers, direct GPIO valves + own pumps)
+                                    │        └-> node_multiplexed (up to 12 chambers, optional shared pressure/vacuum tanks)
+                                    └--UART--> C6 --802.15.4--> Thymio  (dongle-free wheels/LEDs/sound; optional)
 ```
 
 **Software layers:**
@@ -167,9 +170,8 @@ levels are always written to `data/softedibo.log` (rotating, 2 MB x 3 backups).
 ### Firmware
 
 ```bash
-# Gateway — pick your board (both speak the same protocol)
-cd firmware/gateway && pio run -e seeed_xiao_esp32c6 --target upload   # XIAO ESP32-C6 (ESP-IDF)
-cd firmware/gateway && pio run -e esp32dev           --target upload   # ESP32-WROOM-32 (Arduino)
+# Gateway — one build, Seeed XIAO ESP32-S3 (ESP-IDF)
+cd firmware/gateway && pio run -e seeed_xiao_esp32s3 --target upload
 
 # Actuator nodes (one project, env per variant)
 cd firmware/node_actuator && pio run -e direct      --target upload
@@ -177,7 +179,12 @@ cd firmware/node_actuator && pio run -e multiplexed --target upload
 
 # Sensor node (4x MLX90393 touch board)
 cd firmware/node_magnet_sensor && pio run --target upload
+
+# Thymio radio co-processor (optional) — Seeed XIAO ESP32-C6
+cd firmware/thymio_rcp && pio run -e rcp_c6 --target upload
 ```
+
+Prebuilt binaries for all of the above are produced by `scripts/build-firmware.sh`.
 
 Requires [PlatformIO](https://platformio.org/).
 
@@ -218,7 +225,8 @@ The CI pipeline automatically selects the firmware environment:
 | `scripts/label_touches.py` / `scripts/train_touch_model.py` | Offline touch-gesture labelling + training (`.[ml]` extra) |
 | `src/log.py` | Centralized logging setup (console + rotating file) |
 | `config/settings.yaml` | Robot and hardware configuration |
-| `firmware/gateway/` | Gateway firmware (ESP-IDF, Seeed XIAO ESP32-C6) |
+| `firmware/gateway/` | Gateway firmware (ESP-IDF, Seeed XIAO ESP32-S3) |
+| `firmware/thymio_rcp/` | Thymio radio co-processor (XIAO ESP32-C6) — dongle-free 802.15.4 control; see [docs/THYMIO_WIRELESS_CONTROL.md](docs/THYMIO_WIRELESS_CONTROL.md) |
 | `firmware/common/` | Shared firmware headers (`se_espnow.h`, units/pressure/dbg/cmd_queue) |
 | `firmware/node_actuator/` | Actuator nodes — `direct` + `multiplexed` variants (build-flag envs) |
 | `firmware/node_magnet_sensor/` | Sensor node — 4× MLX90393 touch board (`node_magnet_sensor` protocol) |

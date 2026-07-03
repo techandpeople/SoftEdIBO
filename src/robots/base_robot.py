@@ -18,6 +18,12 @@ class RobotStatus(Enum):
 class BaseRobot(ABC):
     """Abstract base class that all robots must implement."""
 
+    # Activity-kind slug of this robot ("thymio" / "turtle" / "tree", see
+    # src/activities/activity_kind.KINDS). Read by the behaviour engine's
+    # ``if robot is …`` blocks and by the session setup. Subclasses set it;
+    # SimulatedRobot copies it from the robot it mirrors. "" = unknown.
+    robot_kind: str = ""
+
     def __init__(self, robot_id: str, name: str):
         self.robot_id = robot_id
         self.name = name

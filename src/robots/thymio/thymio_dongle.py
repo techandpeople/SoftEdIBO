@@ -185,3 +185,30 @@ class ThymioDongle:
             logger.exception("Thymio dongle: failed to set %s on node %s",
                              variables, node_id)
             return False
+
+    def play_sound(self, node_id: Any, *, system: int | None = None,
+                   freq: int | None = None, dur60: int = 30) -> bool:
+        """Play a beep on one node by loading + running a tiny Aseba program.
+
+        A ``system`` sound (0-7, -1 stops) or a ``freq`` Hz tone (``dur60`` in 1/60 s).
+        Loading bytecode leaves the node's variables (motor targets) untouched.
+        """
+        th = self._th
+        if th is None or node_id is None:
+            return False
+        # event.args (@2, 32-word scratch) holds the native-call args by address.
+        if freq is not None:
+            asm = (f"\tdc end_toc\n\tdc _ev.init, init\nend_toc:\ninit:\n"
+                   f"\tpush {int(freq)}\n\tstore 2\n\tpush {int(dur60)}\n\tstore 3\n"
+                   f"\tpush 2\n\tpush 3\n\tcallnat _nf.sound.freq\n\tstop\n")
+        else:
+            asm = (f"\tdc end_toc\n\tdc _ev.init, init\nend_toc:\ninit:\n"
+                   f"\tpush {int(system if system is not None else 0)}\n\tstore 2\n"
+                   f"\tpush 2\n\tcallnat _nf.sound.system\n\tstop\n")
+        try:
+            with self._lock:
+                th.run_asm(node_id, asm)
+            return True
+        except Exception:
+            logger.exception("Thymio dongle: failed to play sound on node %s", node_id)
+            return False

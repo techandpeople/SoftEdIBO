@@ -63,8 +63,9 @@ class _FakeSkin:
 
 
 class _FakeRobot:
-    def __init__(self, skins):
+    def __init__(self, skins, robot_kind=""):
         self.robot_id = "robot-1"
+        self.robot_kind = robot_kind
         self.skins = {s.skin_id: s for s in skins}
 
 
@@ -133,19 +134,47 @@ def test_validate_rejects_bad_target_kind():
         validate_spec(spec)
 
 
-def test_target_derives_robot_type_and_variant():
-    from src.robots.turtle_tree.turtle_tree_robot import TurtleTreeRobot
+def test_legacy_kind_target_derives_robot_type():
+    from src.robots.tree.tree_robot import TreeRobot
     spec = {"initial": "s", "states": {"s": {"do": []}},
-            "target": {"kind": "tree", "skin_variant": "organ"}}
-    act = ScriptedActivity("Tree · Organ", "d", spec)
-    assert act.target == {"kind": "tree", "skin_variant": "organ"}
-    assert act.robot_type is TurtleTreeRobot          # tree → TurtleTreeRobot
+            "target": {"kind": "tree"}}
+    act = ScriptedActivity("Tree legacy", "d", spec)
+    assert act.target == {"kind": "tree"}
+    assert act.skin is None
+    assert act.robot_type is TreeRobot
+
+
+def test_skin_target_runs_on_any_robot():
+    from src.robots.base_robot import BaseRobot
+    spec = {"initial": "s", "states": {"s": {"do": []}},
+            "target": {"skin": "organs"}}
+    act = ScriptedActivity("Organs", "d", spec)
+    assert act.target == {"skin": "organs"}
+    assert act.skin == "organs"
+    assert act.robot_type is BaseRobot
+
+
+def test_validate_rejects_bad_target_skin():
+    spec = {"initial": "s", "states": {"s": {"do": []}},
+            "target": {"skin": "furry"}}
+    with pytest.raises(SpecError):
+        validate_spec(spec)
+
+
+def test_thymio_verbs_allowed_in_skin_targeted_spec():
+    # No kind restriction outside legacy kind targets: the verb no-ops on
+    # robots without a wheeled base instead of failing validation.
+    spec = {"initial": "s", "states": {"s": {"do": [
+        {"thymio_drive": {"left": 100, "right": 100}}]}},
+        "target": {"skin": "natural"}}
+    validate_spec(spec)   # must not raise
 
 
 def test_legacy_spec_without_target_runs_on_any_robot():
     from src.robots.base_robot import BaseRobot
     act = ScriptedActivity("Legacy", "d", {"initial": "s", "states": {"s": {}}})
     assert act.target is None
+    assert act.skin is None
     assert act.robot_type is BaseRobot
 
 
@@ -575,7 +604,7 @@ def test_declarative_activity_round_trip(db):
 
 
 # ---------------------------------------------------------------------------
-# Thymio verbs (thymio_drive / thymio_leds) — wheeled base, kind-gated
+# Thymio verbs (thymio_drive / thymio_leds) — wheeled base
 # ---------------------------------------------------------------------------
 
 class _FakeThymioBase(_FakeRobot):
@@ -600,21 +629,24 @@ def _thymio_spec(do):
             "target": {"kind": "thymio"}}
 
 
-def test_validate_thymio_verbs_need_thymio_target():
+def test_validate_thymio_verbs_gated_only_for_legacy_kind_targets():
     drive = [{"thymio_drive": {"left": 100, "right": 100}}]
     base = {"initial": "s", "states": {"s": {"do": drive}}}
     with pytest.raises(SpecError):
-        validate_spec(base)                                   # target-less
-    with pytest.raises(SpecError):
         validate_spec({**base, "target": {"kind": "turtle"}})  # wrong kind
     validate_spec({**base, "target": {"kind": "thymio"}})      # must not raise
+    # Target-less and skin-targeted specs allow the verbs anywhere: they no-op
+    # on robots without a wheeled base (wrap in if_robot to be explicit).
+    validate_spec(base)
+    validate_spec({**base, "target": {"skin": "natural"}})
 
 
 def test_validate_thymio_verb_nested_in_control_is_gated_too():
     nested = [{"repeat": {"times": 2,
                           "do": [{"thymio_leds": {"color": "#ff0000"}}]}}]
     with pytest.raises(SpecError):
-        validate_spec({"initial": "s", "states": {"s": {"do": nested}}})
+        validate_spec({"initial": "s", "states": {"s": {"do": nested}},
+                       "target": {"kind": "turtle"}})
 
 
 def test_bare_robot_gets_a_skinless_unit():
@@ -673,3 +705,79 @@ def test_thymio_verbs_noop_on_robot_without_base(clock):
     _start(act, robot)
     clock.advance(0.2)
     act._on_tick()                          # no AttributeError
+
+
+# ---------------------------------------------------------------------------
+# if_robot / robot_is — one behaviour, per-robot branches
+# ---------------------------------------------------------------------------
+
+def _if_robot_spec(robot="thymio", do=None, els=None):
+    return {"initial": "s", "states": {"s": {"do": [
+        {"if_robot": {"robot": robot, "do": do or [], "else": els or []}}]}},
+        "target": {"skin": "natural"}}
+
+
+def test_if_robot_runs_do_branch_on_matching_kind(clock):
+    skin = _FakeSkin()
+    robot = _FakeRobot([skin], robot_kind="turtle")
+    act = ScriptedActivity("t", "d", _if_robot_spec(
+        "turtle", do=[{"inflate": {"chamber": 0, "pct": 70}}],
+        els=[{"inflate": {"chamber": 0, "pct": 10}}]))
+    _start(act, robot)
+    assert skin.pressures == [(0, 70)]
+
+
+def test_if_robot_runs_else_branch_on_other_kind(clock):
+    skin = _FakeSkin()
+    robot = _FakeRobot([skin], robot_kind="tree")
+    act = ScriptedActivity("t", "d", _if_robot_spec(
+        "turtle", do=[{"inflate": {"chamber": 0, "pct": 70}}],
+        els=[{"inflate": {"chamber": 0, "pct": 10}}]))
+    _start(act, robot)
+    assert skin.pressures == [(0, 10)]
+
+
+def test_if_robot_gates_thymio_drive_to_the_thymio(clock):
+    """One spec, two robots: only the Thymio's unit drives its wheels."""
+    thymio = _FakeThymioBase([_FakeSkin("t-skin")])
+    thymio.robot_kind = "thymio"
+    turtle_skin = _FakeSkin("u-skin")
+    turtle = _FakeRobot([turtle_skin], robot_kind="turtle")
+    turtle.robot_id = "robot-2"
+    act = ScriptedActivity("t", "d", _if_robot_spec(
+        "thymio", do=[{"thymio_drive": {"left": 100, "right": 100}}],
+        els=[{"inflate": {"chamber": 0, "pct": 40}}]))
+    act._setup(Session("S001", act), [thymio, turtle])
+    for unit in act._units.values():
+        act._enter_state(unit, act._initial)
+    assert thymio.motors == [(100, 100)]
+    assert turtle_skin.pressures == [(0, 40)]
+
+
+def test_if_robot_missing_else_is_noop(clock):
+    skin = _FakeSkin()
+    robot = _FakeRobot([skin], robot_kind="tree")
+    spec = {"initial": "s", "states": {"s": {"do": [
+        {"if_robot": {"robot": "thymio",
+                      "do": [{"inflate": {"chamber": 0, "pct": 70}}]}}]}}}
+    act = ScriptedActivity("t", "d", spec)
+    _start(act, robot)
+    assert skin.pressures == []
+
+
+def test_robot_is_condition_gates_transition(clock):
+    spec = {"initial": "s1", "states": {
+        "s1": {"do": [], "transitions": [
+            {"to": "s2", "when": {"robot_is": {"robot": "tree"}}}]},
+        "s2": {"do": []}}}
+    tree_unit = _FakeRobot([_FakeSkin()], robot_kind="tree")
+    act = ScriptedActivity("t", "d", spec)
+    _start(act, tree_unit)
+    act._on_tick()
+    assert act.unit_state(_unit(act).unit_id) == "s2"
+
+    turtle_unit = _FakeRobot([_FakeSkin()], robot_kind="turtle")
+    act2 = ScriptedActivity("t", "d", spec)
+    _start(act2, turtle_unit)
+    act2._on_tick()
+    assert act2.unit_state(_unit(act2).unit_id) == "s1"

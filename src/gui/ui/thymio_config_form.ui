@@ -80,7 +80,7 @@
      <item>
       <widget class="QPushButton" name="discover_btn">
        <property name="text"><string>Discover…</string></property>
-       <property name="whatsThis"><string>Sniff the channel and list the Thymio addresses on the air, then pick this robot's — no config editing. Power on / drive the Thymios first; needs the gateway connected.</string></property>
+       <property name="whatsThis"><string>Find this robot's address over the air — no dongle. Opens a guided scan: power each Thymio ON while it runs (they announce themselves at boot) and pick this robot's address from the live list. Needs the gateway connected.</string></property>
       </widget>
      </item>
     </layout>

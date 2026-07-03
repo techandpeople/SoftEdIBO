@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from PySide6.QtWidgets import QInputDialog, QMessageBox, QWidget
+from PySide6.QtWidgets import QMessageBox, QWidget
 
 from src.gui.ui_thymio_config_form import Ui_ThymioConfigForm
 
@@ -95,43 +95,20 @@ class ThymioConfigForm(QWidget, Ui_ThymioConfigForm):
         self.discover_btn.setEnabled(gw)
 
     def _on_discover(self) -> None:
-        """Sniff the channel via the gateway's C6 and let the user pick a Thymio address.
+        """Open the guided dongle-free scan and take the picked address.
 
-        Runs the ~6 s sniff off-thread (async_task) so the dialog stays responsive; the
-        found addresses go into a small picker that fills the address field.
+        The dialog runs a long sniff through the gateway's C6 while the user
+        powers the Thymios on (they announce themselves at boot), listing the
+        addresses live — see :class:`ThymioDiscoverDialog`.
         """
         gateway = self._gateway_provider()
         if gateway is None or not getattr(gateway, "is_connected", False):
             QMessageBox.warning(self, _DISCOVER_TITLE,
                                 "The gateway isn't connected — connect it first.")
             return
-        from src.gui.async_task import run_async
-        from src.robots.thymio.thymio_discovery import discover_thymios
+        from PySide6.QtWidgets import QDialog
+        from src.gui.thymio_discover_dialog import ThymioDiscoverDialog
 
-        ch = self.channel_spin.value()
-        self.discover_btn.setEnabled(False)
-        self.discover_btn.setText("Sniffing…")
-
-        def _restore() -> None:
-            self.discover_btn.setEnabled(True)
-            self.discover_btn.setText("Discover…")
-
-        def _done(addrs: list) -> None:
-            _restore()
-            if not addrs:
-                QMessageBox.information(
-                    self, _DISCOVER_TITLE,
-                    f"No Thymios seen on channel {ch}. Power them on (or drive them with "
-                    f"the RF dongle) and try again.")
-                return
-            choice, ok = QInputDialog.getItem(
-                self, _DISCOVER_TITLE, "Pick this Thymio's address:", addrs, 0, False)
-            if ok and choice:
-                self.addr_edit.setText(choice)
-
-        def _failed(exc: Exception) -> None:
-            _restore()
-            QMessageBox.warning(self, _DISCOVER_TITLE, f"Discovery failed: {exc}")
-
-        run_async(lambda: discover_thymios(gateway, channel=ch, secs=6.0),
-                  on_done=_done, on_error=_failed, parent=self)
+        dlg = ThymioDiscoverDialog(gateway, self.channel_spin.value(), self)
+        if dlg.exec() == QDialog.DialogCode.Accepted and dlg.address():
+            self.addr_edit.setText(dlg.address())

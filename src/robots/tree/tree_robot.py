@@ -1,14 +1,11 @@
-"""Turtle & Tree robot — one robot kind, many skins.
+"""Tree robot — each child has their own skin/branch and can share it.
 
-Turtle and Tree are the same hardware: ESP-NOW nodes driving inflatable skins.
-The only thing that differs between them is the skins fitted on top (a Turtle's
-flat pads vs a Tree's round branches), which is already a per-skin ``skin_type``
-choice. So they share a single robot class; all chamber / command behaviour
-lives in :class:`~src.robots.esp_robot.EspRobot`.
-
-On top of that this class keeps the optional owner / sharing bookkeeping that a
-Tree-style deployment uses to track which participant a given skin (branch)
-belongs to, and who else it is currently shared with.
+Same ESP-NOW hardware as the Turtle (nodes driving inflatable skins); what
+makes it a Tree is its own hardware set and the round branch skins fitted on
+top (``skin_type`` ``tree_round``). All chamber / command behaviour lives in
+:class:`~src.robots.esp_robot.EspRobot`; on top of that this class keeps the
+owner / sharing bookkeeping that tracks which participant a branch belongs to
+and who else it is currently shared with.
 """
 
 from typing import Any
@@ -17,13 +14,13 @@ from src.hardware.gateway import Gateway
 from src.robots.esp_robot import EspRobot
 
 
-class TurtleTreeRobot(EspRobot):
-    """Robot with multiple skins, usable as a Turtle or a Tree.
+class TreeRobot(EspRobot):
+    """Tree robot with individual, shareable branch skins.
 
-    Adds owner / sharing bookkeeping on top of the standard ESP-NOW skin
-    behaviour inherited from :class:`EspRobot`. The ownership map is keyed by
-    skin id, so it works whether the skins are Turtle pads or Tree branches.
+    The ownership map is keyed by skin id (one skin per branch).
     """
+
+    robot_kind = "tree"
 
     def __init__(
         self,
@@ -33,7 +30,7 @@ class TurtleTreeRobot(EspRobot):
         skin_configs: list[dict[str, Any]],
     ):
         super().__init__(
-            robot_id, "Turtle & Tree",
+            robot_id, "Tree",
             gateway=gateway,
             node_configs=node_configs,
             skin_configs=skin_configs,

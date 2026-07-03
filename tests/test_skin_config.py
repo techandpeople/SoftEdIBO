@@ -6,10 +6,10 @@ from src.core import skin_config as skincfg
 
 
 def _data() -> dict:
-    """A settings tree with one turtle_tree robot: 2 actuator nodes + 1 magnet node."""
+    """A settings tree with one turtle robot: 2 actuator nodes + 1 magnet node."""
     return {
         "robots": {
-            "turtle_trees": [{
+            "turtles": [{
                 "nodes": [
                     {"mac": "AA", "node_type": "node_direct", "max_slots": 3},
                     {"mac": "BB", "node_type": "node_multiplexed", "max_slots": 12},
@@ -30,33 +30,33 @@ def _data() -> dict:
 # --- navigation -----------------------------------------------------------
 
 def test_actuator_macs_excludes_magnet_and_macless():
-    assert skincfg.actuator_macs(_data(), "turtle_tree", 0) == ["AA", "BB"]
+    assert skincfg.actuator_macs(_data(), "turtle", 0) == ["AA", "BB"]
 
 
 def test_magnet_macs():
     # node_direct folds in the magnet sensing, so its MAC is also selectable as
     # a touch node, alongside the dedicated node_magnet_sensor board.
-    assert skincfg.magnet_macs(_data(), "turtle_tree", 0) == ["AA", "MM"]
+    assert skincfg.magnet_macs(_data(), "turtle", 0) == ["AA", "MM"]
 
 
 def test_node_max_slots():
-    assert skincfg.node_max_slots(_data(), "turtle_tree", 0) == {"AA": 3, "BB": 12}
+    assert skincfg.node_max_slots(_data(), "turtle", 0) == {"AA": 3, "BB": 12}
 
 
 def test_robot_nodes_out_of_range():
-    assert skincfg.robot_nodes(_data(), "turtle_tree", 9) == []
+    assert skincfg.robot_nodes(_data(), "turtle", 9) == []
 
 
 def test_load_skin_cfg_new_skin_is_empty():
-    assert skincfg.load_skin_cfg(_data(), "turtle_tree", 0, -1) == {}
+    assert skincfg.load_skin_cfg(_data(), "turtle", 0, -1) == {}
 
 
 def test_load_skin_cfg_existing():
-    assert skincfg.load_skin_cfg(_data(), "turtle_tree", 0, 0)["skin_id"] == "belly-1"
+    assert skincfg.load_skin_cfg(_data(), "turtle", 0, 0)["skin_id"] == "belly-1"
 
 
 def test_sibling_skins_excludes_self():
-    sibs = skincfg.sibling_skins(_data(), "turtle_tree", 0, 0)
+    sibs = skincfg.sibling_skins(_data(), "turtle", 0, 0)
     assert [s["skin_id"] for s in sibs] == ["belly-2"]
 
 
@@ -154,17 +154,17 @@ def test_normalize_fill_mode():
 
 def test_save_skin_entry_append_and_replace():
     data = _data()
-    skincfg.save_skin_entry(data, "turtle_tree", 0, -1, {"skin_id": "new-1"})
-    skins = data["robots"]["turtle_trees"][0]["skins"]
+    skincfg.save_skin_entry(data, "turtle", 0, -1, {"skin_id": "new-1"})
+    skins = data["robots"]["turtles"][0]["skins"]
     assert skins[-1]["skin_id"] == "new-1"
-    skincfg.save_skin_entry(data, "turtle_tree", 0, 0, {"skin_id": "belly-1b"})
+    skincfg.save_skin_entry(data, "turtle", 0, 0, {"skin_id": "belly-1b"})
     assert skins[0]["skin_id"] == "belly-1b"
 
 
 def test_delete_skin():
     data = _data()
-    skincfg.delete_skin(data, "turtle_tree", 0, 0)
-    skins = data["robots"]["turtle_trees"][0]["skins"]
+    skincfg.delete_skin(data, "turtle", 0, 0)
+    skins = data["robots"]["turtles"][0]["skins"]
     assert [s["skin_id"] for s in skins] == ["belly-2"]
 
 

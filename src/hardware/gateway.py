@@ -46,6 +46,10 @@ class Gateway:
         self._raw_callbacks: list[Callable[[str, str], None]] = []
         self._logged_disconnected = False
         self._known_macs: set[str] = set()
+        # mac -> time.monotonic() of its last message, so callers can tell a
+        # node that is alive NOW from one merely seen since connect (the
+        # session setup's online/offline dots scan + read this).
+        self._last_seen: dict[str, float] = {}
         # RGBW LED-ring variant self-reported by each node in its ready/pong frame
         # (mac -> bool). Lets the OTA picker auto-select the right firmware bin
         # instead of asking the user. A node absent here hasn't reported it yet
@@ -61,6 +65,14 @@ class Gateway:
     def known_macs(self) -> frozenset[str]:
         """MAC addresses of nodes that have sent at least one message."""
         return frozenset(self._known_macs)
+
+    def node_last_seen(self, mac: str) -> float | None:
+        """``time.monotonic()`` of the node's last message, or None (never).
+
+        Compare against a reference taken before a :meth:`scan` to know which
+        nodes answered THAT scan (i.e. are reachable right now) rather than at
+        any point since connect."""
+        return self._last_seen.get(mac)
 
     def node_rgbw(self, mac: str) -> bool | None:
         """RGBW LED-ring variant a node reported (True/False), or None if unknown.
@@ -344,6 +356,7 @@ class Gateway:
         # node list so it doesn't show up in Discover Nodes / the Add Node picker.
         if source and source != "thymio":
             self._known_macs.add(source)
+            self._last_seen[source] = time.monotonic()
             # Nodes self-report their LED-ring build in ready/pong so the OTA
             # picker can pick the matching bin without asking (see node_rgbw).
             if "rgbw" in data:

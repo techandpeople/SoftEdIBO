@@ -23,6 +23,8 @@ class ThymioRobot(EspRobot):
     no-hardware path is unchanged.
     """
 
+    robot_kind = "thymio"
+
     def __init__(
         self,
         robot_id: str,
@@ -87,6 +89,15 @@ class ThymioRobot(EspRobot):
         if self._link is not None:
             return self._link.set_leds(r, g, b)
         logger.debug("Thymio %s set_leds %d %d %d (no link)", self.robot_id, r, g, b)
+        return True
+
+    def play_sound(self, system: int | None = None, freq: int | None = None,
+                   duration_ms: int = 500) -> bool:
+        """Beep a built-in ``system`` sound (0-7) or a ``freq`` Hz tone (no-op w/o a link)."""
+        if self._link is not None:
+            return self._link.play_sound(system=system, freq=freq,
+                                         duration_ms=duration_ms)
+        logger.debug("Thymio %s play_sound (no link)", self.robot_id)
         return True
 
     def stop(self) -> bool:

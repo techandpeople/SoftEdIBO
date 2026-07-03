@@ -10,21 +10,27 @@ Full protocol + reproduction notes: **[docs/THYMIO_WIRELESS_CONTROL.md](../docs/
 
 | script | what it does |
 |---|---|
-| **`thymio_link.py`** | **the reliable dongle-free drive.** Turns on the C6's firmware `thymio_link` (the C6 polls the Thymio at 10 Hz on its own to hold the link hot) then sends instant `--left/--right/--stop/--led` or a `--repl` jog. **Several Thymios on one C6:** `--index` (0..3) + `--addr <hex>` per robot. No dongle at all. Needs a **U.FL-antenna C6** running the leak-fixed `rcp_c6`. |
+| **`thymio_link.py`** | **the reliable dongle-free drive.** Turns on the C6's firmware `thymio_link` (the C6 polls the Thymio at 10 Hz on its own to hold the link hot) then sends instant `--left/--right/--stop/--led`, **`--sound ID`** (system sound 0-7) / **`--tone HZ DUR`**, or a `--repl` jog (`f/b/l/r/s`, `snd`, `tone`). **Several Thymios on one C6:** `--index` (0..3) + `--addr <hex>` per robot. No dongle at all; runs the leak-fixed `rcp_c6` (chip antenna is plenty). |
 | `thymio_move.py` | one-shot drive — only lands if the link is **already hot** (dongle driving, or a `thymio_link` running); otherwise the Thymio isn't listening. |
 | `thymio_tx.py` | send a raw 802.15.4 frame hex (low-level replay/forge) via the C6's `tx` |
 | `thymio_sniff_capture.py` | raw `esp_ieee802154` promiscuous sniffer via the C6 — `--scan` finds the channel, `--debug` prints frames live, `--ch N` locks one. (The **raw C6** sniffer sees the Thymio; the Sonoff/OpenThread one filters it out.) |
 | `thymio_jog.py` | drive a Thymio via the **RF dongle** (thymiodirect) — the working-today path, and a traffic source to sniff |
 
+**Sound:** `--sound 2` plays a built-in system sound (0-7, -1 stops); `--tone 700 30` plays a
+700 Hz tone for 30/60 s. The C6 loads a tiny Aseba program (SET_BYTECODE + RUN) that calls the
+`sound.*` native functions — motors keep their targets, so a driving robot beeps without
+stopping. In the app / Python: `robot.play_sound(system=2)` or
+`robot.play_sound(freq=700, duration_ms=500)`.
+
 **Several Thymios:** one C6 drives up to 4, each a **slot** (`--index`) addressed by its
 802.15.4 short **`--addr`** (hex, e.g. `6a25`). Discover the addresses in-app (Robot Config →
-Thymio → **Discover…** button, which sniffs and lists them) or with `thymio_sniff_capture.py`.
-In the app, set each Thymio's **Address (C6)** so `wireless_via: gateway` robots get distinct
-slots.
+Thymio → **Discover…**: a guided, dongle-free scan — power each Thymio on while it runs and
+they appear live, in first-seen order) or with `thymio_sniff_capture.py`. In the app, set each
+Thymio's **Address (C6)** so `wireless_via: gateway` robots get distinct slots.
 
 ### 60-second quickstart (dongle-free)
 ```bash
-# 1) flash a XIAO ESP32-C6 (WITH its U.FL antenna) with the RCP (sniff + tx):
+# 1) flash a XIAO ESP32-C6 with the RCP (sniff + tx + sound; chip antenna is fine):
 pio run -d firmware/thymio_rcp -e rcp_c6 -t upload
 ls /dev/serial/by-id/                     # note the C6 port (Espressif)
 

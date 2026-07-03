@@ -267,6 +267,8 @@ static void doTx(uint8_t ch, const char* hex, Print& io) {
 static const uint8_t  TH_PAN[2] = {0x81, 0x44};   // PAN 0x4481 (this dongle network)
 static const uint16_t TH_SET_VARIABLES = 0xA00C;
 static const uint16_t TH_GET_VARIABLES = 0xA00B;
+static const uint16_t TH_SET_BYTECODE  = 0xA001;   // load a program (payload [dest][addr][words])
+static const uint16_t TH_RUN           = 0xA003;   // run it (payload [dest]); NOT 0xA002 = RESET
 static const uint32_t TH_POLL_MS = 100;           // ~10 Hz per Thymio — holds the RX window
                                                   // open (dongle-like; cooler + LED blinks)
 #define TH_MAX 4                                   // up to 4 Thymios on this one C6
@@ -289,10 +291,13 @@ static uint8_t    s_thCh   = 25;
 static uint8_t    s_thSeq  = 0;
 static uint32_t   s_thLastPoll = 0;
 
-// Build one Aseba-over-802.15.4 frame for Thymio `addr` and transmit it (radio up + on ch).
-static void thTx(uint16_t addr, uint16_t msgType, uint16_t startAddr,
-                 const int16_t* vals, uint8_t nvals) {
-    static uint8_t f[64];                          // static: outlives the async transmit
+// Build + transmit one Aseba-over-802.15.4 frame for Thymio `addr` (radio up + on ch).
+// `payload` is the Aseba message body AFTER the msgType and the dest-node word (which
+// every message here carries): [startAddr, values…] for SET/GET_VARIABLES and
+// SET_BYTECODE, or empty for RUN.
+static void thSend(uint16_t addr, uint16_t msgType,
+                   const int16_t* payload, uint8_t npayload) {
+    static uint8_t f[96];                          // static: outlives the async transmit
     const uint8_t dstL = addr & 0xFF, dstH = addr >> 8;   // MAC dest = addr little-endian
     uint8_t* p = &f[1];                            // f[0] = PHR, filled last
     *p++ = 0x61; *p++ = 0x88; *p++ = s_thSeq++;    // FCF + incrementing seq
@@ -304,8 +309,7 @@ static void thTx(uint16_t addr, uint16_t msgType, uint16_t startAddr,
     *p++ = 0x01; *p++ = 0x00;                       // Aseba source (host)
     *p++ = msgType & 0xFF; *p++ = msgType >> 8;
     *p++ = dstH; *p++ = dstL;                       // Aseba dest node = addr big-endian
-    *p++ = startAddr & 0xFF; *p++ = startAddr >> 8;
-    for (uint8_t i = 0; i < nvals; i++) { *p++ = vals[i] & 0xFF; *p++ = (vals[i] >> 8) & 0xFF; }
+    for (uint8_t i = 0; i < npayload; i++) { *p++ = payload[i] & 0xFF; *p++ = (payload[i] >> 8) & 0xFF; }
     f[0] = (uint8_t)((p - &f[1]) + 2);             // PHR = PSDU + FCS
     s_txDone = false;
     esp_ieee802154_transmit(f, false);
@@ -313,8 +317,42 @@ static void thTx(uint16_t addr, uint16_t msgType, uint16_t startAddr,
     while (!s_txDone && millis() - t0 < 15) delayMicroseconds(100);   // next frame
 }
 
+// SET/GET_VARIABLES & SET_BYTECODE: body = [startAddr, values…].
+static void thTx(uint16_t addr, uint16_t msgType, uint16_t startAddr,
+                 const int16_t* vals, uint8_t nvals) {
+    static int16_t body[48];
+    body[0] = (int16_t)startAddr;
+    if (nvals > 47) nvals = 47;
+    for (uint8_t i = 0; i < nvals; i++) body[1 + i] = vals[i];
+    thSend(addr, msgType, body, (uint8_t)(nvals + 1));
+}
+
+// RUN: body is just the dest node (already emitted by thSend), no startAddr.
+static void thRun(uint16_t addr) { thSend(addr, TH_RUN, nullptr, 0); }
+
+// Sound: load a tiny Aseba program that calls a sound native function, then run it.
+// Bytecode templates captured from thymiodirect on a real Thymio-II (word[4] and
+// word[7] are the parameterised values). Loading + running our program leaves the
+// motor.*.target variables untouched, so a driving robot keeps driving through a beep.
+// See docs/THYMIO_WIRELESS_CONTROL.md / memory thymio-sensors-and-sound.
+static void thPlaySystem(uint16_t addr, int16_t soundId) {   // soundId 0..7 (-1 stops)
+    int16_t bc[] = {0x0003, (int16_t)0xffff, 0x0003, 0x2000, soundId, 0x4002,
+                    0x2000, 0x0002, (int16_t)0xc026, 0x0000};   // callnat sound.system
+    thTx(addr, TH_SET_BYTECODE, 0, bc, sizeof(bc) / sizeof(bc[0]));
+    thRun(addr);
+}
+static void thPlayFreq(uint16_t addr, int16_t freqHz, int16_t dur60) {   // dur in 1/60 s
+    int16_t bc[] = {0x0003, (int16_t)0xffff, 0x0003, 0x2000, freqHz, 0x4002,
+                    0x2000, dur60, 0x4003, 0x2000, 0x0002, 0x2000, 0x0003,
+                    (int16_t)0xc02b, 0x0000};                    // callnat sound.freq
+    thTx(addr, TH_SET_BYTECODE, 0, bc, sizeof(bc) / sizeof(bc[0]));
+    thRun(addr);
+}
+
 static void thymioLinkPump() {
-    if (!s_thLink) return;
+    // The sniffer owns the radio while scanning (promiscuous / other channels):
+    // polling through it would corrupt both. sniffStart zeroed our motors first.
+    if (!s_thLink || s_sniffing) return;
     uint32_t now = millis();
     if (now - s_thLastPoll < TH_POLL_MS) return;
     s_thLastPoll = now;
@@ -330,18 +368,40 @@ static void thymioLinkPump() {
     esp_ieee802154_receive();                      // stay armed for the ACKs
 }
 
+// Stop the wheels before the sniffer takes the radio: the pump pauses while
+// sniffing and a Thymio holds its last motor target — don't let it coast blind.
+static void thymioStopForSniff() {
+    if (!s_thLink) return;
+    int16_t zero = 0;
+    for (int i = 0; i < TH_MAX; i++) {
+        ThymioSlot& t = s_th[i];
+        if (!t.active) continue;
+        t.left = t.right = 0;
+        thTx(t.addr, TH_SET_VARIABLES, 0x0056, &zero, 1);
+        thTx(t.addr, TH_SET_VARIABLES, 0x0057, &zero, 1);
+    }
+}
+
 // Handle one complete line from a transport; reply on that same stream.
 static void handleLine(char* line, Print& io) {
     JsonDocument doc;
     if (deserializeJson(doc, line) == DeserializationError::Ok) {
         const char* cmd = doc["cmd"] | "";
         if (strcmp(cmd, "ota_wifi") == 0) {
+            // The whole 802.15.4 side must be quiet before WiFi shares the
+            // radio: stop the Thymio poller (wheels to zero — a Thymio holds
+            // its last target), the sniffer, and the radio itself.
+            bool wasLink = s_thLink;
+            thymioStopForSniff();
+            s_thLink = false;
             sniffStop(io);          // free the shared radio for WiFi before updating
             radioDown();            // ...also if a tx (not a sniff) had brought it up
             doWifiOta(doc["ssid"] | "", doc["pass"] | "", doc["url"] | "", io);
+            s_thLink = wasLink;     // only reached on failure (success reboots)
         } else if (strcmp(cmd, "ping") == 0) {
             io.println("{\"type\":\"pong\",\"src\":\"c6\"}");
         } else if (strcmp(cmd, "sniff_start") == 0) {
+            thymioStopForSniff();
             sniffStart((uint8_t)(doc["ch"] | 0), io);
         } else if (strcmp(cmd, "sniff_stop") == 0) {
             sniffStop(io);
@@ -404,6 +464,21 @@ static void handleLine(char* line, Print& io) {
                 s_th[idx].leds[1] = (int16_t)(int)(doc["g"] | 0);
                 s_th[idx].leds[2] = (int16_t)(int)(doc["b"] | 0);
                 s_th[idx].ledsResend = 8;
+            }
+        } else if (strcmp(cmd, "thymio_sound") == 0) {
+            // {"cmd":"thymio_sound"[,"idx":0],"sys":2}   → system sound 0..7 (-1 stops)
+            // {"cmd":"thymio_sound"[,"idx":0],"freq":700,"dur":30}  → tone (dur in 1/60 s)
+            // Needs the link on (radio up + on channel — held by the poller).
+            int idx = doc["idx"] | 0;
+            if (idx < 0 || idx >= TH_MAX) idx = 0;
+            uint16_t addr = s_th[idx].active ? s_th[idx].addr : 0x6A25;
+            if (!s_thLink || s_sniffing) {
+                io.println("{\"type\":\"thymio_sound\",\"src\":\"c6\",\"err\":\"link_off\"}");
+            } else if (doc["freq"].is<int>()) {
+                thPlayFreq(addr, (int16_t)(int)(doc["freq"] | 440),
+                           (int16_t)(int)(doc["dur"] | 30));
+            } else {
+                thPlaySystem(addr, (int16_t)(int)(doc["sys"] | 0));
             }
         }
         return;

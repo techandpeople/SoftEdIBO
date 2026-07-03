@@ -93,20 +93,28 @@ class ScriptedActivity(BaseActivity):
         if kind == THYMIO:
             from src.robots.thymio.thymio_robot import ThymioRobot
             return ThymioRobot
-        if kind in (TURTLE, TREE):
-            from src.robots.turtle_tree.turtle_tree_robot import TurtleTreeRobot
-            return TurtleTreeRobot
+        if kind == TURTLE:
+            from src.robots.turtle.turtle_robot import TurtleRobot
+            return TurtleRobot
+        if kind == TREE:
+            from src.robots.tree.tree_robot import TreeRobot
+            return TreeRobot
         return BaseRobot
 
     def __init__(self, name: str, description: str, spec: dict[str, Any]):
         super().__init__(name=name, description=description)
         catalog.validate_spec(spec)
         self._spec = spec
-        # Declared target (robot kind + skin variant), or None for a legacy "any"
-        # behaviour. Narrows robot_type from BaseRobot to the kind's class so the
-        # session setup and BaseActivity.setup can validate the robot.
+        # Declared target, or None for a target-less "any" behaviour.
+        # New-style targets carry a skin condition ({"skin": …}) and run on any
+        # robot — `if_robot` blocks gate the robot-specific steps. Only a
+        # LEGACY {"kind": …} target narrows robot_type to that kind's class.
         self.target = catalog.spec_target(spec)
-        if self.target is not None:
+        # Skin condition ("natural"/"wrinkles"/"organs") the behaviour is
+        # written for, or None. The session setup pre-selects by it and warns
+        # when the chosen robot's configured skins don't match.
+        self.skin = catalog.spec_skin(spec)
+        if self.target is not None and "kind" in self.target:
             self.robot_type = self._robot_type_for(self.target["kind"])
         self._states: dict[str, Any] = spec["states"]
         self._initial: str = spec["initial"]
@@ -338,9 +346,18 @@ class ScriptedActivity(BaseActivity):
             return not self._eval_cond(unit, val)
         if name == "organs":
             return self._eval_organs(unit, val)
+        if name == "robot_is":
+            want = val.get("robot", val) if isinstance(val, dict) else val
+            return self._unit_kind(unit) == want
         if name == "always":
             return bool(val)
         return False
+
+    @staticmethod
+    def _unit_kind(unit: _Unit) -> str:
+        """The unit's robot kind ("thymio"/"turtle"/"tree", "" if unknown) —
+        what `if_robot` steps and `robot_is` conditions test against."""
+        return getattr(unit.robot, "robot_kind", "") or ""
 
     def _eval_organs(self, unit: _Unit, params: Any) -> bool:
         """Evaluate an ``organs`` condition against the unit's resolved organs.
@@ -454,6 +471,10 @@ class ScriptedActivity(BaseActivity):
             yield ("touch", self._resolve_chamber(unit, params, ctx))
         elif verb == "sequence":
             yield from self._run_steps(unit, params.get("do", []), ctx)
+        elif verb == "if_robot":
+            branch = ("do" if self._unit_kind(unit) == params.get("robot")
+                      else "else")
+            yield from self._run_steps(unit, params.get(branch) or [], ctx)
         elif verb == "repeat":
             yield from self._run_repeat(unit, params, ctx)
         elif verb == "for_each_chamber":
@@ -559,10 +580,13 @@ class ScriptedActivity(BaseActivity):
         """Invoke a wheeled-base method on the unit's robot, if it has one.
 
         Duck-typed (no robot-class import): non-Thymio robots simply lack
-        ``set_motors``/``set_leds`` and the verb is a silent no-op — the
-        catalog already rejects these verbs outside thymio-targeted specs."""
+        ``set_motors``/``set_leds`` and the verb is a logged no-op — that is
+        what lets one skin-targeted behaviour run on every robot, with
+        `if_robot` blocks (or this no-op) skipping the wheeled parts."""
         fn = getattr(unit.robot, method, None)
         if fn is None:
+            logger.debug("Scripted %s: %s ignored (robot has no wheeled base)",
+                         unit.unit_id, method)
             return
         try:
             fn(*args)

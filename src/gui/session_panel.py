@@ -183,7 +183,8 @@ class SessionPanel(QWidget, Ui_SessionPanel):
 
     def _open_setup_dialog(self) -> None:
         """Open the session setup dialog and start a new session."""
-        dialog = SessionSetupDialog(self._available_robots, self._db, parent=self)
+        dialog = SessionSetupDialog(self._available_robots, self._db,
+                                    gateway=self._gateway, parent=self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
 
@@ -258,9 +259,14 @@ class SessionPanel(QWidget, Ui_SessionPanel):
             timestamp=start_time,
             # Durable, per-session record of exactly which robots this session
             # ran with (and the sim flag) so resume can rebuild it without
-            # relying on the global last_assignments.json cache.
+            # relying on the global last_assignments.json cache. Robot kinds +
+            # the activity's target skin condition are the study's condition
+            # labels for later analysis.
             metadata=json.dumps({
                 "robot_ids": [r.robot_id for r in robots],
+                "robot_kinds": {r.robot_id: getattr(r, "robot_kind", "")
+                                for r in robots},
+                "activity_skin": getattr(activity, "skin", None),
                 "simulation_mode": activity.simulation_mode,
             }),
         ))

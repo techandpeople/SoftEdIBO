@@ -22,7 +22,9 @@ Protocol::
     PC -> gw    {"cmd":"ota_store_data","data":"<base64>"}   (xN, no per-chunk ack)
     PC -> gw    {"cmd":"ota_store_end"}
     gw -> PC    {"type":"ota_stored","ok":true,"url":"http://192.168.4.1/fw"}
-    PC -> node  {"cmd":"ota_wifi","ssid":..,"pass":..,"url":..}
+    PC -> node  {"cmd":"ota_wifi","url":..}   (gateway injects its AP ssid/pass
+                                               while forwarding; an explicit
+                                               ssid/pass here overrides)
     node -> PC  {"type":"ota_wifi_start"}        (node joins AP + downloads)
     node -> PC  {"type":"ota_done"}              (broadcast on the fresh boot)
 
@@ -85,8 +87,8 @@ class WifiOTAUpdater:
         gateway: Gateway,
         mac: str,
         firmware_path: str | Path,
-        ssid: str,
-        password: str,
+        ssid: str = "",
+        password: str = "",
         *,
         on_progress: Callable[[int], None] | None = None,
         on_log: Callable[[str], None] | None = None,
@@ -122,8 +124,6 @@ class WifiOTAUpdater:
         """Perform the update. Returns ``(ok, message)``. Blocking."""
         if not self._gateway.is_connected:
             return False, "Gateway not connected"
-        if not self._ssid:
-            return False, "No access-point name given"
         try:
             data = self._path.read_bytes()
         except OSError as e:
@@ -256,9 +256,13 @@ class WifiOTAUpdater:
                 return True
             now = time.monotonic()
             if now >= next_send:
-                # "pass" is a Python keyword, so it can't be a kwarg name.
-                self._gateway.send(self._mac, "ota_wifi", ssid=self._ssid,
-                                   url=url, **{"pass": self._password})
+                # No ssid → the gateway injects its own stored AP credentials
+                # while forwarding, so the PC never has to know them. An
+                # explicit ssid overrides ("pass" is a Python keyword, so it
+                # can't be a kwarg name).
+                creds = ({"ssid": self._ssid, "pass": self._password}
+                         if self._ssid else {})
+                self._gateway.send(self._mac, "ota_wifi", url=url, **creds)
                 next_send = now + self.START_RESEND
             self._event.wait(0.2)
             self._event.clear()
@@ -347,7 +351,8 @@ class C6WifiOTAUpdater(WifiOTAUpdater):
     # over the shared-radio AP before giving up.
     DONE_TIMEOUT = 180.0
 
-    def __init__(self, gateway, firmware_path, ssid, password, **kwargs):
+    def __init__(self, gateway, firmware_path, ssid: str = "",
+                 password: str = "", **kwargs):
         super().__init__(gateway, self.TARGET, firmware_path, ssid, password, **kwargs)
 
     def _handle_node(self, mtype, data):
