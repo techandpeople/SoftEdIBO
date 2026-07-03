@@ -115,6 +115,10 @@ class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
         # staircase closely instead of the 500 ms status cadence.
         self._telemetry = FastTelemetry(self._gateway, skin["chamber_mac"])
         self._telemetry.start()
+        # Ask the touch node for 3-axis deltas during the sweep, so the curves
+        # can carry offset vectors (harmless no-op on older firmware). Left on
+        # afterwards: live vector compensation needs the same stream.
+        self._gateway.send(skin["touch_mac"], "configure", stream_vec=True)
         self._advance()
         self._tick.start()
 

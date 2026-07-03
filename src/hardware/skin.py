@@ -190,6 +190,12 @@ class Skin:
             return touch_controller
         logger.info("Pressure-informed touch compensation enabled for skin %s",
                     self.skin_id)
+        if compensator.has_vector and hasattr(touch_controller, "send_command"):
+            # The calibration carries offset vectors — ask the node to stream
+            # its 3-axis deltas so the compensator can subtract vectorially
+            # (RAM-only firmware flag, so re-push on every build; harmless
+            # no-op on older firmware).
+            touch_controller.send_command("configure", stream_vec=True)
         return CompensatedMagnetSource(
             touch_controller, compensator, self._chamber_levels)
 

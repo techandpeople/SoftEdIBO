@@ -37,12 +37,20 @@ S2→Q3 (bottom-left), S3→Q4 (bottom-right)** — matches the PC `QuadrantDete
 - `mag` — per-sensor field-change magnitude in µT (`|sample − baseline|`).
 - `act` — indices of sensors whose `mag ≥ act_threshold_ut` (the value the PC prefers).
 
-**3-axis streaming (`[env:vector]` build, `-DMAG_VECTOR`):** the stream message
-additionally carries `"vec":[[dx,dy,dz],...]` — the per-sensor baseline-subtracted
-field delta in whole µT — and the boot announce gains `"vec":1`. `mag`/`act` are
+**3-axis streaming:** the stream message can additionally carry
+`"vec":[[dx,dy,dz],...]` — the per-sensor baseline-subtracted field delta in
+whole µT — and the boot announce then gains `"vec":1`. `mag`/`act` are
 unchanged, so the PC pipeline is unaffected; the direction information enables
 vector touch compensation and richer offline analysis (`docs/TOUCH_COUPLING.md`).
-Flash `[env:release]` to revert to the scalar-only protocol.
+Two ways to turn it on: the `[env:vector]` build (`-DMAG_VECTOR`) enables it
+from boot (flash `[env:release]` to revert), or
+`{"cmd":"configure","stream_vec":true}` toggles it at runtime on any build
+(RAM-only — cleared by a reboot; the PC re-sends it when it needs vectors).
+
+**Shared module:** all sensing/streaming logic lives in
+`firmware/common/se_magnet.h`, which the direct actuator board
+(`node_actuator` `[env:direct*]`) folds in too — one implementation, two
+boards. This file only wires the buses, command dispatch and OTA.
 
 **Commands** (PC → board, via gateway):
 ```json

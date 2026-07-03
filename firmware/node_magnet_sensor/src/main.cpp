@@ -2,57 +2,37 @@
  * SoftEdIBO — node_magnet_sensor firmware
  *
  * 4x MLX90393 magnetometers (+1 optional 5th on a second I2C bus) acting as a
- * touch-sensing board for a soft skin. A small magnet sits above each sensor in
- * the silicone; pressing the skin moves the magnet and changes the field.
+ * touch-sensing board for a soft skin. All the sensing/streaming logic lives in
+ * the shared firmware/common/se_magnet.h (also used by the direct actuator
+ * board, which folds the same module in); this file only wires the buses, the
+ * ESP-NOW command dispatch and OTA.
  *
- * Emits the node_magnet_sensor protocol over ESP-NOW via the shared se_espnow.h, so it
- * drops straight into the SoftEdIBO PC (QuadrantDetector / touch tracking):
+ * Protocol (see se_magnet.h):
  *   boot:   {"status":"node_magnet_sensor_ready","sensors":N,"variant":"mlx90393"}
- *   stream: {"type":"magnet","mag":[uT..],"act":[idx..]}
+ *   stream: {"type":"magnet","mag":[uT..],"act":[idx..]}   (+"vec" when enabled)
  *
  * Sensor order matters: S0..S3 map to quadrants Q1(TL) Q2(TR) Q3(BL) Q4(BR),
  * which is the order of the I2C addresses below. The PC's QuadrantDetector
  * consumes the first 4 sensors; the optional 5th is appended after them.
  *
- * Each sensor auto-zeros (baseline) at boot. Re-zero at runtime by sending
- * {"cmd":"rebaseline"} (e.g. after the silicone settles). The activation
- * threshold (µT) is tunable with {"cmd":"configure","act_threshold_ut":...}.
+ * Commands: {"cmd":"rebaseline"}, {"cmd":"configure","act_threshold_ut":...,
+ * "adaptive_baseline":...,"baseline_tau_ms":...,"stream_vec":...}.
  *
- * Optional adaptive baseline ({"cmd":"configure","adaptive_baseline":true,
- * "baseline_tau_ms":2000}): after boot, the baseline keeps slowly tracking the
- * field for sensors that are not currently touched, so slow drift (e.g. a
- * chamber inflating and pushing the magnet) is absorbed while fast touches
- * still register. Off by default — measure the actuation contamination first.
- *
- * Optional 3-axis streaming (-DMAG_VECTOR, the [env:vector] build): each stream
- * message also carries "vec":[[dx,dy,dz],...] — the per-sensor baseline-
- * subtracted field delta in whole µT. The scalar "mag"/"act" fields are
- * unchanged, so the PC pipeline works identically; "vec" just adds the
- * direction information (touch vs actuation displace the magnet along
- * different axes, which the magnitude collapses away). The ready announce
- * gains "vec":1 so recordings identify vector-capable nodes. Flag off (the
- * default build) = byte-for-byte the previous protocol.
- *
- * Adapted from the thesis MLX90393 live-stream firmware. The offline
- * calibration protocol (CSV) was dropped: the SoftEdIBO runtime detects touch
- * with thresholds on the raw µT magnitudes, not a calibrated model.
+ * 3-axis streaming: build [env:vector] (-DMAG_VECTOR) to stream "vec" from
+ * boot, or toggle at runtime with {"cmd":"configure","stream_vec":true}.
+ * [env:release] + no configure = byte-for-byte the previous scalar protocol.
  */
 
 #include <Arduino.h>
 #include <Wire.h>
-#include <Adafruit_MLX90393.h>
 #include <ArduinoJson.h>
-#include <math.h>
 #include <esp_ota_ops.h>
 
 #include "se_espnow.h"
+#include "se_magnet.h"
 #include "se_ota.h"
 
 namespace {
-
-// ---------------------------------------------------------------------------
-// Hardware config (from the thesis board)
-// ---------------------------------------------------------------------------
 
 constexpr uint8_t I2C_SDA   = 21, I2C_SCL   = 22;   // primary bus (S0..S3)
 constexpr uint8_t EXTRA_SDA = 16, EXTRA_SCL = 17;   // secondary bus (optional S4)
@@ -60,73 +40,11 @@ constexpr uint8_t EXTRA_SDA = 16, EXTRA_SCL = 17;   // secondary bus (optional S
 constexpr size_t  NUM_PRIMARY = 4;
 constexpr uint8_t PRIMARY_ADDR[NUM_PRIMARY] = {0x18, 0x19, 0x1A, 0x1B};
 constexpr uint8_t EXTRA_ADDR  = 0x1A;
-constexpr size_t  MAX_SENSORS = NUM_PRIMARY + 1;    // +1 optional extra
 
-constexpr mlx90393_gain_t         GAIN   = MLX90393_GAIN_2X;
-constexpr mlx90393_oversampling_t OSR    = MLX90393_OSR_2;
-constexpr mlx90393_filter_t       FILTER = MLX90393_FILTER_3;
+constexpr uint32_t STREAM_INTERVAL_MS = 35;   // ~28 Hz (dedicated board — no
+                                              // actuation commands to crowd out)
 
-constexpr uint16_t BASELINE_SAMPLES   = 70;   // running-average samples to auto-zero
-constexpr uint32_t STREAM_INTERVAL_MS = 35;   // ~28 Hz
-
-// ---------------------------------------------------------------------------
-// Tunables (overridable at runtime via "configure")
-// ---------------------------------------------------------------------------
-
-float actThresholdUt = 300.0f;  // |field delta| in µT at/above which a sensor is "active"
-bool  adaptiveBaseline = false;  // continuously track slow drift (opt-in via configure)
-float baselineTauMs    = 2000.0f; // adaptive-baseline time constant (ms); larger = slower
-#ifdef DEBUG_BUILD
-bool  debugMode    = true;
-#else
-bool  debugMode    = false;
-#endif
-
-// ---------------------------------------------------------------------------
-// State
-// ---------------------------------------------------------------------------
-
-struct Vec3 { float x, y, z; };
-
-Adafruit_MLX90393 mlx[MAX_SENSORS];
-TwoWire           extraWire = TwoWire(1);
-bool              ready[MAX_SENSORS] = {};
-size_t            streamCount = NUM_PRIMARY;   // 4, or 5 if the extra is present
-
-Vec3     baseline[MAX_SENSORS] = {};
-bool     baselineReady = false;
-uint16_t baselineN     = 0;
-uint32_t lastStreamMs    = 0;
-uint32_t lastAnnounceMs  = 0;
-char     announceMsg[96] = {};
-
-constexpr uint32_t ANNOUNCE_INTERVAL_MS = 2000;
-
-inline float vmag(const Vec3& v) { return sqrtf(v.x * v.x + v.y * v.y + v.z * v.z); }
-
-bool readSensor(size_t i, Vec3& out) {
-    if (!ready[i]) return false;
-    return mlx[i].readData(&out.x, &out.y, &out.z);
-}
-
-void initSensor(size_t i, uint8_t addr, TwoWire* bus) {
-    ready[i] = mlx[i].begin_I2C(addr, bus);
-    if (ready[i]) {
-        mlx[i].setGain(GAIN);
-        mlx[i].setOversampling(OSR);
-        mlx[i].setFilter(FILTER);
-    }
-}
-
-void resetBaseline() {
-    baselineReady = false;
-    baselineN     = 0;
-    for (auto& b : baseline) b = {0.0f, 0.0f, 0.0f};
-}
-
-// ---------------------------------------------------------------------------
-// ESP-NOW command handling
-// ---------------------------------------------------------------------------
+TwoWire extraWire = TwoWire(1);
 
 void onReceived(const uint8_t* mac, const uint8_t* data, int len) {
     se::node::learnGateway(mac);   // remember gateway + add peer on first msg
@@ -139,99 +57,10 @@ void onReceived(const uint8_t* mac, const uint8_t* data, int len) {
     if (strcmp(cmd, "ping") == 0) {
         se::node::toGateway("{\"type\":\"pong\"}");
     } else if (strcmp(cmd, "rebaseline") == 0) {
-        resetBaseline();
+        se::magnet::resetBaseline();
     } else if (strcmp(cmd, "configure") == 0) {
-        if (!doc["act_threshold_ut"].isNull()) {
-            actThresholdUt = doc["act_threshold_ut"].as<float>();
-        } else if (!doc["act_threshold"].isNull()) {
-            // Back-compat: the old activation level was a fraction of a full-scale
-            // (default 1000 µT), so convert it to the µT it used to mean.
-            float fs = doc["fullscale_mt"].isNull() ? 1000.0f : doc["fullscale_mt"].as<float>();
-            actThresholdUt = doc["act_threshold"].as<float>() * fs;
-        }
-        if (!doc["adaptive_baseline"].isNull()) adaptiveBaseline = doc["adaptive_baseline"].as<bool>();
-        if (!doc["baseline_tau_ms"].isNull())   baselineTauMs   = doc["baseline_tau_ms"].as<float>();
+        se::magnet::applyConfigure(doc);
     }
-}
-
-// ---------------------------------------------------------------------------
-// Streaming
-// ---------------------------------------------------------------------------
-
-// Accumulate a running-average baseline over the first BASELINE_SAMPLES reads.
-void accumulateBaseline(const Vec3* samples, const bool* valid) {
-    baselineN++;
-    const float a = 1.0f / static_cast<float>(baselineN);
-    for (size_t i = 0; i < streamCount; ++i) {
-        if (!valid[i]) continue;
-        if (baselineN == 1) {
-            baseline[i] = samples[i];
-        } else {
-            baseline[i].x = (1.0f - a) * baseline[i].x + a * samples[i].x;
-            baseline[i].y = (1.0f - a) * baseline[i].y + a * samples[i].y;
-            baseline[i].z = (1.0f - a) * baseline[i].z + a * samples[i].z;
-        }
-    }
-    if (baselineN >= BASELINE_SAMPLES) baselineReady = true;
-}
-
-// Continuously nudge the baseline toward the current reading for sensors that
-// are NOT being touched, so slow drift (silicone settling, a chamber inflating
-// and pushing the magnet) is absorbed while fast touches still stand out.
-// Active sensors are frozen so the touch itself is never averaged into the
-// baseline. Opt-in: {"cmd":"configure","adaptive_baseline":true}. The EWMA step
-// is dt/tau, where dt is the real time since the last stream (not a fixed
-// constant) so the time constant stays honest even when reads are delayed.
-void updateAdaptiveBaseline(const Vec3* samples, const bool* valid, float dtMs) {
-    if (!adaptiveBaseline || baselineTauMs <= 0.0f) return;
-    float a = dtMs / baselineTauMs;
-    if (a > 1.0f) a = 1.0f;             // clamp if a read was badly delayed
-    for (size_t i = 0; i < streamCount; ++i) {
-        if (!valid[i]) continue;
-        float m = vmag({samples[i].x - baseline[i].x,
-                        samples[i].y - baseline[i].y,
-                        samples[i].z - baseline[i].z});
-        if (m >= actThresholdUt) continue;   // touch in progress — freeze this sensor
-        baseline[i].x += a * (samples[i].x - baseline[i].x);
-        baseline[i].y += a * (samples[i].y - baseline[i].y);
-        baseline[i].z += a * (samples[i].z - baseline[i].z);
-    }
-}
-
-// Build {"type":"magnet","mag":[uT..],"act":[idx..]} into buf. A sensor is
-// "active" once its µT delta from baseline reaches actThresholdUt.
-void buildImuMessage(const Vec3* samples, const bool* valid, char* buf, size_t cap) {
-    int pos = snprintf(buf, cap, "{\"type\":\"magnet\",\"mag\":[");
-    bool active[MAX_SENSORS] = {};
-    for (size_t i = 0; i < streamCount; ++i) {
-        float m = valid[i] ? vmag({samples[i].x - baseline[i].x,
-                                    samples[i].y - baseline[i].y,
-                                    samples[i].z - baseline[i].z}) : 0.0f;
-        active[i] = m >= actThresholdUt;
-        pos += snprintf(buf + pos, cap - pos, "%s%.3f", i ? "," : "", m);
-    }
-    pos += snprintf(buf + pos, cap - pos, "],\"act\":[");
-    bool first = true;
-    for (size_t i = 0; i < streamCount; ++i) {
-        if (!active[i]) continue;
-        pos += snprintf(buf + pos, cap - pos, "%s%u", first ? "" : ",", (unsigned)i);
-        first = false;
-    }
-#ifdef MAG_VECTOR
-    // Per-sensor baseline-subtracted delta components, whole µT — the direction
-    // information the scalar magnitude collapses away. Ints keep the frame well
-    // under the 250-byte ESP-NOW payload limit even with 5 sensors.
-    pos += snprintf(buf + pos, cap - pos, "],\"vec\":[");
-    for (size_t i = 0; i < streamCount; ++i) {
-        Vec3 d = valid[i] ? Vec3{samples[i].x - baseline[i].x,
-                                 samples[i].y - baseline[i].y,
-                                 samples[i].z - baseline[i].z}
-                          : Vec3{0.0f, 0.0f, 0.0f};
-        pos += snprintf(buf + pos, cap - pos, "%s[%.0f,%.0f,%.0f]",
-                        i ? "," : "", d.x, d.y, d.z);
-    }
-#endif
-    snprintf(buf + pos, cap - pos, "]}");
 }
 
 }  // namespace
@@ -248,18 +77,21 @@ void setup() {
     Wire.setClock(400000);
     extraWire.begin(EXTRA_SDA, EXTRA_SCL);
     extraWire.setClock(400000);
-    delay(800);
+    delay(800);   // let the sensors power up before the first transaction
 
     // TODO(scale): supporting ~12 sensors needs more I2C than the MLX90393's
     // 4 addresses/bus allow — add a TCA9548A I2C mux and a {channel,address}
     // sensor table. See README.md "Planned / TODO" before adding.
 
-    for (size_t i = 0; i < NUM_PRIMARY; ++i) initSensor(i, PRIMARY_ADDR[i], &Wire);
-    initSensor(NUM_PRIMARY, EXTRA_ADDR, &extraWire);
-
-    // The PC's QuadrantDetector consumes the first 4 sensors; include the 5th
-    // only when it actually responded so it lands after the quadrant sensors.
-    streamCount = ready[NUM_PRIMARY] ? MAX_SENSORS : NUM_PRIMARY;
+    for (size_t i = 0; i < NUM_PRIMARY; ++i) {
+        se::magnet::addSensor(PRIMARY_ADDR[i], &Wire);
+    }
+    // The optional 5th sensor only takes a slot when it actually responds, so
+    // it always lands after the quadrant sensors.
+    se::magnet::addSensor(EXTRA_ADDR, &extraWire, /*optional=*/true);
+    // forcePresent: a dedicated magnet board with dead sensors must still
+    // announce, so it shows up in scans and the fault is visible.
+    se::magnet::finishInit(STREAM_INTERVAL_MS, /*forcePresent=*/true);
 
     if (!se::begin(onReceived)) {
         Serial.println(F("{\"error\":\"esp_now_init_failed\"}"));
@@ -270,15 +102,7 @@ void setup() {
     // hook — see se_ota.h).
     se::ota::checkBootDone();
 
-    snprintf(announceMsg, sizeof(announceMsg),
-             "{\"status\":\"node_magnet_sensor_ready\",\"sensors\":%u,"
-#ifdef MAG_VECTOR
-             "\"vec\":1,"
-#endif
-             "\"variant\":\"mlx90393\"}",
-             (unsigned)streamCount);
-    se::broadcast(announceMsg);
-    Serial.println(announceMsg);
+    se::magnet::announce();
 }
 
 void loop() {
@@ -286,41 +110,5 @@ void loop() {
     // the node reboots into the new firmware).
     se::ota::pollWifi();
 
-    uint32_t now = millis();
-
-    // While a firmware update is streaming in, stay off the air: ~28 Hz magnet
-    // broadcasts plus blocking I2C reads congest the ESP-NOW link and starve the
-    // ota_ack replies, which makes the transfer fail ("No ACK for chunk N").
-    if (se::ota::active) return;
-
-    if (!se::node::gatewayKnown && now - lastAnnounceMs >= ANNOUNCE_INTERVAL_MS) {
-        lastAnnounceMs = now;
-        se::broadcast(announceMsg);
-    }
-
-    if (now - lastStreamMs < STREAM_INTERVAL_MS) return;
-    const float dtMs = (float)(now - lastStreamMs);   // real elapsed time, for the EWMA
-    lastStreamMs = now;
-
-    Vec3 samples[MAX_SENSORS];
-    bool valid[MAX_SENSORS];
-    bool any = false;
-    for (size_t i = 0; i < streamCount; ++i) {
-        valid[i] = readSensor(i, samples[i]) &&
-                   !isnan(samples[i].x) && !isnan(samples[i].y) && !isnan(samples[i].z);
-        any |= valid[i];
-    }
-    if (!any) return;
-
-    if (!baselineReady) {
-        accumulateBaseline(samples, valid);
-        return;
-    }
-
-    updateAdaptiveBaseline(samples, valid, dtMs);
-
-    char msg[256];
-    buildImuMessage(samples, valid, msg, sizeof(msg));
-    se::node::toGateway(msg);
-    if (debugMode) Serial.println(msg);
+    se::magnet::tick(millis());
 }

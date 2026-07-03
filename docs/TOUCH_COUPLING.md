@@ -31,10 +31,16 @@ response:
 - `CouplingMatrix.sensor_primary_chamber(threshold)` → `sensor -> strongest chamber`
   (with 4-sensor skins, that's per-quadrant)
 
-When the samples carry the firmware's 3-axis `vec` deltas (the `MAG_VECTOR`
-build of `node_magnet_sensor` — `pio run -e vector`; reflash `-e release` to
-revert), each curve point also records the per-sensor offset **vectors**,
-enabling vector compensation (below). The ready announce gains `"vec":1`.
+When the samples carry the firmware's 3-axis `vec` deltas, each curve point
+also records the per-sensor offset **vectors**, enabling vector compensation
+(below). The magnet module is shared (`firmware/common/se_magnet.h`) between
+the standalone `node_magnet_sensor` board and the direct actuator board, so
+both support it two ways: the `MAG_VECTOR` build flag (`pio run -e vector` on
+`node_magnet_sensor`; reflash `-e release` to revert) turns it on from boot, or
+`{"cmd":"configure","stream_vec":true}` toggles it at runtime on any build
+(RAM-only — the calibration dialog sends it when a sweep starts, and the Skin
+re-sends it on build whenever its stored curves carry vectors). The ready
+announce gains `"vec":1` while it is on.
 
 **Sensor-lag handling.** Chamber `status` broadcasts lag the true pressure,
 while `magnet` samples stream at ~28 Hz. Instead of guessing the lag, the
