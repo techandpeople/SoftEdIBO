@@ -127,11 +127,6 @@
       var RING = [['all rings', 'all'], ['ring 0', '0'], ['ring 1', '1'],
                   ['ring 2', '2'], ['ring 3', '3']];
       Blockly.defineBlocksWithJsonArray([
-        { type: 'se_behaviour',
-          message0: 'behaviour — starts at the first phase %1',
-          args0: [{ type: 'input_statement', name: 'STATES', check: 'State' }],
-          colour: 290, tooltip: 'Root of a behaviour. Stack phases inside.' },
-
         { type: 'se_state',
           message0: 'phase %1', args0: [{ type: 'field_input', name: 'NAME', text: 'phase1' }],
           message1: 'do %1', args1: [{ type: 'input_statement', name: 'DO', check: 'Step' }],
@@ -243,6 +238,25 @@
           message0: 'hold all chambers',
           previousStatement: 'Step', nextStatement: 'Step', colour: 230 },
 
+        // --- Thymio wheeled base (only offered when the behaviour targets Thymio) ---
+        { type: 'se_thymio_drive',
+          message0: 'drive Thymio — left wheel %1 right wheel %2 for %3 ms',
+          args0: [{ type: 'field_number', name: 'LEFT', value: 100, min: -500, max: 500 },
+                  { type: 'field_number', name: 'RIGHT', value: 100, min: -500, max: 500 },
+                  { type: 'field_number', name: 'MS', value: 1000, min: 0 }],
+          previousStatement: 'Step', nextStatement: 'Step', colour: 160,
+          tooltip: 'Set the Thymio wheel speeds (-500..500; negative = backwards, '
+                 + 'opposite signs turn on the spot). "for N ms" drives that long '
+                 + 'then stops; 0 keeps driving until the next drive block. '
+                 + '0 / 0 stops the wheels.' },
+
+        { type: 'se_thymio_leds',
+          message0: 'Thymio top LED colour %1',
+          args0: [{ type: 'field_input', name: 'COLOR', text: DEFAULT_COLOUR }],
+          previousStatement: 'Step', nextStatement: 'Step', colour: 160,
+          tooltip: 'Colour the Thymio\'s top LED. The colour is a "#rrggbb" tag — '
+                 + 'use the Colour helper panel to pick one and copy it.' },
+
         // --- control ---
         { type: 'se_wait',
           message0: 'wait %1 ms', args0: [{ type: 'field_number', name: 'MS', value: 500, min: 0 }],
@@ -305,8 +319,72 @@
           message0: 'always', output: 'Cond', colour: 20 },
       ]);
 
+      defineBehaviourBlock();
       defineBeatBlock();
       defineRepeatBlock();
+    }
+
+    // ---- behaviour root: declares the target robot kind -----------------
+    // The "for" dropdown is the activity's target (spec.target.kind): it gates
+    // the toolbox (Thymio wheel blocks only exist for Thymio) and tells the
+    // session which robots the activity is for. 'any' = legacy target-less.
+    function defineBehaviourBlock() {
+      Blockly.Blocks['se_behaviour'] = {
+        init: function () {
+          this.appendDummyInput()
+            .appendField('behaviour for')
+            .appendField(new Blockly.FieldDropdown([
+              ['any robot', 'any'],
+              ['Thymio', 'thymio'],
+              ['Turtle', 'turtle'],
+              ['Tree', 'tree'],
+            ], function (kind) { updateToolboxForKind(kind); return kind; }), 'TARGET');
+          this.appendStatementInput('STATES')
+            .setCheck('State')
+            .appendField('— starts at the first phase');
+          this.setColour(290);
+          this.setTooltip(
+            'Root of a behaviour. Stack phases inside. "for" declares which '
+            + 'robot kind the activity targets: robot-specific blocks (e.g. '
+            + 'the Thymio wheels) only appear for that kind, and the session '
+            + 'only offers matching robots. "any robot" keeps the generic '
+            + 'skin-only blocks.');
+        },
+      };
+    }
+
+    // ---- toolbox: inject the Thymio category only for thymio targets ----
+    function toolboxForKind(kind) {
+      var xml = document.getElementById('toolbox').cloneNode(true);
+      if (kind === 'thymio') {
+        var cat = document.createElement('category');
+        cat.setAttribute('name', 'Thymio');
+        cat.setAttribute('colour', '160');
+        ['se_thymio_drive', 'se_thymio_leds'].forEach(function (t) {
+          var blk = document.createElement('block');
+          blk.setAttribute('type', t);
+          cat.appendChild(blk);
+        });
+        // After "Actions", so the wheel blocks sit next to the skin actions.
+        xml.insertBefore(cat, xml.children[2] || null);
+      }
+      return xml;
+    }
+
+    function updateToolboxForKind(kind) {
+      if (workspace) workspace.updateToolbox(toolboxForKind(kind));
+    }
+
+    // Read the target off the root block and sync the toolbox to it; when a
+    // loaded spec carries a target, push it into the block first.
+    function syncTargetUi(spec) {
+      var roots = workspace.getBlocksByType('se_behaviour', false);
+      if (!roots.length) { updateToolboxForKind('any'); return; }
+      if (spec && spec.target && spec.target.kind) {
+        try { roots[0].setFieldValue(spec.target.kind, 'TARGET'); }
+        catch (e) { console.warn('target kind', spec.target.kind, e); }
+      }
+      updateToolboxForKind(roots[0].getFieldValue('TARGET'));
     }
 
     // ---- beat: a block whose fields change with the chosen mode --------
@@ -474,6 +552,11 @@
           return { set_pressure: withDuty({ chamber: b.getFieldValue('CHAMBER'), pct: num(b, 'PCT') }, b) };
         case 'se_stop':
           return { stop: {} };
+        case 'se_thymio_drive':
+          return { thymio_drive: { left: num(b, 'LEFT'), right: num(b, 'RIGHT'),
+                                   ms: num(b, 'MS') } };
+        case 'se_thymio_leds':
+          return { thymio_leds: { color: b.getFieldValue('COLOR') } };
         case 'se_wait':
           return { wait: { ms: num(b, 'MS') } };
         case 'se_wait_for_touch':
@@ -520,8 +603,9 @@
 
     function getSpec() {
       var roots = workspace.getBlocksByType('se_behaviour', false);
-      var states = {}, initial = null;
+      var states = {}, initial = null, kind = null;
       if (roots.length) {
+        kind = roots[0].getFieldValue('TARGET');
         var s = roots[0].getInputTargetBlock('STATES');
         while (s) {
           var name = s.getFieldValue('NAME');
@@ -538,6 +622,8 @@
       // runtime/validator ignore unknown top-level keys.
       var spec = { initial: initial, states: states,
                    _blockly: Blockly.serialization.workspaces.save(workspace) };
+      // 'any' = legacy target-less behaviour: omit the key entirely.
+      if (kind && kind !== 'any') spec.target = { kind: kind };
       return JSON.stringify(spec);
     }
 
@@ -548,6 +634,7 @@
         if (spec && spec._blockly) {
           Blockly.serialization.workspaces.load(spec._blockly, workspace);
           renderAllBlocks();
+          syncTargetUi(spec);
           return;
         }
         // A hand-authored or imported spec carries no _blockly workspace blob.
@@ -652,6 +739,12 @@
           setF(b, 'PCT', verb === 'wrinkle' ? 0 : p.pct);
           setDuty(b, p); break;
         case 'stop': b = newStepBlock('se_stop'); break;
+        case 'thymio_drive':
+          b = newStepBlock('se_thymio_drive');
+          setF(b, 'LEFT', p.left); setF(b, 'RIGHT', p.right);
+          setF(b, 'MS', p.ms); break;
+        case 'thymio_leds':
+          b = newStepBlock('se_thymio_leds'); setF(b, 'COLOR', p.color); break;
         case 'wait':
           b = newStepBlock('se_wait');
           setF(b, 'MS', p.ms != null ? p.ms : p._value); break;
@@ -722,6 +815,7 @@
     function buildBlocksFromSpec(spec) {
       workspace.clear();
       var root = newStepBlock('se_behaviour');
+      if (spec.target && spec.target.kind) setF(root, 'TARGET', spec.target.kind);
       root.moveBy(30, 30);
       var states = spec.states || {};
       var order = Object.keys(states);
@@ -746,6 +840,7 @@
       });
       root.render();
       renderAllBlocks();
+      syncTargetUi(spec);
     }
 
     // After a programmatic deserialize, Blockly 13 can leave nested blocks
@@ -773,6 +868,7 @@
       root.getInput('STATES').connection.connect(st.previousConnection);
       root.moveBy(30, 30);
       root.render();
+      updateToolboxForKind('any');
     }
   </script>
 </body>

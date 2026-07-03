@@ -1,55 +1,39 @@
-# ESP-NOW Gateway Firmware
+# SoftEdIBO Gateway Firmware
 
 Bridges USB/serial (PC) <-> ESP-NOW (nodes). The ESP-NOW / MAC / radio plumbing
 is shared with the node firmwares via `firmware/common/se_espnow.h`.
 
-## Three board variants
+## One build — Seeed XIAO ESP32-S3
 
-All speak the **identical** serial protocol below; pick the one matching your
-hardware. Each compiles only its own entry point (see `platformio.ini`).
-
-| Variant | Board | Framework | Source | PlatformIO env | Output bin |
-|---------|-------|-----------|--------|----------------|-----------|
-| Preferred | **Seeed XIAO ESP32-S3** (Xtensa, dual-core), native USB-Serial/JTAG | ESP-IDF | `src/main.cpp` (cJSON, usb_serial_jtag) | `seeed_xiao_esp32s3` | `firmware.bin` |
-| Compact | **Seeed XIAO ESP32-C6** (RISC-V), native USB-Serial/JTAG | ESP-IDF | `src/main.cpp` (cJSON, usb_serial_jtag) | `seeed_xiao_esp32c6` | `firmware.bin` |
-| Old | **ESP32-WROOM-32** DevKit, USB-UART bridge (CH340/CP2102) | Arduino | `src/main_arduino.cpp` (ArduinoJson, Serial) | `esp32dev` | `firmware-esp32.bin` |
-
-Baud rate: 115200 either way. The S3 and C6 share the **same** ESP-IDF source
-(both have the native USB-Serial/JTAG peripheral); the S3 is preferred because
-its dual-core Xtensa and extra RAM leave headroom to run a SoftAP for the
-Thymios alongside ESP-NOW.
+The gateway is a **Seeed XIAO ESP32-S3** (Xtensa dual-core, native USB-Serial/JTAG),
+ESP-IDF, `src/main.cpp` (cJSON). One build (`seeed_xiao_esp32s3` → `firmware-s3.bin`)
+does everything: ESP-NOW chamber control **+** a SoftAP for the Thymios / WiFi-OTA
+(`-DGATEWAY_AP`) **+** a UART link to a companion XIAO ESP32-C6 that speaks 802.15.4 to
+Thymio robots (`-DGATEWAY_THYMIO`, see `docs/THYMIO_WIRELESS_CONTROL.md`). The dual-core
+headroom keeps the ESP-NOW bridge responsive while WiFi clients are associated (the bridge
+runs on the second core); PSRAM buffers the WiFi-OTA image. Baud rate 115200.
 
 ## Build & Flash
 
 ```bash
 cd firmware/gateway
-pio run -e seeed_xiao_esp32s3    --target upload  # preferred: XIAO ESP32-S3
-pio run -e seeed_xiao_esp32s3_ap --target upload  # S3 + WiFi AP for Thymios
-pio run -e seeed_xiao_esp32c6    --target upload  # compact:   XIAO ESP32-C6
-pio run -e esp32dev             --target upload   # old:       ESP32-WROOM-32
+pio run -e seeed_xiao_esp32s3 --target upload
 ```
 
-### Optional WiFi access point (`-DGATEWAY_AP`)
+### WiFi access point (`-DGATEWAY_AP`, always on)
 
-The `seeed_xiao_esp32s3_ap` env builds the gateway with a **SoftAP** so WiFi
-clients (e.g. Thymio robots) can associate **while ESP-NOW keeps running** — the
-two share one 2.4 GHz radio, so the AP and the nodes must be on the **same
-channel** (default 1). On the dual-core S3 the ESP-NOW bridge runs on the second
-core so AP traffic never stalls forwarding to the PC. The SoftAP (and the WiFi
-firmware update it enables) is **S3-only**: the C6 is single-core, sharing the
-radio, the ESP-NOW bridge and the USB relay on one core, so it stays a plain
-ESP-NOW gateway. Defaults: SSID `SoftEdIBO`,
-password `softedibo`, channel 1, up to 8 clients — override at build time:
+The gateway runs a **SoftAP** so WiFi clients (e.g. Thymio robots) can associate **while
+ESP-NOW keeps running** — the two share one 2.4 GHz radio, so the AP and the nodes are on
+the **same channel** (default 1). Defaults: SSID `SoftEdIBO`, password `softedibo`,
+channel 1, up to 8 clients — override at build time:
 
 ```bash
-pio run -e seeed_xiao_esp32s3_ap \
+pio run -e seeed_xiao_esp32s3 \
   -a '-DGATEWAY_AP_SSID="MyNet" -DGATEWAY_AP_PASS="secret12" -DGATEWAY_AP_CHANNEL=6'
 ```
 
-A SoftAP build announces itself with an extra `"ap"` field on boot:
-`{"status":"gateway_ready","mac":"…","ap":"SoftEdIBO"}`. In the desktop app the
-setup wizard exposes this as a **"Run as WiFi access point for Thymio robots"**
-checkbox on the gateway-flash page (enabled only for boards with an AP build).
+The gateway announces itself with an `"ap"` field on boot:
+`{"status":"gateway_ready","mac":"…","ap":"SoftEdIBO"}`.
 
 The SSID/password can be changed at **runtime** (no reflash) via two
 gateway-local commands — JSON lines **without** a `"target"`, so the gateway
@@ -85,21 +69,14 @@ gateway proxy is in `src/main.cpp`.
 {"type":"ota_stored","ok":true,"url":"http://192.168.4.1/fw"}
 ```
 
-Requires [PlatformIO](https://platformio.org/). The XIAO C6 (RISC-V) and S3
-(Xtensa) need ESP-IDF 5.x — the official `espressif32` 6.x ships Arduino core
-2.x and does NOT support them with the espidf framework, so both XIAO envs pin
-the **pioarduino** platform fork (verified: IDF 5.5.4). Native ESP-IDF also
-works (the `CMakeLists.txt` are shared):
+Requires [PlatformIO](https://platformio.org/). The XIAO ESP32-S3 needs ESP-IDF 5.x — the
+official `espressif32` 6.x ships Arduino core 2.x, so the env pins the **pioarduino**
+platform fork (verified: IDF 5.5.4). Native ESP-IDF also works (shared `CMakeLists.txt`):
 
 ```bash
 cd firmware/gateway
-idf.py set-target esp32s3 && idf.py build flash   # or: set-target esp32c6
+idf.py set-target esp32s3 && idf.py build flash
 ```
-
-> Flashing offsets differ: the C6 merged image has its bootloader at `0x0`,
-> the WROOM at `0x1000` — but both merged `.bin` files are written at `0x0`
-> (`esptool --chip esp32c6 …` vs `--chip esp32 …`). The setup wizard handles
-> this automatically.
 
 ## Serial Protocol (newline-terminated JSON)
 

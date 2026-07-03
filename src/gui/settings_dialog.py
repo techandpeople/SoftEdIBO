@@ -59,7 +59,7 @@ class SettingsDialog(BaseDialog, Ui_SettingsDialog):
         Built programmatically so we don't have to regenerate the .ui — same
         approach as the Tools menu actions added in MainWindow.
         """
-        group = QGroupBox("ESP-NOW Gateway", self)
+        group = QGroupBox("SoftEdIBO Gateway", self)
         form = QFormLayout(group)
 
         self.gw_port_combo = QComboBox()

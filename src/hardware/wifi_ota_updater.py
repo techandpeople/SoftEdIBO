@@ -43,7 +43,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from src.hardware.espnow_gateway import ESPNowGateway
+from src.hardware.gateway import Gateway
 from src.hardware.node_ota_updater import extract_app_image
 
 logger = logging.getLogger(__name__)
@@ -82,7 +82,7 @@ class WifiOTAUpdater:
 
     def __init__(
         self,
-        gateway: ESPNowGateway,
+        gateway: Gateway,
         mac: str,
         firmware_path: str | Path,
         ssid: str,
@@ -184,7 +184,7 @@ class WifiOTAUpdater:
                     self._on_progress(100)
                 return True, "Update complete — node rebooted into new firmware"
             if self._error:
-                return False, f"Node error: {self._error}"
+                return False, f"Node error: {self._error}{self._error_detail}"
             self._event.wait(0.2)
             self._event.clear()
         return False, ("Timed out waiting for the node to confirm. It may not "
@@ -323,3 +323,53 @@ class WifiOTAUpdater:
         logger.info("WiFi OTA %s: %s", self._mac, msg)
         if self._on_log:
             self._on_log(msg)
+
+
+class C6WifiOTAUpdater(WifiOTAUpdater):
+    """WiFi-OTA for the Thymio radio co-processor (XIAO ESP32-C6).
+
+    Identical staged pull as a node — the whole flow (stage on the gateway, tell the
+    device to join the SoftAP and pull ``/fw``, wait for it to reboot) is inherited.
+    Only two things differ:
+
+    * The target is the gateway's ``"thymio"`` UART route, not an ESP-NOW MAC, so the
+      ``ota_wifi`` command is forwarded to the C6 over the wire (see
+      ``docs/THYMIO_WIRELESS_CONTROL.md``). The gateway tags the C6's replies with
+      ``source: "thymio"``, which matches ``self._mac`` and routes them to the node
+      handler exactly like a real node.
+    * The C6 has no ``ota_done`` broadcast; its fresh boot emits
+      ``{"type":"rcp_ready","src":"c6"}`` (tagged ``source:"thymio"``), which we treat
+      as "update finished".
+    """
+
+    TARGET = "thymio"
+    # The C6 retries the pull internally (OTA_ATTEMPTS), so allow for several attempts
+    # over the shared-radio AP before giving up.
+    DONE_TIMEOUT = 180.0
+
+    def __init__(self, gateway, firmware_path, ssid, password, **kwargs):
+        super().__init__(gateway, self.TARGET, firmware_path, ssid, password, **kwargs)
+
+    def _handle_node(self, mtype, data):
+        if mtype == "rcp_ready":
+            self._done = True
+            return True
+        if mtype == "ota_wifi_ok":
+            self._log("C6 activated the new image — rebooting…")
+            return True
+        if mtype == "ota_activate":
+            self._log(f"C6 activate failed: {data.get('esp_err')} "
+                      f"(run={data.get('run')} state={data.get('run_state')} "
+                      f"next={data.get('next')})")
+            return True
+        if mtype == "ota_wifi_retry":
+            self._log(f"C6 download attempt {data.get('attempt')} failed "
+                      f"(err {data.get('err')}) — retrying…")
+            return True
+        if mtype == "ota_wifi_fail":
+            self._error = str(data.get("reason", "wifi_fail"))
+            code, err = data.get("code"), data.get("err")
+            if code is not None:
+                self._error_detail = f" (code {code}, err {err})"
+            return True
+        return super()._handle_node(mtype, data)

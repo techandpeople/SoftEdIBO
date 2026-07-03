@@ -39,7 +39,7 @@ from src.data.models import SkinTemplate
 from src.gui.skin_grid_editor import SkinGridEditor
 from src.gui.base_dialog import BaseDialog
 from src.gui.ui_skin_config_dialog import Ui_SkinConfigDialog
-from src.hardware.espnow_gateway import ESPNowGateway
+from src.hardware.gateway import Gateway
 from src.hardware.skin_geometry import max_organs_for, variant_has_organs
 
 # Domain rules (node lookup, validation, persistence) live in src.core.skin_config;
@@ -221,7 +221,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         skin_index:  Index of this skin in the robot's ``skins`` list,
                      or ``-1`` to add a new skin.
         settings:    Application settings instance.
-        gateway:     Shared ESP-NOW gateway (used by the test dialog).
+        gateway:     Shared SoftEdIBO gateway (used by the test dialog).
         parent:      Optional parent widget.
     """
 
@@ -231,7 +231,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         robot_index: int,
         skin_index: int,
         settings: Settings,
-        gateway: ESPNowGateway,
+        gateway: Gateway,
         db=None,
         parent: QWidget | None = None,
     ):

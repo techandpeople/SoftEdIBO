@@ -44,7 +44,7 @@ USER (GUI button / activity script)
 [PC] Skin / ESP32Controller / TestActuatorsDialog   (Python)
    │   builds a command dict  {target, cmd, chamber, …}
    ▼
-[PC] ESPNowGateway.send()                            src/hardware/espnow_gateway.py
+[PC] Gateway.send()                            src/hardware/gateway.py
    │   json.dumps(...) + "\n"  → USB serial
    ▼
 [Gateway ESP32] processLine()                        firmware/gateway/src/main.cpp (IDF, XIAO-C6)
@@ -147,7 +147,7 @@ window scaled by concurrent load (`Skin._apply:301-307`,
 
 ## 3. PC → gateway transport
 
-`ESPNowGateway.send()` `src/hardware/espnow_gateway.py:79`:
+`Gateway.send()` `src/hardware/gateway.py:79`:
 - builds `{"target": mac, "cmd": command, **kwargs}`, `json.dumps`, appends `\n`,
   writes to the serial port.
 - Returns `False` (drops the command) if not connected.
@@ -352,7 +352,7 @@ over the button.
   (`commands.h:41-58`, `main.cpp:111,161`) — shows the real pump LEDC duty.
 - Gateway emits `bad_cmd_json` on unparseable PC lines
   (`gateway/src/main.cpp:271`, `main_arduino.cpp:60`); PC logs `type:"error"`
-  (`espnow_gateway.py:190`). Watch them in Robot panel → **Serial Monitor**.
+  (`gateway.py:190`). Watch them in Robot panel → **Serial Monitor**.
 
 ---
 

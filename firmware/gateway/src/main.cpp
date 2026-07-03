@@ -1,6 +1,6 @@
 /**
- * SoftEdIBO — ESP-NOW Gateway Firmware (ESP-IDF)
- * Target: Seeed XIAO ESP32-C6 (RISC-V), USB-Serial/JTAG to the PC.
+ * SoftEdIBO — Gateway Firmware (ESP-IDF)
+ * Target: Seeed XIAO ESP32-S3, USB-Serial/JTAG to the PC.
  *
  * Bridges JSON commands from the PC (USB serial) to remote ESP32 nodes via
  * ESP-NOW, and forwards replies from nodes back to the PC.
@@ -23,6 +23,12 @@
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "driver/usb_serial_jtag.h"
+#ifdef GATEWAY_THYMIO
+#include "driver/uart.h"
+#include "driver/gpio.h"
+#endif
+#include "esp_log.h"
+#include "esp_rom_md5.h"
 #include "cJSON.h"
 
 #include "se_espnow.h"
@@ -155,6 +161,12 @@ struct RxMsg {
 };
 static QueueHandle_t s_rxQueue;
 
+// Handles for the RX tasks (set by xTaskCreate in app_main).
+static TaskHandle_t s_rxTaskHandle = nullptr;
+#ifdef GATEWAY_THYMIO
+static TaskHandle_t s_thymioRxHandle = nullptr;
+#endif
+
 // ---------------------------------------------------------------------------
 // USB-Serial/JTAG I/O
 // ---------------------------------------------------------------------------
@@ -218,6 +230,83 @@ static void rxTask(void*) {
         cJSON_Delete(doc);
     }
 }
+
+#ifdef GATEWAY_THYMIO
+// ---------------------------------------------------------------------------
+// Thymio RCP link (UART to the co-processor C6 that speaks 802.15.4 to Thymios)
+//
+// A third route alongside gateway-local and ESP-NOW: PC lines with
+// {"target":"thymio",...} are forwarded verbatim (minus "target") to the C6 over
+// UART; lines the C6 sends back are tagged {"source":"thymio",...} so the PC can
+// route/filter them. The gateway stays a transparent pipe — no Thymio-data
+// filtering here; that belongs in the C6 (source) or the PC (sink) once the data
+// shape is known. See docs/THYMIO_WIRELESS_CONTROL.md.
+// ---------------------------------------------------------------------------
+static constexpr uart_port_t THYMIO_UART    = UART_NUM_1;
+static constexpr int         THYMIO_UART_TX  = 43;   // S3 D6 -> C6 D7/RX
+static constexpr int         THYMIO_UART_RX  = 44;   // S3 D7 <- C6 D6/TX
+static constexpr int         THYMIO_BAUD     = 115200;
+
+static void thymioUartInit() {
+    uart_config_t uc = {};
+    uc.baud_rate  = THYMIO_BAUD;
+    uc.data_bits  = UART_DATA_8_BITS;
+    uc.parity     = UART_PARITY_DISABLE;
+    uc.stop_bits  = UART_STOP_BITS_1;
+    uc.flow_ctrl  = UART_HW_FLOWCTRL_DISABLE;
+    uc.source_clk = UART_SCLK_DEFAULT;
+    uart_driver_install(THYMIO_UART, 2048, 0, 0, nullptr, 0);
+    uart_param_config(THYMIO_UART, &uc);
+    uart_set_pin(THYMIO_UART, THYMIO_UART_TX, THYMIO_UART_RX,
+                 UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+}
+
+// PC -> C6: forward the command (minus "target") as one JSON line.
+static void thymioForward(cJSON* doc) {
+    cJSON_DeleteItemFromObjectCaseSensitive(doc, "target");
+    char* out = cJSON_PrintUnformatted(doc);
+    if (out) {
+        uart_write_bytes(THYMIO_UART, out, strlen(out));
+        uart_write_bytes(THYMIO_UART, "\n", 1);
+        cJSON_free(out);
+    }
+}
+
+// C6 -> PC: read lines from the C6 and forward them tagged with source "thymio".
+static void thymioRxTask(void*) {
+    static char line[256];
+    size_t      llen = 0;
+    uint8_t     rx[128];
+    for (;;) {
+        int got = uart_read_bytes(THYMIO_UART, rx, sizeof(rx), pdMS_TO_TICKS(20));
+        if (got <= 0) continue;
+        for (int i = 0; i < got; ++i) {
+            uint8_t ch = rx[i];
+            if (ch == '\n' || ch == '\r') {
+                if (llen == 0) continue;
+                line[llen] = '\0';
+                cJSON* doc = cJSON_Parse(line);
+                if (!doc) {
+                    doc = cJSON_CreateObject();
+                    cJSON_AddStringToObject(doc, "raw", line);
+                }
+                cJSON_AddStringToObject(doc, "source", "thymio");
+                char* out = cJSON_PrintUnformatted(doc);
+                if (out) { usbWriteLine(out); cJSON_free(out); }
+                cJSON_Delete(doc);
+                llen = 0;
+            } else if (llen == 0 && ch != '{') {
+                // Skip leading garbage before the JSON — e.g. a stray byte glitched
+                // onto the C6's UART TX while it resets after a WiFi-OTA, which would
+                // otherwise corrupt the rcp_ready "done" line.
+            } else if (llen < sizeof(line) - 1) {
+                line[llen++] = static_cast<char>(ch);
+            }
+        }
+    }
+}
+
+#endif  // GATEWAY_THYMIO
 
 #ifdef GATEWAY_AP
 // ---------------------------------------------------------------------------
@@ -293,6 +382,11 @@ static void otaHttpStart() {
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.server_port      = 80;
     cfg.lru_purge_enable = true;
+    // A client writing the image to flash (erase+write is slow) can stop reading the
+    // socket for several seconds; the 5 s default would cut it off mid-image and the
+    // node's HTTPUpdate fails. Give slow clients room on a contended SoftAP.
+    cfg.send_wait_timeout = 30;   // seconds
+    cfg.recv_wait_timeout = 30;
     if (httpd_start(&s_httpd, &cfg) != ESP_OK) { s_httpd = nullptr; return; }
     httpd_uri_t uri = {};
     uri.uri     = "/fw";
@@ -306,6 +400,22 @@ static void otaStoreReset() {
     s_otaCap = s_otaLen = 0;
     s_otaReady = false;
     s_otaMd5[0] = '\0';
+}
+
+// Recompute the MD5 of the stored image and compare against the one the PC sent
+// (served as x-MD5). Catches a size-preserving staging corruption here, where the
+// PC can retry, instead of letting the node download bad bytes and fail its own MD5
+// check opaquely. True if no md5 was provided (nothing to check) or it matches.
+static bool otaImageMd5Matches() {
+    if (!s_otaMd5[0]) return true;
+    md5_context_t ctx;
+    uint8_t digest[16];
+    esp_rom_md5_init(&ctx);
+    esp_rom_md5_update(&ctx, s_otaImage, s_otaLen);
+    esp_rom_md5_final(digest, &ctx);
+    char hex[33];
+    for (int i = 0; i < 16; ++i) snprintf(hex + i * 2, 3, "%02x", digest[i]);
+    return strcasecmp(hex, s_otaMd5) == 0;
 }
 
 // Handles the ota_store_* gateway-local commands; returns true if it consumed one.
@@ -364,6 +474,11 @@ static bool handleOtaStore(const char* cmd, cJSON* doc) {
                      "{\"type\":\"ota_store_error\",\"reason\":\"size_mismatch\","
                      "\"got\":%u,\"want\":%u}", (unsigned)s_otaLen, (unsigned)s_otaCap);
             usbWriteLine(buf);
+            otaStoreReset();
+            return true;
+        }
+        if (!otaImageMd5Matches()) {
+            usbWriteLine("{\"type\":\"ota_store_error\",\"reason\":\"md5_mismatch\"}");
             otaStoreReset();
             return true;
         }
@@ -466,6 +581,11 @@ static void processLine(const char* line, size_t len) {
     if (!cJSON_IsString(target)) {
         // No target → command for the gateway itself.
         handleGatewayCmd(doc);
+#ifdef GATEWAY_THYMIO
+    } else if (strcmp(target->valuestring, "thymio") == 0) {
+        // Thymio route → forward to the C6 radio co-processor over UART.
+        thymioForward(doc);
+#endif
     } else if (se::parseMac(target->valuestring, mac) && se::ensurePeer(mac)) {
         // Strip "target" so nodes receive only the command fields.
         cJSON_DeleteItemFromObjectCaseSensitive(doc, "target");
@@ -489,6 +609,13 @@ static void processLine(const char* line, size_t len) {
 // ---------------------------------------------------------------------------
 
 extern "C" void app_main(void) {
+    // The USB-Serial/JTAG port IS the JSON protocol channel, so keep IDF's own logs
+    // (WiFi/lwIP driver chatter, loud during SoftAP OTA) off it — they show up on the
+    // PC as "Invalid JSON" noise. Safe now that the PC read-loop no longer relies on
+    // that stream to resync (see ESPNowGateway._read_loop). Rebuild without this to
+    // debug at the console.
+    esp_log_level_set("*", ESP_LOG_NONE);
+
     usb_serial_jtag_driver_config_t ucfg = {
         .tx_buffer_size = 1024,
         // Large RX buffer so the bulk OTA staging stream (PC -> gateway) has
@@ -513,9 +640,15 @@ extern "C" void app_main(void) {
     // Dual-core (S3): WiFi/AP stays on PRO_CPU (core 0, IDF default); run the
     // USB serialization task on APP_CPU (core 1) so AP traffic never stalls
     // forwarding node replies to the PC. Matters most with GATEWAY_AP active.
-    xTaskCreatePinnedToCore(rxTask, "espnow_rx", 4096, nullptr, 5, nullptr, 1);
+    xTaskCreatePinnedToCore(rxTask, "espnow_rx", 4096, nullptr, 5, &s_rxTaskHandle, 1);
 #else
-    xTaskCreate(rxTask, "espnow_rx", 4096, nullptr, 5, nullptr);
+    xTaskCreate(rxTask, "espnow_rx", 4096, nullptr, 5, &s_rxTaskHandle);
+#endif
+
+#ifdef GATEWAY_THYMIO
+    // Bring up the UART link to the C6 RCP and forward its replies to the PC.
+    thymioUartInit();
+    xTaskCreate(thymioRxTask, "thymio_rx", 4096, nullptr, 5, &s_thymioRxHandle);
 #endif
 
     // Report own MAC so the app can identify the gateway.

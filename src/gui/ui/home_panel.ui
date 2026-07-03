@@ -96,7 +96,7 @@ by synchronising touch, rhythm and collaboration</string></property>
        </item>
        <item row="1" column="1">
         <widget class="QLabel" name="gateway_status_label">
-         <property name="whatsThis"><string>Whether the ESP-NOW gateway is connected. Connect it from the Robots tab; the hardware is unreachable until it shows connected.</string></property>
+         <property name="whatsThis"><string>Whether the SoftEdIBO gateway is connected. Connect it from the Robots tab; the hardware is unreachable until it shows connected.</string></property>
          <property name="text"><string>Not connected</string></property>
         </widget>
        </item>

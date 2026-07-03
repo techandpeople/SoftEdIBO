@@ -24,7 +24,7 @@ roughly right: it can never drive a chamber past its pressure limit.
 from __future__ import annotations
 
 import time
-from typing import Callable
+from typing import Any, Callable
 
 
 def scale_fill_ms(base_ms: float, active_chambers: int, pump_count: int) -> int:
@@ -47,8 +47,31 @@ def scale_fill_ms(base_ms: float, active_chambers: int, pump_count: int) -> int:
 # target (the pressure cutoff is still the real backstop). A future
 # calibrate-at-several-dutys sweep would replace this rough linear model with a
 # measured duty->flow curve per chamber.
+#
+# The diaphragm pumps barely move air until well over half duty — below ~190 the
+# motor stalls and the fill never completes — so the floor sits there, not near 0.
 FULL_DUTY = 255
-MIN_PUMP_DUTY = 60
+MIN_PUMP_DUTY = 190
+
+
+def duty_sweep(count: int = 4, top: int = FULL_DUTY,
+               floor: int = MIN_PUMP_DUTY) -> tuple[int, ...]:
+    """Geometrically-spaced PWM duties (fastest → slowest) for the duty-curve sweep.
+
+    The pump's air-flow vs duty response is roughly exponential — most of the
+    useful range sits near full duty and it collapses toward the stall floor — so
+    linear steps waste samples on the dead low end. Geometric spacing between
+    ``top`` and ``floor`` puts the points closer together as duty drops, sampling
+    the steep part of the curve where it matters. ``count`` distinct duties,
+    de-duplicated and clamped to ``[1, FULL_DUTY]``."""
+    top = max(1, min(FULL_DUTY, int(top)))
+    floor = max(1, min(top, int(floor)))
+    n = max(2, int(count))
+    ratio = (floor / top) ** (1.0 / (n - 1))
+    seen: dict[int, None] = {}
+    for i in range(n):
+        seen.setdefault(int(round(top * ratio ** i)), None)
+    return tuple(seen)
 
 
 def duty_for_period(natural_ms: float, period_ms: float,
@@ -67,6 +90,92 @@ def duty_for_period(natural_ms: float, period_ms: float,
         return FULL_DUTY
     duty = int(round(FULL_DUTY * float(natural_ms) / float(period_ms)))
     return max(int(min_duty), min(FULL_DUTY, duty))
+
+
+class DutyModel:
+    """Measured pump-duty → fill-speed model — replaces the rough linear
+    :func:`duty_for_period` when a chamber has a **duty-curve sweep**.
+
+    The sweep records the full-fill time at several PWM duties (each swept from
+    empty). A lower duty moves less air per ms, so the whole fill takes longer; the
+    **slowdown factor** at duty ``d`` is ``T(d) / T_fastest`` (>= 1). To make a fill
+    that naturally takes ``natural_ms`` at full duty last ``period_ms`` instead,
+    pick the duty whose slowdown factor ≈ ``period_ms / natural_ms``.
+
+    Samples are ``(duty, full_time_ms)``. Times are forced monotone non-increasing
+    over ascending duty (higher duty is never slower — sweep noise can invert two
+    neighbours), and the factor lookup interpolates only within the measured duty
+    range, clamping outside it. Pure / Qt-free, so it unit-tests trivially. The
+    firmware pressure cutoff remains the real backstop, so a rough duty is safe.
+    """
+
+    __slots__ = ("_pts",)
+
+    def __init__(self, samples: Any) -> None:
+        # (duty, factor) sorted by ascending duty, factor non-increasing, factor>=1.
+        self._pts: list[tuple[int, float]] = self._normalise(samples)
+
+    @staticmethod
+    def _normalise(samples: Any) -> list[tuple[int, float]]:
+        by_duty: dict[int, float] = {}
+        for item in samples or []:
+            try:
+                d = int(item[0])
+                t = float(item[1])
+            except (TypeError, ValueError, IndexError):
+                continue
+            if 1 <= d <= FULL_DUTY and t > 0:
+                by_duty[d] = t                       # last write per duty wins
+        ordered = sorted(by_duty.items())            # ascending duty
+        if len(ordered) < 2:
+            return []
+        # Force time non-increasing as duty rises, so the slowdown factor is a clean
+        # monotone function of duty (invertible for the period→duty lookup).
+        times: list[float] = []
+        running = float("inf")
+        for _, t in ordered:
+            running = min(running, t)
+            times.append(running)
+        t_fast = times[-1]                           # highest duty = fastest = ref
+        return [(d, ordered_t / t_fast)
+                for (d, _), ordered_t in zip(ordered, times)]
+
+    @classmethod
+    def from_list(cls, raw: Any) -> "DutyModel | None":
+        """Build from the stored ``[[duty, full_time_ms], ...]`` form, or ``None``
+        when absent/degenerate."""
+        model = cls(raw if isinstance(raw, (list, tuple)) else [])
+        return model if not model.is_empty else None
+
+    @property
+    def is_empty(self) -> bool:
+        return len(self._pts) < 2
+
+    def to_list(self) -> list[list[float]]:
+        """Serialise the measured factors back as ``[[duty, factor], ...]`` (for
+        debugging/inspection; the stored form is the raw ``(duty, ms)`` sweep)."""
+        return [[d, round(f, 4)] for d, f in self._pts]
+
+    def duty_for_period(self, natural_ms: float, period_ms: float) -> int:
+        """Duty (1-255) whose measured slowdown stretches ``natural_ms`` to
+        ``period_ms``. Full duty when no stretch is needed or the model is empty."""
+        if self.is_empty or period_ms <= 0 or natural_ms <= 0 or period_ms <= natural_ms:
+            return FULL_DUTY
+        ratio = float(period_ms) / float(natural_ms)
+        pts = self._pts                              # ascending duty; factor descending
+        if ratio >= pts[0][1]:
+            return pts[0][0]                         # slower than slowest measured duty
+        if ratio <= pts[-1][1]:
+            return pts[-1][0]                        # at/above fastest → full-ish
+        for i in range(len(pts) - 1):
+            d_lo, f_lo = pts[i]                      # lower duty, higher factor
+            d_hi, f_hi = pts[i + 1]                  # higher duty, lower factor
+            if f_hi <= ratio <= f_lo:
+                if f_lo == f_hi:
+                    return d_lo
+                frac = (f_lo - ratio) / (f_lo - f_hi)
+                return int(round(d_lo + frac * (d_hi - d_lo)))
+        return pts[-1][0]
 
 
 def effective_fill_ms(base_ms: float, value_pct: float,

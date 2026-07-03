@@ -1,15 +1,15 @@
-"""Tests for the ESP-NOW gateway module."""
+"""Tests for the SoftEdIBO gateway serial module."""
 
-from src.hardware.espnow_gateway import ESPNowGateway
+from src.hardware.gateway import Gateway
 
 
 def test_gateway_not_connected_by_default():
-    gateway = ESPNowGateway("/dev/ttyUSB0")
+    gateway = Gateway("/dev/ttyUSB0")
     assert not gateway.is_connected
 
 
 def test_send_fails_when_not_connected():
-    gateway = ESPNowGateway("/dev/ttyUSB0")
+    gateway = Gateway("/dev/ttyUSB0")
     result = gateway.send("AA:BB:CC:DD:EE:01", "inflate", chamber=0, value=255)
     assert result is False
 
@@ -20,7 +20,7 @@ class _Sink:
 
 
 def test_on_message_registers_and_removes_callback():
-    gateway = ESPNowGateway("/dev/ttyUSB0")
+    gateway = Gateway("/dev/ttyUSB0")
     sink = _Sink()
     gateway.on_message(sink.cb)
     # Callbacks are held as weakrefs; resolve them to compare.
@@ -33,7 +33,7 @@ def test_on_message_registers_and_removes_callback():
 # --- handshake: a peer is only accepted if it identifies as a gateway -------
 
 def test_gateway_lines_are_recognized():
-    gateway = ESPNowGateway("/dev/ttyUSB0")
+    gateway = Gateway("/dev/ttyUSB0")
     accepted = [
         b'{"status":"gateway_ready","mac":"AA:BB:CC:DD:EE:00"}',
         b'{"status":"gateway_ready","mac":"AA:BB:CC:DD:EE:00","ap":"SoftEdIBO"}',
@@ -50,7 +50,7 @@ def test_gateway_lines_are_recognized():
 # --- LED-ring variant self-reported by nodes (drives the OTA firmware picker) -
 
 def test_node_rgbw_captured_from_reported_frames():
-    gateway = ESPNowGateway("/dev/ttyUSB0")
+    gateway = Gateway("/dev/ttyUSB0")
     # Unknown until the node reports it.
     assert gateway.node_rgbw("AA:BB:CC:DD:EE:01") is None
 
@@ -69,7 +69,7 @@ def test_node_rgbw_captured_from_reported_frames():
 
 
 def test_non_gateway_lines_are_rejected():
-    gateway = ESPNowGateway("/dev/ttyUSB0")
+    gateway = Gateway("/dev/ttyUSB0")
     rejected = [
         b"",
         b"   ",

@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>ThymioConfigForm</class>
+ <widget class="QWidget" name="ThymioConfigForm">
+  <property name="geometry">
+   <rect><x>0</x><y>0</y><width>420</width><height>240</height></rect>
+  </property>
+  <layout class="QFormLayout" name="form_layout">
+   <property name="leftMargin"><number>0</number></property>
+   <property name="topMargin"><number>0</number></property>
+   <property name="rightMargin"><number>0</number></property>
+   <property name="bottomMargin"><number>0</number></property>
+   <item row="0" column="0">
+    <widget class="QLabel" name="id_label">
+     <property name="text"><string>Thymio ID:</string></property>
+    </widget>
+   </item>
+   <item row="0" column="1">
+    <widget class="QLineEdit" name="id_edit">
+     <property name="whatsThis"><string>This robot's name in the app and in settings.yaml (e.g. thymio-1). Sessions and logs refer to it by this ID.</string></property>
+    </widget>
+   </item>
+   <item row="2" column="1">
+    <widget class="QCheckBox" name="wireless_check">
+     <property name="text"><string>Drive wheels wirelessly</string></property>
+     <property name="whatsThis"><string>Drive the Thymio's wheels and top LED from the app, wirelessly. Choose the transport below. When off, the Thymio's air-chamber skins still work; only the wheels/LEDs stay idle.</string></property>
+    </widget>
+   </item>
+   <item row="3" column="0">
+    <widget class="QLabel" name="via_label">
+     <property name="text"><string>Wireless via:</string></property>
+    </widget>
+   </item>
+   <item row="3" column="1">
+    <widget class="QComboBox" name="via_combo">
+     <property name="whatsThis"><string>How the app reaches the Thymio's wheels:
+• RF dongle — thymiodirect straight to the wireless dongle's serial port (no Thymio Suite needed; one dongle relays to several Thymios by node id).
+• Gateway C6 — the gateway's own C6 drives the Thymios over 802.15.4, NO dongle: the C6 impersonates the dongle and holds the link itself. Up to 4 Thymios per C6, told apart by the address below.</string></property>
+    </widget>
+   </item>
+   <item row="4" column="0">
+    <widget class="QLabel" name="node_id_label">
+     <property name="text"><string>Wireless node id:</string></property>
+    </widget>
+   </item>
+   <item row="4" column="1">
+    <widget class="QSpinBox" name="node_id_spin">
+     <property name="minimum"><number>0</number></property>
+     <property name="maximum"><number>65535</number></property>
+     <property name="specialValueText"><string>auto (first)</string></property>
+     <property name="whatsThis"><string>Which Thymio on the shared RF dongle this robot is (dongle transport only). One dongle relays to several Thymios at once, each with its own wireless node id — give each robot a distinct id (list them with `scripts/thymio_jog.py --list`). 0 = auto: bind to the first Thymio the dongle reports (fine when only one is paired).</string></property>
+    </widget>
+   </item>
+   <item row="5" column="0">
+    <widget class="QLabel" name="channel_label">
+     <property name="text"><string>Channel (C6):</string></property>
+    </widget>
+   </item>
+   <item row="5" column="1">
+    <widget class="QSpinBox" name="channel_spin">
+     <property name="minimum"><number>11</number></property>
+     <property name="maximum"><number>26</number></property>
+     <property name="value"><number>25</number></property>
+     <property name="whatsThis"><string>802.15.4 channel the Thymio is on (Gateway C6 transport only). Find it with `scripts/thymio_sniff_capture.py --scan`; it was 25 in testing.</string></property>
+    </widget>
+   </item>
+   <item row="6" column="0">
+    <widget class="QLabel" name="addr_label">
+     <property name="text"><string>Address (C6):</string></property>
+    </widget>
+   </item>
+   <item row="6" column="1">
+    <layout class="QHBoxLayout" name="addr_row">
+     <item>
+      <widget class="QLineEdit" name="addr_edit">
+       <property name="placeholderText"><string>auto / e.g. 6a25</string></property>
+       <property name="whatsThis"><string>This Thymio's 802.15.4 short address in hex (e.g. 6a25) — how the C6 tells the robots apart (Gateway C6 transport). Leave blank for the first robot (uses the C6's built-in default). Use Discover to read the addresses off the air.</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="discover_btn">
+       <property name="text"><string>Discover…</string></property>
+       <property name="whatsThis"><string>Sniff the channel and list the Thymio addresses on the air, then pick this robot's — no config editing. Power on / drive the Thymios first; needs the gateway connected.</string></property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

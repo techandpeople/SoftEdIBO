@@ -2,35 +2,12 @@
     "configurations": [
         {
             "name": "SoftEdIBO firmware (all)",
-            "compilerPath": "${env:HOME}/.platformio/packages/toolchain-xtensa-esp32/bin/xtensa-esp32-elf-g++",
-            "includePath": [
-                "${workspaceFolder}/firmware/common",
-                "${workspaceFolder}/firmware/node_actuator/src/direct",
-                "${workspaceFolder}/firmware/node_actuator/src/multiplexed",
-                "${workspaceFolder}/firmware/node_magnet_sensor/src",
-                "${workspaceFolder}/firmware/gateway/src",
-                "${workspaceFolder}/firmware/*/include",
-                "${workspaceFolder}/firmware/*/.pio/libdeps/**",
-                "${env:HOME}/.platformio/packages/framework-arduinoespressif32/cores/esp32",
-                "${env:HOME}/.platformio/packages/framework-arduinoespressif32/variants/esp32",
-                "${env:HOME}/.platformio/packages/framework-arduinoespressif32/libraries/**",
-                "${env:HOME}/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/**"
+            "compileCommands": [
+                "${workspaceFolder}/firmware/gateway/compile_commands.json",
+                "${workspaceFolder}/firmware/thymio_rcp/compile_commands.json",
+                "${workspaceFolder}/firmware/node_actuator/compile_commands.json",
+                "${workspaceFolder}/firmware/node_magnet_sensor/compile_commands.json"
             ],
-            "defines": [
-                "PLATFORMIO=60118",
-                "ARDUINO=10813",
-                "ARDUINO_ARCH_ESP32",
-                "ESP32",
-                "DEBUG_BUILD",
-                "NODE_DIRECT"
-            ],
-            "cStandard": "c17",
-            "cppStandard": "gnu++17",
-            "intelliSenseMode": "linux-gcc-x64"
-        },
-        {
-            "name": "Node Actuator (direct)",
-            "compilerPath": "${env:HOME}/.platformio/packages/toolchain-xtensa-esp32/bin/xtensa-esp32-elf-g++",
             "includePath": [
                 "${workspaceFolder}/firmware/common",
                 "${workspaceFolder}/firmware/node_actuator/src/direct",
@@ -48,6 +25,7 @@
                 "DEBUG_BUILD",
                 "NODE_DIRECT"
             ],
+            "compilerPath": "${env:HOME}/.platformio/packages/toolchain-xtensa-esp32/bin/xtensa-esp32-elf-g++",
             "cStandard": "c17",
             "cppStandard": "gnu++17",
             "intelliSenseMode": "linux-gcc-x64"
@@ -71,28 +49,6 @@
                 "ESP32",
                 "DEBUG_BUILD",
                 "NODE_MULTIPLEXED"
-            ],
-            "cStandard": "c17",
-            "cppStandard": "gnu++17",
-            "intelliSenseMode": "linux-gcc-x64"
-        },
-        {
-            "name": "Gateway",
-            "compilerPath": "${env:HOME}/.platformio/packages/toolchain-xtensa-esp32/bin/xtensa-esp32-elf-g++",
-            "includePath": [
-                "${workspaceFolder}/firmware/common",
-                "${workspaceFolder}/firmware/gateway/src",
-                "${workspaceFolder}/firmware/gateway/.pio/libdeps/**",
-                "${env:HOME}/.platformio/packages/framework-arduinoespressif32/cores/esp32",
-                "${env:HOME}/.platformio/packages/framework-arduinoespressif32/variants/esp32",
-                "${env:HOME}/.platformio/packages/framework-arduinoespressif32/libraries/**",
-                "${env:HOME}/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/**"
-            ],
-            "defines": [
-                "PLATFORMIO=60118",
-                "ARDUINO=10813",
-                "ARDUINO_ARCH_ESP32",
-                "ESP32"
             ],
             "cStandard": "c17",
             "cppStandard": "gnu++17",

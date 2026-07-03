@@ -19,7 +19,7 @@ import logging
 from typing import Any
 
 from src.hardware.esp32_controller import ESP32Controller
-from src.hardware.espnow_gateway import ESPNowGateway
+from src.hardware.gateway import Gateway
 from src.hardware.skin import Skin
 from src.robots._robot_builder import (
     build_skins,
@@ -37,7 +37,7 @@ class EspRobot(BaseRobot):
     Args:
         robot_id:          Unique identifier.
         kind:              Display name ("Turtle & Tree", "Thymio", ...).
-        gateway:           Shared ESP-NOW gateway. Required for hardware mode;
+        gateway:           Shared SoftEdIBO gateway. Required for hardware mode;
                            may be ``None`` for robots that boot in
                            "no-hardware" mode (e.g. ThymioRobot without nodes).
         node_configs:      List of ``{"mac": ..., "node_type": ...}`` dicts.
@@ -48,7 +48,7 @@ class EspRobot(BaseRobot):
         self,
         robot_id: str,
         kind: str,
-        gateway: ESPNowGateway | None,
+        gateway: Gateway | None,
         node_configs: list[dict[str, Any]] | None,
         skin_configs: list[dict[str, Any]] | None,
     ):
@@ -72,6 +72,11 @@ class EspRobot(BaseRobot):
     # ------------------------------------------------------------------
     # Public model accessors
     # ------------------------------------------------------------------
+
+    @property
+    def gateway(self):
+        """The SoftEdIBO gateway this robot talks through (or None in sim/no-hardware)."""
+        return self._gateway
 
     @property
     def skins(self) -> dict[str, Skin]:

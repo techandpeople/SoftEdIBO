@@ -8,15 +8,15 @@
  * Emits the node_magnet_sensor protocol over ESP-NOW via the shared se_espnow.h, so it
  * drops straight into the SoftEdIBO PC (QuadrantDetector / touch tracking):
  *   boot:   {"status":"node_magnet_sensor_ready","sensors":N,"variant":"mlx90393"}
- *   stream: {"type":"magnet","mag":[mT..],"adj":[0..1..],"act":[idx..]}
+ *   stream: {"type":"magnet","mag":[uT..],"act":[idx..]}
  *
  * Sensor order matters: S0..S3 map to quadrants Q1(TL) Q2(TR) Q3(BL) Q4(BR),
  * which is the order of the I2C addresses below. The PC's QuadrantDetector
  * consumes the first 4 sensors; the optional 5th is appended after them.
  *
  * Each sensor auto-zeros (baseline) at boot. Re-zero at runtime by sending
- * {"cmd":"rebaseline"} (e.g. after the silicone settles). Normalisation scale
- * and activation level are tunable with {"cmd":"configure",...}.
+ * {"cmd":"rebaseline"} (e.g. after the silicone settles). The activation
+ * threshold (µT) is tunable with {"cmd":"configure","act_threshold_ut":...}.
  *
  * Optional adaptive baseline ({"cmd":"configure","adaptive_baseline":true,
  * "baseline_tau_ms":2000}): after boot, the baseline keeps slowly tracking the
@@ -26,7 +26,7 @@
  *
  * Adapted from the thesis MLX90393 live-stream firmware. The offline
  * calibration protocol (CSV) was dropped: the SoftEdIBO runtime detects touch
- * with thresholds on the normalised values, not a calibrated model.
+ * with thresholds on the raw µT magnitudes, not a calibrated model.
  */
 
 #include <Arduino.h>
@@ -64,8 +64,7 @@ constexpr uint32_t STREAM_INTERVAL_MS = 35;   // ~28 Hz
 // Tunables (overridable at runtime via "configure")
 // ---------------------------------------------------------------------------
 
-float fullscaleMt  = 1000.0f;  // |delta| mapped to adj = 1.0
-float actThreshold = 0.3f;    // adj level at/above which a sensor is "active"
+float actThresholdUt = 300.0f;  // |field delta| in µT at/above which a sensor is "active"
 bool  adaptiveBaseline = false;  // continuously track slow drift (opt-in via configure)
 float baselineTauMs    = 2000.0f; // adaptive-baseline time constant (ms); larger = slower
 #ifdef DEBUG_BUILD
@@ -133,8 +132,14 @@ void onReceived(const uint8_t* mac, const uint8_t* data, int len) {
     } else if (strcmp(cmd, "rebaseline") == 0) {
         resetBaseline();
     } else if (strcmp(cmd, "configure") == 0) {
-        if (!doc["fullscale_mt"].isNull())      fullscaleMt     = doc["fullscale_mt"].as<float>();
-        if (!doc["act_threshold"].isNull())     actThreshold    = doc["act_threshold"].as<float>();
+        if (!doc["act_threshold_ut"].isNull()) {
+            actThresholdUt = doc["act_threshold_ut"].as<float>();
+        } else if (!doc["act_threshold"].isNull()) {
+            // Back-compat: the old activation level was a fraction of a full-scale
+            // (default 1000 µT), so convert it to the µT it used to mean.
+            float fs = doc["fullscale_mt"].isNull() ? 1000.0f : doc["fullscale_mt"].as<float>();
+            actThresholdUt = doc["act_threshold"].as<float>() * fs;
+        }
         if (!doc["adaptive_baseline"].isNull()) adaptiveBaseline = doc["adaptive_baseline"].as<bool>();
         if (!doc["baseline_tau_ms"].isNull())   baselineTauMs   = doc["baseline_tau_ms"].as<float>();
     }
@@ -177,33 +182,24 @@ void updateAdaptiveBaseline(const Vec3* samples, const bool* valid, float dtMs) 
         float m = vmag({samples[i].x - baseline[i].x,
                         samples[i].y - baseline[i].y,
                         samples[i].z - baseline[i].z});
-        float adj = fullscaleMt > 0.0f ? m / fullscaleMt : 0.0f;
-        if (adj >= actThreshold) continue;   // touch in progress — freeze this sensor
+        if (m >= actThresholdUt) continue;   // touch in progress — freeze this sensor
         baseline[i].x += a * (samples[i].x - baseline[i].x);
         baseline[i].y += a * (samples[i].y - baseline[i].y);
         baseline[i].z += a * (samples[i].z - baseline[i].z);
     }
 }
 
-// Build {"type":"magnet","mag":[..],"adj":[..],"act":[..]} into buf.
+// Build {"type":"magnet","mag":[uT..],"act":[idx..]} into buf. A sensor is
+// "active" once its µT delta from baseline reaches actThresholdUt.
 void buildImuMessage(const Vec3* samples, const bool* valid, char* buf, size_t cap) {
     int pos = snprintf(buf, cap, "{\"type\":\"magnet\",\"mag\":[");
-    for (size_t i = 0; i < streamCount; ++i) {
-        float m = valid[i] ? vmag({samples[i].x - baseline[i].x,
-                                    samples[i].y - baseline[i].y,
-                                    samples[i].z - baseline[i].z}) : 0.0f;
-        pos += snprintf(buf + pos, cap - pos, "%s%.3f", i ? "," : "", m);
-    }
-    pos += snprintf(buf + pos, cap - pos, "],\"adj\":[");
     bool active[MAX_SENSORS] = {};
     for (size_t i = 0; i < streamCount; ++i) {
         float m = valid[i] ? vmag({samples[i].x - baseline[i].x,
                                     samples[i].y - baseline[i].y,
                                     samples[i].z - baseline[i].z}) : 0.0f;
-        float adj = fullscaleMt > 0.0f ? m / fullscaleMt : 0.0f;
-        if (adj > 1.0f) adj = 1.0f;
-        active[i] = adj >= actThreshold;
-        pos += snprintf(buf + pos, cap - pos, "%s%.3f", i ? "," : "", adj);
+        active[i] = m >= actThresholdUt;
+        pos += snprintf(buf + pos, cap - pos, "%s%.3f", i ? "," : "", m);
     }
     pos += snprintf(buf + pos, cap - pos, "],\"act\":[");
     bool first = true;

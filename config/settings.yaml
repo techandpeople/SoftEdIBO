@@ -62,15 +62,21 @@ robots:
 # robots:
 #   thymios:
 #     - thymio_id: thymio_1
-#       # Drive the Thymio's wheels + top LED from the app. Needs Thymio Suite
-#       # (its Thymio Device Manager) running with the RF dongle plugged in and
-#       # this robot paired to it. Leave false to keep the wheels/LEDs idle
-#       # (air-chamber skins still work either way).
+#       # Drive the Thymio's wheels + top LED from the app, wirelessly. Leave
+#       # false to keep the wheels/LEDs idle (air-chamber skins still work
+#       # either way).
 #       wireless: true
-#       host: localhost   # Thymio Device Manager host — localhost for a dongle in this PC
-#       port: 8596        # Thymio Device Manager port (default)
-#       # Optional air-chamber skin(s) on top, same shape as turtle_trees above:
-#       # node_mac: "AA:BB:CC:DD:EE:10"
+#       # Transport: "dongle" (thymiodirect straight to the RF dongle's serial
+#       # port) or "gateway" (the gateway's C6 impersonates the dongle over
+#       # 802.15.4 — no dongle at all; see docs/THYMIO_WIRELESS_CONTROL.md).
+#       wireless_via: gateway
+#       node_id: 0        # dongle only: which paired Thymio (0 = first)
+#       channel: 25       # gateway only: 802.15.4 channel
+#       thymio_addr: 6a25 # gateway only: this Thymio's short address (hex);
+#                         # blank = C6 default. Robot Config → Discover… fills it.
+#       # Optional air-chamber skin(s) on top, same shape as turtle_trees above
+#       # (nodes are added from the robot panel's "+ Node"):
+#       # nodes: [...]
 #       # skins: [...]
 database:
   backend: sqlite

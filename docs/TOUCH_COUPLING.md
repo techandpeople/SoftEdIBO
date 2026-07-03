@@ -6,8 +6,8 @@ On a skin, a small magnet sits in the silicone above each MLX90393 touch sensor;
 pressing the skin moves the magnet and changes the field (that's how touch is
 sensed). But **inflating a chamber also deforms the silicone and shifts the
 magnet** — so chamber actuation can masquerade as a touch. The boot-time
-magnetic baseline is static, so once a chamber inflates under a sensor its `adj`
-climbs and may cross `act_threshold` → a *false touch*.
+magnetic baseline is static, so once a chamber inflates under a sensor its `mag`
+climbs and may cross the activation threshold → a *false touch*.
 
 This matters during a session because chambers are actively driven while we read
 touch. Before doing anything about it, **measure whether it actually bites** for
@@ -19,7 +19,7 @@ a given skin (the sensors may sit away from actuated chambers).
 
 `src/core/touch_coupling.py` (pure, Qt-free, tested) turns a *sweep* into a
 coupling matrix `[chamber × sensor]` of how much each chamber moves each sensor's
-`adj`, plus a derived chamber↔sensor map:
+`mag` (µT), plus a derived chamber↔sensor map:
 
 - `build_coupling(samples, sensor_count, …) -> CouplingMatrix`
 - `build_coupling_from_recording(path, sensor_count, …)` — reads a stream JSONL
@@ -84,7 +84,7 @@ stands out; the actuation offset is removed.
   `src/hardware/touch_calibration.py` (tested).
 
 The matrix is measured in **`mag` (uT)** — the same field the PC detection path
-uses (it ignores the firmware `adj`). Enabled per skin; off by default, so the
+uses. Enabled per skin; off by default, so the
 detection path is byte-for-byte identical until you calibrate and enable.
 
 ## Existing related mapping

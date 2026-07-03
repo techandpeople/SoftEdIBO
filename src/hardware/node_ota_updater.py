@@ -3,7 +3,7 @@
 The PC drives the whole transfer; the node only writes flash and ACKs (see the
 firmware side in ``firmware/common/se_ota.h``). The firmware image is read from
 disk, split into small chunks, base64-encoded and streamed as ordinary JSON
-ESP-NOW messages through the existing :class:`ESPNowGateway` pipe — no WiFi/AP
+ESP-NOW messages through the existing :class:`Gateway` pipe — no WiFi/AP
 involved, so it works anywhere the gateway can reach the node.
 
 Protocol::
@@ -39,7 +39,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from src.hardware.espnow_gateway import ESPNowGateway
+from src.hardware.gateway import Gateway
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +97,7 @@ class NodeOTAUpdater:
 
     def __init__(
         self,
-        gateway: ESPNowGateway,
+        gateway: Gateway,
         mac: str,
         firmware_path: str | Path,
         *,

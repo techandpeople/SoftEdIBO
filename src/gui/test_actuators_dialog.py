@@ -2,7 +2,6 @@
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
-    QCheckBox,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -17,7 +16,7 @@ from src.gui.led_ring_tester import LedRingTester
 from src.gui.sensor_tester import SensorTester
 from src.gui.base_dialog import BaseDialog
 from src.gui.ui_test_actuators_dialog import Ui_TestActuatorsDialog
-from src.hardware.espnow_gateway import ESPNowGateway
+from src.hardware.gateway import Gateway
 from src.hardware.fill_profile import FillProfile
 from src.hardware.units import kpa_to_pct
 
@@ -37,7 +36,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
             ``fill_profile``). The limits are pushed to the node before each
             actuation, and time-mode chambers inflate by their calibrated time
             window — mirroring how :class:`~src.hardware.skin.Skin` drives them.
-        gateway: Connected ESP-NOW gateway.
+        gateway: Connected SoftEdIBO gateway.
         led_count: LED count for a single-ring node (back-compat fallback when
             ``led_rings`` is None).
         led_rings: Per-ring LED counts for the node (e.g. ``[24, 16, 16, 16]``
@@ -58,12 +57,6 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
     # lazily builds the sensor tester the first time a node actually streams it.
     _magnet_received = Signal(list)                # per-sensor magnitudes (µT)
 
-    # A sensor is marked active on the node when adj = mag / fullscale_mt reaches
-    # act_threshold. We keep act_threshold at the firmware default and scale
-    # fullscale_mt so the µT threshold the user sets in the tester is where the
-    # node's own detection flips — see _configure_sensors.
-    _ACT_THRESHOLD = 0.3
-
     # Monospace valve/pump button base; the open variant adds a green fill so an
     # actually-open valve is obvious at a glance.
     _VALVE_STYLE = "font-family: Courier; font-size: 10pt;"
@@ -75,7 +68,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         self,
         mac: str,
         skin_cfgs: list[dict],
-        gateway: ESPNowGateway,
+        gateway: Gateway,
         led_count: int = 24,
         led_rings: list[int] | None = None,
         led_angles: dict[int, float] | None = None,
@@ -121,35 +114,25 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         self.setWindowTitle(f"Test Actuators — {mac}")
         self.close_btn.clicked.connect(self.accept)
 
-        # When checked, a per-chamber Inflate/Deflate button starts a continuous
-        # run of just that chamber (ignores the pressure cap, runs until the
-        # button is pressed again) instead of a one-shot fill to max/min.
-        self._cont_cb = QCheckBox(
-            "Ignore max pressure — per-chamber Inflate/Deflate runs until stopped")
-        self._cont_cb.setWhatsThis(
-            "While checked, a chamber's Inflate or Deflate button toggles a "
-            "continuous run of that one chamber: it opens the matching valve and "
-            "drives the pump, ignoring the configured max/min pressure, until you "
-            "press the button (now ⏹ Stop) again. While unchecked, those "
-            "buttons do a one-shot fill toward the configured max/min.")
-
+        # The "Ignore max pressure" checkbox (cont_cb), pump group and continuous
+        # run group all live in the .ui (left column); we only wire their signals
+        # here. cont_cb stays hidden until there are chambers to drive.
         if not skin_cfgs:
             self.no_chambers_label.setVisible(True)
         else:
             self.chambers_scroll.setVisible(True)
+            self.cont_cb.setVisible(True)
             for skin_cfg in skin_cfgs:
                 self.chambers_vbox.addWidget(self._build_chamber_group(skin_cfg))
             self.chambers_vbox.addStretch()
-            self.verticalLayout.insertWidget(
-                self.verticalLayout.indexOf(self.chambers_scroll) + 1,
-                self._cont_cb)
             # Apply the configured limits up front so the firmware's reported
             # pressure %% matches each chamber's min/max from the start, not only
             # after that chamber is first actuated (otherwise it uses boot defaults).
             self._push_all_limits()
 
-        # LED ring tester(s). Insert before the Close button (last widget in the
-        # dialog's vertical layout). node_direct has a single ring; node_multiplexed
+        # LED ring tester(s). Inserted into the left column just above the pump
+        # group (its count/size is only known from the node config, so it can't be
+        # authored in the .ui). node_direct has a single ring; node_multiplexed
         # drives four independently-addressable rings — one tester tab each, so the
         # user can assign colours to each ring (and each LED) separately.
         rings = led_rings if led_rings is not None else (
@@ -162,8 +145,8 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
                     self._send_led(None, idx, cols, pat, fade, angle),
                 initial_angle=self._led_angles.get(0, 0.0),
                 on_save_angle=self._angle_saver(0))
-            self.verticalLayout.insertWidget(
-                self.verticalLayout.count() - 1, self._led_tester)
+            self.left_col.insertWidget(
+                self.left_col.indexOf(self.pump_group), self._led_tester)
         elif len(rings) > 1:
             self._led_tabs = QTabWidget()
             for k, size in enumerate(rings):
@@ -174,37 +157,20 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
                     initial_angle=self._led_angles.get(k, 0.0),
                     on_save_angle=self._angle_saver(k))
                 self._led_tabs.addTab(tester, f"Ring {k} · {size} LEDs")
-            self.verticalLayout.insertWidget(
-                self.verticalLayout.count() - 1, self._led_tabs)
+            self.left_col.insertWidget(
+                self.left_col.indexOf(self.pump_group), self._led_tabs)
 
-        # Pump controls (toggle style, monospace font for fixed width)
-        self._pump_states: dict[int, tuple[bool, QPushButton]] = {}  # pump => (on, button)
-        pump_group = QGroupBox("Pump Control")
-        pump_layout = QHBoxLayout(pump_group)
-        monospace_style = "font-family: Courier; font-size: 10pt;"
-
-        pump_inf_btn = QPushButton("Inflate Pump: OFF")
-        pump_inf_btn.setMaximumWidth(160)
-        pump_inf_btn.setStyleSheet(monospace_style)
-        pump_inf_btn.clicked.connect(lambda _=False, p=0, btn=pump_inf_btn: self._toggle_pump(p, btn))
-        self._pump_states[0] = (False, pump_inf_btn)
-        pump_layout.addWidget(pump_inf_btn)
-
-        pump_def_btn = QPushButton("Deflate Pump: OFF")
-        pump_def_btn.setMaximumWidth(160)
-        pump_def_btn.setStyleSheet(monospace_style)
-        pump_def_btn.clicked.connect(lambda _=False, p=1, btn=pump_def_btn: self._toggle_pump(p, btn))
-        self._pump_states[1] = (False, pump_def_btn)
-        pump_layout.addWidget(pump_def_btn)
-
-        stop_all_btn = QPushButton("⏹ STOP ALL (Close valves + Off pumps)")
-        stop_all_btn.setStyleSheet("background-color: #FF6B6B; font-weight: bold;")
-        stop_all_btn.clicked.connect(self._stop_all)
-        pump_layout.addWidget(stop_all_btn)
-
-        pump_layout.addStretch()
-        self.verticalLayout.insertWidget(
-            self.verticalLayout.count() - 1, pump_group)
+        # Pump controls live in the .ui (pump_group); wire the toggles here.
+        # pump => (on, button).
+        self._pump_states: dict[int, tuple[bool, QPushButton]] = {
+            0: (False, self.pump_inf_btn),
+            1: (False, self.pump_def_btn),
+        }
+        self.pump_inf_btn.clicked.connect(
+            lambda _=False: self._toggle_pump(0, self.pump_inf_btn))
+        self.pump_def_btn.clicked.connect(
+            lambda _=False: self._toggle_pump(1, self.pump_def_btn))
+        self.stop_all_btn.clicked.connect(self._stop_all)
 
         # Continuous run (bench wiring test): drive one pump + all of its valves
         # wide open INDEFINITELY, ignoring pressure and the firmware dead-man.
@@ -220,34 +186,10 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         self._run_keepalive = QTimer(self)
         self._run_keepalive.setInterval(1000)
         self._run_keepalive.timeout.connect(self._send_run_keepalive)
-        run_group = QGroupBox("Continuous Run (ignores pressure)")
-        run_group.setWhatsThis(
-            "Drive one pump and all of its valves wide open indefinitely, "
-            "ignoring the pressure reading and the firmware dead-man timeout. "
-            "Use this to check pump/valve wiring when the pressure sensor reads "
-            "wrong. Press the active button again, STOP ALL, or close the dialog "
-            "to stop.")
-        run_layout = QHBoxLayout(run_group)
-
-        self._run_inf_btn = QPushButton("Run Inflate ∞: OFF")
-        self._run_inf_btn.setStyleSheet(monospace_style)
-        self._run_inf_btn.setWhatsThis(
-            "Turn the inflate pump on and open every inflate valve, and keep them "
-            "on until stopped. Ignores pressure limits.")
-        self._run_inf_btn.clicked.connect(lambda _=False: self._toggle_run(0))
-        run_layout.addWidget(self._run_inf_btn)
-
-        self._run_def_btn = QPushButton("Run Deflate ∞: OFF")
-        self._run_def_btn.setStyleSheet(monospace_style)
-        self._run_def_btn.setWhatsThis(
-            "Turn the deflate pump on and open every deflate valve, and keep them "
-            "on until stopped. Ignores pressure limits.")
-        self._run_def_btn.clicked.connect(lambda _=False: self._toggle_run(1))
-        run_layout.addWidget(self._run_def_btn)
-
-        run_layout.addStretch()
-        self.verticalLayout.insertWidget(
-            self.verticalLayout.count() - 1, run_group)
+        # The continuous-run group + buttons live in the .ui (run_group); wire the
+        # toggles here.
+        self.run_inf_btn.clicked.connect(lambda _=False: self._toggle_run(0))
+        self.run_def_btn.clicked.connect(lambda _=False: self._toggle_run(1))
 
         # Manual valve/pump dead-man keepalive. The firmware auto-closes a manually
         # opened valve / pump after MANUAL_MAX_ON_MS (~5 s) so a lost "off" frame
@@ -380,32 +322,35 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         if self._sensor_tester is None:
             self._sensor_tester = SensorTester(
                 len(mag), self._rezero_sensors, self._configure_sensors)
-            # Insert just before the Close button row (the last layout item),
-            # matching the pump / run / LED groups.
-            self.verticalLayout.insertWidget(
-                self.verticalLayout.count() - 1, self._sensor_tester)
+            # Insert into the right column, above its trailing spacer (index 0), so
+            # the panel sits to the RIGHT of the chambers/pump/run controls and is
+            # pinned to the top-right rather than stacked below everything.
+            self.right_col.insertWidget(0, self._sensor_tester)
             # Show it now so the layout accounts for it immediately: a widget
             # inserted into an already-shown dialog is otherwise only shown on the
             # next event loop pass, and until then the layout treats it as zero —
             # so _grow_to_fit would read a too-small hint and not make room.
             self._sensor_tester.show()
-            # The panel is always-visible bottom content (not inside the chamber
-            # scroll area), so it must not squeeze the rest: grow the dialog to
-            # fit its new preferred height rather than compress everything above.
+            # The panel is a new right-hand column (not inside the chamber scroll
+            # area), so it must not squeeze the rest: grow the dialog to fit its
+            # new preferred size rather than compress the columns beside it.
             self._grow_to_fit()
         self._sensor_tester.update_values(mag)
 
     def _grow_to_fit(self) -> None:
-        """Grow the dialog to its preferred height (never shrink, never past the
+        """Grow the dialog to its preferred size (never shrink, never past the
         screen). Called when a panel is added after construction so the added
-        content doesn't compress the panels above it below their minimums."""
+        content isn't squeezed below its minimum. Grows width as well as height
+        because the sensor tester is added as a new right-hand column."""
         self.layout().activate()   # refresh the size hint after the insert
-        target = self.sizeHint().height()
+        hint = self.sizeHint()
+        target_w, target_h = hint.width(), hint.height()
         screen = self.screen()
         if screen is not None:
-            target = min(target, screen.availableGeometry().height())
-        if target > self.height():
-            self.resize(self.width(), target)
+            avail = screen.availableGeometry()
+            target_w = min(target_w, avail.width())
+            target_h = min(target_h, avail.height())
+        self.resize(max(self.width(), target_w), max(self.height(), target_h))
 
     def _rezero_sensors(self) -> None:
         """Re-zero the node's magnet baseline (sensor tester Re-zero button)."""
@@ -413,15 +358,12 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
 
     def _configure_sensors(self, threshold_ut: float) -> None:
         """Push the tester's µT threshold to the node so its own touch detection
-        fires at that level. The node marks a sensor active when
-        ``mag / fullscale_mt >= act_threshold``; keeping act_threshold at the
-        firmware default and setting ``fullscale_mt = threshold / act_threshold``
-        makes ``threshold_ut`` the µT at which the node flips the sensor active."""
+        (the ``act`` set the activities and monitor consume) flips a sensor active
+        at exactly this µT."""
         if threshold_ut <= 0:
             return
         self._gateway.send(self._mac, "configure", repeat=2,
-                           fullscale_mt=threshold_ut / self._ACT_THRESHOLD,
-                           act_threshold=self._ACT_THRESHOLD)
+                           act_threshold_ut=threshold_ut)
 
     def _update_pressure(self, chamber: int, pressure: int, kpa: float) -> None:
         """Called in the main thread via Signal.
@@ -696,7 +638,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         max/min."""
         if self._run == (direction, slot):
             self._stop_run()
-        elif self._cont_cb.isChecked():
+        elif self.cont_cb.isChecked():
             self._start_run(direction, slot)
         elif direction == 0:
             self._inflate_slot(slot)
@@ -779,9 +721,9 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
 
     def _refresh_run_buttons(self) -> None:
         run = self._run
-        self._run_inf_btn.setText(
+        self.run_inf_btn.setText(
             f"Run Inflate ∞: {'ON ' if run == (0, -1) else 'OFF'}")
-        self._run_def_btn.setText(
+        self.run_def_btn.setText(
             f"Run Deflate ∞: {'ON ' if run == (1, -1) else 'OFF'}")
         for (slot, direction), btn in self._chamber_btns.items():
             default = "Inflate" if direction == 0 else "Deflate"

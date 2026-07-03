@@ -15,7 +15,7 @@ from src.gui.trash_dialog import TrashDialog
 from src.gui.robot_panel import RobotPanel
 from src.gui.session_panel import SessionPanel
 from src.gui.session_setup_dialog import SessionSetupDialog
-from src.hardware.espnow_gateway import ESPNowGateway
+from src.hardware.gateway import Gateway
 from src.robots.base_robot import BaseRobot, RobotStatus
 from src.robots.turtle_tree.turtle_tree_robot import TurtleTreeRobot
 
@@ -157,24 +157,24 @@ class TestSessionSetupDialog:
 
 class TestRobotPanel:
     def test_creates(self, qtbot):
-        panel = RobotPanel(ESPNowGateway("/dev/null"), _mock_settings())
+        panel = RobotPanel(Gateway("/dev/null"), _mock_settings())
         qtbot.addWidget(panel)
 
     def test_lists_start_empty(self, qtbot):
-        panel = RobotPanel(ESPNowGateway("/dev/null"), _mock_settings())
+        panel = RobotPanel(Gateway("/dev/null"), _mock_settings())
         qtbot.addWidget(panel)
         assert panel.turtle_tree_tree.topLevelItemCount() == 0
         assert panel.thymio_tree.topLevelItemCount() == 0
 
     def test_refresh_populates_turtle_list(self, qtbot):
-        panel = RobotPanel(ESPNowGateway("/dev/null"), _mock_settings())
+        panel = RobotPanel(Gateway("/dev/null"), _mock_settings())
         qtbot.addWidget(panel)
         panel.refresh([_mock_turtle("Turtle-1"), _mock_turtle("Turtle-2")])
         assert panel.turtle_tree_tree.topLevelItemCount() == 0
         assert panel.thymio_tree.topLevelItemCount() == 0
 
     def test_gateway_connect_btn_present(self, qtbot):
-        panel = RobotPanel(ESPNowGateway("/dev/null"), _mock_settings())
+        panel = RobotPanel(Gateway("/dev/null"), _mock_settings())
         qtbot.addWidget(panel)
         assert panel.connect_btn.text() == "Connect"
 
@@ -201,7 +201,10 @@ class TestDataPanel:
     def test_export_button(self, qtbot, db):
         panel = DataPanel(db)
         qtbot.addWidget(panel)
-        assert panel.export_btn.text() == "Export Session to CSV"
+        # Export now supports multi-select; with nothing selected the button shows
+        # its default "Export Selected to CSV" (relabelled with a count once rows are
+        # picked). A separate "Export All" button covers the whole roster.
+        assert panel.export_btn.text() == "Export Selected to CSV"
 
     def test_delete_button_disabled_until_selection(self, qtbot, db):
         db.save_session(SessionRecord("s01", "Group Touch", datetime(2026, 1, 1, 9, 0)))
@@ -430,7 +433,7 @@ class TestActuatorsDialogSensors:
         dlg._sensor_tester.rezero_btn.click()
         assert ("rebaseline", {}) in gw.sent
 
-    def test_push_scales_fullscale_so_threshold_is_the_trigger_uT(self, qtbot):
+    def test_push_sends_threshold_uT_to_node(self, qtbot):
         gw = _RecordingGateway()
         dlg = self._dialog(qtbot, gw)
         dlg._on_magnet_data([0.0, 0.0, 0.0, 0.0])
@@ -438,7 +441,6 @@ class TestActuatorsDialogSensors:
         dlg._sensor_tester.push_btn.click()
         cfg = [kw for c, kw in gw.sent if c == "configure"]
         assert len(cfg) == 1
-        # fullscale_mt = threshold / act_threshold, so mag == threshold → adj ==
-        # act_threshold → the node flips the sensor active at exactly 120 µT.
-        assert cfg[0]["act_threshold"] == pytest.approx(0.3)
-        assert cfg[0]["fullscale_mt"] == pytest.approx(120.0 / 0.3)
+        # The µT threshold goes straight to the node — it flips a sensor active at
+        # exactly 120 µT (no fullscale/fraction gymnastics).
+        assert cfg[0]["act_threshold_ut"] == pytest.approx(120.0)

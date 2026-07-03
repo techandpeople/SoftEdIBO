@@ -16,6 +16,9 @@ enum CmdType : uint8_t {
     CMD_TEST_RUN, CMD_TEST_STOP,
     // Emergency stop: latch all actuators off until re-armed.
     CMD_STOP, CMD_RESUME,
+    // Telemetry cadence: temporarily raise the status broadcast rate (dense
+    // pressure for calibration / live gauges / touch coupling), auto-reverting.
+    CMD_STATUS_RATE,
     // Configuration / status.
     CMD_CONFIGURE, CMD_PING
 #ifdef DEBUG_BUILD

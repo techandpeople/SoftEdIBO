@@ -29,12 +29,12 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 
 from src.config.settings import Settings
-from src.gui.setup_wizard import firmware_for_node_type
+from src.gui.setup_wizard import firmware_for_node_type, firmware_for_c6
 from src.gui.base_dialog import BaseDialog
 from src.gui.ui_ota_update_dialog import Ui_OTAUpdateDialog
-from src.hardware.espnow_gateway import ESPNowGateway
+from src.hardware.gateway import Gateway
 from src.hardware.node_ota_updater import NodeOTAUpdater
-from src.hardware.wifi_ota_updater import WifiOTAUpdater
+from src.hardware.wifi_ota_updater import WifiOTAUpdater, C6WifiOTAUpdater
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,12 @@ logger = logging.getLogger(__name__)
 _TRANSPORT_ESPNOW, _TRANSPORT_WIFI = range(2)
 
 _DIALOG_TITLE = "Update Nodes"
+
+# The gateway's C6 half (Thymio RCP) — WiFi-OTA only, reached by target "thymio"
+# (not a MAC), so it gets a synthetic row key + a fixed "wired" state.
+_C6_KEY = "__c6_rcp__"
+_C6_LABEL = "C6 (Thymio RCP)"
+_C6_TYPE = "thymio_rcp"
 
 # Columns
 _COL_SEL, _COL_MAC, _COL_TYPE, _COL_LED, _COL_ONLINE, _COL_PROGRESS, _COL_STATUS = range(7)
@@ -58,7 +64,7 @@ class _OTAWorker(QThread):
     status = Signal(str, str)     # mac, message
     done = Signal()
 
-    def __init__(self, gateway: ESPNowGateway, jobs: list[tuple[str, Path]],
+    def __init__(self, gateway: Gateway, jobs: list[tuple[str, Path]],
                  transport: int = _TRANSPORT_ESPNOW,
                  ap_ssid: str = "", ap_password: str = ""):
         super().__init__()
@@ -78,6 +84,12 @@ class _OTAWorker(QThread):
     def _make_updater(self, mac: str, path: Path) -> NodeOTAUpdater | WifiOTAUpdater:
         on_progress = lambda p, m=mac: self.progress.emit(m, p)
         on_log = lambda s, m=mac: self.status.emit(m, s)
+        if mac == _C6_KEY:
+            # The C6 is addressed by target "thymio", not a MAC, and only over WiFi.
+            return C6WifiOTAUpdater(
+                self._gateway, path, self._ap_ssid, self._ap_password,
+                on_progress=on_progress, on_log=on_log,
+            )
         if self._transport == _TRANSPORT_WIFI:
             return WifiOTAUpdater(
                 self._gateway, mac, path, self._ap_ssid, self._ap_password,
@@ -103,7 +115,7 @@ class _OTAWorker(QThread):
 class OTAUpdateDialog(BaseDialog, Ui_OTAUpdateDialog):
     """Multi-select node firmware updater (ESP-NOW or WiFi transport)."""
 
-    def __init__(self, gateway: ESPNowGateway, settings: Settings,
+    def __init__(self, gateway: Gateway, settings: Settings,
                  session_active: bool = False, parent=None):
         super().__init__(parent)
         self.setupUi(self)
@@ -154,37 +166,50 @@ class OTAUpdateDialog(BaseDialog, Ui_OTAUpdateDialog):
 
     def _populate(self) -> None:
         nodes = self._nodes_from_settings()
-        self.table.setRowCount(len(nodes))
+        self.table.setRowCount(len(nodes) + 1)   # + the gateway's C6 (Thymio RCP)
         for row, (_rid, mac, ntype) in enumerate(nodes):
-            self._row_by_mac[mac] = row
-
-            sel = QTableWidgetItem()
-            sel.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
-            sel.setCheckState(Qt.CheckState.Unchecked)
-            self.table.setItem(row, _COL_SEL, sel)
-            self.table.setItem(row, _COL_MAC, QTableWidgetItem(mac))
-            self.table.setItem(row, _COL_TYPE, QTableWidgetItem(ntype))
-            self.table.setItem(row, _COL_LED, QTableWidgetItem("?"))
-            self.table.setItem(row, _COL_ONLINE, QTableWidgetItem("?"))
-
-            bar = QProgressBar()
-            bar.setRange(0, 100)
-            bar.setValue(0)
-            self.table.setCellWidget(row, _COL_PROGRESS, bar)
-            self.table.setItem(row, _COL_STATUS, QTableWidgetItem(""))
+            self._init_row(row, mac, ntype)
+        # Always offer the C6 half of the gateway (WiFi-OTA only), last.
+        self._init_row(len(nodes), _C6_KEY, _C6_TYPE, mac_text=_C6_LABEL)
         self.table.resizeColumnsToContents()
         self._refresh_online()
+
+    def _init_row(self, row: int, key: str, ntype: str, mac_text: str | None = None) -> None:
+        self._row_by_mac[key] = row
+        sel = QTableWidgetItem()
+        sel.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
+        sel.setCheckState(Qt.CheckState.Unchecked)
+        self.table.setItem(row, _COL_SEL, sel)
+        self.table.setItem(row, _COL_MAC, QTableWidgetItem(mac_text or key))
+        self.table.setItem(row, _COL_TYPE, QTableWidgetItem(ntype))
+        self.table.setItem(row, _COL_LED, QTableWidgetItem("?"))
+        self.table.setItem(row, _COL_ONLINE, QTableWidgetItem("?"))
+
+        bar = QProgressBar()
+        bar.setRange(0, 100)
+        bar.setValue(0)
+        self.table.setCellWidget(row, _COL_PROGRESS, bar)
+        self.table.setItem(row, _COL_STATUS, QTableWidgetItem(""))
 
     def _refresh_online(self) -> None:
         known = self._gateway.known_macs if self._gateway.is_connected else frozenset()
         for mac, row in self._row_by_mac.items():
-            item = self.table.item(row, _COL_ONLINE)
+            self._refresh_row(mac, row, known)
+
+    def _refresh_row(self, mac: str, row: int, known) -> None:
+        item = self.table.item(row, _COL_ONLINE)
+        led = self.table.item(row, _COL_LED)
+        if mac == _C6_KEY:
+            # Reached over the wired UART to the S3, not ESP-NOW — no MAC to scan.
             if item is not None:
-                item.setText("online" if mac in known else "offline")
-            led = self.table.item(row, _COL_LED)
+                item.setText("wired")
             if led is not None:
-                ntype = self.table.item(row, _COL_TYPE).text()
-                led.setText(self._led_text(mac, ntype))
+                led.setText("—")
+            return
+        if item is not None:
+            item.setText("online" if mac in known else "offline")
+        if led is not None:
+            led.setText(self._led_text(mac, self.table.item(row, _COL_TYPE).text()))
 
     def _led_text(self, mac: str, ntype: str) -> str:
         """LED-ring variant to show for a node: 'rgb'/'rgbw' if reported, '?' if
@@ -246,6 +271,15 @@ class OTAUpdateDialog(BaseDialog, Ui_OTAUpdateDialog):
         for mac, row in self._row_by_mac.items():
             if self.table.item(row, _COL_SEL).checkState() != Qt.CheckState.Checked:
                 continue
+            if mac == _C6_KEY:
+                fw = firmware_for_c6()
+                if not fw.exists():
+                    self.table.item(row, _COL_STATUS).setText(
+                        "✗ firmware not found — build rcp_c6 first "
+                        "(pio run -d firmware/thymio_rcp -e rcp_c6)")
+                    continue
+                jobs.append((mac, fw))
+                continue
             ntype = self.table.item(row, _COL_TYPE).text()
             reported = self._gateway.node_rgbw(mac)
             rgbw = fallback_rgbw if reported is None else reported
@@ -269,6 +303,12 @@ class OTAUpdateDialog(BaseDialog, Ui_OTAUpdateDialog):
         transport = self.transport_combo.currentIndex()
         ssid = self.ap_ssid_edit.text().strip()
         password = self.ap_pass_edit.text()
+        if any(mac == _C6_KEY for mac, _ in jobs) and transport != _TRANSPORT_WIFI:
+            QMessageBox.information(
+                self, _DIALOG_TITLE,
+                "The C6 (Thymio RCP) updates over WiFi only. Pick the WiFi transport "
+                "and enter the gateway access-point name.")
+            return
         if transport == _TRANSPORT_WIFI and not ssid:
             QMessageBox.information(self, _DIALOG_TITLE,
                                     "Enter the gateway access-point name first.")

@@ -61,3 +61,8 @@ firmware/*/compile_commands.json
 # Editor falls back to the CDN when absent; bundle/CI can vendor it on demand.
 src/gui/blockly/blockly.min.js
 src/gui/blockly/media/
+
+# Thymio 802.15.4 capture artifacts (throwaway; produced by scripts/thymio_sniff_*)
+cap*.jsonl
+capture_*.jsonl
+*.pcap

@@ -51,7 +51,7 @@ chambers are well-separated and each magnet is directly above its own sensor.
 
 ```
 node_magnet_sensor (ESP32)
-  → ESP-NOW → ESPNowGateway
+  → ESP-NOW → Gateway
     → ESP32Controller._handle_message()
       → _dispatch_imu(data)
         ├── SkinGridView._on_imu_msg()     ← GUI: flash yellow on sensor cells
@@ -65,17 +65,16 @@ node_magnet_sensor (ESP32)
 The `node_magnet_sensor` firmware sends via ESP-NOW:
 
 ```json
-{"type": "magnet", "adj": [0.0, 0.82, 0.0, 0.0], "act": [1], "source": "AA:BB:CC:DD:EE:FF"}
+{"type": "magnet", "mag": [4.0, 180.0, 6.0, 3.0], "act": [1], "source": "AA:BB:CC:DD:EE:FF"}
 ```
 
 | Field | Description |
 |-------|-------------|
-| `adj` | Per-sensor adjusted values (0.0–1.0), baseline-subtracted by the firmware |
-| `mag` | Raw magnitudes in mT (fallback if `adj` absent) |
-| `act` | Indices of sensors currently above the firmware threshold |
+| `mag` | Per-sensor field-change magnitudes in µT, baseline-subtracted by the firmware |
+| `act` | Indices of sensors whose `mag` is at/above the firmware threshold (`act_threshold_ut`) |
 
-`Skin._extract_sensor_magnitudes()` tries `adj` → `mag` → `act` in order, so the
-system works whether or not the firmware sends pre-normalised values.
+`Skin._extract_sensor_magnitudes()` tries `mag` → `act` in order, so it works on
+the raw µT magnitudes and falls back to the binary active set.
 
 ---
 
@@ -279,7 +278,7 @@ YAML, so any skin shape (rectangular, round, asymmetric) is supported.
 
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
-| No touch detected | `adj` all zeros; baseline not set | Check firmware baseline initialisation; lower `quadrant_thresholds` |
+| No touch detected | `mag` all zeros; baseline not set | Check firmware baseline initialisation; lower `quadrant_thresholds` |
 | Constant false positive | Threshold too low or magnet too strong | Raise threshold, or add `hysteresis: 0.1` |
 | Flickering on/off | Sensor noise at edge of threshold | Increase `hysteresis` (try 0.1–0.15) |
 | Wrong chamber reacts | `sensor_to_chamber` mapping wrong | Check sensor physical positions and update mapping |
@@ -293,5 +292,5 @@ YAML, so any skin shape (rectangular, round, asymmetric) is supported.
 |-----------|--------|
 | `QuadrantDetector` / `TouchPositionTracker` | Adapted from `Tese/tools/quadrant_detection.py` |
 | magnet sensor firmware | Colleague's repo (external, not in this tree) |
-| `Skin._extract_sensor_magnitudes` | New — handles `adj`/`mag`/`act` fallback chain |
+| `Skin._extract_sensor_magnitudes` | New — handles `mag`/`act` fallback chain |
 | `SkinGridView` yellow pulse | Pre-existing, unchanged |

@@ -206,7 +206,7 @@ The CI pipeline automatically selects the firmware environment:
 | `src/hardware/skin.py` | Skin model — groups 1-3 AirChambers on one ESP32 node; `skin_type` + `geometry` |
 | `src/hardware/skin_geometry.py` | Hardcoded skin-geometry registry (shape + sensor coords) keyed by `skin_type` |
 | `src/hardware/air_chamber.py` | AirChamber model — pressure 0-100 %, configurable max |
-| `src/hardware/esp32_controller.py` | Real hardware controller (via ESP-NOW gateway) |
+| `src/hardware/esp32_controller.py` | Real hardware controller (via the SoftEdIBO gateway) |
 | `src/hardware/simulated_controller.py` | Mock controller for simulation mode |
 | `src/data/stream_recorder.py` | Per-session JSONL recorder of all gateway sensor messages |
 | `src/data/export.py` | Session CSV export with robot/participant attribution |

@@ -7,15 +7,12 @@ from PySide6.QtGui import QColor, QKeyEvent
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
-    QFormLayout,
     QHBoxLayout,
     QHeaderView,
     QInputDialog,
-    QLineEdit,
     QMenu,
     QMessageBox,
     QPushButton,
-    QSpinBox,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -24,8 +21,9 @@ from PySide6.QtWidgets import (
 
 from src.config.settings import Settings
 from src.gui.async_task import run_async
+from src.gui.thymio_config_form import ThymioConfigForm
 from src.gui.ui_robot_panel import Ui_RobotPanel
-from src.hardware.espnow_gateway import ESPNowGateway
+from src.hardware.gateway import Gateway
 from src.hardware.latency_monitor import LatencyMonitor
 from src.hardware.serial_ports import list_esp32_ports
 from src.robots.base_robot import BaseRobot
@@ -70,7 +68,7 @@ class RobotPanel(QWidget, Ui_RobotPanel):
     # How often each known node is pinged for a fresh latency reading.
     _LATENCY_POLL_MS = 3000
 
-    def __init__(self, gateway: ESPNowGateway, settings: Settings, db=None):
+    def __init__(self, gateway: Gateway, settings: Settings, db=None):
         super().__init__()
         self._gateway  = gateway
         self._settings = settings
@@ -686,48 +684,38 @@ class RobotPanel(QWidget, Ui_RobotPanel):
     # Thymio helpers
     # ------------------------------------------------------------------
 
-    def _thymio_config_dialog(
-        self, thymio_id: str = "", host: str = "localhost", port: int = 8596,
-    ) -> tuple[str, str, int] | None:
+    def _thymio_config_dialog(self, cfg: dict) -> dict | None:
+        """Edit ``cfg``'s Thymio keys in the shared form; the edited values, or
+        ``None`` on cancel/blank ID."""
         dlg  = QDialog(self)
         dlg.setWindowTitle("Thymio Configuration")
-        form = QFormLayout()
-        id_edit   = QLineEdit(thymio_id)
-        host_edit = QLineEdit(host)
-        port_spin = QSpinBox()
-        port_spin.setRange(1, 65535)
-        port_spin.setValue(port)
-        form.addRow("Thymio ID:", id_edit)
-        form.addRow("Host:",      host_edit)
-        form.addRow("Port:",      port_spin)
+        form = ThymioConfigForm(lambda: self._gateway, dlg)
+        form.set_values(cfg)
         btn_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
         btn_box.accepted.connect(dlg.accept)
         btn_box.rejected.connect(dlg.reject)
         layout = QVBoxLayout(dlg)
-        layout.addLayout(form)
+        layout.addWidget(form)
         layout.addWidget(btn_box)
-        if dlg.exec() != QDialog.DialogCode.Accepted:
+        if dlg.exec() != QDialog.DialogCode.Accepted or not form.thymio_id():
             return None
-        tid = id_edit.text().strip()
-        if not tid:
-            return None
-        return tid, host_edit.text().strip() or "localhost", port_spin.value()
+        return form.values()
 
     def _on_configure_thymio(self, robot_index: int) -> None:
         robots_list = self._settings.data.get("robots", {}).get("thymios", [])
         if not (0 <= robot_index < len(robots_list)):
             return
         cfg    = robots_list[robot_index]
-        result = self._thymio_config_dialog(
-            thymio_id=cfg.get("thymio_id", ""),
-            host=cfg.get("host", "localhost"),
-            port=int(cfg.get("port", 8596)),
-        )
+        result = self._thymio_config_dialog(cfg)
         if result is None:
             return
-        cfg["thymio_id"], cfg["host"], cfg["port"] = result
+        # Dead keys from configs saved before the dongle/gateway transports
+        # (TDM host/port, unused per-robot node_mac).
+        for stale in ("host", "port", "node_mac"):
+            cfg.pop(stale, None)
+        cfg.update(result)
         self._settings.save()
         self.robot_configured.emit()
 
@@ -735,12 +723,10 @@ class RobotPanel(QWidget, Ui_RobotPanel):
         if robot_type == "thymio":
             existing   = self._settings.data.get("robots", {}).get("thymios", [])
             default_id = f"thymio-{len(existing) + 1}"
-            result     = self._thymio_config_dialog(thymio_id=default_id)
+            result     = self._thymio_config_dialog({"thymio_id": default_id})
             if result is None:
                 return
-            tid, host, port = result
-            entry: dict = {"thymio_id": tid, "host": host, "port": port,
-                           "nodes": [], "skins": []}
+            entry: dict = {**result, "skins": []}
         else:
             existing = (
                 self._settings.data.get("robots", {}).get(_YAML_KEY[robot_type], [])

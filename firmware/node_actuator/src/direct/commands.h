@@ -42,8 +42,13 @@ inline void sendStatus(int ch, float kpa) {
 
 inline void sendPong() {
     if (!gatewayKnown) return;
-    static const char pong[] = "{\"type\":\"pong\",\"rgbw\":" LED_RGBW_JSON "}";
-    esp_now_send(gatewayMac, reinterpret_cast<const uint8_t*>(pong), sizeof(pong) - 1);
+    // "kpa_min" mirrors the ready message: the gauge floor, so the PC can learn
+    // it from a ping when it missed the boot broadcast.
+    char pong[96];
+    int len = snprintf(pong, sizeof(pong),
+                       "{\"type\":\"pong\",\"rgbw\":" LED_RGBW_JSON ",\"kpa_min\":%.0f}",
+                       (double)pressure::FLOOR_KPA);
+    esp_now_send(gatewayMac, reinterpret_cast<uint8_t*>(pong), len);
 }
 
 // Echo back that a command actually reached the node (used to tell a lost
@@ -53,6 +58,41 @@ inline void sendAck(const char* cmd) {
     char buf[48];
     int  len = snprintf(buf, sizeof(buf), "{\"type\":\"ack\",\"cmd\":\"%s\"}", cmd);
     esp_now_send(gatewayMac, reinterpret_cast<uint8_t*>(buf), len);
+}
+
+// ---------------------------------------------------------------------------
+// Runtime-adjustable telemetry cadence.
+// ---------------------------------------------------------------------------
+// The status broadcast normally goes out every DEFAULT_STATUS_MS. A `status_rate`
+// command can lower that interval for a bounded, keepalive-refreshed window so a
+// consumer (fill calibration, live pressure gauges, touch-coupling sweep) sees
+// dense pressure instead of the coarse 500 ms heartbeat. It reverts to the default
+// once the window (ttl) lapses, so fast telemetry can never be left on by a lost
+// "off" — the same dead-man idea as the bench-test keepalive.
+constexpr uint32_t DEFAULT_STATUS_MS = 500;
+constexpr uint32_t MIN_STATUS_MS     = 20;    // floor: don't flood the radio
+inline uint32_t statusIntervalMs  = DEFAULT_STATUS_MS;
+inline uint32_t fastStatusUntilMs = 0;        // millis() deadline; 0 = normal rate
+
+// Apply a `status_rate` request: ms<=0 or ttl<=0 turns fast telemetry off.
+inline void setStatusRate(uint32_t ms, uint32_t ttlMs) {
+    if (ms == 0 || ttlMs == 0) {
+        statusIntervalMs  = DEFAULT_STATUS_MS;
+        fastStatusUntilMs = 0;
+        return;
+    }
+    statusIntervalMs  = max(MIN_STATUS_MS, ms);
+    fastStatusUntilMs = millis() + ttlMs;
+}
+
+// Current broadcast interval, auto-reverting to the default once the fast window
+// expires. loop() gates the status heartbeat on this (call once per loop).
+inline uint32_t statusReportMs(uint32_t now) {
+    if (fastStatusUntilMs != 0 && (int32_t)(now - fastStatusUntilMs) >= 0) {
+        statusIntervalMs  = DEFAULT_STATUS_MS;
+        fastStatusUntilMs = 0;
+    }
+    return statusIntervalMs;
 }
 
 // Wireless diagnostic for Inflate/Deflate-All: the live engine phase + the set of
@@ -181,10 +221,10 @@ inline void applyChamberCmd(int n, const cmd_queue::Cmd& c) {
     auto& ch = chambers::state[n];
 
     // duty 0 (unset) -> full speed. (Direct runs its single pump on/off at full
-    // duty; the value is kept for telemetry.) ``fill_ms`` is no longer a separate
-    // time-fill path: the engine's coupled measure gives a trustworthy per-chamber
-    // pressure, so all targeting is pressure-based, with the engine's chamber_max_ms
-    // as the time backstop.
+    // duty; the value is kept for telemetry.) ``fill_ms`` is the optional
+    // per-chamber time budget: targeting is pressure-based via the engine, but a
+    // target the gauge can't see (deflate below the sensor floor) closes on this
+    // calibrated time instead; 0 keeps the engine's chamber_max_ms backstop.
     switch (c.type) {
     case CMD_INFLATE: {
         uint8_t duty = c.duty ? c.duty : chambers::DEFAULT_INFLATE_DUTY;
@@ -193,7 +233,7 @@ inline void applyChamberCmd(int n, const cmd_queue::Cmd& c) {
         // Only actuate if actually below target (else a repeated "+" at the cap
         // would creep past max one round at a time).
         if (chambers::cachedKpa[n] < target)
-            chambers::requestInflate(n, target, duty);
+            chambers::requestInflate(n, target, duty, c.fill_ms);
         break;
     }
     case CMD_DEFLATE: {
@@ -201,7 +241,7 @@ inline void applyChamberCmd(int n, const cmd_queue::Cmd& c) {
         float delta  = (ch.max_kpa - ch.min_kpa) * constrain(c.param, 0, 100) / 100.0f;
         float target = max(chambers::cachedKpa[n] - delta, ch.min_kpa);
         if (chambers::cachedKpa[n] > target)
-            chambers::requestDeflate(n, target, duty);
+            chambers::requestDeflate(n, target, duty, c.fill_ms);
         break;
     }
     case CMD_SET_PRESSURE: {
@@ -263,6 +303,12 @@ inline void process(const cmd_queue::Cmd& c) {
     // Stop a continuous bench-test run: honoured even while latched stopped.
     if (c.type == CMD_TEST_STOP) { chambers::testStop(); sendAck("test_stop"); sendPumps(); return; }
 
+    // Telemetry cadence: pure reporting, safe (and useful) even while stopped.
+    if (c.type == CMD_STATUS_RATE) {
+        setStatusRate((uint32_t)(c.param > 0 ? c.param : 0), c.fill_ms);
+        sendAck("status_rate"); return;
+    }
+
     // While latched stopped, drop every actuation command so nothing re-actuates.
     if (chambers::stopped) return;
 
@@ -272,7 +318,7 @@ inline void process(const cmd_queue::Cmd& c) {
     if (c.type == CMD_TEST_RUN) {
         chambers::inflateEng.abort();
         chambers::deflateEng.abort();
-        chambers::testRun(c.param, c.chamber); sendAck("test_run"); sendPumps(); return;
+        chambers::testRun(c.param, c.chamber, c.duty); sendAck("test_run"); sendPumps(); return;
     }
 
 #ifdef DEBUG_BUILD
@@ -327,8 +373,9 @@ inline void parseAndQueue(const uint8_t* data, int len) {
     else if (strcmp(cmd, "hold") == 0)              { c.type = CMD_HOLD;         c.chamber = doc["chamber"] | -1; }
     else if (strcmp(cmd, "stop") == 0)              { c.type = CMD_STOP;         c.chamber = -1; }
     else if (strcmp(cmd, "resume") == 0)            { c.type = CMD_RESUME;       c.chamber = -1; }
-    else if (strcmp(cmd, "test_run") == 0)          { c.type = CMD_TEST_RUN;     c.chamber = doc["chamber"] | -1; c.param = doc["dir"] | 0; }  // 0=inflate, 1=deflate; chamber -1 = all
+    else if (strcmp(cmd, "test_run") == 0)          { c.type = CMD_TEST_RUN;     c.chamber = doc["chamber"] | -1; c.param = doc["dir"] | 0; c.duty = doc["duty"] | 0; }  // 0=inflate, 1=deflate; chamber -1 = all; duty 0 = full
     else if (strcmp(cmd, "test_stop") == 0)         { c.type = CMD_TEST_STOP;    c.chamber = -1; }
+    else if (strcmp(cmd, "status_rate") == 0)       { c.type = CMD_STATUS_RATE;  c.chamber = -1; c.param = doc["ms"] | 0; c.fill_ms = doc["ttl"] | 0; }  // ms<=0/ttl<=0 = revert to default
     else if (strcmp(cmd, "valve_manual") == 0) {
         c.type = CMD_VALVE_MANUAL;
         c.chamber = doc["chamber"] | -1;

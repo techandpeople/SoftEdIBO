@@ -192,13 +192,22 @@ def max_organs_for(skin_type: str | None) -> int:
 # (config, GUI, recordings) and fed to the touch ML as a feature.
 #
 # ``organ`` carries a single pluggable organ (a Tree branch); ``three_organ``
-# carries three (Turtle square, Thymio). Both are organ-bearing variants
+# carries three (Turtle square). Each Thymio carries one organ of a fixed
+# SHAPE, so the shape is pinned by its own variant: ``organ_rectangle`` /
+# ``organ_triangle`` / ``organ_ellipse``. All are organ-bearing variants
 # (``ORGAN_VARIANTS``); the per-type cap lives in ``MAX_ORGANS_BY_TYPE``.
-# Keep the order stable — the touch ML one-hot encodes against it.
-SKIN_VARIANTS: tuple[str, ...] = ("natural", "wrinkles", "organ", "three_organ")
+# Keep the order stable and only APPEND new variants — the touch ML one-hot
+# encodes against it, so appending grows the vector while existing indices stay.
+SKIN_VARIANTS: tuple[str, ...] = (
+    "natural", "wrinkles", "organ", "three_organ",
+    "organ_rectangle", "organ_triangle", "organ_ellipse",
+)
 
 # Variants that carry pluggable organs (the organ editor is gated on these).
-ORGAN_VARIANTS: frozenset[str] = frozenset({"organ", "three_organ"})
+ORGAN_VARIANTS: frozenset[str] = frozenset({
+    "organ", "three_organ",
+    "organ_rectangle", "organ_triangle", "organ_ellipse",
+})
 
 # Human-readable labels for the GUI pickers; the stored data stays the slug.
 VARIANT_LABELS: dict[str, str] = {
@@ -206,6 +215,9 @@ VARIANT_LABELS: dict[str, str] = {
     "wrinkles": "Wrinkles",
     "organ": "Organ",
     "three_organ": "ThreeOrgan",
+    "organ_rectangle": "Organ (Rectangle)",
+    "organ_triangle": "Organ (Triangle)",
+    "organ_ellipse": "Organ (Ellipse)",
 }
 
 # Which silicone variants each skin TYPE is cast in, hardcoded per the physical
@@ -216,9 +228,10 @@ VARIANTS_BY_TYPE: dict[str, tuple[str, ...]] = {
     "turtle_side":     ("natural", "wrinkles"),
     "turtle_triangle": ("natural", "wrinkles"),
     "tree_round":      ("organ", "wrinkles", "natural"),
-    # Each Thymio carries ONE organ; a 3-Thymio activity spreads three different
-    # organ shapes (Rect, Triangle, Ellipse) across the three robots.
-    "thymio":          ("organ", "natural", "wrinkles"),
+    # Each Thymio carries ONE organ of a fixed shape; a 3-Thymio activity spreads
+    # the three shapes across the three robots (one per child).
+    "thymio": ("organ_rectangle", "organ_triangle", "organ_ellipse",
+               "natural", "wrinkles"),
 }
 
 

@@ -1,4 +1,4 @@
-"""Serial communication with the ESP-NOW gateway ESP32.
+"""Serial communication with the SoftEdIBO gateway ESP32.
 
 The gateway ESP32 is connected to the PC via USB/serial and relays
 commands to/from remote ESP32 nodes using the ESP-NOW protocol.
@@ -30,8 +30,8 @@ VERIFY_TIMEOUT_S = 2.0
 WRITE_TIMEOUT_S = 1.0
 
 
-class ESPNowGateway:
-    """Manages serial communication with the ESP-NOW gateway."""
+class Gateway:
+    """Manages serial communication with the SoftEdIBO gateway."""
 
     def __init__(self, port: str, baud_rate: int = 115200):
         self._port = port
@@ -109,7 +109,7 @@ class ESPNowGateway:
         self._running = True
         self._read_thread = threading.Thread(target=self._read_loop, daemon=True)
         self._read_thread.start()
-        logger.info("Connected to ESP-NOW gateway on %s", self._port)
+        logger.info("Connected to SoftEdIBO gateway on %s", self._port)
         return True
 
     def _is_gateway_line(self, raw: bytes) -> bool:
@@ -200,7 +200,7 @@ class ESPNowGateway:
             self._serial = None
         self._known_macs.clear()
         self._node_rgbw.clear()
-        logger.info("Disconnected from ESP-NOW gateway")
+        logger.info("Disconnected from SoftEdIBO gateway")
 
     def send(self, target_mac: str, command: str, repeat: int = 1,
              **kwargs: Any) -> bool:
@@ -339,12 +339,15 @@ class ESPNowGateway:
         except (json.JSONDecodeError, UnicodeDecodeError):
             logger.warning("Invalid JSON from gateway: %s", raw)
             return
-        if "source" in data:
-            self._known_macs.add(data["source"])
+        source = data.get("source")
+        # "thymio" is the 802.15.4/C6 route tag, not an ESP-NOW node — keep it out of the
+        # node list so it doesn't show up in Discover Nodes / the Add Node picker.
+        if source and source != "thymio":
+            self._known_macs.add(source)
             # Nodes self-report their LED-ring build in ready/pong so the OTA
             # picker can pick the matching bin without asking (see node_rgbw).
             if "rgbw" in data:
-                self._node_rgbw[data["source"]] = bool(data["rgbw"])
+                self._node_rgbw[source] = bool(data["rgbw"])
         # Surface gateway-reported errors (e.g. a command the gateway couldn't
         # parse because the serial link dropped/garbled bytes) so a swallowed
         # command is visible in the console instead of failing silently.
@@ -384,8 +387,15 @@ class ESPNowGateway:
                     raw, _, rest = buf.partition(b"\n")
                     buf = bytearray(rest)
                     if not synced:
-                        synced = True  # first fragment is a partial line; drop it
-                        continue
+                        synced = True
+                        # The first line after connecting can be a mid-message
+                        # fragment (we usually land mid-stream). A real gateway line
+                        # is JSON starting with '{'; only drop it when it isn't one.
+                        # Dropping unconditionally swallowed the first reply when the
+                        # gateway was briefly silent (fresh connect, no node traffic,
+                        # IDF logs off), which stalled WiFi-OTA staging.
+                        if not raw.lstrip().startswith(b"{"):
+                            continue
                     self._dispatch_line(raw)
             except serial.SerialException:
                 logger.exception("Serial read error — gateway disconnected")

@@ -1,6 +1,6 @@
 """Interactive node discovery and mapping tool.
 
-Connects to the ESP-NOW gateway, discovers all ESP32 nodes, and lets
+Connects to the SoftEdIBO gateway, discovers all ESP32 nodes, and lets
 the user identify each one by inflating its chambers one at a time.
 The user watches which skin inflates and types a name for it.
 The result is saved to config/settings.yaml.
@@ -16,7 +16,7 @@ sys.path.insert(0, str(project_root))
 
 import yaml
 
-from src.hardware.espnow_gateway import ESPNowGateway
+from src.hardware.gateway import Gateway
 
 CONFIG_PATH = project_root / "config" / "settings.yaml"
 
@@ -33,7 +33,7 @@ def save_config(config: dict) -> None:
         yaml.dump(config, f, default_flow_style=False, sort_keys=False)
 
 
-def discover_nodes(gateway: ESPNowGateway, timeout: float = 5.0) -> list[str]:
+def discover_nodes(gateway: Gateway, timeout: float = 5.0) -> list[str]:
     """Ask the gateway to scan for ESP-NOW nodes and return their MACs.
 
     The gateway firmware should respond to a 'scan' command with
@@ -55,23 +55,23 @@ def discover_nodes(gateway: ESPNowGateway, timeout: float = 5.0) -> list[str]:
     return discovered
 
 
-def inflate_node(gateway: ESPNowGateway, mac: str, chamber: int) -> None:
+def inflate_node(gateway: Gateway, mac: str, chamber: int) -> None:
     """Inflate a specific chamber on a node."""
     gateway.send(mac, "inflate", chamber=chamber, value=255)
 
 
-def deflate_node(gateway: ESPNowGateway, mac: str, chamber: int) -> None:
+def deflate_node(gateway: Gateway, mac: str, chamber: int) -> None:
     """Deflate a specific chamber on a node."""
     gateway.send(mac, "deflate", chamber=chamber)
 
 
-def deflate_all_on_node(gateway: ESPNowGateway, mac: str) -> None:
+def deflate_all_on_node(gateway: Gateway, mac: str) -> None:
     """Deflate all 3 chambers on a node."""
     for ch in range(3):
         gateway.send(mac, "deflate", chamber=ch)
 
 
-def identify_node(gateway: ESPNowGateway, mac: str) -> list[dict]:
+def identify_node(gateway: Gateway, mac: str) -> list[dict]:
     """Interactively identify the skins on a single ESP32 node.
 
     Inflates each chamber slot one by one. The user sees which
@@ -135,7 +135,7 @@ def main():
     print("=== SoftEdIBO Node Discovery ===\n")
     print(f"Connecting to gateway on {port}...")
 
-    gateway = ESPNowGateway(port, baud)
+    gateway = Gateway(port, baud)
     if not gateway.connect():
         print("ERROR: Could not connect to gateway. Check the serial port.")
         sys.exit(1)

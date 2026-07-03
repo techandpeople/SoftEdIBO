@@ -46,7 +46,7 @@ def test_extract_invalid_returns_empty():
 # ---------------------------------------------------------------------------
 
 class FakeGateway:
-    """ESPNowGateway stand-in: records sends, replays gateway/node messages."""
+    """Gateway stand-in: records sends, replays gateway/node messages."""
 
     def __init__(self, auto_ack=False):
         self.is_connected = True

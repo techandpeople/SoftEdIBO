@@ -74,13 +74,13 @@ class TouchTuningPanel(QGroupBox, Ui_TouchTuningPanel):
         self.rebaseline_btn.setEnabled(True)
 
     def _apply_node_config(self) -> None:
-        """Send configure to the firmware to ensure fullscale_mt is set high
-        (so 'mag' values are in a useful range for Serial debug) and
-        act_threshold matches a sensible default."""
+        """Send configure to the firmware to set the node's activation threshold
+        (the µT at/above which it reports a sensor in ``act``) to a sensible
+        default."""
         ctrl = getattr(self._skin, "touch_controller", None)
         if ctrl is None or not hasattr(ctrl, "send_command"):
             return
-        ctrl.send_command("configure", fullscale_mt=1000.0, act_threshold=0.3)
+        ctrl.send_command("configure", act_threshold_ut=300.0)
 
     def _apply_adaptive_baseline(self) -> None:
         """Toggle the node's adaptive baseline (and its time constant)."""

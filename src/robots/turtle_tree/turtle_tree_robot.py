@@ -13,7 +13,7 @@ belongs to, and who else it is currently shared with.
 
 from typing import Any
 
-from src.hardware.espnow_gateway import ESPNowGateway
+from src.hardware.gateway import Gateway
 from src.robots.esp_robot import EspRobot
 
 
@@ -28,7 +28,7 @@ class TurtleTreeRobot(EspRobot):
     def __init__(
         self,
         robot_id: str,
-        gateway: ESPNowGateway,
+        gateway: Gateway,
         node_configs: list[dict[str, Any]],
         skin_configs: list[dict[str, Any]],
     ):

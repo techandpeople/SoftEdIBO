@@ -1,6 +1,6 @@
-"""Raw serial debugging terminal for the ESP-NOW gateway.
+"""Raw serial debugging terminal for the SoftEdIBO gateway.
 
-Taps the gateway's raw serial stream (see ``ESPNowGateway.on_raw``) and shows
+Taps the gateway's raw serial stream (see ``Gateway.on_raw``) and shows
 every line to/from the gateway, with an input box for sending arbitrary lines.
 """
 
@@ -12,7 +12,7 @@ from PySide6.QtWidgets import QWidget
 
 from src.gui.base_dialog import BaseDialog
 from src.gui.ui_serial_monitor_dialog import Ui_SerialMonitorDialog
-from src.hardware.espnow_gateway import ESPNowGateway
+from src.hardware.gateway import Gateway
 
 _PREFIX = {"rx": "«", "tx": "»"}
 
@@ -28,7 +28,7 @@ class SerialMonitorDialog(BaseDialog, Ui_SerialMonitorDialog):
     # Marshals raw lines from the gateway read thread onto the GUI thread.
     _line_received = Signal(str, str)
 
-    def __init__(self, gateway: ESPNowGateway, parent: QWidget | None = None):
+    def __init__(self, gateway: Gateway, parent: QWidget | None = None):
         super().__init__(parent)
         self._gateway = gateway
         self.setupUi(self)

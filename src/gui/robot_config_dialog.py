@@ -10,17 +10,20 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
-    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
 from src.config.settings import Settings
 from src.gui.base_dialog import BaseDialog
+from src.gui.thymio_config_form import ThymioConfigForm
 from src.gui.ui_robot_config_dialog import Ui_RobotConfigDialog
 from src.robots.base_robot import BaseRobot
 from src.robots.thymio.thymio_robot import ThymioRobot
 from src.robots.turtle_tree.turtle_tree_robot import TurtleTreeRobot
+
+_TEST_ACTUATORS = "Test Actuators"
+_TEST_DRIVE = "Test Drive"
 
 
 class RobotConfigDialog(BaseDialog, Ui_RobotConfigDialog):
@@ -97,7 +100,7 @@ class RobotConfigDialog(BaseDialog, Ui_RobotConfigDialog):
         def _inflate() -> None:
             if idx[0] >= len(steps):
                 btn.setEnabled(True)
-                btn.setText("Test Actuators")
+                btn.setText(_TEST_ACTUATORS)
                 return
             skin, slot = steps[idx[0]]
             skin.inflate(slot)
@@ -110,6 +113,23 @@ class RobotConfigDialog(BaseDialog, Ui_RobotConfigDialog):
             QTimer.singleShot(1000, _inflate)
 
         _inflate()
+
+    def _run_drive_test(self, btn: QPushButton) -> None:
+        """Quick wheeled-base check: forward ~0.8 s with the top LED green,
+        then stop and LED off. Exercises the whole link (dongle or gateway C6)."""
+        robot = self._robot
+        btn.setEnabled(False)
+        btn.setText("Driving…")
+        robot.set_leds(0, 32, 0)
+        robot.set_motors(150, 150)
+
+        def _stop() -> None:
+            robot.set_motors(0, 0)
+            robot.set_leds(0, 0, 0)
+            btn.setEnabled(True)
+            btn.setText(_TEST_DRIVE)
+
+        QTimer.singleShot(800, _stop)
 
     # ------------------------------------------------------------------
     # Skin config (Turtle & Tree share the same flat skins[] structure)
@@ -132,7 +152,7 @@ class RobotConfigDialog(BaseDialog, Ui_RobotConfigDialog):
         id_row = QHBoxLayout()
         id_row.addWidget(QLabel(f"Robot ID: <b>{self._robot.robot_id}</b>"))
         id_row.addStretch()
-        test_btn = QPushButton("Test Actuators")
+        test_btn = QPushButton(_TEST_ACTUATORS)
         test_btn.clicked.connect(
             lambda _=False, b=test_btn: self._run_sequential_test(b)
         )
@@ -224,7 +244,7 @@ class RobotConfigDialog(BaseDialog, Ui_RobotConfigDialog):
     # ------------------------------------------------------------------
 
     def _build_test_section(self) -> None:
-        test_group = QGroupBox("Test Actuators")
+        test_group = QGroupBox(_TEST_ACTUATORS)
         test_layout = QVBoxLayout(test_group)
 
         skins = getattr(self._robot, "skins", {})
@@ -241,7 +261,7 @@ class RobotConfigDialog(BaseDialog, Ui_RobotConfigDialog):
                     QLabel(f"  {skin.skin_id}: {slot_str}")
                 )
 
-            run_btn = QPushButton("Test Actuators")
+            run_btn = QPushButton(_TEST_ACTUATORS)
             run_btn.clicked.connect(
                 lambda _=False, b=run_btn: self._run_sequential_test(b)
             )
@@ -273,59 +293,52 @@ class RobotConfigDialog(BaseDialog, Ui_RobotConfigDialog):
         self, parent_layout: QVBoxLayout, thymio_cfg: dict | None
     ) -> None:
         thymio_id = thymio_cfg["thymio_id"] if thymio_cfg else ""
-        host = thymio_cfg.get("host", "localhost") if thymio_cfg else "localhost"
-        port = int(thymio_cfg.get("port", 8596)) if thymio_cfg else 8596
-        mac = thymio_cfg.get("node_mac", "") if thymio_cfg else ""
-        wireless = bool(thymio_cfg.get("wireless", False)) if thymio_cfg else False
         skins_cfg = thymio_cfg.get("skins", []) if thymio_cfg else []
 
         box = QGroupBox(f"Thymio: {thymio_id}")
-        form = QFormLayout(box)
+        layout = QVBoxLayout(box)
 
-        id_edit = QLineEdit(thymio_id)
-        id_edit.textChanged.connect(
+        form = ThymioConfigForm(
+            lambda: getattr(self._robot, "gateway", None), box)
+        if thymio_cfg:
+            form.set_values(thymio_cfg)
+        form.id_edit.textChanged.connect(
             lambda t, g=box: g.setTitle(f"Thymio: {t}")
         )
-        host_edit = QLineEdit(host)
-        port_spin = QSpinBox()
-        port_spin.setRange(1, 65535)
-        port_spin.setValue(port)
-        mac_edit = QLineEdit(mac)
-        wireless_check = QCheckBox("Drive wheels wirelessly (RF dongle)")
-        wireless_check.setChecked(wireless)
-        wireless_check.setWhatsThis(
-            "Drive the Thymio's wheels and top LED from the app over a wireless RF "
-            "dongle. Requires Thymio Suite (its Thymio Device Manager) running with the "
-            "dongle plugged in and this robot paired to it. Host/Port below point to that "
-            "manager — leave Host as 'localhost' for a dongle in this PC. When off, the "
-            "Thymio's air-chamber skins still work; only the wheels/LEDs stay idle."
-        )
+        layout.addWidget(form)
 
-        form.addRow("Thymio ID:", id_edit)
-        form.addRow("Host:", host_edit)
-        form.addRow("Port:", port_spin)
-        form.addRow("Node MAC:", mac_edit)
-        form.addRow(wireless_check)
-
-        # Test button only for the robot currently open
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+        # Test buttons only for the robot currently open
         is_current = thymio_cfg and thymio_cfg.get("thymio_id") == self._robot.robot_id
         if is_current:
-            test_btn = QPushButton("Test Actuators")
+            drive_btn = QPushButton(_TEST_DRIVE)
+            drive_btn.setWhatsThis(
+                "Quick wheeled-base check: drives this Thymio forward for about a "
+                "second with the top LED green, then stops. Needs 'Drive wheels "
+                "wirelessly' on and the transport reachable (dongle plugged / "
+                "gateway connected)."
+            )
+            drive_btn.clicked.connect(
+                lambda _=False, b=drive_btn: self._run_drive_test(b)
+            )
+            buttons.addWidget(drive_btn)
+            test_btn = QPushButton(_TEST_ACTUATORS)
             test_btn.clicked.connect(
                 lambda _=False, b=test_btn: self._run_sequential_test(b)
             )
-            form.addRow("", test_btn)
+            buttons.addWidget(test_btn)
 
         del_btn = QPushButton("Delete")
-        form.addRow("", del_btn)
+        buttons.addWidget(del_btn)
+        layout.addLayout(buttons)
 
         entry: dict = {
-            "id_edit": id_edit,
-            "host_edit": host_edit,
-            "port_spin": port_spin,
-            "mac_edit": mac_edit,
-            "wireless_check": wireless_check,
+            "form": form,
             "group": box,
+            # The original settings entry: keys the form doesn't edit (the
+            # robot's "+ Node" nodes list, notably) must survive a save.
+            "cfg": dict(thymio_cfg or {}),
             "skins_cfg": skins_cfg,
             "deleted": False,
         }
@@ -343,19 +356,14 @@ class RobotConfigDialog(BaseDialog, Ui_RobotConfigDialog):
         for te in self._thymio_entries:
             if te["deleted"]:
                 continue
-            thymio_id = te["id_edit"].text().strip()
-            host = te["host_edit"].text().strip() or "localhost"
-            port = te["port_spin"].value()
-            mac = te["mac_edit"].text().strip()
-            if thymio_id:
-                thymios.append({
-                    "thymio_id": thymio_id,
-                    "host": host,
-                    "port": port,
-                    "node_mac": mac,
-                    "wireless": te["wireless_check"].isChecked(),
-                    "skins": te["skins_cfg"],
-                })
+            values = te["form"].values()
+            if values["thymio_id"]:
+                cfg = {**te["cfg"], **values, "skins": te["skins_cfg"]}
+                # Dead keys from configs saved before the dongle/gateway
+                # transports (TDM host/port, unused per-robot node_mac).
+                for stale in ("host", "port", "node_mac"):
+                    cfg.pop(stale, None)
+                thymios.append(cfg)
         return thymios
 
     # ------------------------------------------------------------------

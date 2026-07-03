@@ -35,7 +35,8 @@ from src.gui.robot_panel import RobotPanel
 from src.gui.session_panel import SessionPanel
 from src.gui.settings_dialog import SettingsDialog
 from src.gui.ui_main_window import Ui_MainWindow
-from src.hardware.espnow_gateway import ESPNowGateway
+from src.hardware.gateway import Gateway
+from src.hardware.fill_calibration import resolve_fill_profiles
 from src.robots.base_robot import BaseRobot
 from src.robots.thymio.thymio_robot import ThymioRobot
 from src.robots.turtle_tree.turtle_tree_robot import TurtleTreeRobot
@@ -55,8 +56,8 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self._db = Database.from_settings(self._settings.db_cfg, Settings.ROOT)
         self._db.connect()
 
-        # Shared ESP-NOW gateway (not connected yet; user clicks Connect)
-        self._gateway = ESPNowGateway(
+        # Shared SoftEdIBO gateway (not connected yet; user clicks Connect)
+        self._gateway = Gateway(
             port=self._settings.gateway_port,
             baud_rate=self._settings.gateway_baud,
         )
@@ -189,24 +190,55 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                     robot_id=tt_cfg.get("id", "turtle_tree"),
                     gateway=self._gateway,
                     node_configs=tt_cfg.get("nodes", []),
-                    skin_configs=tt_cfg["skins"],
+                    # Fill in each chamber's effective fill curve (own override, else
+                    # its skin-type template) before the robot builds its skins.
+                    skin_configs=resolve_fill_profiles(self._settings.data, tt_cfg["skins"]),
                 ))
 
-        # Thymios
-        for thymio_cfg in robot_data.get("thymios", []):
-            # Opt-in wheeled-base link: only build a (connecting) ThymioLink when the
-            # config asks for it, so existing configs and the sim path are untouched.
+        # Thymios — one RF dongle relays to several at once (each a node id), so all
+        # the wireless ones share a single ThymioDongle owned by the window.
+        thymios = robot_data.get("thymios", [])
+        wireless = [t for t in thymios if t.get("wireless")]
+        # Two wireless transports: the RF dongle (thymiodirect, shared across robots by
+        # node id) or the gateway's C6 (802.15.4, dongle-free). `wireless_via: "gateway"`
+        # picks the C6; anything else (default) uses the dongle.
+        dongle_users = [t for t in wireless if t.get("wireless_via", "dongle") != "gateway"]
+        old_dongle, self._thymio_dongle = getattr(self, "_thymio_dongle", None), None
+        if old_dongle is not None:
+            old_dongle.close()                     # config reload: drop the previous one
+        if dongle_users:
+            from src.robots.thymio.thymio_dongle import ThymioDongle
+            # dongle_port omitted → auto-detect; first robot that names one wins.
+            port = next((t.get("dongle_port") for t in dongle_users if t.get("dongle_port")),
+                        None)
+            self._thymio_dongle = ThymioDongle(serial_port=port)
+
+        gateway_idx = 0        # slot each C6-driven Thymio takes on the one C6
+        for thymio_cfg in thymios:
+            # Opt-in wheeled-base link: only build a (connecting) link when the config asks
+            # for it, so existing configs and the sim path are untouched.
             link = None
             if thymio_cfg.get("wireless"):
-                from src.robots.thymio.thymio_link import ThymioLink
-                link = ThymioLink(host=thymio_cfg.get("host"), port=thymio_cfg.get("port"))
+                if thymio_cfg.get("wireless_via") == "gateway":
+                    from src.robots.thymio.thymio_gateway_link import ThymioGatewayLink
+                    link = ThymioGatewayLink(
+                        gateway=self._gateway,
+                        channel=int(thymio_cfg.get("channel", 25)),
+                        index=gateway_idx,
+                        address=thymio_cfg.get("thymio_addr") or None,
+                    )
+                    gateway_idx += 1
+                else:
+                    from src.robots.thymio.thymio_link import ThymioLink
+                    # node_id picks this robot out of the shared dongle; blank/0 → first.
+                    node_id = thymio_cfg.get("node_id") or None
+                    link = ThymioLink(dongle=self._thymio_dongle, node_id=node_id)
             robots.append(ThymioRobot(
                 robot_id=thymio_cfg["thymio_id"],
-                tdm_host=thymio_cfg.get("host", "localhost"),
-                tdm_port=int(thymio_cfg.get("port", 8596)),
                 gateway=self._gateway,
                 node_configs=thymio_cfg.get("nodes", []),
-                skin_configs=thymio_cfg.get("skins", []),
+                skin_configs=resolve_fill_profiles(
+                    self._settings.data, thymio_cfg.get("skins", [])),
                 link=link,
             ))
 
@@ -589,6 +621,8 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         """Disconnect hardware and close the database on exit."""
         if self._gateway.is_connected:
             self._gateway.disconnect()
+        if getattr(self, "_thymio_dongle", None) is not None:
+            self._thymio_dongle.close()   # stops thymiodirect's non-daemon threads
         self._db.close()
         super().closeEvent(event)
 

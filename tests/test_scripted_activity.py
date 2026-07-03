@@ -127,6 +127,28 @@ def test_validate_rejects_transition_to_unknown_state():
         validate_spec(spec)
 
 
+def test_validate_rejects_bad_target_kind():
+    spec = {"initial": "s", "states": {"s": {"do": []}}, "target": {"kind": "nope"}}
+    with pytest.raises(SpecError):
+        validate_spec(spec)
+
+
+def test_target_derives_robot_type_and_variant():
+    from src.robots.turtle_tree.turtle_tree_robot import TurtleTreeRobot
+    spec = {"initial": "s", "states": {"s": {"do": []}},
+            "target": {"kind": "tree", "skin_variant": "organ"}}
+    act = ScriptedActivity("Tree · Organ", "d", spec)
+    assert act.target == {"kind": "tree", "skin_variant": "organ"}
+    assert act.robot_type is TurtleTreeRobot          # tree → TurtleTreeRobot
+
+
+def test_legacy_spec_without_target_runs_on_any_robot():
+    from src.robots.base_robot import BaseRobot
+    act = ScriptedActivity("Legacy", "d", {"initial": "s", "states": {"s": {}}})
+    assert act.target is None
+    assert act.robot_type is BaseRobot
+
+
 # ---------------------------------------------------------------------------
 # State machine — on enter, time + touch transitions
 # ---------------------------------------------------------------------------
@@ -550,3 +572,104 @@ def test_declarative_activity_round_trip(db):
 
     db.delete_declarative_activity("DA001")
     assert db.get_declarative_activities() == []
+
+
+# ---------------------------------------------------------------------------
+# Thymio verbs (thymio_drive / thymio_leds) — wheeled base, kind-gated
+# ---------------------------------------------------------------------------
+
+class _FakeThymioBase(_FakeRobot):
+    """Fake robot with a wheeled base (duck-typed like ThymioRobot)."""
+
+    def __init__(self, skins=()):
+        super().__init__(list(skins))
+        self.motors: list[tuple] = []
+        self.leds: list[tuple] = []
+
+    def set_motors(self, left, right):
+        self.motors.append((left, right))
+        return True
+
+    def set_leds(self, r, g, b):
+        self.leds.append((r, g, b))
+        return True
+
+
+def _thymio_spec(do):
+    return {"initial": "s", "states": {"s": {"do": do}},
+            "target": {"kind": "thymio"}}
+
+
+def test_validate_thymio_verbs_need_thymio_target():
+    drive = [{"thymio_drive": {"left": 100, "right": 100}}]
+    base = {"initial": "s", "states": {"s": {"do": drive}}}
+    with pytest.raises(SpecError):
+        validate_spec(base)                                   # target-less
+    with pytest.raises(SpecError):
+        validate_spec({**base, "target": {"kind": "turtle"}})  # wrong kind
+    validate_spec({**base, "target": {"kind": "thymio"}})      # must not raise
+
+
+def test_validate_thymio_verb_nested_in_control_is_gated_too():
+    nested = [{"repeat": {"times": 2,
+                          "do": [{"thymio_leds": {"color": "#ff0000"}}]}}]
+    with pytest.raises(SpecError):
+        validate_spec({"initial": "s", "states": {"s": {"do": nested}}})
+
+
+def test_bare_robot_gets_a_skinless_unit():
+    robot = _FakeThymioBase()          # no skins at all
+    act = ScriptedActivity("t", "d", _thymio_spec([]))
+    _start(act, robot)
+    assert list(act._units) == ["robot-1"]
+    assert _unit(act).chambers == []
+
+
+def test_thymio_drive_sets_motors_then_timed_stop(clock):
+    robot = _FakeThymioBase()
+    act = ScriptedActivity("t", "d", _thymio_spec(
+        [{"thymio_drive": {"left": 150, "right": -150, "ms": 500}}]))
+    _start(act, robot)
+    assert robot.motors == [(150, -150)]   # driving, stop still pending
+    clock.advance(0.6)
+    act._on_tick()
+    assert robot.motors[-1] == (0, 0)      # timed stop fired
+
+
+def test_thymio_drive_without_ms_keeps_driving(clock):
+    robot = _FakeThymioBase()
+    act = ScriptedActivity("t", "d", _thymio_spec(
+        [{"thymio_drive": {"left": 200, "right": 200}}]))
+    _start(act, robot)
+    clock.advance(5)
+    act._on_tick()
+    assert robot.motors == [(200, 200)]    # no auto-stop
+
+
+def test_thymio_leds_scaled_to_aseba_0_32():
+    robot = _FakeThymioBase()
+    act = ScriptedActivity("t", "d", _thymio_spec(
+        [{"thymio_leds": {"color": "#ff0080"}}]))
+    _start(act, robot)
+    assert robot.leds == [(32, 0, 16)]     # 255→32, 0→0, 128→16
+
+
+def test_activity_stop_zeroes_the_wheels():
+    robot = _FakeThymioBase()
+    act = ScriptedActivity("t", "d", _thymio_spec(
+        [{"thymio_drive": {"left": 300, "right": 300}}]))
+    _start(act, robot)
+    act.stop()
+    assert robot.motors[-1] == (0, 0)
+
+
+def test_thymio_verbs_noop_on_robot_without_base(clock):
+    """A wrong pairing (thymio spec, skin-only robot) must not crash a tick."""
+    skin = _FakeSkin()
+    robot = _FakeRobot([skin])
+    act = ScriptedActivity("t", "d", _thymio_spec(
+        [{"thymio_drive": {"left": 100, "right": 100, "ms": 100}},
+         {"thymio_leds": {"color": "#00ff00"}}]))
+    _start(act, robot)
+    clock.advance(0.2)
+    act._on_tick()                          # no AttributeError

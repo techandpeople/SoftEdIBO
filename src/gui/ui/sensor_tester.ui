@@ -5,6 +5,12 @@
   <property name="geometry">
    <rect><x>0</x><y>0</y><width>620</width><height>240</height></rect>
   </property>
+  <property name="sizePolicy">
+   <sizepolicy hsizetype="Maximum" vsizetype="Preferred">
+    <horstretch>0</horstretch>
+    <verstretch>0</verstretch>
+   </sizepolicy>
+  </property>
   <property name="title"><string>Magnet sensor test</string></property>
   <property name="whatsThis"><string>Live readout of the node's magnet/touch sensors. Each bar shows how far that sensor's field has moved from its baseline, in µT — press the skin above a sensor and its bar rises. A sensor lights green once it passes the &quot;Active threshold&quot;. Re-zero resets the baseline (do it at rest, hands off). Push to node sends this threshold to the board so its own touch detection (used by activities and the monitor) fires at the same level.</string></property>
   <layout class="QVBoxLayout" name="main_layout">
@@ -45,12 +51,6 @@
        <property name="whatsThis"><string>Send the active threshold above to the board so its own touch detection fires at this µT level — fixing detection everywhere (this test, activities and the monitor), not only in this readout.</string></property>
        <property name="text"><string>Push to node</string></property>
       </widget>
-     </item>
-     <item>
-      <spacer name="controls_spacer">
-       <property name="orientation"><enum>Qt::Horizontal</enum></property>
-       <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
-      </spacer>
      </item>
     </layout>
    </item>

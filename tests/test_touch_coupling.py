@@ -31,18 +31,18 @@ def test_classify_transition_one_mid():
 def _sweep_samples():
     """Rest, then chamber 0 inflated (moves sensor 0), with a lagged transition.
 
-    During the settle window after inflation starts, the adj is already spiking
+    During the settle window after inflation starts, the mag is already spiking
     (pressure-sensor lag) — those samples must be excluded from the means.
     """
     samples = []
-    # rest 0..2000 ms: baseline adj = 1.0 everywhere
+    # rest 0..2000 ms: baseline mag = 1.0 everywhere
     for t in range(0, 2000, 100):
         samples.append((float(t), {0: 0.0, 1: 0.0}, [1.0, 1.0, 1.0, 1.0]))
     # chamber 0 active 2000..5000 ms: sensor 0 reads 5.0 (delta 4.0)
     for t in range(2000, 5000, 100):
         # within the 800 ms settle window the reading is wild (would skew means)
-        adj0 = 99.0 if t < 2800 else 5.0
-        samples.append((float(t), {0: 80.0, 1: 0.0}, [adj0, 1.0, 1.0, 1.0]))
+        mag0 = 99.0 if t < 2800 else 5.0
+        samples.append((float(t), {0: 80.0, 1: 0.0}, [mag0, 1.0, 1.0, 1.0]))
     return samples
 
 
@@ -81,9 +81,9 @@ def test_samples_from_recording(tmp_path):
     rec = tmp_path / "sweep.jsonl"
     lines = [
         {"t": "2024-01-01T00:00:00.000", "msg": {"type": "status", "chamber": 0, "pressure": 0.0}},
-        {"t": "2024-01-01T00:00:00.100", "msg": {"type": "magnet", "adj": [1.0, 1.0, 1.0, 1.0]}},
+        {"t": "2024-01-01T00:00:00.100", "msg": {"type": "magnet", "mag": [1.0, 1.0, 1.0, 1.0]}},
         {"t": "2024-01-01T00:00:01.000", "msg": {"type": "status", "chamber": 0, "pressure": 80.0}},
-        {"t": "2024-01-01T00:00:01.100", "msg": {"type": "magnet", "adj": [5.0, 1.0, 1.0, 1.0]}},
+        {"t": "2024-01-01T00:00:01.100", "msg": {"type": "magnet", "mag": [5.0, 1.0, 1.0, 1.0]}},
         {"t": "2024-01-01T00:00:01.200", "msg": {"type": "boot", "status": "ready"}},  # ignored
     ]
     rec.write_text("\n".join(json.dumps(line) for line in lines), encoding="utf-8")

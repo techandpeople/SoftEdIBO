@@ -9,7 +9,7 @@ from typing import Any
 
 from src.hardware.air_chamber import AirChamber, ChamberState
 from src.hardware.esp32_controller import ESP32Controller
-from src.hardware.espnow_gateway import ESPNowGateway
+from src.hardware.gateway import Gateway
 
 logger = logging.getLogger(__name__)
 
@@ -17,13 +17,13 @@ logger = logging.getLogger(__name__)
 class ThymioAirChamber:
     """Manages air chambers mounted on a Thymio robot."""
 
-    def __init__(self, thymio_id: str, esp32_mac: str, gateway: ESPNowGateway):
+    def __init__(self, thymio_id: str, esp32_mac: str, gateway: Gateway):
         """Initialize air chambers for a Thymio.
 
         Args:
             thymio_id: ID of the parent Thymio robot.
             esp32_mac: MAC address of the ESP32 controlling the chambers.
-            gateway: ESP-NOW gateway for communication.
+            gateway: SoftEdIBO gateway for communication.
         """
         self.thymio_id = thymio_id
         self._controller = ESP32Controller(esp32_mac, gateway)

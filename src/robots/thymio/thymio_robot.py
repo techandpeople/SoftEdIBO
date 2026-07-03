@@ -3,7 +3,7 @@
 import logging
 from typing import Any
 
-from src.hardware.espnow_gateway import ESPNowGateway
+from src.hardware.gateway import Gateway
 from src.robots.esp_robot import EspRobot
 from src.robots.base_robot import RobotStatus
 from src.robots.thymio.thymio_link import ThymioLink
@@ -15,18 +15,18 @@ class ThymioRobot(EspRobot):
     """Thymio wheeled robot with movement, sensor, and air chamber capabilities.
 
     The ESP-NOW node side (air chambers) is identical to other robots and lives in
-    EspRobot. Thymio adds the wheeled base: motors and LEDs driven through an
-    injected :class:`ThymioLink` (tdmclient over a TDM / RF dongle). When no link is
-    given the movement commands are no-ops and ``connect`` still succeeds, so the
-    sim / no-hardware path is unchanged.
+    EspRobot. Thymio adds the wheeled base: motors and LEDs driven through an injected
+    link — either a :class:`ThymioLink` (RF dongle via thymiodirect) or a
+    :class:`~src.robots.thymio.thymio_gateway_link.ThymioGatewayLink` (the gateway's C6
+    over 802.15.4, no dongle). Both share the same duck-typed interface. When no link is
+    given the movement commands are no-ops and ``connect`` still succeeds, so the sim /
+    no-hardware path is unchanged.
     """
 
     def __init__(
         self,
         robot_id: str,
-        tdm_host: str = "localhost",
-        tdm_port: int = 8596,
-        gateway: ESPNowGateway | None = None,
+        gateway: Gateway | None = None,
         node_configs: list[dict[str, Any]] | None = None,
         skin_configs: list[dict[str, Any]] | None = None,
         link: ThymioLink | None = None,
@@ -37,8 +37,6 @@ class ThymioRobot(EspRobot):
             node_configs=node_configs,
             skin_configs=skin_configs,
         )
-        self._tdm_host = tdm_host
-        self._tdm_port = tdm_port
         self._link = link
 
     # ------------------------------------------------------------------
