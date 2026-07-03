@@ -1,7 +1,10 @@
 """Tests for pressure-informed touch compensation (pure core)."""
 
 from src.core.touch_compensation import (
+    ChamberCoupling,
+    CouplingPoint,
     TouchCompensator,
+    TransitionGuard,
     compensator_from_config,
     coupling_to_config,
 )
@@ -95,3 +98,85 @@ def test_config_disabled_returns_none():
     assert compensator_from_config(
         {"coupling": cfg, "compensation": {"enabled": False}}) is None        # disabled
     assert compensator_from_config(None) is None
+
+
+# --- upgrade: margin, guard, curves, vector mode ---------------------------
+
+
+def test_margin_raises_threshold_with_applied_offset():
+    comp = _comp(margin_frac=0.5)
+    # Chamber 0 full: offset 200 on sensor 0 → effective threshold 100 + 100.
+    mag, act = comp.compensate([350, 5, 5, 5], {0: 100.0, 1: 0.0})
+    assert mag[0] == 150.0 and act == []          # over base, under margin
+    _, act = comp.compensate([450, 5, 5, 5], {0: 100.0, 1: 0.0})
+    assert 0 in act                                # clears the margin too
+    # An uncoupled sensor gets no margin — base threshold applies unchanged.
+    _, act = comp.compensate([5, 5, 5, 120], {0: 100.0, 1: 0.0})
+    assert 3 in act
+
+
+def test_transition_guard_hardens_then_relaxes():
+    comp = _comp(guard=TransitionGuard(settle_ms=800.0, level_eps=3.0))
+    comp.compensate([5, 5, 5, 5], {0: 0.0, 1: 0.0}, now_ms=0.0)   # anchor refs
+    # Level jump at t=1000 → chamber 0 unsettled until t=1800: sensor 0's
+    # threshold is boosted by the chamber's max coupling (200).
+    mag, act = comp.compensate([480, 5, 5, 5], {0: 100.0, 1: 0.0}, now_ms=1000.0)
+    assert mag[0] == 280.0 and act == []           # 280 < 100 + 200 boost
+    # Same reading after the window: plain threshold again → touch fires.
+    _, act = comp.compensate([480, 5, 5, 5], {0: 100.0, 1: 0.0}, now_ms=2000.0)
+    assert 0 in act
+
+
+def test_curve_interpolates_between_measured_levels():
+    cup = ChamberCoupling([CouplingPoint(50.0, [100.0]),
+                           CouplingPoint(100.0, [120.0])], sensor_count=1)
+    comp = TouchCompensator({0: cup}, sensor_count=1, threshold_ut=50.0)
+    assert comp.expected_offset({0: 25.0})[0] == 50.0     # origin → first point
+    assert comp.expected_offset({0: 50.0})[0] == 100.0
+    assert comp.expected_offset({0: 75.0})[0] == 110.0    # between points
+    assert comp.expected_offset({0: 100.0})[0] == 120.0
+    # Beyond the top point: proportional extension (legacy behaviour).
+    assert abs(comp.expected_offset({0: 110.0})[0] - 132.0) < 1e-9
+
+
+def test_vector_mode_separates_touch_from_actuation():
+    # Actuation pushes sensor 0 by [200,0,0]; a touch adds an orthogonal 150.
+    cup = ChamberCoupling(
+        [CouplingPoint(100.0, [200.0], [[200.0, 0.0, 0.0]])], sensor_count=1)
+    comp = TouchCompensator({0: cup}, sensor_count=1, threshold_ut=100.0)
+    assert comp.has_vector
+    # Ghost (actuation only): vector residual is 0.
+    mag, act = comp.compensate([200.0], {0: 100.0}, vec=[[200.0, 0.0, 0.0]])
+    assert mag == [0.0] and act == []
+    # Real orthogonal touch: |raw| = 250 → the scalar path misses it
+    # (250 - 200 = 50 < 100)…
+    _, act = comp.compensate([250.0], {0: 100.0})
+    assert act == []
+    # …but the vector residual |[0,0,150]| = 150 catches it.
+    mag, act = comp.compensate([250.0], {0: 100.0}, vec=[[200.0, 0.0, 150.0]])
+    assert act == [0] and abs(mag[0] - 150.0) < 1e-9
+
+
+def test_config_round_trip_with_curves_margin_and_guard():
+    curves = {0: [{"pct": 50.0, "mag": [100.0], "vec": [[100.0, 0.0, 0.0]]},
+                  {"pct": 100.0, "mag": [120.0], "vec": [[120.0, 0.0, 0.0]]}]}
+    cfg = coupling_to_config({0: [120.0]}, sensor_count=1, ref_pct=100.0,
+                             curves=curves)
+    comp = compensator_from_config({
+        "coupling": cfg,
+        "compensation": {"enabled": True, "threshold_ut": 100.0,
+                         "margin_frac": 0.25, "guard_ms": 800.0},
+    })
+    assert comp is not None
+    assert comp.margin_frac == 0.25 and comp.guard is not None
+    assert comp.has_vector
+    # Curves win over the legacy linear scaling (which would give 90 at 75 %).
+    assert comp.expected_offset({0: 75.0})[0] == 110.0
+
+
+def test_config_without_new_keys_keeps_old_behaviour():
+    cfg = coupling_to_config({0: [200.0]}, sensor_count=1)
+    comp = compensator_from_config(
+        {"coupling": cfg, "compensation": {"enabled": True}})
+    assert comp.margin_frac == 0.0 and comp.guard is None
+    assert not comp.has_vector

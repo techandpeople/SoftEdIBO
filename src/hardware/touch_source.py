@@ -15,6 +15,7 @@ controller via ``skin.touch_controller``.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Callable, Mapping
 
 from src.core.touch_compensation import TouchCompensator
@@ -66,7 +67,8 @@ class CompensatedMagnetSource:
 
     def _handle(self, data: dict[str, Any]) -> None:
         try:
-            out = self._comp.apply(data, self._levels())
+            out = self._comp.apply(data, self._levels(),
+                                   now_ms=time.monotonic() * 1000.0)
         except Exception:   # noqa: BLE001 — never let one bad reading kill the stream
             logger.exception("touch compensation failed; passing raw")
             out = data
