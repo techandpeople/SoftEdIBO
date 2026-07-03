@@ -8,9 +8,7 @@ online/offline status instead of filtering by robot class:
 * On open it triggers a gateway node scan and repaints each robot's status as
   the answers arrive: **Online** (all of the robot's nodes answered),
   **Partial** (some did), **Ready** (a node-less wireless Thymio whose
-  transport is up) or **Offline**.
-* Robots that come up Online/Ready are pre-ticked once; later repaints never
-  touch the user's ticks.
+  transport is up) or **Offline**. Ticking is entirely up to the user.
 * When a ticked robot's configured skin variants don't match the selected
   activity's target skin, a warning shows under the list — the session can
   still start (useful when the physical skins were swapped without updating
@@ -73,9 +71,6 @@ class SessionSetupDialog(BaseDialog, Ui_SessionSetupDialog):
         self._robots = robots
         self._db = db
         self._gateway = gateway
-        # Robots already auto-ticked once when first seen Online/Ready, so a
-        # later repaint (or the user unticking) is never overridden.
-        self._auto_ticked: set[str] = set()
         # Liveness reference: nodes heard from after this instant count as
         # alive. Refreshed by _start_status_scan just before the scan goes out.
         self._scan_ref = time.monotonic()
@@ -270,12 +265,6 @@ class SessionSetupDialog(BaseDialog, Ui_SessionSetupDialog):
             item.setText(f"{dot} {robot.robot_id}  [{kind.capitalize()}]"
                          f"  —  {detail}")
             item.setForeground(_STATUS_COLORS.get(status, QColor("#cc2222")))
-            # Pre-tick a robot the first time it shows up usable, then leave
-            # the tick to the user.
-            if (status in ("online", "ready")
-                    and robot.robot_id not in self._auto_ticked):
-                self._auto_ticked.add(robot.robot_id)
-                item.setCheckState(Qt.CheckState.Checked)
 
     def _robot_status(self, robot: BaseRobot) -> tuple[str, str]:
         """``(status, human detail)`` for a robot row.

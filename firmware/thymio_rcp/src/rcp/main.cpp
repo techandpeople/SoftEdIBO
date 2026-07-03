@@ -117,7 +117,10 @@ struct SniffFrame {
     uint8_t lqi;
     uint8_t channel;
 };
-static QueueHandle_t s_sniffQ   = nullptr;
+// One RX queue shared by the sniffer AND the link-mode sensor reader (they never
+// run at once — the poller pauses while sniffing). The ISR fills it; whichever pump
+// is active drains it.
+static QueueHandle_t s_rxQ      = nullptr;
 static volatile bool s_sniffing = false;
 static uint8_t       s_sniffCh    = 11;   // current channel
 static uint8_t       s_sniffFixed = 0;    // 0 = hop 11..26, else locked channel
@@ -137,14 +140,14 @@ static volatile bool s_txDone = true;
 // Driver ISR callback: copy the frame out and hand it to loop() via the queue.
 void IRAM_ATTR esp_ieee802154_receive_done(uint8_t* frame,
                                            esp_ieee802154_frame_info_t* info) {
-    if (!s_sniffQ) return;
+    if (!s_rxQ) return;
     SniffFrame f;
     uint8_t len = frame[0];
     if (len > sizeof(f.data)) len = sizeof(f.data);
     f.len = len; f.rssi = info->rssi; f.lqi = info->lqi; f.channel = info->channel;
     memcpy(f.data, &frame[1], len);
     BaseType_t hp = pdFALSE;
-    xQueueSendFromISR(s_sniffQ, &f, &hp);
+    xQueueSendFromISR(s_rxQ, &f, &hp);
     if (hp) portYIELD_FROM_ISR();
 }
 
@@ -159,7 +162,7 @@ static void sniffTune(uint8_t channel) {
 }
 
 static void sniffStart(uint8_t fixed_ch, Print& io) {
-    if (!s_sniffQ) s_sniffQ = xQueueCreate(24, sizeof(SniffFrame));
+    if (!s_rxQ) s_rxQ = xQueueCreate(24, sizeof(SniffFrame));
     s_sniffFixed = fixed_ch;
     s_sniffCh    = fixed_ch ? fixed_ch : 11;
     radioUp();
@@ -183,10 +186,10 @@ static void sniffStop(Print& io) {
 
 // Drain queued frames to Serial1 as JSON, and hop channels when not locked.
 static void sniffPump() {
-    if (!s_sniffing || !s_sniffQ) return;
+    if (!s_sniffing || !s_rxQ) return;
     SniffFrame f;
     bool got = false;
-    while (xQueueReceive(s_sniffQ, &f, 0) == pdTRUE) {
+    while (xQueueReceive(s_rxQ, &f, 0) == pdTRUE) {
         got = true;
         uint8_t n = f.len < SNIFF_MAX_BYTES ? f.len : SNIFF_MAX_BYTES;
         static const char H[] = "0123456789ABCDEF";
@@ -269,6 +272,17 @@ static const uint16_t TH_SET_VARIABLES = 0xA00C;
 static const uint16_t TH_GET_VARIABLES = 0xA00B;
 static const uint16_t TH_SET_BYTECODE  = 0xA001;   // load a program (payload [dest][addr][words])
 static const uint16_t TH_RUN           = 0xA003;   // run it (payload [dest]); NOT 0xA002 = RESET
+static const uint16_t TH_VARIABLES     = 0x9005;   // node→host reply to GET_VARIABLES
+static const uint16_t TH_HOST_ADDR     = 0x3237;   // our spoofed host short address
+// Poll one contiguous window that fits a single 802.15.4 frame (38 words = 76 B):
+//   prox.ground.delta @0x54,0x55  → value[0..1]   (table reflection; ~0 when lifted)
+//   acc               @0x62..0x64 → value[14..16] (impact = deviation from rest 0,0,20)
+//   mic.intensity     @0x79       → value[37]      (ambient loudness)
+static const uint16_t TH_SENSE_START   = 0x0054;   // start at prox.ground.delta (@84)
+static const uint8_t  TH_SENSE_COUNT   = 38;        // through mic.intensity (@121), one frame
+static const uint8_t  TH_OFF_GROUND    = 0;         // value index of prox.ground.delta[0]
+static const uint8_t  TH_OFF_ACC       = 14;        // value index of acc x
+static const uint8_t  TH_OFF_MIC       = 37;        // value index of mic.intensity
 static const uint32_t TH_POLL_MS = 100;           // ~10 Hz per Thymio — holds the RX window
                                                   // open (dongle-like; cooler + LED blinks)
 #define TH_MAX 4                                   // up to 4 Thymios on this one C6
@@ -290,6 +304,10 @@ static bool       s_thLink = false;
 static uint8_t    s_thCh   = 25;
 static uint8_t    s_thSeq  = 0;
 static uint32_t   s_thLastPoll = 0;
+static bool       s_thRxDebug = false;   // stream raw RX frames (link bring-up only)
+static bool       s_thDiscover = false;  // active discovery: broadcast LIST_NODES, report replies
+static uint8_t    s_thDiscCh   = 25;
+static uint32_t   s_thDiscLast = 0;
 
 // Build + transmit one Aseba-over-802.15.4 frame for Thymio `addr` (radio up + on ch).
 // `payload` is the Aseba message body AFTER the msgType and the dest-node word (which
@@ -330,6 +348,30 @@ static void thTx(uint16_t addr, uint16_t msgType, uint16_t startAddr,
 // RUN: body is just the dest node (already emitted by thSend), no startAddr.
 static void thRun(uint16_t addr) { thSend(addr, TH_RUN, nullptr, 0); }
 
+// Broadcast an Aseba LIST_NODES so every Thymio on the network answers with a
+// NODE_PRESENT (0x900C) — how the dongle enumerates robots. This is what makes
+// dongle-free discovery work: a powered-but-idle Thymio never announces itself,
+// but it DOES reply to LIST_NODES. Frame bytes captured verbatim from a real RF
+// dongle (docs/THYMIO_WIRELESS_CONTROL.md): a broadcast frame differs from our
+// unicast in FCF (0x8841, no ACK-request), dst (0xFFFF), and the RF-module
+// wrapper (0x82 tag with only the host node, no destination). The payload
+// a0 01 00 05 00 = LIST_NODES(0xA011) with protocol version 5.
+static void thDiscoverBroadcast() {
+    static uint8_t f[24];                          // static: outlives the async transmit
+    uint8_t* p = &f[1];                            // f[0] = PHR, filled last
+    *p++ = 0x41; *p++ = 0x88; *p++ = s_thSeq++;    // FCF (broadcast, no ACK) + seq
+    *p++ = TH_PAN[0]; *p++ = TH_PAN[1];            // PAN 0x4481
+    *p++ = 0xFF; *p++ = 0xFF;                      // dst = broadcast
+    *p++ = 0x37; *p++ = 0x32;                      // src = host 0x3237
+    *p++ = 0x82; *p++ = 0x00; *p++ = 0x32; *p++ = 0x37; *p++ = 0x11;   // broadcast wrapper
+    *p++ = 0xA0; *p++ = 0x01; *p++ = 0x00; *p++ = 0x05; *p++ = 0x00;   // LIST_NODES(proto 5)
+    f[0] = (uint8_t)((p - &f[1]) + 2);             // PHR = PSDU + FCS
+    s_txDone = false;
+    esp_ieee802154_transmit(f, false);
+    uint32_t t0 = millis();                        // pace: wait TX done before re-arming RX
+    while (!s_txDone && millis() - t0 < 15) delayMicroseconds(100);
+}
+
 // Sound: load a tiny Aseba program that calls a sound native function, then run it.
 // Bytecode templates captured from thymiodirect on a real Thymio-II (word[4] and
 // word[7] are the parameterised values). Loading + running our program leaves the
@@ -348,6 +390,23 @@ static void thPlayFreq(uint16_t addr, int16_t freqHz, int16_t dur60) {   // dur 
     thTx(addr, TH_SET_BYTECODE, 0, bc, sizeof(bc) / sizeof(bc[0]));
     thRun(addr);
 }
+// Play a recorded track from the Thymio's microSD (sound.play(trackId) → /SD Pn.wav;
+// needs a card inserted). One arg, so the bytecode mirrors thPlaySystem with the track.
+// TODO(confirm via recon): sound.play's native-function INDEX on this firmware is unknown.
+// Run scratchpad thymio_natives.py on the USB Thymio, read the index of "sound.play", and
+// set TH_NF_SOUND_PLAY (callnat opcode = 0xC000 | index). Until then we refuse the command
+// rather than callnat a wrong index (which can crash the Thymio VM). Ref: sound.system=0x26,
+// sound.freq=0x2b on this firmware.
+static const int16_t TH_NF_SOUND_PLAY = -1;   // -1 = not configured yet
+static bool thPlayTrack(uint16_t addr, int16_t track) {
+    if (TH_NF_SOUND_PLAY < 0) return false;
+    int16_t bc[] = {0x0003, (int16_t)0xffff, 0x0003, 0x2000, track, 0x4002,
+                    0x2000, 0x0002,
+                    (int16_t)(0xC000 | (TH_NF_SOUND_PLAY & 0x01FF)), 0x0000};  // callnat sound.play
+    thTx(addr, TH_SET_BYTECODE, 0, bc, sizeof(bc) / sizeof(bc[0]));
+    thRun(addr);
+    return true;
+}
 
 static void thymioLinkPump() {
     // The sniffer owns the radio while scanning (promiscuous / other channels):
@@ -359,13 +418,112 @@ static void thymioLinkPump() {
     for (int i = 0; i < TH_MAX; i++) {             // poll + assert every active Thymio
         ThymioSlot& t = s_th[i];
         if (!t.active) continue;
-        int16_t cnt = 0x0080;
-        thTx(t.addr, TH_GET_VARIABLES, 0x0000, &cnt, 1);    // keep this robot's link hot
+        // Poll a small window (acc x/y/z through mic.intensity) instead of the whole
+        // variable space: it still holds the RX window open (keep-alive) AND its
+        // VARIABLES reply fits one 802.15.4 frame, so thymioRxPump can parse it.
+        int16_t cnt = TH_SENSE_COUNT;
+        thTx(t.addr, TH_GET_VARIABLES, TH_SENSE_START, &cnt, 1);  // keep hot + read sensors
         thTx(t.addr, TH_SET_VARIABLES, 0x0056, &t.left, 1);  // motor.left.target
         thTx(t.addr, TH_SET_VARIABLES, 0x0057, &t.right, 1); // motor.right.target
         if (t.ledsResend) { t.ledsResend--; thTx(t.addr, TH_SET_VARIABLES, 0x0065, t.leds, 3); }
     }
-    esp_ieee802154_receive();                      // stay armed for the ACKs
+    esp_ieee802154_receive();                      // stay armed for the ACKs + reply
+}
+
+// Which slot a reply's Thymio short address (its MAC src) belongs to, else 0.
+static int thSlotForAddr(uint16_t addr) {
+    for (int i = 0; i < TH_MAX; i++)
+        if (s_th[i].active && s_th[i].addr == addr) return i;
+    return 0;
+}
+
+// Emit a received frame's hex (capped) for link bring-up: confirms the reply even
+// arrives and lets us eyeball the Aseba offset. Off unless thymio_rx_debug asked.
+static void thEmitRaw(const SniffFrame& f) {
+    static const char H[] = "0123456789ABCDEF";
+    uint8_t n = f.len < SNIFF_MAX_BYTES ? f.len : SNIFF_MAX_BYTES;
+    char hex[SNIFF_MAX_BYTES * 2 + 1];
+    for (uint8_t i = 0; i < n; i++) { hex[i * 2] = H[f.data[i] >> 4]; hex[i * 2 + 1] = H[f.data[i] & 0x0F]; }
+    hex[n * 2] = '\0';
+    char line[288];
+    snprintf(line, sizeof(line),
+             "{\"type\":\"thymio_rx\",\"rssi\":%d,\"len\":%u,\"data\":\"%s\"}",
+             f.rssi, f.len, hex);
+    Serial1.println(line);
+    Serial.println(line);
+}
+
+// Drain received frames in link mode and turn each VARIABLES reply into a
+// {"type":"thymio_sensors",...}. The Thymio answers our GET_VARIABLES poll with a
+// VARIABLES (0x9005) frame addressed to the host (0x3237); its Aseba body is
+// [start_addr][values…]. We poll from 0x62 (acc x/y/z) through 0x79 (mic.intensity),
+// so values[0..2] = acc and values[23] = mic. The RF-module wrapper offset isn't
+// fixed, so we locate the Aseba message by scanning for its msgType word (05 90 LE)
+// rather than a hardcoded offset. Promiscuous RX (set on link-on) lets us hear the
+// reply even though the C6 never claimed the host address. See memory
+// thymio-sensors-and-sound. NOTE: unverified on hardware — thymio_rx_debug streams
+// the raw frames so we can confirm the reply arrives and the parse is right.
+static void thymioRxPump() {
+    if (!s_thLink || s_sniffing || !s_rxQ) return;
+    SniffFrame f;
+    while (xQueueReceive(s_rxQ, &f, 0) == pdTRUE) {
+        if (s_thRxDebug) thEmitRaw(f);
+        if (f.len < 9) continue;                          // no addressing (e.g. an ACK)
+        uint16_t pan = f.data[3] | (f.data[4] << 8);
+        uint16_t dst = f.data[5] | (f.data[6] << 8);
+        uint16_t src = f.data[7] | (f.data[8] << 8);
+        if (pan != 0x4481 || dst != TH_HOST_ADDR) continue;   // only replies addressed to us
+        int p = -1;                                       // find the VARIABLES msgType (05 90)
+        for (int i = 9; i + 3 < f.len; i++)
+            if (f.data[i] == (TH_VARIABLES & 0xFF) && f.data[i + 1] == (TH_VARIABLES >> 8)) { p = i; break; }
+        if (p < 0) continue;
+        uint16_t start = f.data[p + 2] | (f.data[p + 3] << 8);
+        if (start != TH_SENSE_START) continue;            // not our sensor poll reply
+        int base = p + 4;                                 // first value word
+        if (base + 2 * TH_SENSE_COUNT > f.len) continue;  // reply truncated
+        auto rd = [&](int w) -> int16_t {
+            return (int16_t)(f.data[base + 2 * w] | (f.data[base + 2 * w + 1] << 8));
+        };
+        char line[160];
+        snprintf(line, sizeof(line),
+                 "{\"type\":\"thymio_sensors\",\"idx\":%d,\"acc\":[%d,%d,%d],"
+                 "\"mic\":%d,\"ground\":[%d,%d]}",
+                 thSlotForAddr(src),
+                 rd(TH_OFF_ACC), rd(TH_OFF_ACC + 1), rd(TH_OFF_ACC + 2),
+                 rd(TH_OFF_MIC), rd(TH_OFF_GROUND), rd(TH_OFF_GROUND + 1));
+        Serial1.println(line);
+        Serial.println(line);
+    }
+}
+
+// Active discovery: broadcast LIST_NODES ~2 Hz and turn every reply into a
+// {"type":"thymio_found","addr":"XXXX"}. A reply is any frame on our PAN whose
+// MAC source is a real robot (not the host, not broadcast) — its src IS the
+// address the app needs. The PC de-dups and orders by first-seen. Runs on the
+// same shared radio as the link/sniffer, so callers pause those first.
+static void thymioDiscoverPump() {
+    if (!s_thDiscover || s_sniffing) return;
+    uint32_t now = millis();
+    if (now - s_thDiscLast >= 500) {               // re-broadcast the query ~2 Hz
+        s_thDiscLast = now;
+        thDiscoverBroadcast();
+        esp_ieee802154_receive();                  // stay armed for the NODE_PRESENT replies
+    }
+    if (!s_rxQ) return;
+    SniffFrame f;
+    while (xQueueReceive(s_rxQ, &f, 0) == pdTRUE) {
+        if (s_thRxDebug) thEmitRaw(f);
+        if (f.len < 9) continue;                   // no addressing (e.g. a bare ACK)
+        uint16_t pan = f.data[3] | (f.data[4] << 8);
+        uint16_t src = f.data[7] | (f.data[8] << 8);
+        if (pan != 0x4481) continue;               // only the Thymio network
+        if (src == TH_HOST_ADDR || src == 0xFFFF) continue;   // our own tx / broadcast
+        char line[80];
+        snprintf(line, sizeof(line),
+                 "{\"type\":\"thymio_found\",\"src\":\"c6\",\"addr\":\"%04x\"}", src);
+        Serial1.println(line);
+        Serial.println(line);
+    }
 }
 
 // Stop the wheels before the sniffer takes the radio: the pump pauses while
@@ -420,6 +578,12 @@ static void handleLine(char* line, Print& io) {
             s_thCh = (uint8_t)(doc["ch"] | s_thCh);
             if (doc["on"] | true) {
                 radioUp();
+                if (!s_rxQ) s_rxQ = xQueueCreate(24, sizeof(SniffFrame));
+                // Promiscuous + rx_when_idle so we hear the Thymio's VARIABLES reply
+                // (addressed to the host 0x3237, which the C6 never claimed) between
+                // our TX bursts — thymioRxPump parses it into thymio_sensors.
+                esp_ieee802154_set_promiscuous(true);
+                esp_ieee802154_set_rx_when_idle(true);
                 esp_ieee802154_set_channel(s_thCh);
                 esp_ieee802154_receive();
                 s_thSeq = (uint8_t)millis();       // fresh seq so repeats aren't dup-dropped
@@ -439,6 +603,35 @@ static void handleLine(char* line, Print& io) {
             }
             io.printf("{\"type\":\"thymio_link\",\"src\":\"c6\",\"on\":%d,\"ch\":%u}\n",
                       s_thLink ? 1 : 0, s_thCh);
+        } else if (strcmp(cmd, "thymio_discover") == 0) {
+            // {"cmd":"thymio_discover","on":true[,"ch":25]} — dongle-free discovery:
+            // broadcast LIST_NODES and report every Thymio that replies (thymio_found).
+            // Shares the radio with the link/sniffer, so pause the poller first.
+            s_thDiscCh = (uint8_t)(doc["ch"] | s_thDiscCh);
+            if (doc["on"] | true) {
+                thymioStopForSniff();          // zero wheels if the link was driving
+                s_thLink = false;
+                radioUp();
+                if (!s_rxQ) s_rxQ = xQueueCreate(24, sizeof(SniffFrame));
+                esp_ieee802154_set_promiscuous(true);   // hear replies addressed to the host
+                esp_ieee802154_set_rx_when_idle(true);
+                esp_ieee802154_set_channel(s_thDiscCh);
+                esp_ieee802154_receive();
+                s_thSeq = (uint8_t)millis();
+                s_thDiscLast = 0;
+                s_thDiscover = true;
+            } else {
+                s_thDiscover = false;
+            }
+            io.printf("{\"type\":\"thymio_discover\",\"src\":\"c6\",\"on\":%d,\"ch\":%u}\n",
+                      s_thDiscover ? 1 : 0, s_thDiscCh);
+        } else if (strcmp(cmd, "thymio_rx_debug") == 0) {
+            // {"cmd":"thymio_rx_debug","on":true} — stream raw RX frames while the
+            // link is on, to confirm the Thymio's sensor reply arrives / check the
+            // parse. Noisy; leave off in normal use.
+            s_thRxDebug = (bool)(doc["on"] | true);
+            io.printf("{\"type\":\"thymio_rx_debug\",\"src\":\"c6\",\"on\":%d}\n",
+                      s_thRxDebug ? 1 : 0);
         } else if (strcmp(cmd, "thymio_set") == 0) {
             // {"cmd":"thymio_set","idx":0,"addr":"6a25"} — register a Thymio in a slot
             int idx = doc["idx"] | 0;
@@ -474,6 +667,10 @@ static void handleLine(char* line, Print& io) {
             uint16_t addr = s_th[idx].active ? s_th[idx].addr : 0x6A25;
             if (!s_thLink || s_sniffing) {
                 io.println("{\"type\":\"thymio_sound\",\"src\":\"c6\",\"err\":\"link_off\"}");
+            } else if (doc["track"].is<int>()) {
+                if (!thPlayTrack(addr, (int16_t)(int)(doc["track"] | 0)))
+                    io.println("{\"type\":\"thymio_sound\",\"src\":\"c6\","
+                               "\"err\":\"sound_play_index_unset\"}");
             } else if (doc["freq"].is<int>()) {
                 thPlayFreq(addr, (int16_t)(int)(doc["freq"] | 440),
                            (int16_t)(int)(doc["dur"] | 30));
@@ -530,4 +727,6 @@ void loop() {
     pump(Serial1, uart_buf, uart_len, sizeof(uart_buf));
     sniffPump();       // stream any 802.15.4 frames while sniffing (no-op otherwise)
     thymioLinkPump();  // keep the Thymio link hot + assert motor/LED targets (no-op if off)
+    thymioRxPump();    // parse the Thymio's VARIABLES reply → thymio_sensors (no-op if off)
+    thymioDiscoverPump();  // broadcast LIST_NODES + report replies while discovering (no-op if off)
 }

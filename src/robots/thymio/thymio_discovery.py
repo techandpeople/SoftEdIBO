@@ -1,16 +1,19 @@
 """Discover the 802.15.4 short addresses of the Thymios on the air.
 
-The gateway's C6 can sniff (promiscuous 802.15.4); :func:`discover_thymios` turns that into
-a one-call "which Thymios are out there" so robots can be swapped between studies without
-hand-editing addresses. It sniffs a channel for a few seconds and returns the distinct
-Thymio short addresses seen on the Thymio network (PAN 0x4481), as hex strings (e.g.
-``["6a25", ...]``) — exactly the ``address`` a
-:class:`~src.robots.thymio.thymio_gateway_link.ThymioGatewayLink` wants.
+:func:`discover_thymios` is a one-call "which Thymios are out there" so robots can be swapped
+between studies without hand-editing addresses. It returns the distinct Thymio short addresses
+on the Thymio network (PAN 0x4481), as hex strings (e.g. ``["6a25", ...]``) — exactly the
+``address`` a :class:`~src.robots.thymio.thymio_gateway_link.ThymioGatewayLink` wants.
 
-The Thymios must be **transmitting** while we sniff — drive them with the RF dongle, or just
-power them on (a Wireless Thymio emits frames looking for its coordinator). Each frame on
-PAN 0x4481 carries the Thymio address as whichever of its 802.15.4 dst/src is not the host
-(0x3237) or broadcast.
+Discovery is **active**, exactly how the RF dongle enumerates: the gateway's C6 broadcasts an
+Aseba ``LIST_NODES`` and every powered Thymio replies with a ``NODE_PRESENT`` frame carrying
+its address (the C6 ``thymio_discover`` command; it emits a ``thymio_found`` line per reply).
+This matters because a **Wireless Thymio does NOT announce itself at boot** — a passive sniff
+sees an idle robot only if something else makes it transmit. The broadcast makes even an idle,
+powered robot answer, so no dongle and no driving are needed.
+
+Only robots already on this network (PAN 0x4481, same channel as our C6/dongle) reply; a fresh
+robot must be paired onto the network once (via the dongle or a USB cable) before it shows up.
 """
 from __future__ import annotations
 
@@ -62,6 +65,27 @@ def _frame_addr(direction: str, text: str) -> int | None:
     return parse_thymio_addr(msg.get("data", ""))
 
 
+def _found_addr(direction: str, text: str) -> int | None:
+    """The Thymio address in a C6 ``thymio_found`` line, or None (other lines).
+
+    The C6's active discovery reports each replying robot as
+    ``{"type":"thymio_found","addr":"6a25"}``; ``addr`` is the robot's short address.
+    """
+    if direction != "rx":
+        return None
+    try:
+        msg = json.loads(text)
+    except (ValueError, TypeError):
+        return None
+    if msg.get("type") != "thymio_found":
+        return None
+    try:
+        addr = int(str(msg.get("addr", "")), 16)
+    except ValueError:
+        return None
+    return addr if addr not in (_HOST_ADDR, _BROADCAST) else None
+
+
 def _notify_found(on_found: Any, addr: int) -> None:
     if on_found is None:
         return
@@ -82,13 +106,17 @@ def _wait(secs: float, stop: Any) -> None:
 
 def discover_thymios(gateway: Any, channel: int = 25, secs: float = 6.0,
                      on_found: Any = None, stop: Any = None) -> list[str]:
-    """Sniff `channel` via the gateway's C6 and return the Thymio addresses seen.
+    """Actively discover the Thymios on `channel` via the gateway's C6.
 
-    Returns hex strings like ``["6a25", ...]`` in FIRST-SEEN order — so powering
-    robots on one at a time while scanning tells you which address is which. The
-    Thymios must be transmitting: a Wireless Thymio announces itself when powered
-    on, so switching it on (or off/on) during the scan is enough — no dongle.
-    Leaves the C6 back in plain-RCP mode.
+    Broadcasts ``LIST_NODES`` through the C6 (``thymio_discover``) so every powered
+    robot on the network replies with its address, and returns them as hex strings
+    like ``["6a25", ...]`` in FIRST-SEEN order — so powering robots on one at a time
+    while scanning tells you which address is which. No dongle, and the robots need
+    not be driven: even an idle, powered Thymio answers the broadcast. Leaves the C6
+    back in plain-RCP mode.
+
+    Also accepts the legacy passive ``frame`` lines, so an old C6 firmware still
+    yields any robots that happen to be transmitting.
 
     Args:
         on_found: Optional ``callback(addr_hex)`` fired the moment a NEW address
@@ -103,7 +131,9 @@ def discover_thymios(gateway: Any, channel: int = 25, secs: float = 6.0,
     found: dict[int, None] = {}
 
     def _on_raw(direction: str, text: str) -> None:
-        addr = _frame_addr(direction, text)
+        addr = _found_addr(direction, text)
+        if addr is None:
+            addr = _frame_addr(direction, text)     # legacy/passive fallback
         if addr is None or addr in found:
             return
         found[addr] = None
@@ -111,9 +141,9 @@ def discover_thymios(gateway: Any, channel: int = 25, secs: float = 6.0,
 
     gateway.on_raw(_on_raw)
     try:
-        gateway.send("thymio", "sniff_start", ch=channel)
+        gateway.send("thymio", "thymio_discover", on=True, ch=channel)
         _wait(secs, stop)
-        gateway.send("thymio", "sniff_stop")
+        gateway.send("thymio", "thymio_discover", on=False)
         time.sleep(0.2)                              # let the stop reply drain
     finally:
         gateway.remove_raw_callback(_on_raw)

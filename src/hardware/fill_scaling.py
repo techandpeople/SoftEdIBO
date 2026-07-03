@@ -151,11 +151,6 @@ class DutyModel:
     def is_empty(self) -> bool:
         return len(self._pts) < 2
 
-    def to_list(self) -> list[list[float]]:
-        """Serialise the measured factors back as ``[[duty, factor], ...]`` (for
-        debugging/inspection; the stored form is the raw ``(duty, ms)`` sweep)."""
-        return [[d, round(f, 4)] for d, f in self._pts]
-
     def duty_for_period(self, natural_ms: float, period_ms: float) -> int:
         """Duty (1-255) whose measured slowdown stretches ``natural_ms`` to
         ``period_ms``. Full duty when no stretch is needed or the model is empty."""

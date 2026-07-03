@@ -6,11 +6,11 @@
    <rect><x>0</x><y>0</y><width>420</width><height>360</height></rect>
   </property>
   <property name="windowTitle"><string>Discover Thymios</string></property>
-  <property name="whatsThis"><string>Finds the 802.15.4 addresses of the Thymio robots over the air — no dongle needed. The gateway's C6 listens on the Thymio channel; a Wireless Thymio announces itself when it powers on, so switch each robot on (or off and on again) while the scan runs.</string></property>
+  <property name="whatsThis"><string>Finds the 802.15.4 addresses of the Thymio robots over the air — no dongle needed. The gateway's C6 asks the network who is there (it broadcasts a LIST_NODES query, exactly like the dongle) and every powered robot answers with its address. Just have the robots switched on; they need not move. Only robots already paired to this network reply.</string></property>
   <layout class="QVBoxLayout" name="main_layout">
    <item>
     <widget class="QLabel" name="instructions_label">
-     <property name="text"><string>&lt;b&gt;Power each Thymio ON now&lt;/b&gt; (or switch it off and on again) — it announces itself at boot and appears below. No dongle needed.&lt;br&gt;&lt;br&gt;Turning robots on &lt;b&gt;one at a time&lt;/b&gt; tells you which address is which: they are listed in the order they appear.</string></property>
+     <property name="text"><string>&lt;b&gt;Switch each Thymio ON&lt;/b&gt; — the gateway asks the network who is there and every powered robot answers with its address. No dongle needed, and the robots need not move.&lt;br&gt;&lt;br&gt;Turning robots on &lt;b&gt;one at a time&lt;/b&gt; tells you which address is which: they are listed in the order they appear.</string></property>
      <property name="wordWrap"><bool>true</bool></property>
     </widget>
    </item>

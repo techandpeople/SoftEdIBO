@@ -23,7 +23,7 @@ from src.robots.esp_robot import EspRobot
 from src.robots.thymio.thymio_robot import ThymioRobot
 
 _TEST_ACTUATORS = "Test Actuators"
-_TEST_DRIVE = "Test Drive"
+_TEST_THYMIO = "Test Thymio…"
 
 
 class RobotConfigDialog(BaseDialog, Ui_RobotConfigDialog):
@@ -115,22 +115,23 @@ class RobotConfigDialog(BaseDialog, Ui_RobotConfigDialog):
 
         _inflate()
 
-    def _run_drive_test(self, btn: QPushButton) -> None:
-        """Quick wheeled-base check: forward ~0.8 s with the top LED green,
-        then stop and LED off. Exercises the whole link (dongle or gateway C6)."""
-        robot = self._robot
-        btn.setEnabled(False)
-        btn.setText("Driving…")
-        robot.set_leds(0, 32, 0)
-        robot.set_motors(150, 150)
+    def _open_test_thymio(self, form: ThymioConfigForm) -> None:
+        """Open the interactive Test Thymio panel for the live robot.
 
-        def _stop() -> None:
-            robot.set_motors(0, 0)
-            robot.set_leds(0, 0, 0)
-            btn.setEnabled(True)
-            btn.setText(_TEST_DRIVE)
+        Drives the robot's own link (dongle or gateway C6) so it exercises the real
+        transport, and shows the live acc/mic + impact readout (gateway C6 only).
+        A threshold calibrated by knocking is written back into ``form`` so saving
+        the config persists it."""
+        if not isinstance(self._robot, ThymioRobot):
+            return
+        from src.gui.test_thymio_dialog import TestThymioDialog
 
-        QTimer.singleShot(800, _stop)
+        dlg = TestThymioDialog(
+            self._robot,
+            on_save_threshold=form.set_impact_threshold,
+            parent=self,
+        )
+        dlg.exec()
 
     # ------------------------------------------------------------------
     # Skin config (Turtle & Tree share the same flat skins[] structure)
@@ -313,15 +314,16 @@ class RobotConfigDialog(BaseDialog, Ui_RobotConfigDialog):
         # Test buttons only for the robot currently open
         is_current = thymio_cfg and thymio_cfg.get("thymio_id") == self._robot.robot_id
         if is_current:
-            drive_btn = QPushButton(_TEST_DRIVE)
+            drive_btn = QPushButton(_TEST_THYMIO)
             drive_btn.setWhatsThis(
-                "Quick wheeled-base check: drives this Thymio forward for about a "
-                "second with the top LED green, then stops. Needs 'Drive wheels "
-                "wirelessly' on and the transport reachable (dongle plugged / "
-                "gateway connected)."
+                "Open the Test Thymio panel: jog the wheels, colour the top LED, "
+                "play sounds and watch the live accelerometer/mic + impact readout. "
+                "Needs 'Drive wheels wirelessly' on and the transport reachable "
+                "(dongle plugged / gateway connected); the sensor readout needs the "
+                "Gateway C6 transport."
             )
             drive_btn.clicked.connect(
-                lambda _=False, b=drive_btn: self._run_drive_test(b)
+                lambda _=False, f=form: self._open_test_thymio(f)
             )
             buttons.addWidget(drive_btn)
             test_btn = QPushButton(_TEST_ACTUATORS)

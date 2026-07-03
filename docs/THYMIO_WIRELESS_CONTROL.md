@@ -111,17 +111,27 @@ single-Thymio one). Firmware `thymio_link` holds a per-slot motor/LED state and 
 active slot; `thymio_set {idx,addr}` registers a robot, `thymio_drive`/`thymio_leds`/
 `thymio_sound` take an `idx`. In the app: Robot Config → each Thymio's `wireless_via: gateway`
 + **Address (C6)** → **Discover…**. That opens a **guided, dongle-free scan**
-(`ThymioDiscoverDialog` + `thymio_discovery.discover_thymios`): the C6 sniffs the channel for
-~20 s while you **power the Thymios on** (a Wireless Thymio announces itself at boot), and the
-addresses appear **live, in first-seen order** — so turning robots on one at a time maps
-address → robot. Pick one and it fills the field; no dongle, no hand-editing config. From the
-CLI: `thymio_link.py --index N --addr <hex>`. (Slot 0 with no address rides a built-in default,
-so the single-Thymio flow needs no address.)
+(`ThymioDiscoverDialog` + `thymio_discovery.discover_thymios`): the C6 **broadcasts a
+`LIST_NODES` query ~2 Hz** (the `thymio_discover` command) and every powered robot answers
+with its address, appearing **live, in first-seen order** — so turning robots on one at a time
+maps address → robot. Pick one and it fills the field; no dongle, no hand-editing config. From
+the CLI: `thymio_link.py --index N --addr <hex>`. (Slot 0 with no address rides a built-in
+default, so the single-Thymio flow needs no address.)
 
-> The scan is passive — it only sees a Thymio while it's *transmitting*. Powering one on
-> during the scan should announce it; if nothing shows, drive it briefly (dongle or an already
-> hot link) to make it talk. The sniffer pauses the link poller and zeroes motors first so the
-> two don't fight for the radio.
+> **Discovery is active, not passive** — a Wireless Thymio does **not** announce itself at boot
+> (hard-tested: reboot a robot with the sniffer armed and nothing appears). It *does* reply to a
+> `LIST_NODES` broadcast, exactly how the dongle enumerates, so `thymio_discover` broadcasts the
+> query and reports each `NODE_PRESENT` reply. Even an idle, powered robot answers — no need to
+> drive it. **Only robots already on this network (PAN 0x4481) reply**; a fresh robot must be
+> paired onto the network once (dongle, or `_rf.setup`/`_rf.nodeid` over a USB cable) first.
+> Reception needs a decent antenna: the boxed gateway's chip-antenna C6 is too weak to hear the
+> replies reliably — use the U.FL C6 (same weakness that made the link flaky).
+>
+> The exact broadcast frame (captured verbatim from a real dongle, ch 25):
+> `41 88 <seq> 81 44 ff ff 37 32  82 00 32 37 11  a0 01 00 05 00` — FCF `8841` (broadcast, no
+> ACK), dst `ffff`, broadcast wrapper `82 00 32 37 11` (tag `82`, host node only, vs unicast
+> `83 00 <dst> <src> 11`), then `LIST_NODES` (`0xA011`) with protocol version 5. The robot
+> replies with msgType `0x900C` (`NODE_PRESENT`); its MAC src is the address.
 
 ### Movement, LEDs — proven; Sound — done; Sensors — planned
 - **Proven:** full standalone control — SET_VARIABLES (motors, LEDs, any writable variable)

@@ -53,6 +53,7 @@
     <category name="Thymio" colour="160">
       <block type="se_thymio_drive"></block>
       <block type="se_thymio_leds"></block>
+      <block type="se_thymio_sound"></block>
     </category>
     <category name="Control" colour="120">
       <block type="se_wait"></block>
@@ -64,6 +65,8 @@
     <category name="Conditions" colour="20">
       <block type="se_elapsed"></block>
       <block type="se_touch_count"></block>
+      <block type="se_on_impact"></block>
+      <block type="se_on_lifted"></block>
       <block type="se_organs"></block>
       <block type="se_robot_is"></block>
       <block type="se_any"></block>
@@ -266,6 +269,18 @@
           tooltip: 'Colour the Thymio\'s top LED. The colour is a "#rrggbb" tag — '
                  + 'use the Colour helper panel to pick one and copy it.' },
 
+        { type: 'se_thymio_sound',
+          message0: 'Thymio sound — system %1 or tone %2 Hz for %3 ms or SD track %4',
+          args0: [{ type: 'field_number', name: 'SYS', value: 2, min: -1, max: 7 },
+                  { type: 'field_number', name: 'FREQ', value: 0, min: 0 },
+                  { type: 'field_number', name: 'DUR', value: 200, min: 0 },
+                  { type: 'field_number', name: 'TRACK', value: -1, min: -1 }],
+          previousStatement: 'Step', nextStatement: 'Step', colour: 160,
+          tooltip: 'Play a sound. "SD track" ≥ 0 plays a recording off the microSD '
+                 + '(needs a card) and wins. Else a "tone Hz" > 0 plays that tone for '
+                 + '"for N ms"; else the built-in system sound (0-7; -1 stops). The '
+                 + 'wheels keep driving through the sound.' },
+
         // --- control ---
         { type: 'se_wait',
           message0: 'wait %1 ms', args0: [{ type: 'field_number', name: 'MS', value: 500, min: 0 }],
@@ -302,6 +317,23 @@
         { type: 'se_touch_count',
           message0: 'touched at least %1 times', args0: [{ type: 'field_number', name: 'MIN', value: 15, min: 1 }],
           output: 'Cond', colour: 20 },
+
+        { type: 'se_on_impact',
+          message0: 'Thymio hit at least %1 times, at least %2',
+          args0: [{ type: 'field_number', name: 'MIN', value: 1, min: 1 },
+                  { type: 'field_dropdown', name: 'LEVEL',
+                    options: [['a touch', '1'], ['a knock', '2'], ['a slap', '3']] }],
+          output: 'Cond', colour: 20,
+          tooltip: 'True once the Thymio was hit at least N times in this phase, at '
+                 + 'the chosen intensity or harder (touch < knock < slap). Needs the '
+                 + 'gateway/C6 wireless link; robots without impact sensing never fire it.' },
+
+        { type: 'se_on_lifted',
+          message0: 'Thymio lifted at least %1 times', args0: [{ type: 'field_number', name: 'MIN', value: 1, min: 1 }],
+          output: 'Cond', colour: 20,
+          tooltip: 'True once the Thymio was lifted off the table at least N times in '
+                 + 'this phase (its ground sensors stop seeing the surface). Needs the '
+                 + 'gateway/C6 wireless link; robots without ground sensing never fire it.' },
 
         { type: 'se_organs',
           message0: 'organs %1 good %2 %3 bad %4 %5',
@@ -567,6 +599,9 @@
                                    ms: num(b, 'MS') } };
         case 'se_thymio_leds':
           return { thymio_leds: { color: b.getFieldValue('COLOR') } };
+        case 'se_thymio_sound':
+          return { thymio_sound: { sys: num(b, 'SYS'), freq: num(b, 'FREQ'),
+                                   dur: num(b, 'DUR'), track: num(b, 'TRACK') } };
         case 'se_wait':
           return { wait: { ms: num(b, 'MS') } };
         case 'se_wait_for_touch':
@@ -593,6 +628,9 @@
       switch (b.type) {
         case 'se_elapsed':     return { elapsed_ms: num(b, 'MS') };
         case 'se_touch_count': return { touch_count: { min: num(b, 'MIN') } };
+        case 'se_on_impact':   return { on_impact: { min: num(b, 'MIN'),
+                                                     level: num(b, 'LEVEL') } };
+        case 'se_on_lifted':   return { on_lifted: { min: num(b, 'MIN') } };
         case 'se_organs':      return { organs: { scope: b.getFieldValue('SCOPE'),
                                                   good_op: b.getFieldValue('GOOD_OP'), good: num(b, 'GOOD'),
                                                   bad_op: b.getFieldValue('BAD_OP'), bad: num(b, 'BAD') } };
@@ -760,6 +798,12 @@
           setF(b, 'MS', p.ms); break;
         case 'thymio_leds':
           b = newStepBlock('se_thymio_leds'); setF(b, 'COLOR', p.color); break;
+        case 'thymio_sound':
+          b = newStepBlock('se_thymio_sound');
+          setF(b, 'SYS', p.sys != null ? p.sys : 2);
+          setF(b, 'FREQ', p.freq != null ? p.freq : 0);
+          setF(b, 'DUR', p.dur != null ? p.dur : 200);
+          setF(b, 'TRACK', p.track != null ? p.track : -1); break;
         case 'wait':
           b = newStepBlock('se_wait');
           setF(b, 'MS', p.ms != null ? p.ms : p._value); break;
@@ -798,6 +842,17 @@
         case 'touch_count':
           b = newStepBlock('se_touch_count');
           setF(b, 'MIN', (v && v.min != null) ? v.min : v); break;
+        case 'on_impact': {
+          b = newStepBlock('se_on_impact');
+          var im = (v && v.min != null) ? v.min : v;
+          setF(b, 'MIN', im == null ? 1 : im);
+          setF(b, 'LEVEL', String((v && v.level != null) ? v.level : 1)); break;
+        }
+        case 'on_lifted': {
+          b = newStepBlock('se_on_lifted');
+          var lf = (v && v.min != null) ? v.min : v;
+          setF(b, 'MIN', lf == null ? 1 : lf); break;
+        }
         case 'organs':
           b = newStepBlock('se_organs'); v = v || {};
           setF(b, 'SCOPE', v.scope); setF(b, 'GOOD_OP', v.good_op);

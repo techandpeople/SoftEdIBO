@@ -614,6 +614,9 @@ class _FakeThymioBase(_FakeRobot):
         super().__init__(list(skins))
         self.motors: list[tuple] = []
         self.leds: list[tuple] = []
+        self.sounds: list[tuple] = []
+        self._impact_cbs: list = []
+        self._lifted_cbs: list = []
 
     def set_motors(self, left, right):
         self.motors.append((left, right))
@@ -622,6 +625,32 @@ class _FakeThymioBase(_FakeRobot):
     def set_leds(self, r, g, b):
         self.leds.append((r, g, b))
         return True
+
+    def play_sound(self, system=None, freq=None, duration_ms=500, track=None):
+        self.sounds.append((system, freq, duration_ms, track))
+        return True
+
+    def on_impact(self, callback):
+        self._impact_cbs.append(callback)
+
+    def remove_impact_listener(self, callback):
+        if callback in self._impact_cbs:
+            self._impact_cbs.remove(callback)
+
+    def fire_impact(self, level=2):
+        for cb in list(self._impact_cbs):
+            cb(level)
+
+    def on_lifted(self, callback):
+        self._lifted_cbs.append(callback)
+
+    def remove_lifted_listener(self, callback):
+        if callback in self._lifted_cbs:
+            self._lifted_cbs.remove(callback)
+
+    def fire_lifted(self, lifted=True):
+        for cb in list(self._lifted_cbs):
+            cb(lifted)
 
 
 def _thymio_spec(do):
@@ -684,6 +713,134 @@ def test_thymio_leds_scaled_to_aseba_0_32():
         [{"thymio_leds": {"color": "#ff0080"}}]))
     _start(act, robot)
     assert robot.leds == [(32, 0, 16)]     # 255→32, 0→0, 128→16
+
+
+def test_thymio_sound_system_tone_and_track():
+    robot = _FakeThymioBase()
+    act = ScriptedActivity("t", "d", _thymio_spec(
+        [{"thymio_sound": {"sys": 3, "freq": 0, "dur": 200, "track": -1}}]))
+    _start(act, robot)
+    assert robot.sounds == [(3, None, 500, None)]     # freq 0, track <0 → system
+
+    robot2 = _FakeThymioBase()
+    act2 = ScriptedActivity("t", "d", _thymio_spec(
+        [{"thymio_sound": {"sys": 2, "freq": 700, "dur": 250}}]))
+    _start(act2, robot2)
+    assert robot2.sounds == [(None, 700, 250, None)]  # freq set → tone path
+
+    robot3 = _FakeThymioBase()
+    act3 = ScriptedActivity("t", "d", _thymio_spec(
+        [{"thymio_sound": {"sys": 2, "freq": 700, "track": 5}}]))
+    _start(act3, robot3)
+    assert robot3.sounds == [(None, None, 500, 5)]    # track ≥0 wins over tone/system
+
+
+def test_thymio_sound_noop_on_non_thymio_robot():
+    ctrl = _FakeCtrl()
+    robot = _FakeRobot([_FakeSkin(controller=ctrl)])   # no play_sound
+    act = ScriptedActivity("t", "d",
+                           {"initial": "s",
+                            "states": {"s": {"do": [{"thymio_sound": {"sys": 1}}]}}})
+    _start(act, robot)          # must not raise — duck-typed no-op
+
+
+def _impact_spec(min_impacts):
+    return {"initial": "p1",
+            "states": {
+                "p1": {"transitions": [
+                    {"to": "p2", "when": {"on_impact": {"min": min_impacts}}}]},
+                "p2": {}},
+            "target": {"kind": "thymio"}}
+
+
+def test_on_impact_condition_advances_after_enough_knocks(clock):
+    robot = _FakeThymioBase()
+    act = ScriptedActivity("t", "d", _impact_spec(2))
+    _start(act, robot)
+    uid = _unit(act).unit_id
+
+    robot.fire_impact()
+    act._on_tick()
+    assert act.unit_state(uid) == "p1"      # one knock < 2 → still here
+
+    robot.fire_impact()
+    act._on_tick()
+    assert act.unit_state(uid) == "p2"      # second knock → advance
+
+
+def test_impact_count_resets_on_state_enter(clock):
+    robot = _FakeThymioBase()
+    act = ScriptedActivity("t", "d", _impact_spec(1))
+    _start(act, robot)
+    unit = _unit(act)
+    robot.fire_impact()
+    assert unit.impact_count == 1
+    act._enter_state(unit, "p1")            # re-enter resets the counter
+    assert unit.impact_count == 0
+
+
+def test_impact_listener_removed_on_stop():
+    robot = _FakeThymioBase()
+    act = ScriptedActivity("t", "d", _impact_spec(1))
+    _start(act, robot)
+    assert robot._impact_cbs               # subscribed
+    act.stop()
+    assert robot._impact_cbs == []         # unsubscribed on stop
+
+
+def test_on_impact_condition_filters_by_level(clock):
+    # Needs 1 hit at level ≥ 3 (slap). A touch/knock must not satisfy it.
+    spec = {"initial": "p1",
+            "states": {
+                "p1": {"transitions": [
+                    {"to": "p2", "when": {"on_impact": {"min": 1, "level": 3}}}]},
+                "p2": {}},
+            "target": {"kind": "thymio"}}
+    robot = _FakeThymioBase()
+    act = ScriptedActivity("t", "d", spec)
+    _start(act, robot)
+    uid = _unit(act).unit_id
+
+    robot.fire_impact(level=1)               # a touch
+    robot.fire_impact(level=2)               # a knock
+    act._on_tick()
+    assert act.unit_state(uid) == "p1"       # neither is a slap → stay
+    robot.fire_impact(level=3)               # a slap
+    act._on_tick()
+    assert act.unit_state(uid) == "p2"
+
+
+def _lifted_spec(min_lifts):
+    return {"initial": "p1",
+            "states": {
+                "p1": {"transitions": [
+                    {"to": "p2", "when": {"on_lifted": {"min": min_lifts}}}]},
+                "p2": {}},
+            "target": {"kind": "thymio"}}
+
+
+def test_on_lifted_condition_advances(clock):
+    robot = _FakeThymioBase()
+    act = ScriptedActivity("t", "d", _lifted_spec(2))
+    _start(act, robot)
+    uid = _unit(act).unit_id
+
+    robot.fire_lifted(True)
+    robot.fire_lifted(False)                 # set-down doesn't count
+    act._on_tick()
+    assert act.unit_state(uid) == "p1"       # one lift < 2
+    robot.fire_lifted(True)
+    act._on_tick()
+    assert act.unit_state(uid) == "p2"       # second lift → advance
+
+
+def test_lifted_listener_removed_on_stop():
+    robot = _FakeThymioBase()
+    act = ScriptedActivity("t", "d", _lifted_spec(1))
+    _start(act, robot)
+    assert robot._lifted_cbs
+    act.stop()
+    assert robot._lifted_cbs == []
 
 
 def test_activity_stop_zeroes_the_wheels():

@@ -218,12 +218,15 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             link = None
             if thymio_cfg.get("wireless"):
                 if thymio_cfg.get("wireless_via") == "gateway":
-                    from src.robots.thymio.thymio_gateway_link import ThymioGatewayLink
+                    from src.robots.thymio.thymio_gateway_link import (
+                        DEFAULT_IMPACT_THRESHOLD, ThymioGatewayLink)
                     link = ThymioGatewayLink(
                         gateway=self._gateway,
                         channel=int(thymio_cfg.get("channel", 25)),
                         index=gateway_idx,
                         address=thymio_cfg.get("thymio_addr") or None,
+                        impact_threshold=float(thymio_cfg.get("impact_threshold")
+                                               or DEFAULT_IMPACT_THRESHOLD),
                     )
                     gateway_idx += 1
                 else:

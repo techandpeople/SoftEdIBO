@@ -92,16 +92,57 @@ class ThymioRobot(EspRobot):
         return True
 
     def play_sound(self, system: int | None = None, freq: int | None = None,
-                   duration_ms: int = 500) -> bool:
-        """Beep a built-in ``system`` sound (0-7) or a ``freq`` Hz tone (no-op w/o a link)."""
+                   duration_ms: int = 500, track: int | None = None) -> bool:
+        """Play a ``system`` sound (0-7), a ``freq`` Hz tone, or a microSD ``track``
+        (no-op w/o a link)."""
         if self._link is not None:
             return self._link.play_sound(system=system, freq=freq,
-                                         duration_ms=duration_ms)
+                                         duration_ms=duration_ms, track=track)
         logger.debug("Thymio %s play_sound (no link)", self.robot_id)
         return True
 
     def stop(self) -> bool:
         return self.set_motors(0, 0)
+
+    # ------------------------------------------------------------------
+    # Sensors & impact (delegated to the link; inert without one)
+    # ------------------------------------------------------------------
+
+    def on_sensors(self, callback) -> None:
+        """Subscribe ``callback(acc, mic)`` to the wheeled base's sensor stream."""
+        if self._link is not None:
+            self._link.on_sensors(callback)
+
+    def remove_sensors_listener(self, callback) -> None:
+        if self._link is not None:
+            self._link.remove_sensors_listener(callback)
+
+    def on_impact(self, callback) -> None:
+        """Subscribe ``callback(level)`` to a detected knock (1 touch/2 knock/3 slap)."""
+        if self._link is not None:
+            self._link.on_impact(callback)
+
+    def remove_impact_listener(self, callback) -> None:
+        if self._link is not None:
+            self._link.remove_impact_listener(callback)
+
+    def on_lifted(self, callback) -> None:
+        """Subscribe ``callback(is_lifted)`` to the robot being lifted off / set down."""
+        if self._link is not None:
+            self._link.on_lifted(callback)
+
+    def remove_lifted_listener(self, callback) -> None:
+        if self._link is not None:
+            self._link.remove_lifted_listener(callback)
+
+    @property
+    def impact_threshold(self) -> float:
+        return self._link.impact_threshold if self._link is not None else 0.0
+
+    @impact_threshold.setter
+    def impact_threshold(self, value: float) -> None:
+        if self._link is not None:
+            self._link.impact_threshold = value
 
     def emergency_stop(self) -> None:
         # Stop the wheels too, then latch the air nodes off (EspRobot).
@@ -109,4 +150,14 @@ class ThymioRobot(EspRobot):
         super().emergency_stop()
 
     def get_status_data(self) -> dict[str, Any]:
-        return {**super().get_status_data(), "sensors": {}}
+        sensors: dict[str, Any] = {}
+        if self._link is not None:
+            acc, mic, ground = self._link.last_sensors
+            if acc is not None:
+                sensors = {"acc": list(acc), "mic": mic,
+                           "ground": list(ground) if ground is not None else None,
+                           "impact_count": self._link.impact_count,
+                           "last_impact_level": self._link.last_impact_level,
+                           "lifted": self._link.is_lifted,
+                           "lifted_count": self._link.lifted_count}
+        return {**super().get_status_data(), "sensors": sensors}

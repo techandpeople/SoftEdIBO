@@ -237,20 +237,26 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
         Chambers are ranked by how long their solo curve takes to fill (shorter =
         fills first). The rank answers "which fills first / last" so a bulk fill can
         close valves in that order without waiting for the sensor."""
-        timed = [(key, prof.full_time_ms) for key in self._rows
-                 if (prof := self._profile_for(key)) is not None]
+        profiles = {key: self._profile_for(key) for key in self._rows}
+        timed = [(key, prof.full_time_ms) for key, prof in profiles.items()
+                 if prof is not None]
         order = sorted(timed, key=lambda kv: kv[1])
         rank = {key: i + 1 for i, (key, _) in enumerate(order)}
         total = len(order)
         for key, row in self._rows.items():
-            self._set_row_result(key, row, self._profile_for(key), rank.get(key), total)
+            self._set_row_result(key, row, profiles[key], rank.get(key), total)
+
+    def _duty_curve_for(self, key: tuple[str, int], row: dict) -> Any:
+        """The best-known duty→speed sweep for a row: a fresh measurement if any,
+        else the chamber's stored curve."""
+        return self._duty_results.get(key) or row["cfg"].get("duty_curve")
 
     def _set_row_result(self, key: tuple[str, int], row: dict,
                         prof: FillProfile | None, rank: int | None, total: int) -> None:
         """Render one row's result label from its curve + fill-order rank."""
         label = row["result"]
         if prof is None:
-            duty = self._duty_results.get(key) or row["cfg"].get("duty_curve")
+            duty = self._duty_curve_for(key, row)
             label.setText("⚡ duty" if duty else "—")
             label.setToolTip(f"Duty curve: {len(duty)} points; fill curve not measured."
                              if duty else "Not calibrated yet.")
@@ -273,7 +279,7 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
         """Markers + tooltip suffix for the extra curves a chamber has: ⚡ = a
         measured duty→speed curve, ▼ = a measured deflate curve."""
         marks, txt = "", ""
-        duty = self._duty_results.get(key) or row["cfg"].get("duty_curve")
+        duty = self._duty_curve_for(key, row)
         if duty:
             marks += " ⚡"
             txt += f" Duty curve: {len(duty)} points."
@@ -337,10 +343,11 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
         self._job = {
             "mac": mac, "slot": slot, "kind": kind, "phase": "deflate",
             "phase_elapsed": 0,
-            "cal": ContinuousFillCalibrator(target_pct=DEFAULT_TARGET_PCT,
-                                            max_total_ms=DEFAULT_TIMEOUT_MS),
+            # Built by _begin_sweep / _begin_downsweep when the recording phase
+            # starts; the vent/prefill phases never record.
+            "cal": None,
             "ft": FastTelemetry(self._gateway, mac, rate_ms=self._rate_ms()),
-            "last_pct": {slot: 100.0}, "last_kpa": {slot: float("nan")},
+            "last_pct": 100.0, "last_kpa": float("nan"),
             "plateau": self._new_vent_plateau(),
             "t0": None, "keepalive_acc": 0,
             # Duty jobs sweep the chamber once per duty in _DUTY_SWEEP, collecting
@@ -409,10 +416,9 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
         the reading stops dropping (the shared :class:`PlateauDetector`), never a
         fixed threshold. Falls back to a %-of-range threshold when no kPa is
         reported."""
-        slot = job["slot"]
-        kpa = job["last_kpa"].get(slot, float("nan"))
+        kpa = job["last_kpa"]
         if math.isnan(kpa):
-            return job["last_pct"][slot] <= _EMPTY_PCT
+            return job["last_pct"] <= _EMPTY_PCT
         return job["plateau"].update(job["phase_elapsed"], kpa)
 
     def _on_tick(self) -> None:
@@ -493,8 +499,8 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
         job = self._job
         if job is None or mac != job["mac"] or chamber != job["slot"]:
             return
-        job["last_pct"][chamber] = pct
-        job["last_kpa"][chamber] = kpa
+        job["last_pct"] = pct
+        job["last_kpa"] = kpa
         self._feed_job_pressure(job, row, pct)
 
     def _feed_job_pressure(self, job: dict, row: dict | None, pct: float) -> None:
@@ -511,7 +517,7 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
             elapsed_ms = (time.monotonic() - job["t0"]) * 1000.0
             done = job["cal"].record(elapsed_ms, pct)
             if row is not None:
-                row["bar"].setValue(int(max(0.0, min(100.0, job["cal"].profile.top_pct))))
+                row["bar"].setValue(int(job["cal"].top_pct))
             if done:
                 self._on_sweep_done(job)
 
