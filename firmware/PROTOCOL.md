@@ -55,7 +55,7 @@ runtime `set_tank_pressure` command; re-send `configure` to change them.
 | `cmd` | Fields | Notes |
 |---|---|---|
 | `rebaseline` | — | Re-zero (recapture the baseline of) all magnetic sensors |
-| `configure` | `act_threshold_ut`, `adaptive_baseline`, `baseline_tau_ms` | Set the µT activation threshold; opt-in adaptive baseline (tracks slow drift, frozen per-sensor while active). All optional. Legacy `fullscale_mt`/`act_threshold` (fraction) still accepted |
+| `configure` | `act_threshold_ut`, `adaptive_baseline`, `baseline_tau_ms`, `stream_vec` | Set the µT activation threshold; opt-in adaptive baseline (tracks slow drift, frozen per-sensor while active); `stream_vec` toggles the 3-axis `vec` rows in the stream (RAM-only — re-send after a node reboot). All optional. Legacy `fullscale_mt`/`act_threshold` (fraction) still accepted |
 
 ### Multiplexed-node only
 
@@ -147,6 +147,11 @@ it into cover / resistance event streams for activities.
 |---|---|
 | `mag` | `[m1, …]` — N per-sensor magnitudes (µT), baseline-subtracted |
 | `act` | `[idx, …]` — indices of sensors whose `mag ≥ act_threshold_ut` |
+| `vec` | `[[dx,dy,dz], …]` — per-sensor 3-axis deltas (whole µT); only when 3-axis streaming is on (`MAG_VECTOR` build or `configure stream_vec`). The announce then carries `"vec":1` |
+
+The magnet module is shared: `firmware/common/se_magnet.h`, used by both the
+standalone `node_magnet_sensor` board and the direct actuator board (which
+folds it in, auto-detected).
 
 The PC decides what's touched based on the skin's configured layout
 (`skin.touch.sensor_grid` paired with `imu_geometry`). The firmware does **not**
