@@ -57,6 +57,9 @@ def wrap_robots_in_simulation(
             robot.robot_id, robot.name, skin_configs,
             sim_params=sim_params,
         )
+        # Mirror the real robot's kind so `if robot is …` blocks and the
+        # session's kind-aware logic behave the same in simulation.
+        sim.robot_kind = getattr(robot, "robot_kind", "")
         sims.append(sim)
         logger.debug("Simulating %s (sim_params=%s)", robot.robot_id, sim_params)
     return sims

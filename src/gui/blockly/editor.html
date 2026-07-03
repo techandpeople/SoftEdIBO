@@ -50,16 +50,22 @@
       <block type="se_set_pressure"></block>
       <block type="se_stop"></block>
     </category>
+    <category name="Thymio" colour="160">
+      <block type="se_thymio_drive"></block>
+      <block type="se_thymio_leds"></block>
+    </category>
     <category name="Control" colour="120">
       <block type="se_wait"></block>
       <block type="se_wait_for_touch"></block>
       <block type="se_repeat"></block>
       <block type="se_for_each"></block>
+      <block type="se_if_robot"></block>
     </category>
     <category name="Conditions" colour="20">
       <block type="se_elapsed"></block>
       <block type="se_touch_count"></block>
       <block type="se_organs"></block>
+      <block type="se_robot_is"></block>
       <block type="se_any"></block>
       <block type="se_all"></block>
       <block type="se_not"></block>
@@ -126,6 +132,8 @@
       // (0..3); the direct board has one and ignores higher indices.
       var RING = [['all rings', 'all'], ['ring 0', '0'], ['ring 1', '1'],
                   ['ring 2', '2'], ['ring 3', '3']];
+      // Robot kinds for the `if robot is` / `robot is` blocks (activity_kind.KINDS).
+      var ROBOTS = [['Thymio', 'thymio'], ['Turtle', 'turtle'], ['Tree', 'tree']];
       Blockly.defineBlocksWithJsonArray([
         { type: 'se_state',
           message0: 'phase %1', args0: [{ type: 'field_input', name: 'NAME', text: 'phase1' }],
@@ -238,7 +246,8 @@
           message0: 'hold all chambers',
           previousStatement: 'Step', nextStatement: 'Step', colour: 230 },
 
-        // --- Thymio wheeled base (only offered when the behaviour targets Thymio) ---
+        // --- Thymio wheeled base (no-ops on robots without wheels; wrap in
+        // "if robot is Thymio" so the Turtle/Tree skip it explicitly) ---
         { type: 'se_thymio_drive',
           message0: 'drive Thymio — left wheel %1 right wheel %2 for %3 ms',
           args0: [{ type: 'field_number', name: 'LEFT', value: 100, min: -500, max: 500 },
@@ -272,6 +281,18 @@
           message0: 'for each chamber',
           message1: 'do %1', args1: [{ type: 'input_statement', name: 'DO', check: 'Step' }],
           previousStatement: 'Step', nextStatement: 'Step', colour: 120 },
+
+        { type: 'se_if_robot',
+          message0: 'if robot is %1',
+          args0: [{ type: 'field_dropdown', name: 'ROBOT', options: ROBOTS }],
+          message1: 'do %1', args1: [{ type: 'input_statement', name: 'DO', check: 'Step' }],
+          message2: 'else %1', args2: [{ type: 'input_statement', name: 'ELSE', check: 'Step' }],
+          previousStatement: 'Step', nextStatement: 'Step', colour: 120,
+          tooltip: 'Run "do" only when the session robot is the chosen kind, '
+                 + 'else run "else". This is how one behaviour covers every '
+                 + 'robot — e.g. put the Thymio drive blocks under '
+                 + '"if robot is Thymio" and the Turtle/Tree skip them. '
+                 + 'Chain another "if robot is" inside "else" for 3 ways.' },
 
         // --- conditions ---
         { type: 'se_elapsed',
@@ -315,6 +336,13 @@
           message0: 'not %1', args0: [{ type: 'input_value', name: 'C', check: 'Cond' }],
           output: 'Cond', colour: 20 },
 
+        { type: 'se_robot_is',
+          message0: 'robot is %1',
+          args0: [{ type: 'field_dropdown', name: 'ROBOT', options: ROBOTS }],
+          output: 'Cond', colour: 20,
+          tooltip: 'True when the session robot is the chosen kind — lets a '
+                 + 'phase transition fire only on one robot.' },
+
         { type: 'se_always',
           message0: 'always', output: 'Cond', colour: 20 },
       ]);
@@ -324,67 +352,49 @@
       defineRepeatBlock();
     }
 
-    // ---- behaviour root: declares the target robot kind -----------------
-    // The "for" dropdown is the activity's target (spec.target.kind): it gates
-    // the toolbox (Thymio wheel blocks only exist for Thymio) and tells the
-    // session which robots the activity is for. 'any' = legacy target-less.
+    // ---- behaviour root: declares the target skin condition -------------
+    // The "for skin" dropdown is the activity's target (spec.target.skin).
+    // One behaviour covers every robot — robot-specific parts go inside
+    // "if robot is …" blocks — and the session pre-selects the activity that
+    // matches the skins the robots are dressed in. 'any' = target-less.
     function defineBehaviourBlock() {
       Blockly.Blocks['se_behaviour'] = {
         init: function () {
           this.appendDummyInput()
-            .appendField('behaviour for')
+            .appendField('behaviour for skin')
             .appendField(new Blockly.FieldDropdown([
-              ['any robot', 'any'],
-              ['Thymio', 'thymio'],
-              ['Turtle', 'turtle'],
-              ['Tree', 'tree'],
-            ], function (kind) { updateToolboxForKind(kind); return kind; }), 'TARGET');
+              ['any skin', 'any'],
+              ['Natural', 'natural'],
+              ['Wrinkles', 'wrinkles'],
+              ['Organs', 'organs'],
+            ]), 'SKIN');
           this.appendStatementInput('STATES')
             .setCheck('State')
             .appendField('— starts at the first phase');
           this.setColour(290);
           this.setTooltip(
-            'Root of a behaviour. Stack phases inside. "for" declares which '
-            + 'robot kind the activity targets: robot-specific blocks (e.g. '
-            + 'the Thymio wheels) only appear for that kind, and the session '
-            + 'only offers matching robots. "any robot" keeps the generic '
-            + 'skin-only blocks.');
+            'Root of a behaviour. Stack phases inside. "for skin" declares '
+            + 'which skin set the activity is written for (Natural / Wrinkles '
+            + '/ Organs); the session pre-selects the matching activity and '
+            + 'warns when a robot wears different skins. The behaviour runs '
+            + 'on ANY robot — wrap robot-specific parts (e.g. the Thymio '
+            + 'wheels) in "if robot is …" blocks.');
         },
       };
     }
 
-    // ---- toolbox: inject the Thymio category only for thymio targets ----
-    function toolboxForKind(kind) {
-      var xml = document.getElementById('toolbox').cloneNode(true);
-      if (kind === 'thymio') {
-        var cat = document.createElement('category');
-        cat.setAttribute('name', 'Thymio');
-        cat.setAttribute('colour', '160');
-        ['se_thymio_drive', 'se_thymio_leds'].forEach(function (t) {
-          var blk = document.createElement('block');
-          blk.setAttribute('type', t);
-          cat.appendChild(blk);
-        });
-        // After "Actions", so the wheel blocks sit next to the skin actions.
-        xml.insertBefore(cat, xml.children[2] || null);
-      }
-      return xml;
-    }
-
-    function updateToolboxForKind(kind) {
-      if (workspace) workspace.updateToolbox(toolboxForKind(kind));
-    }
-
-    // Read the target off the root block and sync the toolbox to it; when a
-    // loaded spec carries a target, push it into the block first.
+    // When a loaded spec carries a target, push its skin condition into the
+    // root block ('any' when absent or legacy robot-kind-targeted).
     function syncTargetUi(spec) {
       var roots = workspace.getBlocksByType('se_behaviour', false);
-      if (!roots.length) { updateToolboxForKind('any'); return; }
-      if (spec && spec.target && spec.target.kind) {
-        try { roots[0].setFieldValue(spec.target.kind, 'TARGET'); }
-        catch (e) { console.warn('target kind', spec.target.kind, e); }
+      if (!roots.length) return;
+      var skin = (spec && spec.target && spec.target.skin) || 'any';
+      if (spec && spec.target && spec.target.kind && !spec.target.skin) {
+        console.warn('legacy robot-kind target', spec.target.kind,
+                     '— re-save to convert to a skin target');
       }
-      updateToolboxForKind(roots[0].getFieldValue('TARGET'));
+      try { roots[0].setFieldValue(skin, 'SKIN'); }
+      catch (e) { console.warn('target skin', skin, e); }
     }
 
     // ---- beat: a block whose fields change with the chosen mode --------
@@ -569,6 +579,10 @@
         }
         case 'se_for_each':
           return { for_each_chamber: { do: stepsFromStack(b.getInputTargetBlock('DO')) } };
+        case 'se_if_robot':
+          return { if_robot: { robot: b.getFieldValue('ROBOT'),
+                               do: stepsFromStack(b.getInputTargetBlock('DO')),
+                               else: stepsFromStack(b.getInputTargetBlock('ELSE')) } };
         default:
           return null;
       }
@@ -587,6 +601,7 @@
         case 'se_all':         return { all: [condToObj(b.getInputTargetBlock('A')),
                                               condToObj(b.getInputTargetBlock('B'))] };
         case 'se_not':         return { not: condToObj(b.getInputTargetBlock('C')) };
+        case 'se_robot_is':    return { robot_is: { robot: b.getFieldValue('ROBOT') } };
         default:               return { always: true };
       }
     }
@@ -603,9 +618,9 @@
 
     function getSpec() {
       var roots = workspace.getBlocksByType('se_behaviour', false);
-      var states = {}, initial = null, kind = null;
+      var states = {}, initial = null, skin = null;
       if (roots.length) {
-        kind = roots[0].getFieldValue('TARGET');
+        skin = roots[0].getFieldValue('SKIN');
         var s = roots[0].getInputTargetBlock('STATES');
         while (s) {
           var name = s.getFieldValue('NAME');
@@ -622,8 +637,8 @@
       // runtime/validator ignore unknown top-level keys.
       var spec = { initial: initial, states: states,
                    _blockly: Blockly.serialization.workspaces.save(workspace) };
-      // 'any' = legacy target-less behaviour: omit the key entirely.
-      if (kind && kind !== 'any') spec.target = { kind: kind };
+      // 'any' = target-less behaviour: omit the key entirely.
+      if (skin && skin !== 'any') spec.target = { skin: skin };
       return JSON.stringify(spec);
     }
 
@@ -759,6 +774,11 @@
         case 'for_each_chamber':
           b = newStepBlock('se_for_each');
           connectStack(b, 'DO', buildStack(p.do)); break;
+        case 'if_robot':
+          b = newStepBlock('se_if_robot');
+          setF(b, 'ROBOT', p.robot);
+          connectStack(b, 'DO', buildStack(p.do));
+          connectStack(b, 'ELSE', buildStack(p['else'])); break;
         default: return null;
       }
       return b;
@@ -793,6 +813,9 @@
           connectCond(b, 'B', buildCond((v || [])[1])); break;
         case 'not':
           b = newStepBlock('se_not'); connectCond(b, 'C', buildCond(v)); break;
+        case 'robot_is':
+          b = newStepBlock('se_robot_is');
+          setF(b, 'ROBOT', (v && v.robot != null) ? v.robot : v); break;
         default:
           b = newStepBlock('se_always'); break;
       }
@@ -815,7 +838,7 @@
     function buildBlocksFromSpec(spec) {
       workspace.clear();
       var root = newStepBlock('se_behaviour');
-      if (spec.target && spec.target.kind) setF(root, 'TARGET', spec.target.kind);
+      if (spec.target && spec.target.skin) setF(root, 'SKIN', spec.target.skin);
       root.moveBy(30, 30);
       var states = spec.states || {};
       var order = Object.keys(states);
@@ -868,7 +891,6 @@
       root.getInput('STATES').connection.connect(st.previousConnection);
       root.moveBy(30, 30);
       root.render();
-      updateToolboxForKind('any');
     }
   </script>
 </body>

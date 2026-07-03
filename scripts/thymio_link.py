@@ -32,9 +32,10 @@ def find_gateway(explicit: str | None) -> str | None:
     return None
 
 
-def repl(drive, leds) -> None:
+def repl(drive, leds, sound) -> None:
     """Line-based manual jog (same keys as thymio_jog)."""
-    print("commands: f=fwd b=back l=left r=right s=stop  m <L> <R>  c <r> <g> <b>  q=quit")
+    print("commands: f=fwd b=back l=left r=right s=stop  m <L> <R>  c <r> <g> <b>  "
+          "snd <0-7>  tone <hz> [ms]  q=quit")
     speed = 150
     while True:
         try:
@@ -60,6 +61,10 @@ def repl(drive, leds) -> None:
             drive(int(a[0]), int(a[1]))
         elif cmd == "c" and len(a) == 3:
             leds(int(a[0]), int(a[1]), int(a[2]))
+        elif cmd == "snd" and len(a) == 1:
+            sound({"sys": int(a[0])})
+        elif cmd == "tone" and a:
+            sound({"freq": int(a[0]), "dur": int(a[1]) if len(a) > 1 else 30})
         else:
             print("?")
 
@@ -73,6 +78,9 @@ def main() -> int:
     p.add_argument("--right", type=int, help="motor.right.target")
     p.add_argument("--stop", action="store_true", help="both motors to 0")
     p.add_argument("--led", nargs=3, type=int, metavar=("R", "G", "B"), help="leds.top r g b")
+    p.add_argument("--sound", type=int, metavar="ID", help="play system sound 0-7 (-1 stops)")
+    p.add_argument("--tone", nargs=2, type=int, metavar=("HZ", "DUR60"),
+                   help="play a tone: frequency Hz + duration in 1/60 s")
     p.add_argument("--repl", action="store_true", help="interactive line jog")
     p.add_argument("--index", type=int, default=0,
                    help="which Thymio slot on the C6 (0..3) — for driving several")
@@ -100,6 +108,9 @@ def main() -> int:
     def leds(r: int, g: int, b: int) -> None:
         send({"cmd": "thymio_leds", "idx": args.index, "r": r, "g": g, "b": b})
 
+    def sound(spec: dict) -> None:
+        send({"cmd": "thymio_sound", "idx": args.index, **spec})
+
     # The serial open resets the C6; wait for it to answer before starting the link.
     ser.write(b'{"target":"thymio","cmd":"ping"}\n')
     t0 = time.time()
@@ -113,16 +124,21 @@ def main() -> int:
     time.sleep(0.1)
 
     has_motion = args.left is not None or args.right is not None
-    do_repl = args.repl or not (args.stop or args.led or has_motion)
+    has_sound = args.sound is not None or args.tone is not None
+    do_repl = args.repl or not (args.stop or args.led or has_motion or has_sound)
     try:
         if args.led is not None:
             leds(*args.led)
+        if args.tone is not None:
+            sound({"freq": args.tone[0], "dur": args.tone[1]})
+        elif args.sound is not None:
+            sound({"sys": args.sound})
         if args.stop:
             drive(0, 0)
         elif has_motion:
             drive(args.left or 0, args.right or 0)
         if do_repl:
-            repl(drive, leds)
+            repl(drive, leds, sound)
         elif has_motion and not args.stop:
             if args.secs:
                 time.sleep(args.secs)

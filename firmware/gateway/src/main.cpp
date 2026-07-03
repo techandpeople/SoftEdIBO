@@ -140,6 +140,22 @@ static void apStart(void) {
     apLoadConfig();
     apApply();
 }
+
+// The AP credentials live on THIS gateway (NVS, Tools → Gateway WiFi AP…), so
+// inject them into any forwarded ota_wifi that doesn't carry its own — the PC
+// then never needs to know or store them, and a renamed AP can't break OTA.
+static void apInjectCreds(cJSON* doc) {
+    cJSON* cmd = cJSON_GetObjectItemCaseSensitive(doc, "cmd");
+    if (!cJSON_IsString(cmd) || strcmp(cmd->valuestring, "ota_wifi") != 0) return;
+    cJSON* ssid = cJSON_GetObjectItemCaseSensitive(doc, "ssid");
+    if (cJSON_IsString(ssid) && ssid->valuestring[0] != '\0') return;   // explicit override
+    cJSON_DeleteItemFromObjectCaseSensitive(doc, "ssid");
+    cJSON_DeleteItemFromObjectCaseSensitive(doc, "pass");
+    cJSON_AddStringToObject(doc, "ssid", s_apSsid);
+    cJSON_AddStringToObject(doc, "pass", s_apPass);
+}
+#else
+static void apInjectCreds(cJSON*) {}
 #endif  // GATEWAY_AP
 
 // ---------------------------------------------------------------------------
@@ -584,10 +600,12 @@ static void processLine(const char* line, size_t len) {
 #ifdef GATEWAY_THYMIO
     } else if (strcmp(target->valuestring, "thymio") == 0) {
         // Thymio route → forward to the C6 radio co-processor over UART.
+        apInjectCreds(doc);
         thymioForward(doc);
 #endif
     } else if (se::parseMac(target->valuestring, mac) && se::ensurePeer(mac)) {
         // Strip "target" so nodes receive only the command fields.
+        apInjectCreds(doc);
         cJSON_DeleteItemFromObjectCaseSensitive(doc, "target");
         char* payload = cJSON_PrintUnformatted(doc);
         if (payload) {

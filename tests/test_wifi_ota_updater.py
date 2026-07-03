@@ -224,8 +224,24 @@ def test_wifi_ota_rejects_invalid_image(tmp_path):
     assert "app image" in msg
 
 
-def test_wifi_ota_requires_ssid(tmp_path):
+def test_wifi_ota_without_ssid_lets_the_gateway_inject(tmp_path):
+    """No ssid → ota_wifi goes out WITHOUT credentials; the gateway fills in
+    its own stored AP ssid/pass while forwarding (apInjectCreds)."""
     app = bytes([_ESP_APP_MAGIC]) + b"x" * 50
-    ok, msg = _make(FakeGateway(), tmp_path, app, ssid="", password="").run()
-    assert ok is False
-    assert "access-point name" in msg
+    gw = FakeGateway()
+    result, thread = _run_in_thread(_make(gw, tmp_path, app, ssid="", password=""))
+
+    gw.wait_gateway("ota_store_begin")
+    gw.deliver({"type": "ota_store_ready"})
+    gw.wait_gateway("ota_store_end")
+    gw.deliver({"type": "ota_stored", "ok": True, "url": URL})
+
+    trigger = gw.wait_node("ota_wifi")
+    assert trigger["url"] == URL
+    assert "ssid" not in trigger
+    assert "pass" not in trigger
+
+    gw.deliver({"source": MAC, "type": "ota_wifi_start"})
+    gw.deliver({"source": MAC, "type": "ota_done"})
+    thread.join(timeout=5)
+    assert result and result[0][0] is True

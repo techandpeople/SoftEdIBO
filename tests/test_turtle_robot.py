@@ -1,14 +1,8 @@
-"""Tests for the merged Turtle & Tree robot module.
-
-Turtle and Tree are one robot kind: the same nodes, only the skins differ.
-These tests cover both shapes of deployment — a Turtle-style robot with several
-skins spread across nodes, and a Tree-style robot whose per-branch skins carry
-owner / sharing bookkeeping.
-"""
+"""Tests for the Turtle robot — several shared skins spread across nodes."""
 
 from unittest.mock import MagicMock, PropertyMock
 
-from src.robots.turtle_tree.turtle_tree_robot import TurtleTreeRobot
+from src.robots.turtle.turtle_robot import TurtleRobot
 
 
 def _make_gateway():
@@ -39,34 +33,14 @@ def _make_turtle():
             {"mac": "AA:BB:CC:DD:EE:02", "slot": 2, "max_pressure": 8.0},
         ]},
     ]
-    robot = TurtleTreeRobot("turtle-1", gateway, node_configs, skin_configs)
+    robot = TurtleRobot("turtle-1", gateway, node_configs, skin_configs)
     return robot, gateway
 
 
-def _make_tree():
-    """Tree-style: one node, one skin (branch) per slot."""
-    gateway = _make_gateway()
-    node_configs = [
-        {"mac": "AA:BB:CC:DD:EE:20", "node_type": "node_direct", "max_slots": 3},
-    ]
-    skin_configs = [
-        {"skin_id": "branch-0", "name": "Branch 0", "chambers": [
-            {"mac": "AA:BB:CC:DD:EE:20", "slot": 0, "max_pressure": 8.0}]},
-        {"skin_id": "branch-1", "name": "Branch 1", "chambers": [
-            {"mac": "AA:BB:CC:DD:EE:20", "slot": 1, "max_pressure": 8.0}]},
-        {"skin_id": "branch-2", "name": "Branch 2", "chambers": [
-            {"mac": "AA:BB:CC:DD:EE:20", "slot": 2, "max_pressure": 8.0}]},
-    ]
-    robot = TurtleTreeRobot(
-        robot_id="tree-1",
-        gateway=gateway,
-        node_configs=node_configs,
-        skin_configs=skin_configs,
-    )
-    return robot, gateway
+def test_robot_kind():
+    robot, _ = _make_turtle()
+    assert robot.robot_kind == "turtle"
 
-
-# --- Turtle-style skin layout ---------------------------------------------
 
 def test_has_correct_skins():
     robot, _ = _make_turtle()
@@ -107,29 +81,9 @@ def test_small_skins_share_node():
     assert skin_b.chamber_count == 2
 
 
-# --- Tree-style ownership / sharing ---------------------------------------
-
-def test_tree_has_correct_branches():
-    robot, _ = _make_tree()
-    assert len(robot.skins) == 3
-
-
-def test_branch_assignment():
-    robot, _ = _make_tree()
-    robot.assign_to("branch-0", "p-001")
-    assert robot.get_owner("branch-0") == "p-001"
-
-
-def test_branch_sharing():
-    robot, _ = _make_tree()
-    robot.assign_to("branch-1", "p-001")
-    robot.share_with("branch-1", "p-002")
-    assert robot.get_owner("branch-1") == "p-001"
-    assert "p-002" in robot.get_shared("branch-1")
-
-
-def test_status_data_includes_owners():
-    robot, _ = _make_tree()
-    robot.assign_to("branch-2", "p-003")
-    data = robot.get_status_data()
-    assert data["owners"]["branch-2"] == "p-003"
+def test_nodes_seen_since_uses_gateway_last_seen():
+    robot, gateway = _make_turtle()
+    seen = {"AA:BB:CC:DD:EE:01": 100.0}          # node 2 never answered
+    gateway.node_last_seen.side_effect = seen.get
+    assert robot.nodes_seen_since(50.0) == (1, 2)
+    assert robot.nodes_seen_since(200.0) == (0, 2)

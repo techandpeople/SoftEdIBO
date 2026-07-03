@@ -93,6 +93,15 @@ class ThymioLink:
     def set_leds(self, r: int, g: int, b: int) -> bool:
         return self._set({"leds.top": [int(r), int(g), int(b)]})
 
+    def play_sound(self, system: int | None = None, freq: int | None = None,
+                   duration_ms: int = 500) -> bool:
+        """Beep: a built-in ``system`` sound (0-7, -1 stops) or a ``freq`` Hz tone."""
+        if not self._active or self._node_id is None:
+            return False
+        dur60 = max(1, round(duration_ms * 60 / 1000))   # Thymio dur unit = 1/60 s
+        return self._dongle.play_sound(self._node_id, system=system,
+                                       freq=freq, dur60=dur60)
+
     def stop(self) -> bool:
         return self.set_motors(0, 0)
 

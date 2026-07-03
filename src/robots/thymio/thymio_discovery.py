@@ -49,11 +49,52 @@ def parse_thymio_addr(data_hex: str) -> int | None:
     return None
 
 
-def discover_thymios(gateway: Any, channel: int = 25, secs: float = 6.0) -> list[str]:
-    """Sniff `channel` via the gateway's C6 and return the distinct Thymio addresses seen.
+def _frame_addr(direction: str, text: str) -> int | None:
+    """The Thymio address in one raw gateway line, or None (non-frame lines)."""
+    if direction != "rx":
+        return None
+    try:
+        msg = json.loads(text)
+    except (ValueError, TypeError):
+        return None
+    if msg.get("type") != "frame":
+        return None
+    return parse_thymio_addr(msg.get("data", ""))
 
-    Returns hex strings like ``["6a25", ...]``. The Thymios must be transmitting (driven by
-    the dongle or just powered on). Leaves the C6 back in plain-RCP mode.
+
+def _notify_found(on_found: Any, addr: int) -> None:
+    if on_found is None:
+        return
+    try:
+        on_found(f"{addr:04x}")
+    except Exception:   # noqa: BLE001 — a bad listener must not kill the scan
+        logger.exception("Thymio discovery on_found callback failed")
+
+
+def _wait(secs: float, stop: Any) -> None:
+    """Sleep up to ``secs``, waking early when ``stop`` (an Event) is set."""
+    deadline = time.monotonic() + secs
+    while time.monotonic() < deadline:
+        if stop is not None and stop.is_set():
+            return
+        time.sleep(0.1)
+
+
+def discover_thymios(gateway: Any, channel: int = 25, secs: float = 6.0,
+                     on_found: Any = None, stop: Any = None) -> list[str]:
+    """Sniff `channel` via the gateway's C6 and return the Thymio addresses seen.
+
+    Returns hex strings like ``["6a25", ...]`` in FIRST-SEEN order — so powering
+    robots on one at a time while scanning tells you which address is which. The
+    Thymios must be transmitting: a Wireless Thymio announces itself when powered
+    on, so switching it on (or off/on) during the scan is enough — no dongle.
+    Leaves the C6 back in plain-RCP mode.
+
+    Args:
+        on_found: Optional ``callback(addr_hex)`` fired the moment a NEW address
+            is seen. Runs on the gateway's serial reader thread — GUI callers
+            must bridge through a signal.
+        stop: Optional ``threading.Event``-like; set it to end the scan early.
     """
     if gateway is None or not getattr(gateway, "is_connected", False):
         logger.error("Thymio discovery: gateway not connected")
@@ -62,26 +103,21 @@ def discover_thymios(gateway: Any, channel: int = 25, secs: float = 6.0) -> list
     found: dict[int, None] = {}
 
     def _on_raw(direction: str, text: str) -> None:
-        if direction != "rx":
+        addr = _frame_addr(direction, text)
+        if addr is None or addr in found:
             return
-        try:
-            msg = json.loads(text)
-        except (ValueError, TypeError):
-            return
-        if msg.get("type") == "frame":
-            addr = parse_thymio_addr(msg.get("data", ""))
-            if addr is not None:
-                found[addr] = None
+        found[addr] = None
+        _notify_found(on_found, addr)
 
     gateway.on_raw(_on_raw)
     try:
         gateway.send("thymio", "sniff_start", ch=channel)
-        time.sleep(secs)
+        _wait(secs, stop)
         gateway.send("thymio", "sniff_stop")
         time.sleep(0.2)                              # let the stop reply drain
     finally:
         gateway.remove_raw_callback(_on_raw)
 
-    addrs = [f"{a:04x}" for a in sorted(found)]
+    addrs = [f"{a:04x}" for a in found]              # first-seen order
     logger.info("Thymio discovery on ch%d: %s", channel, addrs or "(none seen)")
     return addrs

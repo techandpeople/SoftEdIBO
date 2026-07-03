@@ -14,7 +14,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 # YAML list key under ``robots`` for each robot kind.
-YAML_KEY: dict[str, str] = {"turtle_tree": "turtle_trees", "thymio": "thymios"}
+YAML_KEY: dict[str, str] = {
+    "turtle": "turtles", "tree": "trees", "thymio": "thymios"}
 
 DEFAULT_MAX_KPA = 8.0
 # Upper/lower bound for the per-chamber Max/Min the config dialog accepts. These

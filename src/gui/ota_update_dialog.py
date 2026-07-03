@@ -65,14 +65,11 @@ class _OTAWorker(QThread):
     done = Signal()
 
     def __init__(self, gateway: Gateway, jobs: list[tuple[str, Path]],
-                 transport: int = _TRANSPORT_ESPNOW,
-                 ap_ssid: str = "", ap_password: str = ""):
+                 transport: int = _TRANSPORT_ESPNOW):
         super().__init__()
         self._gateway = gateway
         self._jobs = jobs
         self._transport = transport
-        self._ap_ssid = ap_ssid
-        self._ap_password = ap_password
         self._current: NodeOTAUpdater | WifiOTAUpdater | None = None
         self._cancelled = False
 
@@ -82,17 +79,19 @@ class _OTAWorker(QThread):
             self._current.cancel()
 
     def _make_updater(self, mac: str, path: Path) -> NodeOTAUpdater | WifiOTAUpdater:
+        # WiFi updaters carry no AP credentials: the gateway injects its own
+        # stored ssid/pass (Tools → Gateway WiFi AP…) while forwarding ota_wifi.
         on_progress = lambda p, m=mac: self.progress.emit(m, p)
         on_log = lambda s, m=mac: self.status.emit(m, s)
         if mac == _C6_KEY:
             # The C6 is addressed by target "thymio", not a MAC, and only over WiFi.
             return C6WifiOTAUpdater(
-                self._gateway, path, self._ap_ssid, self._ap_password,
+                self._gateway, path,
                 on_progress=on_progress, on_log=on_log,
             )
         if self._transport == _TRANSPORT_WIFI:
             return WifiOTAUpdater(
-                self._gateway, mac, path, self._ap_ssid, self._ap_password,
+                self._gateway, mac, path,
                 on_progress=on_progress, on_log=on_log,
             )
         return NodeOTAUpdater(
@@ -114,6 +113,9 @@ class _OTAWorker(QThread):
 
 class OTAUpdateDialog(BaseDialog, Ui_OTAUpdateDialog):
     """Multi-select node firmware updater (ESP-NOW or WiFi transport)."""
+
+    # Marshals a gateway message from the serial read thread to the GUI thread.
+    _message_received = Signal(dict)
 
     def __init__(self, gateway: Gateway, settings: Settings,
                  session_active: bool = False, parent=None):
@@ -137,12 +139,72 @@ class OTAUpdateDialog(BaseDialog, Ui_OTAUpdateDialog):
         self.transport_combo.currentIndexChanged.connect(self._on_transport_changed)
         self._on_transport_changed(self.transport_combo.currentIndex())
 
+        self.save_ap_btn.clicked.connect(self._on_save_ap)
+
         self._populate()
         self._update_banner()
         # Non-blocking refresh of the online column.
+        self._message_received.connect(self._handle_gateway_message)
+        self._gateway.on_message(self._on_gateway_message)
         if self._gateway.is_connected:
             self._gateway.scan()
             QTimer.singleShot(2000, self._refresh_online)
+            # The gateway owns the AP config (NVS): mirror its real name here,
+            # and Save AP writes edits back. The stored password never leaves
+            # the gateway — during an update it hands it to the node itself.
+            self._gateway.send_gateway("get_ap")
+
+    # ------------------------------------------------------------------
+    # Gateway AP (the gateway stores the credentials; this edits them)
+    # ------------------------------------------------------------------
+
+    def _on_gateway_message(self, data: dict[str, Any]) -> None:
+        """Serial-read-thread callback — hand off to the GUI thread."""
+        self._message_received.emit(data)
+
+    def _handle_gateway_message(self, data: dict[str, Any]) -> None:
+        mtype = data.get("type")
+        if mtype == "ap_config" and data.get("ssid"):
+            self.ap_ssid_edit.setText(data["ssid"])
+        elif mtype == "ap_set":
+            self.save_ap_btn.setEnabled(True)
+            if data.get("ok"):
+                self.ap_pass_edit.clear()
+                self._flash_ap_status(
+                    f"Access point saved — network is now “{data.get('ssid', '')}”.")
+            else:
+                QMessageBox.warning(self, _DIALOG_TITLE,
+                                    "The gateway rejected the AP change: "
+                                    f"{data.get('reason', 'unknown')}")
+
+    def _on_save_ap(self) -> None:
+        if not self._gateway.is_connected:
+            QMessageBox.information(self, _DIALOG_TITLE,
+                                    "Connect the gateway first.")
+            return
+        ssid = self.ap_ssid_edit.text().strip()
+        password = self.ap_pass_edit.text()
+        if not ssid:
+            QMessageBox.information(self, _DIALOG_TITLE,
+                                    "The network name can't be empty.")
+            return
+        if password and len(password) < 8:
+            QMessageBox.information(
+                self, _DIALOG_TITLE,
+                "A new password needs at least 8 characters (or leave it blank "
+                "to keep the current one).")
+            return
+        self.save_ap_btn.setEnabled(False)
+        kwargs = {"ssid": ssid}
+        if password:                       # omitted = keep the stored password
+            kwargs["pass"] = password
+        self._gateway.send_gateway("set_ap", **kwargs)
+
+    def _flash_ap_status(self, text: str) -> None:
+        """Show transient AP feedback in the hint label, then restore it."""
+        original = self.wifi_hint_label.text()
+        self.wifi_hint_label.setText(text)
+        QTimer.singleShot(5000, lambda: self.wifi_hint_label.setText(original))
 
     # ------------------------------------------------------------------
     # Population
@@ -243,10 +305,11 @@ class OTAUpdateDialog(BaseDialog, Ui_OTAUpdateDialog):
     # ------------------------------------------------------------------
 
     def _on_transport_changed(self, index: int) -> None:
-        """Show the AP credential fields + hint only for the WiFi transport."""
+        """Show the AP editor + hint only for the WiFi transport."""
         wifi = index == _TRANSPORT_WIFI
         for w in (self.ap_ssid_label, self.ap_ssid_edit,
-                  self.ap_pass_label, self.ap_pass_edit, self.wifi_hint_label):
+                  self.ap_pass_label, self.ap_pass_edit,
+                  self.save_ap_btn, self.wifi_hint_label):
             w.setVisible(wifi)
 
     def _on_select_online(self) -> None:
@@ -301,17 +364,11 @@ class OTAUpdateDialog(BaseDialog, Ui_OTAUpdateDialog):
             return
 
         transport = self.transport_combo.currentIndex()
-        ssid = self.ap_ssid_edit.text().strip()
-        password = self.ap_pass_edit.text()
         if any(mac == _C6_KEY for mac, _ in jobs) and transport != _TRANSPORT_WIFI:
             QMessageBox.information(
                 self, _DIALOG_TITLE,
-                "The C6 (Thymio RCP) updates over WiFi only. Pick the WiFi transport "
-                "and enter the gateway access-point name.")
-            return
-        if transport == _TRANSPORT_WIFI and not ssid:
-            QMessageBox.information(self, _DIALOG_TITLE,
-                                    "Enter the gateway access-point name first.")
+                "The C6 (Thymio RCP) updates over WiFi only. Pick the WiFi "
+                "transport.")
             return
 
         via = ("fast via the gateway WiFi access point (the PC stays on the "
@@ -324,7 +381,7 @@ class OTAUpdateDialog(BaseDialog, Ui_OTAUpdateDialog):
             return
 
         self._set_running(True)
-        self._worker = _OTAWorker(self._gateway, jobs, transport, ssid, password)
+        self._worker = _OTAWorker(self._gateway, jobs, transport)
         self._worker.progress.connect(self._on_progress)
         self._worker.status.connect(self._on_status)
         self._worker.done.connect(self._on_done)
@@ -338,6 +395,7 @@ class OTAUpdateDialog(BaseDialog, Ui_OTAUpdateDialog):
         self.transport_combo.setEnabled(not running)
         self.ap_ssid_edit.setEnabled(not running)
         self.ap_pass_edit.setEnabled(not running)
+        self.save_ap_btn.setEnabled(not running)
         self.close_btn.setText("Cancel" if running else "Close")
 
     def _on_progress(self, mac: str, pct: int) -> None:

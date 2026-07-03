@@ -29,17 +29,18 @@
       </item>
       <item row="1" column="1">
        <widget class="QComboBox" name="activity_combo">
-        <property name="whatsThis"><string>The activity to run this session. It decides which robot type is required and how chambers and touches behave (e.g. Group Touch, Organ Swap).</string></property>
+        <property name="whatsThis"><string>The activity (behaviour) to run this session. Activities are authored per skin set (Natural / Wrinkles / Organs) in the Activity Editor and run on any robot — robot-specific parts are handled by the behaviour's "if robot is…" blocks.</string></property>
        </widget>
       </item>
       <item row="2" column="0">
-       <widget class="QLabel" name="label_robot_type">
-        <property name="text"><string>Robot type:</string></property>
+       <widget class="QLabel" name="label_target_skin">
+        <property name="text"><string>Target skin:</string></property>
        </widget>
       </item>
       <item row="2" column="1">
-       <widget class="QLabel" name="robot_type_label">
+       <widget class="QLabel" name="target_skin_label">
         <property name="text"><string>—</string></property>
+        <property name="whatsThis"><string>The skin set this activity was written for. Robots dressed in different skins can still run it, but a warning is shown below the robot list.</string></property>
        </widget>
       </item>
      </layout>
@@ -48,11 +49,11 @@
    <item>
     <widget class="QGroupBox" name="robots_group">
      <property name="title"><string>Select robots</string></property>
-     <property name="whatsThis"><string>Pick which connected robots take part. Only robots matching the activity's robot type are listed; select one or several.</string></property>
+     <property name="whatsThis"><string>Tick the robots taking part. Every configured robot is listed with a live status: Online (all of its nodes answered the scan), Partial (only some did), Ready (a wireless Thymio whose transport is up) or Offline. Online robots are pre-ticked.</string></property>
      <layout class="QVBoxLayout" name="robots_layout">
       <item>
        <widget class="QLabel" name="no_robots_label">
-        <property name="text"><string>No robots of this type connected.</string></property>
+        <property name="text"><string>No robots configured.</string></property>
         <property name="alignment"><set>Qt::AlignCenter</set></property>
        </widget>
       </item>
@@ -62,6 +63,15 @@
         <property name="selectionMode">
          <enum>QAbstractItemView::SelectionMode::MultiSelection</enum>
         </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLabel" name="skin_warning_label">
+        <property name="text"><string/></property>
+        <property name="visible"><bool>false</bool></property>
+        <property name="wordWrap"><bool>true</bool></property>
+        <property name="styleSheet"><string notr="true">color: #b36b00;</string></property>
+        <property name="whatsThis"><string>Warns when a ticked robot's configured skin variants do not match the activity's target skin (e.g. an Organs activity with a robot dressed in Natural). The session can still start — fix the robot's skin config or swap the physical skins if this is not intended.</string></property>
        </widget>
       </item>
      </layout>

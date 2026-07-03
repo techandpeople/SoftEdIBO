@@ -39,7 +39,8 @@ from src.hardware.gateway import Gateway
 from src.hardware.fill_calibration import resolve_fill_profiles
 from src.robots.base_robot import BaseRobot
 from src.robots.thymio.thymio_robot import ThymioRobot
-from src.robots.turtle_tree.turtle_tree_robot import TurtleTreeRobot
+from src.robots.tree.tree_robot import TreeRobot
+from src.robots.turtle.turtle_robot import TurtleRobot
 
 logger = logging.getLogger(__name__)
 
@@ -105,10 +106,6 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.actionUpdateNodesOTA = QAction("Update Nodes (OTA)…", self)
         self.actionUpdateNodesOTA.triggered.connect(self._open_ota_dialog)
         self.menuTools.addAction(self.actionUpdateNodesOTA)
-
-        self.actionGatewayAP = QAction("Gateway WiFi AP…", self)
-        self.actionGatewayAP.triggered.connect(self._open_gateway_ap)
-        self.menuTools.addAction(self.actionGatewayAP)
 
         self.actionTrainTouch = QAction("Touch Gestures…", self)
         self.actionTrainTouch.triggered.connect(self._open_train_touch)
@@ -183,17 +180,18 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         robots: list[BaseRobot] = []
         robot_data = self._settings.data.get("robots", {})
 
-        # Turtle & Tree robots (one kind, skins differ)
-        for tt_cfg in robot_data.get("turtle_trees", []):
-            if tt_cfg.get("skins"):
-                robots.append(TurtleTreeRobot(
-                    robot_id=tt_cfg.get("id", "turtle_tree"),
-                    gateway=self._gateway,
-                    node_configs=tt_cfg.get("nodes", []),
-                    # Fill in each chamber's effective fill curve (own override, else
-                    # its skin-type template) before the robot builds its skins.
-                    skin_configs=resolve_fill_profiles(self._settings.data, tt_cfg["skins"]),
-                ))
+        # Turtle / Tree robots — same node hardware, each its own robot kind.
+        for yaml_key, robot_cls in (("turtles", TurtleRobot), ("trees", TreeRobot)):
+            for cfg in robot_data.get(yaml_key, []):
+                if cfg.get("skins"):
+                    robots.append(robot_cls(
+                        robot_id=cfg.get("id", yaml_key[:-1]),
+                        gateway=self._gateway,
+                        node_configs=cfg.get("nodes", []),
+                        # Fill in each chamber's effective fill curve (own override,
+                        # else its skin-type template) before the robot builds its skins.
+                        skin_configs=resolve_fill_profiles(self._settings.data, cfg["skins"]),
+                    ))
 
         # Thymios — one RF dongle relays to several at once (each a node id), so all
         # the wireless ones share a single ThymioDongle owned by the window.
@@ -289,12 +287,6 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             session_active=self._session_active, parent=self,
         )
         dlg.exec()
-
-    def _open_gateway_ap(self) -> None:
-        """Tools => Gateway WiFi AP… — name/password of the SoftAP the gateway
-        broadcasts for the Thymios (access-point firmware build only)."""
-        from src.gui.gateway_ap_dialog import GatewayApDialog
-        GatewayApDialog(self._gateway, parent=self).exec()
 
     def _open_train_touch(self) -> None:
         """Tools => Train Touch Models… — train per-skin-type gesture models

@@ -36,8 +36,11 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--port", help="gateway serial port (default: from settings.yaml)")
-    p.add_argument("--ssid", default="SoftEdIBO", help="S3 SoftAP SSID")
-    p.add_argument("--pass", dest="password", default="softedibo", help="S3 SoftAP password")
+    p.add_argument("--ssid", default="",
+                   help="override the S3 SoftAP SSID (normally omitted — the gateway "
+                        "injects its own stored credentials while forwarding)")
+    p.add_argument("--pass", dest="password", default="",
+                   help="override the S3 SoftAP password (goes with --ssid)")
     p.add_argument("--image", default=DEFAULT_IMAGE, help="C6 firmware .factory.bin")
     args = p.parse_args()
 

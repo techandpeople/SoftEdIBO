@@ -17,7 +17,7 @@ from src.gui.session_panel import SessionPanel
 from src.gui.session_setup_dialog import SessionSetupDialog
 from src.hardware.gateway import Gateway
 from src.robots.base_robot import BaseRobot, RobotStatus
-from src.robots.turtle_tree.turtle_tree_robot import TurtleTreeRobot
+from src.robots.turtle.turtle_robot import TurtleRobot
 
 
 # ---------------------------------------------------------------------------
@@ -38,10 +38,14 @@ def db(tmp_path):
 # ---------------------------------------------------------------------------
 
 def _mock_turtle(name: str = "Turtle-1") -> MagicMock:
-    robot = MagicMock(spec=TurtleTreeRobot)
+    robot = MagicMock(spec=TurtleRobot)
     robot.name = name
     robot.robot_id = name.lower().replace(" ", "-")
+    robot.robot_kind = "turtle"
     robot.status = RobotStatus.CONNECTED
+    robot.skins = {}
+    robot.nodes_seen_since.return_value = (0, 0)
+    robot.gateway = None
     return robot
 
 
@@ -49,7 +53,7 @@ def _mock_settings() -> MagicMock:
     settings = MagicMock()
     settings.gateway_baud = 115200
     settings.gateway_port = "/dev/ttyUSB0"
-    settings.data = {"robots": {"turtle_trees": [], "thymios": []}, "gateway": {}}
+    settings.data = {"robots": {"turtles": [], "trees": [], "thymios": []}, "gateway": {}}
     return settings
 
 
@@ -110,12 +114,12 @@ class TestSessionSetupDialog:
         assert dlg.activity_combo.count() > 0
         assert dlg.activity_combo.itemText(0) == name
 
-    def test_robot_type_label_set_on_open(self, qtbot, db):
+    def test_target_skin_label_set_on_open(self, qtbot, db):
         _seed_behaviour(db)
         dlg = SessionSetupDialog(robots=[], db=db)
         qtbot.addWidget(dlg)
-        # Scripted behaviours accept any robot, so the label shows BaseRobot.
-        assert dlg.robot_type_label.text() == BaseRobot.__name__
+        # The seed behaviour has no skin target, so the label shows "Any".
+        assert dlg.target_skin_label.text() == "Any"
 
     def test_no_robots_label_shown_when_empty(self, qtbot, db):
         dlg = SessionSetupDialog(robots=[], db=db)
@@ -139,7 +143,11 @@ class TestSessionSetupDialog:
         thymio = MagicMock(spec=ThymioRobot)
         thymio.name = "Thymio-1"
         thymio.robot_id = "thymio-1"
+        thymio.robot_kind = "thymio"
         thymio.status = RobotStatus.CONNECTED
+        thymio.skins = {}
+        thymio.nodes_seen_since.return_value = (0, 0)
+        thymio.gateway = None
         dlg = SessionSetupDialog(robots=[_mock_turtle(), thymio], db=db)
         qtbot.addWidget(dlg)
         assert dlg.robots_list.count() == 2
@@ -163,14 +171,16 @@ class TestRobotPanel:
     def test_lists_start_empty(self, qtbot):
         panel = RobotPanel(Gateway("/dev/null"), _mock_settings())
         qtbot.addWidget(panel)
-        assert panel.turtle_tree_tree.topLevelItemCount() == 0
+        assert panel.turtles_tree.topLevelItemCount() == 0
+        assert panel.trees_tree.topLevelItemCount() == 0
         assert panel.thymio_tree.topLevelItemCount() == 0
 
     def test_refresh_populates_turtle_list(self, qtbot):
         panel = RobotPanel(Gateway("/dev/null"), _mock_settings())
         qtbot.addWidget(panel)
         panel.refresh([_mock_turtle("Turtle-1"), _mock_turtle("Turtle-2")])
-        assert panel.turtle_tree_tree.topLevelItemCount() == 0
+        assert panel.turtles_tree.topLevelItemCount() == 0
+        assert panel.trees_tree.topLevelItemCount() == 0
         assert panel.thymio_tree.topLevelItemCount() == 0
 
     def test_gateway_connect_btn_present(self, qtbot):

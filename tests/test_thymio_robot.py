@@ -49,6 +49,10 @@ class _FakeLink:
         self.calls.append(("leds", r, g, b))
         return True
 
+    def play_sound(self, system=None, freq=None, duration_ms=500) -> bool:
+        self.calls.append(("sound", system, freq, duration_ms))
+        return True
+
 
 def test_thymio_movement_delegates_to_link():
     link = _FakeLink()
@@ -80,11 +84,22 @@ def test_thymio_send_command_requires_connected():
     assert thymio.send_command("motors", left=10, right=10) is False
 
 
+def test_thymio_sound_delegates_to_link():
+    link = _FakeLink()
+    thymio = ThymioRobot("t1", link=link)
+    thymio.connect()
+    assert thymio.play_sound(system=2) is True
+    assert ("sound", 2, None, 500) in link.calls
+    assert thymio.play_sound(freq=700, duration_ms=400) is True
+    assert ("sound", None, 700, 400) in link.calls
+
+
 def test_thymio_no_link_movement_is_noop():
     thymio = ThymioRobot("t1")
     thymio.connect()
     assert thymio.set_motors(100, 100) is True
     assert thymio.send_command("motors", left=1, right=2) is True
+    assert thymio.play_sound(system=2) is True   # no link → no-op, still True
 
 
 # --- the link itself, without the dongle / thymiodirect --------------------
@@ -218,6 +233,22 @@ def test_gateway_link_drives_and_leds():
     assert ("thymio", "thymio_leds", {"idx": 0, "r": 32, "g": 0, "b": 0}) in gw.sent
     assert link.stop() is True
     assert ("thymio", "thymio_drive", {"idx": 0, "left": 0, "right": 0}) in gw.sent
+
+
+def test_gateway_link_play_sound():
+    gw = _FakeGateway()
+    link = _gateway_link(gw, channel=25)
+    link.connect()
+    assert link.play_sound(system=2) is True
+    assert ("thymio", "thymio_sound", {"idx": 0, "sys": 2}) in gw.sent
+    # 500 ms tone → Thymio duration unit is 1/60 s → 30
+    assert link.play_sound(freq=700, duration_ms=500) is True
+    assert ("thymio", "thymio_sound", {"idx": 0, "freq": 700, "dur": 30}) in gw.sent
+
+
+def test_gateway_link_play_sound_needs_connection():
+    link = _gateway_link(_FakeGateway(connected=False))
+    assert link.play_sound(system=2) is False
 
 
 def test_gateway_link_registers_address_for_extra_thymios():

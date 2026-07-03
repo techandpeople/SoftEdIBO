@@ -20,7 +20,7 @@ from src.robots.base_robot import BaseRobot
 def _units_for_robot(robot: BaseRobot) -> list[str]:
     """Return the list of assignable unit IDs for a robot.
 
-    - TurtleTreeRobot / ThymioRobot => skin IDs
+    - TurtleRobot / TreeRobot / ThymioRobot => skin IDs
     - Other => single unit with the robot's own ID
     """
     skins = getattr(robot, "skins", None)

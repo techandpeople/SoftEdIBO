@@ -14,7 +14,7 @@ from src.config.settings import Settings
 from src.gui.base_dialog import BaseDialog
 from src.gui.ui_node_config_dialog import Ui_NodeConfigDialog
 
-_YAML_KEY = {"turtle_tree": "turtle_trees", "thymio": "thymios"}
+_YAML_KEY = {"turtle": "turtles", "tree": "trees", "thymio": "thymios"}
 
 NODE_TYPES: dict[str, int] = {
     "node_direct": 3,
@@ -27,7 +27,7 @@ class NodeConfigDialog(BaseDialog, Ui_NodeConfigDialog):
     """Dialog for adding or editing a single node entry.
 
     Args:
-        robot_type:  One of ``"turtle_tree"`` or ``"thymio"``.
+        robot_type:  One of ``"turtle"``, ``"tree"`` or ``"thymio"``.
         robot_index: Index of the parent robot in the settings list.
         node_index:  Index of this node in the robot's ``nodes`` list,
                      or ``-1`` to add a new node.

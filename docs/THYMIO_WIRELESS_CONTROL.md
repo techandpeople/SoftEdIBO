@@ -60,27 +60,39 @@ start=0x62, count=3) then catch the node's VARIABLES reply.
 Spins the robot — SET_VARIABLES motor.right.target(0x57)=200:
 `61 88 d7 81 44 25 6a 37 32 83 00 6a 25 32 37 11  01 00  0c a0  6a 25  57 00  c8 00`
 
-### Thymio variable addresses (word offsets, from `skel-usb-user.h`)
-| variable | addr | | variable | addr |
-|---|---|---|---|---|
-| motor.left.target | **0x56** | | acc[0..2] | **0x62** |
-| motor.right.target | **0x57** | | leds.top r/g/b | **0x65** |
-| prox.horizontal[0..6] | 0x39 | | buttons[0..4] | 0x25 |
-| motor.left/right.pwm | 0x5E | | sound.* | (native fns) |
+### Thymio variable addresses (word offsets)
+
+Confirmed live from a real Thymio-II over USB with `thymiodirect`
+(`th.variable_offset(nid, name)` / `th.variable_size`), which agrees with the firmware's
+empirically-found ones (motor 0x56/0x57, leds.top 0x65). See the memory
+`thymio-sensors-and-sound` for the full 44-variable dump.
+
+| variable | addr | size | | variable | addr | size |
+|---|---|---|---|---|---|---|
+| motor.left.target | **0x56** (86) | 1 | | acc[x,y,z] | **0x62** (98) | 3 |
+| motor.right.target | **0x57** (87) | 1 | | mic.intensity | **0x79** (121) | 1 |
+| leds.top r/g/b | **0x65** (101) | 3 | | acc._tap | 0x7e (126) | 1 |
+| prox.horizontal[0..6] | 0x39 (57) | 7 | | button.center | 0x2c (44) | 1 |
+| prox.ground.delta | 0x54 (84) | 2 | | temperature (×10 °C) | 0x76 (118) | 1 |
+
+`sound.*` are **native functions**, not variables — triggered by bytecode (see Sound below).
+`acc._tap` is set by the Thymio's default gesture program; **once you load your own bytecode
+it stays 0** — for impact use raw `acc` instead (see below).
 
 ### Tooling (`scripts/`)
 | script | what it does |
 |---|---|
-| **`thymio_link.py`** | **the reliable dongle-free drive.** Opens the C6 once, turns on the firmware `thymio_link` (the C6 polls at 10 Hz on its own), and sends instant `--left/--right/--stop/--led` or `--repl` jog. `--index`/`--addr` drive one of several Thymios. Needs a **U.FL-antenna C6**. |
+| **`thymio_link.py`** | **the reliable dongle-free drive.** Opens the C6 once, turns on the firmware `thymio_link` (the C6 polls at 10 Hz on its own), and sends instant `--left/--right/--stop/--led`, `--sound ID`/`--tone HZ DUR`, or a `--repl` jog (`f/b/l/r/s`, `snd`, `tone`). `--index`/`--addr` drive one of several Thymios. Any C6 (chip antenna is fine). |
 | `thymio_move.py` | one-shot drive — only lands if the link is **already hot** (dongle driving, or a `thymio_link` running). |
 | `thymio_tx.py` | send a raw frame hex (low-level replay/forge) |
 | `thymio_sniff_capture.py` | raw `esp_ieee802154` promiscuous sniffer via the C6 (`--scan` finds the channel, `--debug` prints frames live) |
 | `thymio_jog.py` | drive via the **RF dongle** (thymiodirect) — the working-today path + a traffic source to sniff |
 
 ### Reproduce it
-1. Flash a XIAO **ESP32-C6 (with its U.FL antenna!)** with `rcp_c6`
-   (`pio run -d firmware/thymio_rcp -e rcp_c6 -t upload`) — it has `sniff*`, `tx`, and the
-   continuous `thymio_link`.
+1. Flash a XIAO **ESP32-C6** with `rcp_c6`
+   (`pio run -d firmware/thymio_rcp -e rcp_c6 -t upload`) — it has `sniff*`, `tx`,
+   `thymio_sound`, and the continuous `thymio_link`. (Chip antenna is fine — see the
+   antenna note.)
 2. Find the channel: drive the robot (`thymio_jog.py --drive 100 -100 --secs 180`) while
    sniffing (`thymio_sniff_capture.py --no-drive --debug --gateway <C6>`); `grep 8144` —
    the `"ch"` of a frame carrying PAN 0x4481 is the channel (was **25**).
@@ -96,34 +108,72 @@ One C6 drives up to **4 Thymios**, each a **slot** addressed by its 802.15.4 sho
 (e.g. `0x6a25`): the MAC dest is that address little-endian, the Aseba node id is the same
 bytes big-endian (PAN/host/wrapper shared — verified the built frame is byte-identical to the
 single-Thymio one). Firmware `thymio_link` holds a per-slot motor/LED state and polls every
-active slot; `thymio_set {idx,addr}` registers a robot, `thymio_drive`/`thymio_leds` take an
-`idx`. In the app: Robot Config → each Thymio's `wireless_via: gateway` + **Address (C6)** —
-the **Discover…** button sniffs and lists the addresses on the air (`thymio_discovery.py`), so
-robots swap between studies without hand-editing config. From the CLI:
-`thymio_link.py --index N --addr <hex>`. (Slot 0 with no address rides a built-in default, so
-the single-Thymio flow needs no address.)
+active slot; `thymio_set {idx,addr}` registers a robot, `thymio_drive`/`thymio_leds`/
+`thymio_sound` take an `idx`. In the app: Robot Config → each Thymio's `wireless_via: gateway`
++ **Address (C6)** → **Discover…**. That opens a **guided, dongle-free scan**
+(`ThymioDiscoverDialog` + `thymio_discovery.discover_thymios`): the C6 sniffs the channel for
+~20 s while you **power the Thymios on** (a Wireless Thymio announces itself at boot), and the
+addresses appear **live, in first-seen order** — so turning robots on one at a time maps
+address → robot. Pick one and it fills the field; no dongle, no hand-editing config. From the
+CLI: `thymio_link.py --index N --addr <hex>`. (Slot 0 with no address rides a built-in default,
+so the single-Thymio flow needs no address.)
 
-### Proven vs. next
+> The scan is passive — it only sees a Thymio while it's *transmitting*. Powering one on
+> during the scan should announce it; if nothing shows, drive it briefly (dongle or an already
+> hot link) to make it talk. The sniffer pauses the link poller and zeroes motors first so the
+> two don't fight for the radio.
+
+### Movement, LEDs — proven; Sound — done; Sensors — planned
 - **Proven:** full standalone control — SET_VARIABLES (motors, LEDs, any writable variable)
   over the C6's own continuous link, no dongle.
-- **Read sensors (accel, prox, buttons…):** same link, other way — we already *send*
+- **Sound — DONE (2026-07-03).** `sound.system`/`sound.freq`/`sound.play` are *native
+  functions*, not variables, so we trigger them by loading a tiny Aseba program and running
+  it: **SET_BYTECODE (`0xA001`) then RUN (`0xA003`)**. (⚠️ NOT `0xA000`/`0xA002` — those are
+  GET_DESCRIPTION and **RESET**; an earlier note had them wrong.) The bytecode was captured
+  from `thymiodirect`'s assembler on a real Thymio and is baked into the C6 firmware
+  (`thPlaySystem`/`thPlayFreq`). Loading + running it leaves `motor.*.target` untouched, so a
+  **driving robot keeps driving through a beep**. See "Sound" below.
+- **Read sensors (accel, mic, prox, buttons…):** same link, other way — we already *send*
   `GET_VARIABLES` every poll; the next step is to catch + parse the node's `VARIABLES`
-  reply on the C6 and forward it. Firmware, not new R&D.
-- **Impact vs. touch (accelerometer) — do it ON-BOARD, not by polling.** A knock ("pancada")
-  is a short spike (~10-50 ms); polling `acc` at 10 Hz (even 25 Hz) can miss the peak. The
-  robust way is to let the Thymio detect it at full sensor rate: it has a native **`tap`
-  event** (accelerometer tap/pulse detection) for knocks and the **capacitive buttons** for
-  gentle touches. Upload a tiny Aseba program (`onevent tap { hit = 1 }`) via SET_BYTECODE
-  and just read the flag at 10 Hz. **So the control poll rate and impact detection are
-  independent** — 10 Hz control loses nothing.
-- **Sound / running behaviours:** `sound.play`/`sound.system` are *native functions*, not
-  variables — trigger by uploading tiny bytecode (SET_BYTECODE 0xA000 + RUN 0xA002) that
-  calls them. Same transport, more Aseba plumbing.
-- **Via the gateway:** the `thymio_link`/`tx` commands work through the S3 gateway to its own
-  C6 too (`{"target":"thymio",…}`). **But the C6 that talks to the Thymio needs a good U.FL
-  antenna** — the boxed gateway C6's chip antenna is too weak to reach the robot reliably
-  (the spare C6 with U.FL is solid). For the gateway to control Thymios, fit a U.FL antenna
-  on its C6.
+  (`0x9005`) reply on the C6 and forward it. Firmware, not new R&D — but note the full-space
+  poll reply (128 words) exceeds one 802.15.4 frame, so poll a small range instead, e.g.
+  `GET_VARIABLES(0x62, 24)` returns `acc`(0x62-0x64) + `mic.intensity`(0x79) in one frame.
+- **Impact vs. touch (accelerometer) — poll raw `acc`, NOT the tap event.** The obvious idea
+  (read the on-board `acc._tap` flag) does **not** work here: `acc._tap` is produced by the
+  Thymio's *default gesture program*, which our loaded bytecode replaces — so it stays 0.
+  Instead read raw `acc` (rest ≈ `[0,0,20]`, z = gravity): a knock ("pancada") is a large
+  transient deviation, a gentle touch barely moves it. `acc` reads cleanly at ~99 Hz over USB;
+  at the C6's 10 Hz a hard knock is still a clear deviation. Threshold is configurable.
+- **Via the gateway:** the `thymio_link`/`tx`/`thymio_sound` commands work through the S3
+  gateway to its own C6 (`{"target":"thymio",…}`). The boxed gateway C6's **chip antenna is
+  plenty** (see the antenna note below) — no U.FL needed for a table/room study.
+
+### Sound (how it works, and how to use it)
+The Aseba native-call ABI: stash each argument's *value* into scratch RAM (`event.args`
+@0x02, a 32-word array) and push its *address*, then `callnat _nf.<name>`. Wrap that in an
+`init` event, `SET_BYTECODE` it (one message: `[dest][addr=0][words]`), then `RUN` it. The
+exact bytecode (captured from `thymiodirect`'s assembler on a real Thymio-II) is baked into
+the firmware — to play a different system sound only word[4] changes:
+
+```
+sound.system(N):  0003 ffff 0003 2000 000N 4002 2000 0002 c026 0000
+sound.freq(f,d):  0003 ffff 0003 2000 000f 4002 2000 000d 4003 2000 0002 2000 0003 c02b 0000
+```
+`c026`/`c02b` = `callnat` with the native-function index (sound.system=0x26, sound.freq=0x2b
+*on this firmware* — same firmware on every Thymio-II, so stable).
+
+Use it:
+- **CLI:** `thymio_link.py --sound 2` (system sound 0-7, -1 stops) or `--tone 700 30`
+  (freq Hz + duration in 1/60 s); in the REPL, `snd 2` / `tone 700 30`.
+- **Firmware cmd:** `{"target":"thymio","cmd":"thymio_sound","idx":0,"sys":2}` or
+  `{…,"freq":700,"dur":30}`.
+- **App / Python:** `robot.play_sound(system=2)` / `robot.play_sound(freq=700, duration_ms=500)`
+  — on `ThymioRobot` and both links (`ThymioGatewayLink` → the C6; `ThymioLink`/`ThymioDongle`
+  → the RF dongle via `th.run_asm`). `duration_ms` → the Thymio's 1/60 s unit automatically.
+
+To re-derive the map/bytecode for a different firmware, connect a Thymio over USB and use
+`thymiodirect`: `th.variable_offset/size(nid, name)`, `th.native_functions(nid)`,
+`th.run_asm(nid, asm)` (Assembler → set_bytecode → run).
 
 ### Gotchas that cost a day
 - **config→802.15.4-channel map is closed** (CC2533 firmware) — no formula, find it
@@ -131,9 +181,11 @@ the single-Thymio flow needs no address.)
 - **The Sonoff / OpenThread-RCP sniffer FILTERS OUT the Thymio's frames** (never showed
   PAN 0x4481). The **raw `esp_ieee802154` promiscuous** sniffer (our C6) sees them — use
   that.
-- **Antenna is decisive** for the *transmitter*, not just the sniffer: the boxed C6's chip
-  antenna ≈ −100 dBm barely reaches the robot (flaky, "works on the Nth try"); a XIAO C6
-  **with its U.FL antenna** is solid (−46 dBm). The poller needs the good antenna.
+- **Antenna — REASSESSED (2026-07-03): the chip antenna is plenty.** The bare-chip XIAO C6
+  drives the robot solidly at **20 m through a closed door**, no U.FL. The earlier "chip
+  antenna too weak / needs U.FL" was a **misdiagnosis** — the real culprits were the
+  `intr_alloc` leak (radio silently dying) and not polling continuously; once those were fixed
+  the chip antenna was fine. **No external antenna is needed** for a table/room study.
 - **The radio silently died after ~20 `tx` — `E intr_alloc: No free interrupt inputs for
   ZB_MAC`.** `doTx` called `esp_ieee802154_enable()` on *every* tx without a matching
   `disable()`, leaking the ZB_MAC interrupt allocation; once exhausted the radio stopped
@@ -269,6 +321,24 @@ Once boxed, the C6 has no USB to the PC — it updates over **WiFi-OTA** from th
 **Tools → Update Nodes (OTA)… → the "C6 (Thymio RCP)" row**, or `scripts/ota_c6_wifi.py`. The
 PC streams the image to the S3 over USB, the S3 buffers it in PSRAM and serves it at `/fw`,
 and the C6 joins the AP and pulls it — no box opening, no buttons.
+
+**AP credentials live on the gateway, in one place (2026-07-03).** The SoftAP name/password
+are stored on the S3 (NVS) and are edited in the **same OTA dialog** (AP network + New
+password + **Save AP**) — the separate *Tools → Gateway WiFi AP…* dialog was removed. The PC
+no longer sends credentials with the update: it sends `ota_wifi` **without** ssid/pass and the
+**gateway injects its own stored ones while forwarding** (`apInjectCreds`), so a renamed AP
+can't silently break OTA and the password never leaves the gateway. (The OTA dialog still
+auto-fills the SSID from the gateway via `get_ap`; an explicit ssid/pass passed by a script
+overrides the injection.)
+
+> **If a C6 WiFi-OTA fails at ~99% with `wifi`:** staging (PC→S3) finished but the C6 couldn't
+> join the S3's AP. Usual causes: (a) the gateway landed on a different `/dev/ttyACM*` and the
+> app talked to the wrong device — the box can present two USB serials (the S3 **and** a
+> Thymio-II if one is plugged); pin the gateway to its `/dev/serial/by-id/...` path; (b) the
+> C6's 802.15.4 radio was left busy (a prior Test Drive/Discover) — the firmware now quiets the
+> poller/sniffer/radio before WiFi, but that fix has to be flashed first (power-cycle the box
+> for a clean radio and OTA immediately). The node ESP-NOW flood also contends for the S3
+> radio — quiet/unplug the other nodes for the C6 update if it's flaky.
 
 > The old USB↔C6-UART flashing bridge (the `c6_bridge` gateway command + the BOOT/RST
 > auto-press wires) and `scripts/flash_c6_via_s3.sh` were **removed** — WiFi-OTA replaced

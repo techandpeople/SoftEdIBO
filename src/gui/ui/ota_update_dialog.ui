@@ -55,20 +55,25 @@
      </item>
      <item>
       <widget class="QLineEdit" name="ap_ssid_edit">
-       <property name="whatsThis"><string>Name (SSID) of the gateway's WiFi access point the node joins to download the firmware. Default "SoftEdIBO". The node connects to it; the PC does not.</string></property>
-       <property name="text"><string>SoftEdIBO</string></property>
+       <property name="whatsThis"><string>Name (SSID) of the gateway's WiFi access point — stored on the gateway itself and auto-filled from it. The updating node joins this network; the PC does not. Edit it and click Save AP to rename the network on the gateway.</string></property>
       </widget>
      </item>
      <item>
       <widget class="QLabel" name="ap_pass_label">
-       <property name="text"><string>Password:</string></property>
+       <property name="text"><string>New password:</string></property>
       </widget>
      </item>
      <item>
       <widget class="QLineEdit" name="ap_pass_edit">
-       <property name="whatsThis"><string>Password of the gateway's WiFi access point. Default "softedibo". Used by the node to join the AP; leave the default unless you changed it in Tools → Gateway WiFi AP….</string></property>
+       <property name="whatsThis"><string>Only to CHANGE the access point's password (WPA2, at least 8 characters) — leave blank to keep the current one. The stored password never leaves the gateway: during an update the gateway hands it to the node itself.</string></property>
        <property name="echoMode"><enum>QLineEdit::Password</enum></property>
-       <property name="text"><string>softedibo</string></property>
+       <property name="placeholderText"><string>unchanged</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="save_ap_btn">
+       <property name="text"><string>Save AP</string></property>
+       <property name="whatsThis"><string>Write the edited network name/password to the gateway (persisted on it, survives reboots). Updates use whatever is stored there — no need to retype anything here afterwards.</string></property>
       </widget>
      </item>
     </layout>
@@ -76,7 +81,7 @@
    <item>
     <widget class="QLabel" name="wifi_hint_label">
      <property name="wordWrap"><bool>true</bool></property>
-     <property name="text"><string>WiFi OTA (fast): needs the gateway's S3 access-point build (Tools → Flash Firmware). The PC stays on the USB cable — it streams the image to the gateway, which serves it to the node over WiFi.</string></property>
+     <property name="text"><string>WiFi OTA (fast): the PC streams the image to the gateway over USB and the node downloads it from the gateway's access point. The AP name/password live on the gateway — it hands them to the node itself, so normally there is nothing to fill in here.</string></property>
     </widget>
    </item>
    <item>

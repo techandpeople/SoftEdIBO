@@ -1,6 +1,6 @@
 """EspRobot — concrete base for any robot that drives ESP32 nodes via the gateway.
 
-Houses everything that's identical across TurtleTreeRobot, ThymioRobot:
+Houses everything that's identical across TurtleRobot, TreeRobot, ThymioRobot:
   * Controller dictionary built from ``node_configs``
   * ``configure`` push for ``node_multiplexed`` nodes
   * Skin dictionary built from ``skin_configs``
@@ -9,8 +9,8 @@ Houses everything that's identical across TurtleTreeRobot, ThymioRobot:
   * ``get_status_data()`` skeleton
   * Default ``connect()`` / ``disconnect()`` (subclasses override if they need more)
 
-Subclasses contribute their own behaviour on top: Turtle & Tree adds owner /
-sharing logic, Thymio adds tdm-client motors and LEDs.
+Subclasses contribute their own behaviour on top: Tree adds owner / sharing
+logic, Thymio adds tdm-client motors and LEDs.
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ class EspRobot(BaseRobot):
 
     Args:
         robot_id:          Unique identifier.
-        kind:              Display name ("Turtle & Tree", "Thymio", ...).
+        kind:              Display name ("Turtle", "Tree", "Thymio", ...).
         gateway:           Shared SoftEdIBO gateway. Required for hardware mode;
                            may be ``None`` for robots that boot in
                            "no-hardware" mode (e.g. ThymioRobot without nodes).
@@ -81,6 +81,25 @@ class EspRobot(BaseRobot):
     @property
     def skins(self) -> dict[str, Skin]:
         return self._skins
+
+    @property
+    def node_macs(self) -> list[str]:
+        """MAC addresses of this robot's configured ESP-NOW nodes."""
+        return list(self._controllers)
+
+    def nodes_seen_since(self, since: float) -> tuple[int, int]:
+        """``(alive, total)`` of this robot's nodes heard from after ``since``
+        (a ``time.monotonic()`` reference, e.g. taken just before a gateway
+        scan). ``(0, 0)`` when the robot has no nodes or no gateway — the
+        caller decides what that means (a bare wireless Thymio is still
+        usable when its transport is up)."""
+        if self._gateway is None or not self._controllers:
+            return 0, 0
+        alive = sum(
+            1 for mac in self._controllers
+            if (self._gateway.node_last_seen(mac) or 0) >= since
+        )
+        return alive, len(self._controllers)
 
     @property
     def total_chambers(self) -> int:

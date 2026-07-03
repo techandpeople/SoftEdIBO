@@ -38,8 +38,8 @@ def test_topology_metadata():
 
 def test_robot_type_name_and_label():
     assert ak.robot_type_name(ak.THYMIO) == "ThymioRobot"
-    assert ak.robot_type_name(ak.TURTLE) == "TurtleTreeRobot"
-    assert ak.robot_type_name(ak.TREE) == "TurtleTreeRobot"
+    assert ak.robot_type_name(ak.TURTLE) == "TurtleRobot"
+    assert ak.robot_type_name(ak.TREE) == "TreeRobot"
     assert ak.label(ak.TREE) == "Tree"
     assert ak.label("weird") == "weird"
 

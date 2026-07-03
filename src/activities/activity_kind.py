@@ -42,7 +42,7 @@ _PER_CHILD: dict[str, bool] = {THYMIO: True, TURTLE: False, TREE: True}
 # kind -> robot class NAME. Kept as a string so this module imports no robot/Qt
 # code; callers that filter live robots resolve the class themselves.
 _ROBOT_TYPE_NAME: dict[str, str] = {
-    THYMIO: "ThymioRobot", TURTLE: "TurtleTreeRobot", TREE: "TurtleTreeRobot"}
+    THYMIO: "ThymioRobot", TURTLE: "TurtleRobot", TREE: "TreeRobot"}
 # kind -> human label for pickers.
 _LABELS: dict[str, str] = {THYMIO: "Thymio", TURTLE: "Turtle", TREE: "Tree"}
 
@@ -76,7 +76,8 @@ def per_child(kind: Any) -> bool:
 
 
 def robot_type_name(kind: Any) -> str | None:
-    """The robot class name for a kind (``"ThymioRobot"`` / ``"TurtleTreeRobot"``)."""
+    """The robot class name for a kind (``"ThymioRobot"`` / ``"TurtleRobot"`` /
+    ``"TreeRobot"``)."""
     return _ROBOT_TYPE_NAME.get(kind)
 
 

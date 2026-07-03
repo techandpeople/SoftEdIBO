@@ -25,10 +25,11 @@ and by dragging blocks later. Shape::
 
 Each **step** is a single-key dict ``{verb: params}`` where ``params`` is a
 dict (or a scalar shorthand, e.g. ``{"wait": 500}``). Control-flow verbs
-(``sequence`` / ``repeat`` / ``for_each_chamber``) nest more steps under
-``do``. Instantaneous verbs apply immediately; ``wait`` / ``wait_for_touch``
-suspend the running sequence until satisfied — that is what lets an author
-write "inflate 1, wait, deflate 1, inflate 2 …" as a literal sequence.
+(``sequence`` / ``repeat`` / ``for_each_chamber`` / ``if_robot``) nest more
+steps under ``do`` (and ``else`` for ``if_robot``). Instantaneous verbs apply
+immediately; ``wait`` / ``wait_for_touch`` suspend the running sequence until
+satisfied — that is what lets an author write "inflate 1, wait, deflate 1,
+inflate 2 …" as a literal sequence.
 
 A **condition** is a single-key dict too: ``{"elapsed_ms": 120000}``,
 ``{"touch_count": {"min": 10}}``, or a combinator ``{"any": [..]}`` /
@@ -40,7 +41,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from src.activities import activity_kind
+from src.activities import activity_kind, skin_condition
 
 
 @dataclass(frozen=True)
@@ -60,8 +61,9 @@ class Verb:
     description: str
     fields: tuple[VerbField, ...] = field(default_factory=tuple)
     # Activity kinds (activity_kind.KINDS) the verb is restricted to. Empty =
-    # valid everywhere. E.g. the Thymio wheel verbs only make sense in a
-    # thymio-targeted spec, and the editor only offers them there.
+    # valid everywhere. Only enforced for LEGACY kind-targeted specs: a
+    # skin-targeted behaviour may use e.g. the Thymio wheel verbs anywhere
+    # (wrap them in an `if_robot` block; on other robots they no-op).
     kinds: tuple[str, ...] = ()
 
 
@@ -206,7 +208,7 @@ ACTIONS: tuple[Verb, ...] = (
     Verb("log", "action", "Write a line to the activity log (debugging).", (
         VerbField("message", "enum", ""),
     )),
-    # --- Thymio wheeled base (thymio-targeted specs only) ---
+    # --- Thymio wheeled base (no-ops on robots without wheels) ---
     Verb("thymio_drive", "action",
          "Set the Thymio's wheel speeds — optionally for a fixed time, then "
          "stop. 0/0 stops the wheels.", (
@@ -238,6 +240,16 @@ CONTROL: tuple[Verb, ...] = (
     Verb("for_each_chamber", "control",
          "Run the nested steps once per chamber, binding 'current' to each.", (
         VerbField("do", "steps", []),
+    )),
+    Verb("if_robot", "control",
+         "Run 'do' when the unit's robot is the chosen kind, else 'else'. "
+         "Lets one behaviour cover every robot — e.g. only the Thymio drives "
+         "while the Turtle and Tree skip that part.", (
+        VerbField("robot", "enum", activity_kind.THYMIO,
+                  choices=activity_kind.KINDS,
+                  description="Robot kind the 'do' branch runs on."),
+        VerbField("do", "steps", []),
+        VerbField("else", "steps", []),
     )),
 )
 
@@ -274,6 +286,12 @@ CONDITIONS: tuple[Verb, ...] = (
         VerbField("bad_op", "enum", "<=", choices=(">=", "<=", "=="),
                   description="How to compare the bad-organ count."),
         VerbField("bad", "int", 0, description="Bad-organ count threshold."),
+    )),
+    Verb("robot_is", "condition",
+         "True when the unit's robot is the chosen kind — lets a transition "
+         "fire only on one robot.", (
+        VerbField("robot", "enum", activity_kind.THYMIO,
+                  choices=activity_kind.KINDS),
     )),
     Verb("always", "condition", "Always true (unconditional transition).", ()),
 )
@@ -321,8 +339,9 @@ def validate_spec(spec: dict[str, Any]) -> None:
     if initial not in states:
         raise SpecError(f"spec.initial {initial!r} is not a defined state")
 
-    # Optional activity target (robot kind + skin variant). Absent = legacy "any"
-    # behaviour that runs on whatever robot is picked.
+    # Optional activity target. New-style: {"skin": <condition>} — the robot
+    # is chosen at session start and `if_robot` blocks gate robot-specific
+    # steps. Legacy: {"kind": <robot kind>}. Absent = "any" behaviour.
     target = spec.get("target")
     if target is not None:
         _validate_target(target)
@@ -344,22 +363,39 @@ def validate_spec(spec: dict[str, Any]) -> None:
 
 
 def _validate_target(target: Any) -> None:
-    """Check an optional ``spec.target`` (robot kind + skin variant)."""
+    """Check an optional ``spec.target``: new-style ``{"skin": <condition>}``
+    or legacy ``{"kind": <robot kind>}`` (at least one must be present)."""
     if not isinstance(target, dict):
         raise SpecError("spec.target must be a dict")
+    skin = target.get("skin")
     kind = target.get("kind")
-    if not activity_kind.is_kind(kind):
+    if skin is None and kind is None:
+        raise SpecError("spec.target needs a 'skin' (or legacy 'kind')")
+    if skin is not None and not skin_condition.is_condition(skin):
+        raise SpecError(
+            f"spec.target.skin {skin!r} is not a known skin condition")
+    if kind is not None and not activity_kind.is_kind(kind):
         raise SpecError(f"spec.target.kind {kind!r} is not a known activity kind")
-    # ``skin_variant`` is optional and validated against the type at session setup.
 
 
 def spec_target(spec: dict[str, Any]) -> dict[str, str] | None:
-    """The activity's declared target ``{kind, skin_variant}``, or ``None`` (legacy
-    'any' behaviour). Assumes ``spec`` already passed :func:`validate_spec`."""
+    """The activity's declared target, or ``None`` (target-less 'any'
+    behaviour). New-style targets carry ``{"skin": <condition>}``; legacy ones
+    ``{"kind": <robot kind>}``. Assumes ``spec`` passed :func:`validate_spec`."""
     t = spec.get("target")
-    if isinstance(t, dict) and activity_kind.is_kind(t.get("kind")):
-        return {"kind": t["kind"], "skin_variant": t.get("skin_variant", "") or ""}
-    return None
+    if not isinstance(t, dict):
+        return None
+    out: dict[str, str] = {}
+    if skin_condition.is_condition(t.get("skin")):
+        out["skin"] = t["skin"]
+    if activity_kind.is_kind(t.get("kind")):
+        out["kind"] = t["kind"]
+    return out or None
+
+
+def spec_skin(spec: dict[str, Any]) -> str | None:
+    """The activity's declared skin condition, or ``None``."""
+    return (spec_target(spec) or {}).get("skin")
 
 
 def _validate_steps(steps: Any, where: str, kind: str | None = None) -> None:
@@ -371,14 +407,23 @@ def _validate_steps(steps: Any, where: str, kind: str | None = None) -> None:
         name = next(iter(step))
         if name not in STEP_NAMES:
             raise SpecError(f"{where}[{i}] unknown verb {name!r}")
-        v = _ALL_VERBS.get(name)
-        if v is not None and v.kinds and kind not in v.kinds:
-            raise SpecError(
-                f"{where}[{i}] verb {name!r} needs a spec.target of kind "
-                f"{' / '.join(v.kinds)} (got {kind!r})")
+        _check_verb_kind(_ALL_VERBS.get(name), name, kind, f"{where}[{i}]")
         params = step[name]
         if name in CONTROL_NAMES and isinstance(params, dict):
             _validate_steps(params.get("do", []), f"{where}[{i}].do", kind)
+            _validate_steps(params.get("else", []),
+                            f"{where}[{i}].else", kind)
+
+
+def _check_verb_kind(v: Verb | None, name: str, kind: str | None,
+                     where: str) -> None:
+    """Kind gating for LEGACY kind-targeted specs only; skin-targeted and
+    target-less specs may use robot-specific verbs anywhere (they no-op on
+    other robots — wrap in `if_robot` to be explicit)."""
+    if v is not None and v.kinds and kind is not None and kind not in v.kinds:
+        raise SpecError(
+            f"{where} verb {name!r} needs a spec.target of kind "
+            f"{' / '.join(v.kinds)} (got {kind!r})")
 
 
 def _validate_cond(cond: Any, where: str) -> None:

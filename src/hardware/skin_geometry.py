@@ -50,7 +50,7 @@ class SkinGeometry:
     shape: str
     size_mm: tuple[float, float]
     sensors_mm: tuple[tuple[float, float], ...] = ()
-    robot_kind: str = ""          # "turtle_tree" | "thymio" (for GUI filtering)
+    robot_kind: str = ""          # "turtle" | "tree" | "thymio" (for GUI filtering)
     functional: bool = True
     notes: str = ""
 
@@ -119,14 +119,14 @@ SKIN_GEOMETRIES: dict[str, SkinGeometry] = {
     # Turtle — central square pad.
     "turtle_square": SkinGeometry(
         skin_type="turtle_square", shape="rect", size_mm=(125.0, 125.0),
-        sensors_mm=_grid_2x2(125.0, 125.0), robot_kind="turtle_tree",
+        sensors_mm=_grid_2x2(125.0, 125.0), robot_kind="turtle",
         notes="Turtle central square, 4 sensors at quadrant centres.",
     ),
     # Turtle — lateral rectangles (left/right flanks). Only 2 sensors fit on the
     # narrow 75 mm width, stacked along the 125 mm length.
     "turtle_side": SkinGeometry(
         skin_type="turtle_side", shape="rect", size_mm=(75.0, 125.0),
-        sensors_mm=((37.5, 41.67), (37.5, 83.33)), robot_kind="turtle_tree",
+        sensors_mm=((37.5, 41.67), (37.5, 83.33)), robot_kind="turtle",
         notes="Turtle side rectangle, 2 sensors at 1/3 and 2/3 of the length. "
               "TODO: confirm exact positions on the real build.",
     ),
@@ -135,7 +135,7 @@ SKIN_GEOMETRIES: dict[str, SkinGeometry] = {
     "turtle_triangle": SkinGeometry(
         skin_type="turtle_triangle", shape="triangle", size_mm=(75.0, 75.0),
         sensors_mm=((37.5, 25.0), (20.0, 60.0), (55.0, 60.0), (37.5, 45.0)),
-        robot_kind="turtle_tree",
+        robot_kind="turtle",
         notes="TODO: measure — functional corner triangle sensor positions.",
     ),
     # Tree — round branch skins, Ø99 mm. A single sensor at the centre (one
@@ -143,7 +143,7 @@ SKIN_GEOMETRIES: dict[str, SkinGeometry] = {
     "tree_round": SkinGeometry(
         skin_type="tree_round", shape="round", size_mm=(99.0, 99.0),
         sensors_mm=((49.5, 49.5),),
-        robot_kind="turtle_tree",
+        robot_kind="tree",
         notes="Tree branch, Ø99 round, single central sensor.",
     ),
     # Thymio — 'D' (rotated +90°): semicircular bulge on top, flat bottom.
@@ -261,7 +261,7 @@ def variant_label(skin_variant: str | None) -> str:
 
 
 def skin_types_for(robot_kind: str | None) -> list[str]:
-    """Skin types belonging to a robot kind ("turtle_tree"/"thymio").
+    """Skin types belonging to a robot kind ("turtle"/"tree"/"thymio").
 
     Used by the GUI so configuring a robot only offers its own skin types.
     Empty/unknown ``robot_kind`` returns all types."""
