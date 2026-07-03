@@ -290,7 +290,10 @@ static void thymioForward(cJSON* doc) {
 
 // C6 -> PC: read lines from the C6 and forward them tagged with source "thymio".
 static void thymioRxTask(void*) {
-    static char line[256];
+    // Must hold the C6's longest line: a sniff frame is ~54 chars of envelope +
+    // 2 hex chars per captured byte (~320 chars at the full 127-byte PSDU), so
+    // 256 truncated near-max frames into unparseable "raw" lines.
+    static char line[384];
     size_t      llen = 0;
     uint8_t     rx[128];
     for (;;) {

@@ -347,8 +347,8 @@ class C6WifiOTAUpdater(WifiOTAUpdater):
     """
 
     TARGET = "thymio"
-    # The C6 retries the pull internally (OTA_ATTEMPTS), so allow for several attempts
-    # over the shared-radio AP before giving up.
+    # Allow for several pull attempts over the shared-radio AP before giving up
+    # (the AP can drop a sustained download when ESP-NOW contends for the radio).
     DONE_TIMEOUT = 180.0
 
     def __init__(self, gateway, firmware_path, ssid: str = "",
@@ -373,8 +373,21 @@ class C6WifiOTAUpdater(WifiOTAUpdater):
             return True
         if mtype == "ota_wifi_fail":
             self._error = str(data.get("reason", "wifi_fail"))
-            code, err = data.get("code"), data.get("err")
-            if code is not None:
-                self._error_detail = f" (code {code}, err {err})"
+            # The C6 reports the HTTPUpdate error as "err"; keep "code" for parity
+            # with node-style failures.
+            detail = ", ".join(f"{k} {v}" for k in ("code", "err")
+                               if (v := data.get(k)) is not None)
+            if detail:
+                self._error_detail = f" ({detail})"
             return True
         return super()._handle_node(mtype, data)
+
+    def _start_failure_message(self) -> str:
+        msg = super()._start_failure_message()
+        if not self._cancelled and not self._error:
+            # The gateway only forwards the "thymio" target when built with
+            # GATEWAY_THYMIO; on any other build the command is silently dropped.
+            msg = ("C6 did not accept the WiFi update (no ota_wifi_start). "
+                   "Is the gateway built with Thymio support (GATEWAY_THYMIO) "
+                   "and the C6 connected?")
+        return msg

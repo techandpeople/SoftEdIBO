@@ -134,12 +134,20 @@ class ContinuousFillCalibrator:
         self.max_total_ms = float(max_total_ms)
         self._points: list[tuple[float, float]] = [(0.0, 0.0)]   # ambient anchor
         self._elapsed = 0.0
+        self._top_pct = 0.0
         self.done = False
         self.timed_out = False
 
     @property
     def elapsed_ms(self) -> float:
         return self._elapsed
+
+    @property
+    def top_pct(self) -> float:
+        """Highest pressure recorded so far — cheap live-progress readout (the
+        :attr:`profile` property builds a whole FillProfile per call, far too
+        heavy for a per-telemetry-message progress bar)."""
+        return self._top_pct
 
     @property
     def samples(self) -> int:
@@ -161,6 +169,7 @@ class ContinuousFillCalibrator:
         pct = max(0.0, min(100.0, float(pressure_pct)))
         self._points.append((t, pct))
         self._elapsed = t
+        self._top_pct = max(self._top_pct, pct)
         if pct >= self.target_pct:
             self.done = True
         elif t >= self.max_total_ms:

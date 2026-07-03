@@ -1,0 +1,305 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>TestThymioDialog</class>
+ <widget class="QDialog" name="TestThymioDialog">
+  <property name="geometry">
+   <rect><x>0</x><y>0</y><width>520</width><height>620</height></rect>
+  </property>
+  <property name="windowTitle"><string>Test Thymio</string></property>
+  <layout class="QVBoxLayout" name="main_layout">
+   <item>
+    <widget class="QLabel" name="intro_label">
+     <property name="text"><string>Thymio</string></property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QLabel" name="status_label">
+     <property name="text"><string/></property>
+     <property name="wordWrap"><bool>true</bool></property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="drive_group">
+     <property name="title"><string>Drive</string></property>
+     <property name="whatsThis"><string>Jog the wheeled base. Forward/Back/Left/Right drive at the chosen speed and hold until you press Stop (the link keeps re-asserting the target). Needs the wheels-wireless link reachable (dongle plugged / gateway connected).</string></property>
+     <layout class="QGridLayout" name="drive_grid">
+      <item row="0" column="0">
+       <widget class="QLabel" name="speed_label">
+        <property name="text"><string>Speed:</string></property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QSpinBox" name="speed_spin">
+        <property name="whatsThis"><string>Wheel target magnitude (Thymio units, roughly -500..500). Forward/turn buttons use this speed.</string></property>
+        <property name="minimum"><number>0</number></property>
+        <property name="maximum"><number>500</number></property>
+        <property name="singleStep"><number>25</number></property>
+        <property name="value"><number>150</number></property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QPushButton" name="fwd_btn">
+        <property name="text"><string>▲ Forward</string></property>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="QPushButton" name="left_btn">
+        <property name="text"><string>◄ Left</string></property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="QPushButton" name="stop_btn">
+        <property name="text"><string>■ Stop</string></property>
+       </widget>
+      </item>
+      <item row="2" column="2">
+       <widget class="QPushButton" name="right_btn">
+        <property name="text"><string>Right ►</string></property>
+       </widget>
+      </item>
+      <item row="3" column="1">
+       <widget class="QPushButton" name="back_btn">
+        <property name="text"><string>▼ Back</string></property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="leds_group">
+     <property name="title"><string>Top LED</string></property>
+     <property name="whatsThis"><string>Set the Thymio's top LED colour. Each channel is 0..32 (Aseba scale). Apply sends the colour; Off turns the LED off.</string></property>
+     <layout class="QHBoxLayout" name="leds_row">
+      <item>
+       <widget class="QLabel" name="led_r_label">
+        <property name="text"><string>R</string></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QSpinBox" name="led_r_spin">
+        <property name="maximum"><number>32</number></property>
+        <property name="value"><number>32</number></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLabel" name="led_g_label">
+        <property name="text"><string>G</string></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QSpinBox" name="led_g_spin">
+        <property name="maximum"><number>32</number></property>
+        <property name="value"><number>0</number></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLabel" name="led_b_label">
+        <property name="text"><string>B</string></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QSpinBox" name="led_b_spin">
+        <property name="maximum"><number>32</number></property>
+        <property name="value"><number>0</number></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="led_apply_btn">
+        <property name="text"><string>Apply</string></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="led_off_btn">
+        <property name="text"><string>Off</string></property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="sound_group">
+     <property name="title"><string>Sound</string></property>
+     <property name="whatsThis"><string>Play a sound on the Thymio. "System" plays a built-in sound 0-7 (-1 stops). "Tone" plays a frequency (Hz) for a duration (ms). The wheels keep their targets, so a driving robot beeps without stopping.</string></property>
+     <layout class="QGridLayout" name="sound_grid">
+      <item row="0" column="0">
+       <widget class="QLabel" name="sys_label">
+        <property name="text"><string>System sound (-1..7):</string></property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QSpinBox" name="sys_spin">
+        <property name="minimum"><number>-1</number></property>
+        <property name="maximum"><number>7</number></property>
+        <property name="value"><number>2</number></property>
+       </widget>
+      </item>
+      <item row="0" column="2">
+       <widget class="QPushButton" name="sys_play_btn">
+        <property name="text"><string>Play system</string></property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="tone_label">
+        <property name="text"><string>Tone Hz / ms:</string></property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <layout class="QHBoxLayout" name="tone_row">
+        <item>
+         <widget class="QSpinBox" name="tone_freq_spin">
+          <property name="minimum"><number>50</number></property>
+          <property name="maximum"><number>10000</number></property>
+          <property name="singleStep"><number>50</number></property>
+          <property name="value"><number>700</number></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QSpinBox" name="tone_dur_spin">
+          <property name="minimum"><number>10</number></property>
+          <property name="maximum"><number>5000</number></property>
+          <property name="singleStep"><number>50</number></property>
+          <property name="value"><number>300</number></property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item row="1" column="2">
+       <widget class="QPushButton" name="tone_play_btn">
+        <property name="text"><string>Play tone</string></property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="sensors_group">
+     <property name="title"><string>Sensors &amp; impact</string></property>
+     <property name="whatsThis"><string>Live accelerometer and mic readout streamed from the Thymio over the gateway/C6 link. "Impact" is how far the accelerometer is from rest (0,0,20); a knock spikes it. Set the threshold above the resting value and below a real knock — calibrate by knocking the robot and watching the bar cross the line. The tuned threshold is written back to the robot config on close.</string></property>
+     <layout class="QVBoxLayout" name="sensors_vbox">
+      <item>
+       <widget class="QLabel" name="sensors_status_label">
+        <property name="text"><string>Waiting for sensor data… (needs the gateway/C6 wireless link on)</string></property>
+        <property name="wordWrap"><bool>true</bool></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLabel" name="acc_label">
+        <property name="text"><string>acc:  x —  y —  z —</string></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLabel" name="ground_label">
+        <property name="text"><string>ground: —  —      on the table</string></property>
+       </widget>
+      </item>
+      <item>
+       <layout class="QHBoxLayout" name="mic_row">
+        <item>
+         <widget class="QLabel" name="mic_name_label">
+          <property name="minimumSize"><size><width>40</width><height>0</height></size></property>
+          <property name="text"><string>mic</string></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QProgressBar" name="mic_bar">
+          <property name="maximum"><number>300</number></property>
+          <property name="value"><number>0</number></property>
+          <property name="textVisible"><bool>false</bool></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLabel" name="mic_value_label">
+          <property name="minimumSize"><size><width>60</width><height>0</height></size></property>
+          <property name="text"><string>—</string></property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <layout class="QHBoxLayout" name="dev_row">
+        <item>
+         <widget class="QLabel" name="dev_name_label">
+          <property name="minimumSize"><size><width>40</width><height>0</height></size></property>
+          <property name="text"><string>impact</string></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QProgressBar" name="dev_bar">
+          <property name="maximum"><number>60</number></property>
+          <property name="value"><number>0</number></property>
+          <property name="textVisible"><bool>false</bool></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLabel" name="dev_value_label">
+          <property name="minimumSize"><size><width>60</width><height>0</height></size></property>
+          <property name="text"><string>—</string></property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <layout class="QHBoxLayout" name="threshold_row">
+        <item>
+         <widget class="QLabel" name="threshold_label">
+          <property name="text"><string>Impact threshold:</string></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QDoubleSpinBox" name="threshold_spin">
+          <property name="whatsThis"><string>Deviation of the accelerometer from rest above which a reading counts as a knock. Lower = more sensitive. Calibrate by knocking the robot and watching the impact bar cross this value.</string></property>
+          <property name="decimals"><number>0</number></property>
+          <property name="minimum"><double>1.000000000000000</double></property>
+          <property name="maximum"><double>500.000000000000000</double></property>
+          <property name="singleStep"><double>5.000000000000000</double></property>
+          <property name="value"><double>20.000000000000000</double></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLabel" name="impact_label">
+          <property name="text"><string>knocks: 0</string></property>
+         </widget>
+        </item>
+        <item>
+         <spacer name="threshold_spacer">
+          <property name="orientation"><enum>Qt::Horizontal</enum></property>
+          <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+         </spacer>
+        </item>
+       </layout>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <spacer name="vertical_spacer">
+     <property name="orientation"><enum>Qt::Vertical</enum></property>
+     <property name="sizeHint" stdset="0"><size><width>20</width><height>10</height></size></property>
+    </spacer>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="buttons_row">
+     <item>
+      <widget class="QPushButton" name="stop_all_btn">
+       <property name="whatsThis"><string>Stop the wheels and turn the top LED off.</string></property>
+       <property name="text"><string>Stop All</string></property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="buttons_spacer">
+       <property name="orientation"><enum>Qt::Horizontal</enum></property>
+       <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="QPushButton" name="close_btn">
+       <property name="text"><string>Close</string></property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

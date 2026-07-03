@@ -83,6 +83,18 @@ def test_continuous_sweep_times_out_on_creep():
     assert cal.profile.top_pct == 70
 
 
+def test_continuous_sweep_tracks_top_pct_cheaply():
+    cal = ContinuousFillCalibrator(target_pct=95)
+    assert cal.top_pct == 0
+    cal.record(100, 40)
+    assert cal.top_pct == 40
+    cal.record(200, 35)                       # sensor dip — top holds
+    assert cal.top_pct == 40
+    cal.record(300, 96)
+    assert cal.top_pct == 96
+    assert cal.top_pct == cal.profile.top_pct
+
+
 def test_continuous_sweep_ignores_non_monotone_samples():
     cal = ContinuousFillCalibrator(target_pct=95)
     assert cal.record(100, 30) is False

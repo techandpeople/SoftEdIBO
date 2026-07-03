@@ -64,6 +64,15 @@ class _Unit:
     state: str = ""
     state_entered: float = 0.0
     touch_count: int = 0
+    # Impacts (Thymio knocks) counted in the current state, plus the subscription
+    # we installed on the robot's link so `stop` can remove it. impact_levels holds
+    # one intensity (1 touch/2 knock/3 slap) per knock so `on_impact` can filter by
+    # level. lifted_count / lifted_cb mirror this for the ground (lift) sensor.
+    impact_count: int = 0
+    impact_levels: list = field(default_factory=list)
+    impact_cb: Any = None
+    lifted_count: int = 0
+    lifted_cb: Any = None
     touch_seq: int = 0
     touch_seq_by_chamber: dict[int, int] = field(default_factory=dict)
     active_touch: set[int] = field(default_factory=set)
@@ -145,6 +154,8 @@ class ScriptedActivity(BaseActivity):
                 )
                 self._units[unit.unit_id] = unit
                 self._subscribe_touch(unit)
+                self._subscribe_impact(unit)
+                self._subscribe_lifted(unit)
                 self._setup_organs(unit, skin)
             if not skins:
                 # A robot without skins (e.g. a bare Thymio) still runs the
@@ -153,6 +164,8 @@ class ScriptedActivity(BaseActivity):
                 unit = _Unit(unit_id=robot.robot_id, robot=robot,
                              skin=None, ctrl=None, chambers=[])
                 self._units[unit.unit_id] = unit
+                self._subscribe_impact(unit)
+                self._subscribe_lifted(unit)
         logger.info("ScriptedActivity %r set up: %d units",
                     self.name, len(self._units))
 
@@ -188,6 +201,8 @@ class ScriptedActivity(BaseActivity):
                     logger.exception("set_led off failed on %s", unit.unit_id)
             # Wheeled bases (Thymio) must not keep driving past the activity.
             self._thymio_call(unit, "set_motors", 0, 0)
+            self._unsubscribe_impact(unit)
+            self._unsubscribe_lifted(unit)
         self._units.clear()
         logger.info("ScriptedActivity %r stopped", self.name)
 
@@ -297,6 +312,9 @@ class ScriptedActivity(BaseActivity):
         unit.state = state
         unit.state_entered = time.monotonic()
         unit.touch_count = 0
+        unit.impact_count = 0
+        unit.impact_levels.clear()
+        unit.lifted_count = 0
         unit.aux.clear()
         body = self._states.get(state, {}).get("do", [])
         unit.runner = self._run_steps(unit, body, {})
@@ -338,6 +356,20 @@ class ScriptedActivity(BaseActivity):
         if name == "touch_count":
             need = val.get("min", val) if isinstance(val, dict) else val
             return unit.touch_count >= int(need)
+        if name == "on_impact":
+            if isinstance(val, dict):
+                need = int(val.get("min", 1))
+                level = int(val.get("level", 1))
+            else:
+                need = int(val) if val is not None else 1
+                level = 1
+            return sum(1 for lv in unit.impact_levels if lv >= level) >= need
+        if name == "on_lifted":
+            if isinstance(val, dict):
+                need = val.get("min", 1)
+            else:
+                need = val if val is not None else 1
+            return unit.lifted_count >= int(need)
         if name == "any":
             return any(self._eval_cond(unit, c) for c in (val or []))
         if name == "all":
@@ -576,12 +608,12 @@ class ScriptedActivity(BaseActivity):
             yield ("ms", ms)
             self._thymio_call(unit, "set_motors", 0, 0)
 
-    def _thymio_call(self, unit: _Unit, method: str, *args) -> None:
+    def _thymio_call(self, unit: _Unit, method: str, *args, **kwargs) -> None:
         """Invoke a wheeled-base method on the unit's robot, if it has one.
 
         Duck-typed (no robot-class import): non-Thymio robots simply lack
-        ``set_motors``/``set_leds`` and the verb is a logged no-op — that is
-        what lets one skin-targeted behaviour run on every robot, with
+        ``set_motors``/``set_leds``/``play_sound`` and the verb is a logged no-op
+        — that is what lets one skin-targeted behaviour run on every robot, with
         `if_robot` blocks (or this no-op) skipping the wheeled parts."""
         fn = getattr(unit.robot, method, None)
         if fn is None:
@@ -589,9 +621,75 @@ class ScriptedActivity(BaseActivity):
                          unit.unit_id, method)
             return
         try:
-            fn(*args)
+            fn(*args, **kwargs)
         except Exception:   # noqa: BLE001 — a bad link must not kill the tick
             logger.exception("%s%r failed on %s", method, args, unit.unit_id)
+
+    # ------------------------------------------------------------------
+    # Impact input (for `on_impact` conditions) — Thymio knocks
+    # ------------------------------------------------------------------
+
+    def _subscribe_impact(self, unit: _Unit) -> None:
+        """Subscribe to the robot's knock stream, if it exposes one.
+
+        Duck-typed like the wheeled-base calls: only a Thymio (with a link) has
+        ``on_impact``; other robots skip it. Each knock records its intensity for the
+        `on_impact` condition (which can filter by level)."""
+        on_impact = getattr(unit.robot, "on_impact", None)
+        if on_impact is None:
+            return
+        cb = lambda level=1, u=unit: self._on_impact(u, level)   # noqa: E731
+        try:
+            on_impact(cb)
+        except Exception:   # noqa: BLE001
+            logger.exception("on_impact subscribe failed on %s", unit.unit_id)
+            return
+        unit.impact_cb = cb
+
+    def _unsubscribe_impact(self, unit: _Unit) -> None:
+        if unit.impact_cb is None:
+            return
+        remove = getattr(unit.robot, "remove_impact_listener", None)
+        if remove is not None:
+            try:
+                remove(unit.impact_cb)
+            except Exception:   # noqa: BLE001
+                logger.exception("on_impact unsubscribe failed on %s", unit.unit_id)
+        unit.impact_cb = None
+
+    def _on_impact(self, unit: _Unit, level: int = 1) -> None:
+        """Robot read-thread callback: record a knock (with intensity) for `on_impact`."""
+        unit.impact_count += 1
+        unit.impact_levels.append(int(level))
+
+    def _subscribe_lifted(self, unit: _Unit) -> None:
+        """Subscribe to the robot's lift stream (ground sensors), if it exposes one."""
+        on_lifted = getattr(unit.robot, "on_lifted", None)
+        if on_lifted is None:
+            return
+        cb = lambda lifted, u=unit: self._on_lifted(u, lifted)   # noqa: E731
+        try:
+            on_lifted(cb)
+        except Exception:   # noqa: BLE001
+            logger.exception("on_lifted subscribe failed on %s", unit.unit_id)
+            return
+        unit.lifted_cb = cb
+
+    def _unsubscribe_lifted(self, unit: _Unit) -> None:
+        if unit.lifted_cb is None:
+            return
+        remove = getattr(unit.robot, "remove_lifted_listener", None)
+        if remove is not None:
+            try:
+                remove(unit.lifted_cb)
+            except Exception:   # noqa: BLE001
+                logger.exception("on_lifted unsubscribe failed on %s", unit.unit_id)
+        unit.lifted_cb = None
+
+    def _on_lifted(self, unit: _Unit, lifted: bool) -> None:
+        """Robot read-thread callback: count a lift-off event for `on_lifted`."""
+        if lifted:
+            unit.lifted_count += 1
 
     @staticmethod
     def _parse_rgb(hex_colour: str) -> tuple[int, int, int]:
@@ -649,6 +747,18 @@ class ScriptedActivity(BaseActivity):
             # Aseba leds.top expects 0..32 per channel, not 0..255.
             self._thymio_call(unit, "set_leds",
                               r * 32 // 255, g * 32 // 255, b * 32 // 255)
+        elif verb == "thymio_sound":
+            # Priority: microSD track (≥0) → tone (freq > 0) → system sound.
+            track = int(params.get("track", -1))
+            freq = int(params.get("freq") or 0)
+            if track >= 0:
+                self._thymio_call(unit, "play_sound", track=track)
+            elif freq > 0:
+                self._thymio_call(unit, "play_sound", freq=freq,
+                                  duration_ms=int(params.get("dur", 500) or 500))
+            else:
+                self._thymio_call(unit, "play_sound",
+                                  system=int(params.get("sys", 2)))
         elif verb == "log":
             logger.info("Scripted %s: %s", unit.unit_id,
                         params.get("message", params.get("_value", "")))

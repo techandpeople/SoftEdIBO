@@ -64,6 +64,7 @@ class ThymioConfigForm(QWidget, Ui_ThymioConfigForm):
         self.node_id_spin.setValue(int(cfg.get("node_id", 0) or 0))
         self.channel_spin.setValue(int(cfg.get("channel", 25)))
         self.addr_edit.setText(cfg.get("thymio_addr", ""))
+        self.impact_spin.setValue(float(cfg.get("impact_threshold", 20.0) or 20.0))
         self._update_enables()
 
     def values(self) -> dict:
@@ -75,11 +76,17 @@ class ThymioConfigForm(QWidget, Ui_ThymioConfigForm):
             "node_id": self.node_id_spin.value(),
             "channel": self.channel_spin.value(),
             "thymio_addr": self.addr_edit.text().strip(),
+            "impact_threshold": self.impact_spin.value(),
         }
 
     def thymio_id(self) -> str:
         """The (stripped) Thymio ID currently typed."""
         return self.id_edit.text().strip()
+
+    def set_impact_threshold(self, value: float) -> None:
+        """Write a calibrated impact threshold into the form (from Test Thymio), so
+        saving the config persists it."""
+        self.impact_spin.setValue(float(value))
 
     # ------------------------------------------------------------------
     # Behaviour
@@ -93,6 +100,7 @@ class ThymioConfigForm(QWidget, Ui_ThymioConfigForm):
         self.channel_spin.setEnabled(gw)
         self.addr_edit.setEnabled(gw)
         self.discover_btn.setEnabled(gw)
+        self.impact_spin.setEnabled(gw)
 
     def _on_discover(self) -> None:
         """Open the guided dongle-free scan and take the picked address.

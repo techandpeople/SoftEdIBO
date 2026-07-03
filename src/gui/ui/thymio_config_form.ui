@@ -85,6 +85,21 @@
      </item>
     </layout>
    </item>
+   <item row="7" column="0">
+    <widget class="QLabel" name="impact_label">
+     <property name="text"><string>Impact threshold (C6):</string></property>
+    </widget>
+   </item>
+   <item row="7" column="1">
+    <widget class="QDoubleSpinBox" name="impact_spin">
+     <property name="decimals"><number>0</number></property>
+     <property name="minimum"><double>1.000000000000000</double></property>
+     <property name="maximum"><double>500.000000000000000</double></property>
+     <property name="singleStep"><double>5.000000000000000</double></property>
+     <property name="value"><double>20.000000000000000</double></property>
+     <property name="whatsThis"><string>How hard a knock counts as an "impact" for the on_impact behaviour block (Gateway C6 transport). It's the accelerometer's deviation from rest; lower = more sensitive. Calibrate it live in Test Thymio by knocking the robot and watching the impact bar.</string></property>
+    </widget>
+   </item>
   </layout>
  </widget>
  <resources/>

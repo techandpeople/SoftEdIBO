@@ -29,14 +29,18 @@ def test_parse_ignores_ack_and_other_pans():
     assert parse_thymio_addr("nothex") is None
 
 
-# --- end-to-end discovery over a fake sniffing gateway ---------------------
+# --- end-to-end discovery over a fake active-discovery gateway -------------
 
-class _FakeSniffGateway:
-    """Feeds canned sniff frames to the raw callback when sniff_start is sent."""
+class _FakeDiscoverGateway:
+    """Emits ``thymio_found`` lines to the raw callback when discovery starts.
 
-    def __init__(self, frames, connected=True):
+    Mirrors the C6: ``thymio_discover`` on=True broadcasts LIST_NODES and reports
+    each replying robot as ``{"type":"thymio_found","addr":...}``.
+    """
+
+    def __init__(self, addrs, connected=True):
         self.is_connected = connected
-        self._frames = frames
+        self._addrs = addrs
         self._raw_cbs: list = []
         self.sent: list = []
 
@@ -49,8 +53,22 @@ class _FakeSniffGateway:
 
     def send(self, target, cmd, **kwargs):
         self.sent.append((target, cmd, kwargs))
-        if cmd == "sniff_start":
-            for data in self._frames:
+        if cmd == "thymio_discover" and kwargs.get("on"):
+            for addr in self._addrs:
+                line = json.dumps({"type": "thymio_found", "src": "c6", "addr": addr})
+                for cb in list(self._raw_cbs):
+                    cb("rx", line)
+        return True
+
+
+class _FakeLegacyFrameGateway(_FakeDiscoverGateway):
+    """An old C6 that answers discovery by streaming raw ``frame`` lines instead
+    of ``thymio_found`` — exercises the passive fallback parse."""
+
+    def send(self, target, cmd, **kwargs):
+        self.sent.append((target, cmd, kwargs))
+        if cmd == "thymio_discover" and kwargs.get("on"):
+            for data in self._addrs:                     # here _addrs holds frame hex
                 line = json.dumps({"type": "frame", "ch": 25, "data": data,
                                    "source": "thymio"})
                 for cb in list(self._raw_cbs):
@@ -59,34 +77,34 @@ class _FakeSniffGateway:
 
 
 def test_discover_returns_distinct_addresses():
+    gw = _FakeDiscoverGateway(["6a25", "6a25", "7b31"])   # dupe robot answers twice
+    addrs = discover_thymios(gw, channel=25, secs=0.01)
+    assert addrs == ["6a25", "7b31"]                     # first-seen order, deduped, hex
+    # it started the C6 active discovery and put it back
+    assert ("thymio", "thymio_discover", {"on": True, "ch": 25}) in gw.sent
+    assert ("thymio", "thymio_discover", {"on": False}) in gw.sent
+    assert gw._raw_cbs == []                             # callback removed
+
+
+def test_discover_legacy_frame_fallback():
+    # An old firmware streams raw frames; discovery still extracts the addresses.
     frames = [
         "6188388144256a373283006a25",   # host -> Thymio 6a25
-        "61888081443732256a8300",       # Thymio 6a25 -> host (dedupe)
         "6188018144317b373283ff",       # host -> Thymio 7b31
         "020025c80a",                   # ACK — ignored
     ]
-    gw = _FakeSniffGateway(frames)
-    addrs = discover_thymios(gw, channel=25, secs=0.01)
-    assert addrs == ["6a25", "7b31"]                     # first-seen order, deduped, hex
-    # it drove the C6 sniffer and put it back
-    assert ("thymio", "sniff_start", {"ch": 25}) in gw.sent
-    assert ("thymio", "sniff_stop", {}) in gw.sent
-    assert gw._raw_cbs == []                             # callback removed
+    addrs = discover_thymios(_FakeLegacyFrameGateway(frames), channel=25, secs=0.01)
+    assert addrs == ["6a25", "7b31"]
 
 
 def test_discover_no_gateway():
     assert discover_thymios(None) == []
-    assert discover_thymios(_FakeSniffGateway([], connected=False)) == []
+    assert discover_thymios(_FakeDiscoverGateway([], connected=False)) == []
 
 
 def test_discover_reports_each_new_address_live():
-    frames = [
-        "6188388144256a373283006a25",   # Thymio 6a25
-        "61888081443732256a8300",       # 6a25 again — no second callback
-        "6188018144317b373283ff",       # Thymio 7b31
-    ]
     live: list[str] = []
-    gw = _FakeSniffGateway(frames)
+    gw = _FakeDiscoverGateway(["6a25", "6a25", "7b31"])   # 6a25 answers twice
     discover_thymios(gw, channel=25, secs=0.01, on_found=live.append)
     assert live == ["6a25", "7b31"]                      # once per robot, in order
 
@@ -97,8 +115,8 @@ def test_discover_stop_event_ends_the_scan_early():
 
     stop = threading.Event()
     stop.set()                                           # already stopped
-    gw = _FakeSniffGateway([])
+    gw = _FakeDiscoverGateway([])
     t0 = time.monotonic()
     discover_thymios(gw, channel=25, secs=5.0, stop=stop)
     assert time.monotonic() - t0 < 2.0                   # didn't sit out the 5 s
-    assert ("thymio", "sniff_stop", {}) in gw.sent       # C6 put back cleanly
+    assert ("thymio", "thymio_discover", {"on": False}) in gw.sent   # C6 put back cleanly

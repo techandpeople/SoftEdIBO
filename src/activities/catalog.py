@@ -226,6 +226,22 @@ ACTIONS: tuple[Verb, ...] = (
          "Colour the Thymio's top LED.", (
         VerbField("color", "color", "#8e44ad"),
     ), kinds=(activity_kind.THYMIO,)),
+    Verb("thymio_sound", "action",
+         "Play a sound on the Thymio: a built-in system sound (0-7, -1 stops), a "
+         "tone (frequency + duration), or a track recorded on the Thymio's microSD. "
+         "The wheel targets are untouched, so a driving robot beeps without stopping.", (
+        VerbField("sys", "int", 2,
+                  description="Built-in system sound 0-7 (-1 stops). Used when "
+                              "'freq' and 'track' are 0/negative."),
+        VerbField("freq", "int", 0,
+                  description="Tone frequency in Hz; 0 = play the system sound "
+                              "instead of a tone."),
+        VerbField("dur", "ms", 200,
+                  description="Tone duration in ms (only used for a 'freq' tone)."),
+        VerbField("track", "int", -1,
+                  description="Play recorded track N from the microSD (needs a card); "
+                              "-1 = don't (use system/tone). Takes priority when ≥0."),
+    ), kinds=(activity_kind.THYMIO,)),
 )
 
 CONTROL: tuple[Verb, ...] = (
@@ -261,6 +277,22 @@ CONDITIONS: tuple[Verb, ...] = (
     Verb("touch_count", "condition",
          "True once the unit was touched at least 'min' times in this state.", (
         VerbField("min", "int", 10),
+    )),
+    Verb("on_impact", "condition",
+         "True once the Thymio was knocked ('impact': a sharp accelerometer "
+         "deviation from rest) at least 'min' times in this state, at intensity "
+         "'level' or above. Needs the gateway/C6 wireless link; robots without "
+         "impact sensing never fire it.", (
+        VerbField("min", "int", 1),
+        VerbField("level", "enum", 1, choices=(1, 2, 3),
+                  description="Minimum intensity to count: 1 = touch, 2 = knock, "
+                              "3 = slap."),
+    )),
+    Verb("on_lifted", "condition",
+         "True once the Thymio was lifted off the surface at least 'min' times in "
+         "this state (the ground sensors stop seeing the table). Needs the gateway/"
+         "C6 wireless link; robots without ground sensing never fire it.", (
+        VerbField("min", "int", 1),
     )),
     Verb("any", "condition", "True if any sub-condition is true (OR).", (
         VerbField("conds", "conds", []),
