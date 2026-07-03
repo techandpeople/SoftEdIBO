@@ -85,10 +85,29 @@ class ScriptedActivity(BaseActivity):
 
     robot_type = BaseRobot
 
+    @staticmethod
+    def _robot_type_for(kind: str) -> type[BaseRobot]:
+        """Resolve an activity kind to its robot class (lazy import to avoid a
+        cycle: robots import activities). Unknown → BaseRobot (accepts anything)."""
+        from src.activities.activity_kind import THYMIO, TURTLE, TREE
+        if kind == THYMIO:
+            from src.robots.thymio.thymio_robot import ThymioRobot
+            return ThymioRobot
+        if kind in (TURTLE, TREE):
+            from src.robots.turtle_tree.turtle_tree_robot import TurtleTreeRobot
+            return TurtleTreeRobot
+        return BaseRobot
+
     def __init__(self, name: str, description: str, spec: dict[str, Any]):
         super().__init__(name=name, description=description)
         catalog.validate_spec(spec)
         self._spec = spec
+        # Declared target (robot kind + skin variant), or None for a legacy "any"
+        # behaviour. Narrows robot_type from BaseRobot to the kind's class so the
+        # session setup and BaseActivity.setup can validate the robot.
+        self.target = catalog.spec_target(spec)
+        if self.target is not None:
+            self.robot_type = self._robot_type_for(self.target["kind"])
         self._states: dict[str, Any] = spec["states"]
         self._initial: str = spec["initial"]
         self._organ_tolerance = float(
@@ -108,7 +127,8 @@ class ScriptedActivity(BaseActivity):
         self._units.clear()
         self._phase_listeners.clear()
         for robot in robots:
-            for skin in getattr(robot, "skins", {}).values():
+            skins = getattr(robot, "skins", {})
+            for skin in skins.values():
                 ctrl = getattr(skin, "_ctrl", None)
                 unit = _Unit(
                     unit_id=f"{robot.robot_id}/{skin.skin_id}",
@@ -118,6 +138,13 @@ class ScriptedActivity(BaseActivity):
                 self._units[unit.unit_id] = unit
                 self._subscribe_touch(unit)
                 self._setup_organs(unit, skin)
+            if not skins:
+                # A robot without skins (e.g. a bare Thymio) still runs the
+                # spec — its unit just has no chambers/LED ring/touch board,
+                # so only robot-level verbs (thymio_drive/thymio_leds) act.
+                unit = _Unit(unit_id=robot.robot_id, robot=robot,
+                             skin=None, ctrl=None, chambers=[])
+                self._units[unit.unit_id] = unit
         logger.info("ScriptedActivity %r set up: %d units",
                     self.name, len(self._units))
 
@@ -151,6 +178,8 @@ class ScriptedActivity(BaseActivity):
                     set_led("#000000", pattern="off", period_ms=0)
                 except Exception:   # noqa: BLE001
                     logger.exception("set_led off failed on %s", unit.unit_id)
+            # Wheeled bases (Thymio) must not keep driving past the activity.
+            self._thymio_call(unit, "set_motors", 0, 0)
         self._units.clear()
         logger.info("ScriptedActivity %r stopped", self.name)
 
@@ -435,6 +464,8 @@ class ScriptedActivity(BaseActivity):
             yield from self._run_beat(unit, params)
         elif verb == "fade":
             yield from self._run_fade(unit, params)
+        elif verb == "thymio_drive":
+            yield from self._run_thymio_drive(unit, params)
         else:
             self._apply_action(unit, verb, params, ctx)
             # instantaneous — no yield
@@ -514,6 +545,30 @@ class ScriptedActivity(BaseActivity):
                               "solid", 0, ring=ring)
                 yield ("ms", step_ms)
 
+    def _run_thymio_drive(self, unit: _Unit, params: dict) -> Generator:
+        """Set the Thymio's wheel targets; with ``ms`` set, drive that long
+        then stop (a timed stroke), else leave them running."""
+        self._thymio_call(unit, "set_motors",
+                          int(params.get("left", 0)), int(params.get("right", 0)))
+        ms = int(params.get("ms", 0) or 0)
+        if ms > 0:
+            yield ("ms", ms)
+            self._thymio_call(unit, "set_motors", 0, 0)
+
+    def _thymio_call(self, unit: _Unit, method: str, *args) -> None:
+        """Invoke a wheeled-base method on the unit's robot, if it has one.
+
+        Duck-typed (no robot-class import): non-Thymio robots simply lack
+        ``set_motors``/``set_leds`` and the verb is a silent no-op — the
+        catalog already rejects these verbs outside thymio-targeted specs."""
+        fn = getattr(unit.robot, method, None)
+        if fn is None:
+            return
+        try:
+            fn(*args)
+        except Exception:   # noqa: BLE001 — a bad link must not kill the tick
+            logger.exception("%s%r failed on %s", method, args, unit.unit_id)
+
     @staticmethod
     def _parse_rgb(hex_colour: str) -> tuple[int, int, int]:
         h = str(hex_colour).strip().lstrip("#")
@@ -565,6 +620,11 @@ class ScriptedActivity(BaseActivity):
                 hold = getattr(unit.skin, "hold", None)
                 if hold is not None:
                     hold(c)
+        elif verb == "thymio_leds":
+            r, g, b = self._parse_rgb(params.get("color", "#000000"))
+            # Aseba leds.top expects 0..32 per channel, not 0..255.
+            self._thymio_call(unit, "set_leds",
+                              r * 32 // 255, g * 32 // 255, b * 32 // 255)
         elif verb == "log":
             logger.info("Scripted %s: %s", unit.unit_id,
                         params.get("message", params.get("_value", "")))
@@ -585,6 +645,8 @@ class ScriptedActivity(BaseActivity):
 
     def _set_pressure(self, unit: _Unit, chamber, pct: int,
                       period_ms: int = 0, duty: int | None = None) -> None:
+        if unit.skin is None:          # skinless unit (bare wheeled robot)
+            return
         pct = max(0, min(100, int(pct)))
         try:
             if chamber == "all" or chamber is None:

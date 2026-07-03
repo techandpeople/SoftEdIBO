@@ -59,11 +59,9 @@ class TrashDialog(QDialog, Ui_TrashDialog):
         self.purge_btn.setEnabled(False)
         self.empty_trash_btn.setEnabled(bool(records))
 
-    def _selected_session_id(self) -> str | None:
-        selected = self.trash_table.selectedItems()
-        if not selected:
-            return None
-        return self.trash_table.item(selected[0].row(), 0).text()
+    def _selected_session_ids(self) -> list[str]:
+        rows = sorted({item.row() for item in self.trash_table.selectedItems()})
+        return [self.trash_table.item(row, 0).text() for row in rows]
 
     def _on_selection_changed(self) -> None:
         has_selection = bool(self.trash_table.selectedItems())
@@ -71,22 +69,27 @@ class TrashDialog(QDialog, Ui_TrashDialog):
         self.purge_btn.setEnabled(has_selection)
 
     def _on_restore(self) -> None:
-        session_id = self._selected_session_id()
-        if session_id is None:
+        session_ids = self._selected_session_ids()
+        if not session_ids:
             return
-        self._trash.restore(session_id)
+        for session_id in session_ids:
+            self._trash.restore(session_id)
         self.refresh()
 
     def _on_purge(self) -> None:
-        session_id = self._selected_session_id()
-        if session_id is None:
+        session_ids = self._selected_session_ids()
+        if not session_ids:
             return
-        if not self._confirm_permanent(
-            f"Permanently delete session {session_id}?",
-            "This session and its recording will be gone for good.",
-        ):
+        if len(session_ids) == 1:
+            text = f"Permanently delete session {session_ids[0]}?"
+            informative = "This session and its recording will be gone for good."
+        else:
+            text = f"Permanently delete {len(session_ids)} sessions?"
+            informative = "These sessions and their recordings will be gone for good."
+        if not self._confirm_permanent(text, informative):
             return
-        self._trash.purge(session_id)
+        for session_id in session_ids:
+            self._trash.purge(session_id)
         self.refresh()
 
     def _on_empty(self) -> None:

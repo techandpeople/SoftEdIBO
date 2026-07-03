@@ -14,22 +14,27 @@
 // fires on the wrong pressure (one chamber's gauge briefly seeing the line trips
 // the others' cutoff). That is why "inflate the whole skin" never settled right.
 //
-// THE ALGORITHM (the user's "actuate coupled, measure isolated")
+// THE ALGORITHM ("actuate coupled, close progressively, verify isolated")
 //   GROUPING — a chamber requested in this direction starts a short coalescing
 //              window so sibling per-chamber frames (the runtime sends one frame
 //              PER chamber, not a broadcast) are batched and OPEN TOGETHER.
 //   FILLING  — open every chamber in the group at once + run the pumps. While
-//              coupled the line is the only trustworthy reading, so the round
-//              ends when the line first reaches the LOWEST target among the open
-//              chambers (== that chamber is done). A pump-start spike is ignored
-//              for MIN_ROUND_MS and a real cutoff must persist CUTOFF_DEBOUNCE
-//              reads, so a sensor spike never ends the round (or cuts a pump).
-//   SETTLING — every valve is now shut, so after SETTLE_MS each gauge reads its
-//              OWN chamber again. Drop the chambers that really reached target
-//              (±tol); whatever is still short re-opens for the next, higher
-//              round. The set shrinks each round; the last chamber opens ALONE,
-//              so its gauge reads itself → precise. A reading taken while coupled
-//              is never trusted.
+//              coupled every open chamber EQUALISES with the line, so when the
+//              line reaches the LOWEST open target that chamber holds exactly
+//              its target — close JUST IT (progressive close) and keep pumping
+//              the rest without stopping. The line keeps moving to the next
+//              target; chambers close one by one in target order (inflate:
+//              lowest max first; deflate: highest min first, since the line
+//              falls). A pump-start spike is ignored for MIN_ROUND_MS and each
+//              cutoff must persist CUTOFF_DEBOUNCE reads per chamber. A target
+//              the gauge cannot see (deflate below the sensor floor) closes on
+//              its per-chamber time budget (capMs, from the PC's calibrated
+//              deflate curve) instead.
+//   SETTLING — entered once, after the LAST open valve closes. Every gauge now
+//              reads its OWN chamber, so after SETTLE_MS each requested chamber
+//              is verified isolated (±tol); whatever is short re-opens for a
+//              correction round. One settle per sequence instead of one per
+//              round — the pumps only ever stop when everything has closed.
 //
 // One Engine instance drives ONE direction. A board owns two (inflate, deflate);
 // they are independent because the two manifolds are independent. The board
@@ -62,11 +67,12 @@ enum Phase : uint8_t { IDLE = 0, GROUPING = 1, FILLING = 2, SETTLING = 3 };
 
 // Debug event codes handed to Ops::dbg so the board can stream a wireless trace.
 enum Event : uint8_t {
-    EV_ROUND_OPEN = 0,   // a round just opened a set of valves (mask = opened)
-    EV_ROUND_END  = 1,   // a round closed all its valves (mask = was open)
-    EV_MEASURE    = 2,   // isolated measure done (mask = still pending)
-    EV_DONE       = 3,   // whole sequence finished (mask = 0)
-    EV_ABORT      = 4,   // safety cap hit, sequence aborted (mask = was pending)
+    EV_ROUND_OPEN   = 0,   // a round just opened a set of valves (mask = opened)
+    EV_ROUND_END    = 1,   // a round closed all its valves (mask = was open)
+    EV_MEASURE      = 2,   // isolated measure done (mask = still pending)
+    EV_DONE         = 3,   // whole sequence finished (mask = 0)
+    EV_ABORT        = 4,   // safety cap hit, sequence aborted (mask = was pending)
+    EV_CHAMBER_DONE = 5,   // one chamber closed at its target (mask = still open)
 };
 
 // Bundle of board callbacks. Built at the call site with ops(...) so the lambda
@@ -102,7 +108,6 @@ struct Engine {
     uint16_t pendingMask = 0;      // chambers wanting their target, not yet confirmed
     uint16_t openMask    = 0;      // chambers open in the current round
     uint8_t  roundCount  = 0;      // how many valves the last round opened
-    uint8_t  overCount   = 0;      // consecutive over-target reads (round-cutoff debounce)
     uint32_t phaseMs     = 0;      // current phase start (millis)
     uint32_t seqStartMs  = 0;      // whole-sequence start (millis)
 
@@ -110,6 +115,8 @@ struct Engine {
     float    range[MAXN]    = {};  // each chamber's (max-min), for the reached tolerance
     uint32_t openedMs[MAXN] = {};  // when chamber i last opened (for accumOpenMs)
     uint32_t accumMs[MAXN]  = {};  // cumulative open time this sequence (safety cap)
+    uint32_t capMs[MAXN]    = {};  // per-chamber open-time budget (0 = tune.chamber_max_ms)
+    uint8_t  overCnt[MAXN]  = {};  // per-chamber consecutive at-target reads (cutoff debounce)
 
     void begin(uint8_t direction, const Tuning& t) { dir = direction; tune = t; }
 
@@ -123,14 +130,24 @@ struct Engine {
         return dir == 0 ? (k >= target[i] - tol) : (k <= target[i] + tol);
     }
 
+    // Effective open-time budget for chamber i: its own cap when the request set
+    // one (e.g. a calibrated deflate time for a target the gauge can't see),
+    // else the board tuning's global backstop.
+    uint32_t capOf(int i) const {
+        return capMs[i] ? capMs[i] : tune.chamber_max_ms;
+    }
+
     // Add/refresh a target for chamber i. The board only calls this when chamber i
     // actually needs to move (it has already checked current-vs-target), so a
     // request always means "open this chamber for at least one round". A request
     // while IDLE starts the coalescing window; mid-cycle it joins the next round.
-    void request(int i, float target_kpa, float range_kpa) {
+    // ``cap_ms`` (optional) bounds this chamber's total open time — the closing
+    // authority for a target below the gauge floor; 0 keeps the tuning backstop.
+    void request(int i, float target_kpa, float range_kpa, uint32_t cap_ms = 0) {
         if (i < 0 || i >= count) return;
         target[i] = target_kpa;
         range[i]  = range_kpa;
+        capMs[i]  = cap_ms;
         accumMs[i] = 0;
         bool wasEmpty = (pendingMask == 0);
         pendingMask |= (uint16_t)(1u << i);
@@ -162,7 +179,6 @@ struct Engine {
         phase = IDLE;
         pendingMask = 0;
         openMask = 0;
-        overCount = 0;
     }
 
     // ---- internal: open every still-pending chamber together for a round ----
@@ -174,13 +190,32 @@ struct Engine {
             if (openMask & (1u << i)) {
                 o.open(i, dir);
                 openedMs[i] = now;
+                overCnt[i]  = 0;
             }
         }
         o.recalc();
-        overCount = 0;
         phase     = FILLING;
         phaseMs   = now;
         o.dbg(EV_ROUND_OPEN, openMask);
+    }
+
+    // ---- internal: progressive close — one chamber reached its target (or its
+    // time budget) while the rest keep filling. Closing while coupled is exact:
+    // the chamber equalised with the line, so it traps the line's pressure. The
+    // pumps re-scale to the remaining open valves; when the last one closes the
+    // sequence moves to its single final SETTLING verify. ----
+    template <class O>
+    void closeOne(int i, uint32_t now, O& o) {
+        accumMs[i] += now - openedMs[i];
+        o.close(i);
+        openMask &= ~(uint16_t)(1u << i);
+        overCnt[i] = 0;
+        o.recalc();
+        o.dbg(EV_CHAMBER_DONE, openMask);
+        if (openMask == 0) {
+            phase   = SETTLING;
+            phaseMs = now;
+        }
     }
 
     // ---- internal: close all open valves, accrue their open time, go settle ----
@@ -222,34 +257,37 @@ struct Engine {
             break;
 
         case FILLING: {
-            bool end     = false;
-            bool hardCut = false;
-            bool anyReached = false;
-            for (int i = 0; i < count; i++) {
+            // Safety paths that end the WHOLE round (close everything → settle):
+            // the inflate hard ceiling (immediate, no debounce) and the round cap
+            // (nobody progressing — leak or a pump problem).
+            bool endAll = ((int32_t)(now - phaseMs) >= (int32_t)tune.round_max_ms);
+            // Ignore target cutoffs until the pump-start transient on the shared
+            // line has passed; a single-chamber round was never coupled so it only
+            // needs the short gate. HARD_MAX and the time caps bypass the gate.
+            uint32_t gate = (roundCount > 1) ? tune.min_round_ms : tune.min_round_single_ms;
+            bool gateOpen = (int32_t)(now - phaseMs) >= (int32_t)gate;
+            for (int i = 0; i < count && !endAll; i++) {
                 if (!(openMask & (1u << i))) continue;
                 float k = o.readKpa(i);
-                // The line is shared, so any open chamber hitting its own target
-                // means the line reached the LOWEST open target → end the round.
-                if (reached(k, i, 0.0f)) anyReached = true;
-                // Inflate hard ceiling cuts immediately, no debounce (safety).
-                if (dir == 0 && k >= tune.hard_max_kpa) hardCut = true;
-                // Per-chamber cumulative-open safety (stuck gauge, or a deflate
-                // into vacuum the gauge can't see): force the round to end.
-                if (accumMs[i] + (now - openedMs[i]) >= tune.chamber_max_ms) end = true;
+                if (dir == 0 && k >= tune.hard_max_kpa) { endAll = true; break; }
+                // Per-chamber time budget: a stuck gauge, or a target the gauge
+                // can't see (deflate below the sensor floor) closing on its
+                // calibrated time. Closes just this chamber.
+                if (accumMs[i] + (now - openedMs[i]) >= capOf(i)) {
+                    closeOne(i, now, o);
+                    continue;
+                }
+                // Progressive close: every open chamber equalises with the line,
+                // so this chamber reading its own target means the line got there
+                // — it is done. Debounced per chamber so a spike can't close it.
+                if (reached(k, i, 0.0f)) {
+                    if (gateOpen && ++overCnt[i] >= tune.cutoff_debounce)
+                        closeOne(i, now, o);
+                } else {
+                    overCnt[i] = 0;
+                }
             }
-            // Ignore the cutoff until the pump-start transient on the shared line
-            // has passed; a single-chamber round was never coupled so it only needs
-            // the short gate, a multi-chamber round rides out the bigger manifold
-            // kick. HARD_MAX and the safety caps bypass the gate.
-            uint32_t gate = (roundCount > 1) ? tune.min_round_ms : tune.min_round_single_ms;
-            if (anyReached && (int32_t)(now - phaseMs) >= (int32_t)gate) {
-                if (++overCount >= tune.cutoff_debounce) end = true;
-            } else if (!anyReached) {
-                overCount = 0;
-            }
-            if ((int32_t)(now - phaseMs) >= (int32_t)tune.round_max_ms) end = true;  // slow/leak
-            if (hardCut) end = true;
-            if (end) endRound(now, o);
+            if (endAll && phase == FILLING) endRound(now, o);
             break;
         }
 
@@ -264,8 +302,11 @@ struct Engine {
                 if (!(pendingMask & (1u << i))) continue;
                 float tol = tune.tol_frac * range[i];
                 float k   = o.readKpa(i);
+                // A chamber that spent its time budget counts as done even when
+                // its gauge disagrees — for a target below the sensor floor the
+                // budget IS the closing authority, and re-opening it would loop.
                 bool done = reached(k, i, tol)
-                         || accumMs[i] >= tune.chamber_max_ms;
+                         || accumMs[i] >= capOf(i);
                 if (done) pendingMask &= ~(uint16_t)(1u << i);
             }
             o.dbg(EV_MEASURE, pendingMask);

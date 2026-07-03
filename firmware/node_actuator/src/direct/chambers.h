@@ -173,7 +173,11 @@ inline void engOpen(int i, uint8_t dir) {
 // drops the chamber from the other (a clean reversal).
 // ---------------------------------------------------------------------------
 
-inline void requestInflate(int n, float target, uint8_t duty) {
+// ``cap_ms`` (optional) is the per-chamber open-time budget forwarded to the
+// engine — the closing authority for a target the gauge can't see (a deflate
+// below the sensor floor, timed by the PC's calibrated deflate curve).
+
+inline void requestInflate(int n, float target, uint8_t duty, uint32_t cap_ms = 0) {
     if (n < 0 || n >= NUM_CHAMBERS) return;
     target = max(state[n].min_kpa, min(target, state[n].max_kpa));
     bool reversed = false;
@@ -181,10 +185,10 @@ inline void requestInflate(int n, float target, uint8_t duty) {
     if (reversed) recalcPumps();
     state[n].duty       = duty;
     state[n].target_kpa = target;
-    inflateEng.request(n, target, state[n].max_kpa - state[n].min_kpa);
+    inflateEng.request(n, target, state[n].max_kpa - state[n].min_kpa, cap_ms);
 }
 
-inline void requestDeflate(int n, float target, uint8_t duty) {
+inline void requestDeflate(int n, float target, uint8_t duty, uint32_t cap_ms = 0) {
     if (n < 0 || n >= NUM_CHAMBERS) return;
     target = max(state[n].min_kpa, min(target, state[n].max_kpa));
     bool reversed = false;
@@ -192,7 +196,7 @@ inline void requestDeflate(int n, float target, uint8_t duty) {
     if (reversed) recalcPumps();
     state[n].duty       = duty;
     state[n].target_kpa = target;
-    deflateEng.request(n, target, state[n].max_kpa - state[n].min_kpa);
+    deflateEng.request(n, target, state[n].max_kpa - state[n].min_kpa, cap_ms);
 }
 
 // Stop & hold a chamber wherever it is (drops it from both engines).
@@ -372,17 +376,20 @@ inline void testStop() {
 // valve of that direction (whole-node wiring test); a valid index opens only
 // that one chamber's valve. Owns the hardware directly, so it drops any manual
 // override to keep manualSafetyTick from fighting it once the test ends.
-inline void testRun(int dir, int chamber = -1) {
+inline void testRun(int dir, int chamber = -1, uint8_t duty = 0) {
     if (dir != 0 && dir != 1) return;
     testHeartbeatMs = millis();          // every (re)send refreshes the dead-man
     int newChamber  = (chamber >= 0 && chamber < NUM_CHAMBERS) ? chamber : -1;
     if (testDir == dir && testChamber == newChamber) return;  // already running → just refreshed
     testDir     = dir;
     testChamber = newChamber;
+    // duty 0 (unset) -> full speed. The duty-curve calibration sweep drives this
+    // at several PWM levels to measure the pump's duty->fill-speed curve.
+    uint8_t runDuty = duty ? duty : DEFAULT_INFLATE_DUTY;
     for (int i = 0; i < 2; i++)                 { manualPumpOn[i] = false; manualPumpTs[i] = 0; }
     for (int i = 0; i < NUM_CHAMBERS * 2; i++)  { manualValveOn[i] = false; manualValveTs[i] = 0; }
-    ledcWrite(PUMP1_LEDC_CH, dir == 0 ? DEFAULT_INFLATE_DUTY : 0);
-    ledcWrite(PUMP2_LEDC_CH, dir == 1 ? 255 : 0);
+    ledcWrite(PUMP1_LEDC_CH, dir == 0 ? runDuty : 0);
+    ledcWrite(PUMP2_LEDC_CH, dir == 1 ? runDuty : 0);
     for (int n = 0; n < NUM_CHAMBERS; n++) {
         bool open = (testChamber < 0 || testChamber == n);
         setValve(n, dir,     open);

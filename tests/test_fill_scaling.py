@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from src.hardware.fill_scaling import FillLoadTracker, effective_fill_ms
+from src.hardware.fill_scaling import (
+    FULL_DUTY,
+    DutyModel,
+    FillLoadTracker,
+    effective_fill_ms,
+)
 
 
 def test_single_chamber_reproduces_base():
@@ -15,6 +20,38 @@ def test_concurrent_chambers_slow_each_other():
     # Two chambers sharing one pump → each fills ~twice as slow.
     assert effective_fill_ms(1000, 100, active_chambers=2, pump_count=1) == 2000
     assert effective_fill_ms(1000, 100, active_chambers=3, pump_count=1) == 3000
+
+
+def test_duty_model_empty_below_two_points():
+    assert DutyModel([]).is_empty
+    assert DutyModel([[255, 1000]]).is_empty          # one point can't model a slope
+    assert DutyModel.from_list(None) is None
+
+
+def test_duty_model_picks_duty_for_requested_stretch():
+    # At full duty a fill takes 1000 ms; at 128 it takes 2000 (2× slower); at 64,
+    # 4000 (4×). So to stretch a natural 1000 ms fill to 2000 ms, use ~duty 128.
+    m = DutyModel([[255, 1000], [128, 2000], [64, 4000]])
+    assert not m.is_empty
+    assert m.duty_for_period(1000, 2000) == 128        # exact measured point
+    assert m.duty_for_period(1000, 1000) == FULL_DUTY   # no stretch → full
+    assert m.duty_for_period(1000, 500) == FULL_DUTY    # can't go faster than full
+    # A stretch between measured factors interpolates the duty.
+    d = m.duty_for_period(1000, 3000)                   # 3× slowdown, between 64 and 128
+    assert 64 < d < 128
+
+
+def test_duty_model_clamps_beyond_measured_range():
+    m = DutyModel([[255, 1000], [128, 2000]])
+    # Slower than the slowest measured duty → clamp to that slowest duty.
+    assert m.duty_for_period(1000, 9000) == 128
+
+
+def test_duty_model_fixes_non_monotone_sweep_noise():
+    # Sweep noise: duty 128 read faster (900) than full duty (1000). Forced monotone
+    # so higher duty is never modelled as slower — both collapse to the fast time.
+    m = DutyModel([[255, 1000], [128, 900], [64, 3000]])
+    assert m.duty_for_period(1000, 1000) == FULL_DUTY
 
 
 def test_more_pumps_share_the_load():
@@ -93,8 +130,8 @@ def test_duty_for_period_full_speed_when_no_slowdown_wanted():
 
 def test_duty_for_period_scales_down_proportionally():
     from src.hardware.fill_scaling import duty_for_period, FULL_DUTY
-    # Twice as long -> roughly half duty.
-    assert duty_for_period(1000, 2000) == round(FULL_DUTY * 0.5)
+    # 1.25x as long -> ~4/5 duty (still above the stall floor, so not clamped).
+    assert duty_for_period(1000, 1250) == round(FULL_DUTY / 1.25)
 
 
 def test_duty_for_period_floors_at_min_duty():

@@ -8,7 +8,7 @@ moves the magnet and changes the measured field. The board streams the
 
 Adapted from the thesis MLX90393 live-stream firmware. The offline **calibration
 protocol (CSV) was intentionally dropped**: the SoftEdIBO runtime detects touch
-with thresholds on the normalised values (`QuadrantDetector`), not a calibrated
+with thresholds on the raw µT magnitudes (`QuadrantDetector`), not a calibrated
 model. The only "calibration" the runtime needs is the per-sensor baseline,
 which this firmware computes automatically (see below).
 
@@ -32,19 +32,20 @@ S2→Q3 (bottom-left), S3→Q4 (bottom-right)** — matches the PC `QuadrantDete
 
 **Stream** (~28 Hz, to the gateway once it is known):
 ```json
-{"type":"magnet","mag":[mT,...],"adj":[0.0-1.0,...],"act":[active_idx,...]}
+{"type":"magnet","mag":[uT,...],"act":[active_idx,...]}
 ```
-- `mag` — per-sensor field-change magnitude in mT (`|sample − baseline|`).
-- `adj` — `mag / fullscale_mt`, clamped 0..1 (the value the PC prefers).
-- `act` — indices of sensors whose `adj ≥ act_threshold`.
+- `mag` — per-sensor field-change magnitude in µT (`|sample − baseline|`).
+- `act` — indices of sensors whose `mag ≥ act_threshold_ut` (the value the PC prefers).
 
 **Commands** (PC → board, via gateway):
 ```json
 {"cmd":"ping"}                                  // -> {"type":"pong"}
 {"cmd":"rebaseline"}                            // re-zero all sensors now
-{"cmd":"configure","fullscale_mt":30,"act_threshold":0.2}
+{"cmd":"configure","act_threshold_ut":100}      // µT at/above which a sensor is "active"
 {"cmd":"configure","adaptive_baseline":true,"baseline_tau_ms":2000}
 ```
+Legacy `configure` fields (`fullscale_mt`, `act_threshold` as a 0..1 fraction) are
+still accepted, converted to `act_threshold_ut = act_threshold × fullscale_mt`.
 
 ### Baseline (auto-zero)
 Each sensor is auto-zeroed at boot by averaging the first 70 reads. Re-zero at
@@ -85,8 +86,8 @@ A colleague flagged that **more I2C will be needed to support ~3× the sensors**
    = (mux channel, MLX address).
 2. **Firmware (this file):** replace the fixed `PRIMARY_ADDR[4]` + single extra
    bus with a sensor table of `{mux_channel, address}`, select the channel
-   before each `readData`, and let `streamCount` grow to 12. The `mag`/`adj`/
-   `act` arrays already scale with `streamCount`.
+   before each `readData`, and let `streamCount` grow to 12. The `mag`/`act`
+   arrays already scale with `streamCount`.
 3. **PC side:** `QuadrantDetector` is **hardcoded to exactly 4 sensors**
    (`src/hardware/quadrant_detector.py` — `raise ValueError` if ≠ 4). With 12
    sensors the 4-quadrant model no longer fits; route sensors to chambers via

@@ -20,7 +20,7 @@ from PySide6.QtWidgets import QDialogButtonBox, QLineEdit
 
 from src.gui.base_dialog import BaseDialog
 from src.gui.ui_gateway_ap_dialog import Ui_GatewayApDialog
-from src.hardware.espnow_gateway import ESPNowGateway
+from src.hardware.gateway import Gateway
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ class GatewayApDialog(BaseDialog, Ui_GatewayApDialog):
     # Marshals a gateway message from the serial read thread to the GUI thread.
     _message_received = Signal(dict)
 
-    def __init__(self, gateway: ESPNowGateway, parent=None):
+    def __init__(self, gateway: Gateway, parent=None):
         super().__init__(parent)
         self.setupUi(self)
         self._gateway = gateway

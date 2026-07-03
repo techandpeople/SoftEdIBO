@@ -7,8 +7,139 @@ on:
   pull_request:
     branches: [master]
 
+# A newer push to the same branch/PR supersedes any run still in progress
+# (tag builds are never cancelled).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
 jobs:
+  # -----------------------------------------------------------------------
+  # Firmware — built ONCE here (Linux) and reused by both app jobs (ESP .bin
+  # files are identical regardless of the host OS, and the ESP-IDF gateway
+  # build does not work on Windows runners). Each board's bins are cached
+  # under a key hashed from just that board's sources, so touching one board
+  # rebuilds only that board — and a push that touches no firmware builds
+  # nothing at all.
+  # -----------------------------------------------------------------------
+  firmware:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache gateway firmware
+        id: fw-gateway
+        uses: actions/cache@v4
+        with:
+          path: firmware/gateway/firmware-s3.bin
+          key: fw-gateway-${{ hashFiles('firmware/common/**', 'firmware/gateway/src/**', 'firmware/gateway/platformio.ini', 'firmware/gateway/CMakeLists.txt', 'firmware/gateway/sdkconfig*') }}
+
+      - name: Cache actuator firmware
+        id: fw-actuator
+        uses: actions/cache@v4
+        with:
+          path: firmware/node_actuator/firmware-*.bin
+          key: fw-actuator-${{ hashFiles('firmware/common/**', 'firmware/node_actuator/src/**', 'firmware/node_actuator/platformio.ini') }}
+
+      - name: Cache magnet-sensor firmware
+        id: fw-magnet
+        uses: actions/cache@v4
+        with:
+          path: firmware/node_magnet_sensor/firmware-release.bin
+          key: fw-magnet-${{ hashFiles('firmware/common/**', 'firmware/node_magnet_sensor/src/**', 'firmware/node_magnet_sensor/platformio.ini') }}
+
+      - name: Cache Thymio RCP firmware
+        id: fw-thymio
+        uses: actions/cache@v4
+        with:
+          path: firmware/thymio_rcp/firmware.bin
+          key: fw-thymio-${{ hashFiles('firmware/thymio_rcp/src/**', 'firmware/thymio_rcp/platformio.ini') }}
+
+      - name: Pick boards to build (cache misses only)
+        id: fwplan
+        run: |
+          comps=""
+          [[ "${{ steps.fw-gateway.outputs.cache-hit }}"  == "true" ]] || comps="$comps gateway"
+          [[ "${{ steps.fw-actuator.outputs.cache-hit }}" == "true" ]] || comps="$comps actuator"
+          [[ "${{ steps.fw-magnet.outputs.cache-hit }}"   == "true" ]] || comps="$comps magnet"
+          [[ "${{ steps.fw-thymio.outputs.cache-hit }}"   == "true" ]] || comps="$comps thymio"
+          comps="${comps# }"
+          echo "components=$comps" >> "$GITHUB_OUTPUT"
+          echo "Boards to build: ${comps:-none (all cached)}"
+
+      - name: Set up Python
+        if: steps.fwplan.outputs.components != ''
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install PlatformIO
+        if: steps.fwplan.outputs.components != ''
+        run: pip install platformio esptool
+
+      - name: Cache PlatformIO toolchain
+        if: steps.fwplan.outputs.components != ''
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: ${{ runner.os }}-pio-${{ hashFiles('firmware/**/platformio.ini') }}
+          restore-keys: ${{ runner.os }}-pio-
+
+      # Single source of truth is scripts/build-firmware.sh, so local dev
+      # bundles and CI stay in sync. CI passes only the boards whose bin
+      # cache missed.
+      - name: Build firmware
+        if: steps.fwplan.outputs.components != ''
+        run: scripts/build-firmware.sh ${{ steps.fwplan.outputs.components }}
+
+      # ----------------------------------------------------------------
+      # Collect all firmware binaries (flat names, for the release zip)
+      # ----------------------------------------------------------------
+
+      - name: Collect firmware binaries
+        run: |
+          mkdir -p firmware-binaries
+          cp firmware/gateway/firmware-s3.bin                             firmware-binaries/gateway-s3.bin
+          cp firmware/node_actuator/firmware-direct-release.bin           firmware-binaries/node_direct-release.bin
+          cp firmware/node_actuator/firmware-direct-debug.bin             firmware-binaries/node_direct-debug.bin
+          cp firmware/node_actuator/firmware-direct-rgbw-release.bin      firmware-binaries/node_direct-rgbw-release.bin
+          cp firmware/node_actuator/firmware-direct-rgbw-debug.bin        firmware-binaries/node_direct-rgbw-debug.bin
+          cp firmware/node_actuator/firmware-multiplexed-release.bin      firmware-binaries/node_multiplexed-release.bin
+          cp firmware/node_actuator/firmware-multiplexed-debug.bin        firmware-binaries/node_multiplexed-debug.bin
+          cp firmware/node_actuator/firmware-multiplexed-rgbw-release.bin firmware-binaries/node_multiplexed-rgbw-release.bin
+          cp firmware/node_actuator/firmware-multiplexed-rgbw-debug.bin   firmware-binaries/node_multiplexed-rgbw-debug.bin
+          cp firmware/node_magnet_sensor/firmware-release.bin             firmware-binaries/node_magnet_sensor.bin
+          cp firmware/thymio_rcp/firmware.bin                             firmware-binaries/thymio_rcp-c6-app.bin
+
+      - name: Upload firmware artifact (flat, for releases)
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: firmware-binaries/
+          retention-days: 30
+
+      # Tree-layout copy the app jobs drop straight into the workspace so
+      # PyInstaller bundles them without rebuilding any firmware.
+      - name: Upload firmware binaries (tree layout, for the app bundle)
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-tree
+          path: |
+            firmware/gateway/firmware-s3.bin
+            firmware/node_actuator/firmware-*.bin
+            firmware/node_magnet_sensor/firmware-release.bin
+            firmware/thymio_rcp/firmware.bin
+          retention-days: 30
+
+  # -----------------------------------------------------------------------
+  # Linux build — runs the test suite (which gates the AppImage and, via
+  # `needs`, the nightly/stable releases) and produces the AppImage.
+  # -----------------------------------------------------------------------
   build:
+    needs: firmware
     runs-on: ubuntu-22.04
 
     steps:
@@ -57,89 +188,19 @@ jobs:
           printf '__version__ = "%s"\nGITHUB_REPO = "%s"\n__build_time__ = "%s"\n__commit__ = "%s"\n' \
             "$VERSION" "$REPO" "$BUILD_TIME" "${GITHUB_SHA}" > src/_version.py
 
-      # ----------------------------------------------------------------
-      # Firmware — built ONCE here (Linux) and reused by the Windows job
-      # (ESP .bin files are identical regardless of the host OS, and the
-      # ESP-IDF gateway build does not work on Windows runners). Cached by a
-      # hash of the firmware sources, so an unchanged firmware tree is not
-      # recompiled.
-      # ----------------------------------------------------------------
+      # Unit tests gate the build: a red suite must not produce an AppImage,
+      # a Windows zip release, or a nightly (nightly/release `needs` this
+      # job). Headless (offscreen QPA) — pytest/pytest-qt come from
+      # requirements.txt.
+      - name: Run tests
+        run: QT_QPA_PLATFORM=offscreen python -m pytest -q
 
-      - name: Cache built firmware binaries
-        id: fwcache
-        uses: actions/cache@v4
-        with:
-          path: |
-            firmware/gateway/firmware.bin
-            firmware/gateway/firmware-s3.bin
-            firmware/gateway/firmware-s3-ap.bin
-            firmware/gateway/firmware-esp32.bin
-            firmware/node_actuator/firmware-direct-release.bin
-            firmware/node_actuator/firmware-direct-debug.bin
-            firmware/node_actuator/firmware-multiplexed-release.bin
-            firmware/node_actuator/firmware-multiplexed-debug.bin
-            firmware/node_magnet_sensor/firmware-release.bin
-          key: fwbins-${{ hashFiles('firmware/common/**', 'firmware/gateway/src/**', 'firmware/gateway/platformio.ini', 'firmware/gateway/CMakeLists.txt', 'firmware/gateway/sdkconfig.defaults*', 'firmware/node_actuator/src/**', 'firmware/node_actuator/platformio.ini', 'firmware/node_magnet_sensor/src/**', 'firmware/node_magnet_sensor/platformio.ini') }}
-
-      - name: Install PlatformIO
-        if: steps.fwcache.outputs.cache-hit != 'true'
-        run: pip install platformio esptool
-
-      - name: Cache PlatformIO toolchain
-        if: steps.fwcache.outputs.cache-hit != 'true'
-        uses: actions/cache@v4
-        with:
-          path: ~/.platformio
-          key: ${{ runner.os }}-pio-${{ hashFiles('firmware/**/platformio.ini') }}
-          restore-keys: ${{ runner.os }}-pio-
-
-      # All firmware (gateway + nodes) — single source of truth is
-      # scripts/build-firmware.sh, so local dev bundles and CI stay in sync.
-      - name: Build all firmware (gateway + nodes)
-        if: steps.fwcache.outputs.cache-hit != 'true'
-        run: scripts/build-firmware.sh
-
-      # ----------------------------------------------------------------
-      # Collect all firmware binaries (flat names, for the release zip)
-      # ----------------------------------------------------------------
-
-      - name: Collect firmware binaries
-        run: |
-          mkdir -p firmware-binaries
-          cp firmware/gateway/firmware.bin                       firmware-binaries/gateway-c6.bin
-          cp firmware/gateway/firmware-s3.bin                    firmware-binaries/gateway-s3.bin
-          cp firmware/gateway/firmware-s3-ap.bin                 firmware-binaries/gateway-s3-ap.bin
-          cp firmware/gateway/firmware-esp32.bin                 firmware-binaries/gateway-esp32.bin
-          cp firmware/node_actuator/firmware-direct-release.bin       firmware-binaries/node_direct-release.bin
-          cp firmware/node_actuator/firmware-direct-debug.bin         firmware-binaries/node_direct-debug.bin
-          cp firmware/node_actuator/firmware-multiplexed-release.bin  firmware-binaries/node_multiplexed-release.bin
-          cp firmware/node_actuator/firmware-multiplexed-debug.bin    firmware-binaries/node_multiplexed-debug.bin
-          cp firmware/node_magnet_sensor/firmware-release.bin           firmware-binaries/node_magnet_sensor.bin
-
-      - name: Upload firmware artifact (flat, for releases)
-        uses: actions/upload-artifact@v4
-        with:
-          name: firmware
-          path: firmware-binaries/
-          retention-days: 30
-
-      # Tree-layout copy the Windows job drops straight into the workspace so
-      # PyInstaller bundles them without rebuilding any firmware.
-      - name: Upload firmware binaries (tree layout, for the app bundle)
-        uses: actions/upload-artifact@v4
+      # Firmware comes prebuilt from the firmware job (cache-accelerated).
+      - name: Download firmware binaries
+        uses: actions/download-artifact@v4
         with:
           name: firmware-tree
-          path: |
-            firmware/gateway/firmware.bin
-            firmware/gateway/firmware-s3.bin
-            firmware/gateway/firmware-s3-ap.bin
-            firmware/gateway/firmware-esp32.bin
-            firmware/node_actuator/firmware-direct-release.bin
-            firmware/node_actuator/firmware-direct-debug.bin
-            firmware/node_actuator/firmware-multiplexed-release.bin
-            firmware/node_actuator/firmware-multiplexed-debug.bin
-            firmware/node_magnet_sensor/firmware-release.bin
-          retention-days: 30
+          path: firmware
 
       # ----------------------------------------------------------------
       # Python desktop application
@@ -210,10 +271,12 @@ jobs:
           retention-days: 30
 
   # -----------------------------------------------------------------------
-  # Windows build — produces a portable zip
+  # Windows build — produces a portable zip. Needs only the firmware job
+  # (never rebuilds firmware), so it runs in parallel with the Linux build;
+  # nightly/stable releases still require the tested Linux build.
   # -----------------------------------------------------------------------
   build-windows:
-    needs: build          # reuse the firmware built on Linux; never rebuild it here
+    needs: firmware
     runs-on: windows-latest
 
     steps:
@@ -324,8 +387,9 @@ jobs:
             **Linux:** `chmod +x SoftEdIBO-x86_64.AppImage && ./SoftEdIBO-x86_64.AppImage`
             **Windows:** extract `SoftEdIBO-windows-x64.zip` and run `SoftEdIBO.exe`
 
-            **Firmware** (`firmware.zip`): gateway variants (C6, S3, S3+AP, WROOM), release/debug for both actuator node types, and the sensor node.
-            Flash with `esptool.py --chip esp32 write_flash 0x0 <bin>`.
+            **Firmware** (`firmware.zip`): the S3 gateway, release/debug × RGB/RGBW builds for both actuator node types, the magnet sensor node, and the Thymio RCP app image.
+            Flash merged bins at 0x0 — gateway: `esptool.py --chip esp32s3 write_flash 0x0 gateway-s3.bin`; nodes: `esptool.py --chip esp32 write_flash 0x0 <bin>`.
+            `thymio_rcp-c6-app.bin` is a WiFi-OTA app image only — do **not** flash it at 0x0.
 
   # -----------------------------------------------------------------------
   # Tags v*: creates a stable GitHub release (available via OTA).
@@ -392,24 +456,22 @@ jobs:
             ## Firmware (`firmware.zip`)
 
             The desktop app already includes these binaries — use `Tools => Flash Firmware…`
-            to flash. Manual flashing is also possible:
+            to flash. Manual flashing is also possible (all merged bins go at `0x0`;
+            the gateway uses `--chip esp32s3`, the nodes `--chip esp32`):
             ```bash
             esptool.py --chip esp32 write_flash 0x0 <bin>
             ```
 
             | File | Node type | Description |
             |------|-----------|-------------|
-            | `gateway-s3.bin` | Gateway | USB–ESP-NOW bridge, **Seeed XIAO ESP32-S3** (ESP-IDF, recommended) |
-            | `gateway-s3-ap.bin` | Gateway | Same S3 build + **WiFi access point** for Thymio robots (`-DGATEWAY_AP`) |
-            | `gateway-c6.bin` | Gateway | USB–ESP-NOW bridge, **Seeed XIAO ESP32-C6** (ESP-IDF) |
-            | `gateway-esp32.bin` | Gateway | USB–ESP-NOW bridge, **classic ESP32-WROOM** (Arduino) |
+            | `gateway-s3.bin` | Gateway | USB–ESP-NOW bridge + SoftAP + Thymio UART link, **Seeed XIAO ESP32-S3** (ESP-IDF) |
             | `node_direct-release.bin` | `node_direct` | 3 chambers, direct sensors/valves, onboard pumps |
             | `node_direct-debug.bin` | `node_direct` | Same as above with Serial logs (`DEBUG_BUILD`) |
+            | `node_direct-rgbw-release.bin` | `node_direct` | RGBW LED-ring build (SK6812 NeoPixels) |
+            | `node_direct-rgbw-debug.bin` | `node_direct` | RGBW build with Serial logs |
             | `node_multiplexed-release.bin` | `node_multiplexed` | Up to 12 chambers, multiplexed valves/sensors, optional shared pressure/vacuum tanks, runtime-sized |
             | `node_multiplexed-debug.bin` | `node_multiplexed` | Same as above with Serial logs (`DEBUG_BUILD`) |
+            | `node_multiplexed-rgbw-release.bin` | `node_multiplexed` | RGBW LED-ring build (SK6812 NeoPixels) |
+            | `node_multiplexed-rgbw-debug.bin` | `node_multiplexed` | RGBW build with Serial logs |
             | `node_magnet_sensor.bin` | `node_magnet_sensor` | 4× MLX90393 magnetic touch board (node_magnet_sensor protocol) |
-
-            > **Note:** pick the gateway bin for your board. The S3 flashes with
-            > `--chip esp32s3` and the C6 with `--chip esp32c6` (both at `0x0`,
-            > e.g. `esptool.py --chip esp32s3 write_flash 0x0 gateway-s3.bin`);
-            > the WROOM and all node bins flash with `--chip esp32` at `0x0`.
+            | `thymio_rcp-c6-app.bin` | Thymio RCP | XIAO ESP32-C6 802.15.4 co-processor — **WiFi-OTA app image, never flash at 0x0** (first flash over USB: `pio run -d firmware/thymio_rcp -e rcp_c6 -t upload`) |

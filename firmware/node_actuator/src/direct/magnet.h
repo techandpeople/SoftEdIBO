@@ -19,15 +19,15 @@
 // standalone node_magnet_sensor firmware speaks, so the SoftEdIBO PC
 // (QuadrantDetector / touch tracking) consumes it unchanged:
 //   boot:   {"status":"node_magnet_sensor_ready","sensors":N,"variant":"mlx90393"}
-//   stream: {"type":"magnet","mag":[mT..],"adj":[0..1..],"act":[idx..]}
+//   stream: {"type":"magnet","mag":[uT..],"act":[idx..]}
 //
 // The module is auto-detecting and self-disabling: if no MLX90393 answers on
 // the bus at boot (no sensors wired), `present` stays false and the board runs
 // exactly as a plain node_direct — no announce, no stream, no I2C traffic.
 //
 // Each sensor auto-zeros (baseline) over the first BASELINE_SAMPLES reads.
-// Re-zero at runtime with {"cmd":"rebaseline"}; tune normalisation/activation
-// (and opt into adaptive baseline) with {"cmd":"configure",...}. Both are
+// Re-zero at runtime with {"cmd":"rebaseline"}; tune the activation threshold in
+// µT (and opt into adaptive baseline) with {"cmd":"configure",...}. Both are
 // dispatched from commands.h, matching what the PC's touch tuning panel sends.
 // ---------------------------------------------------------------------------
 
@@ -47,8 +47,7 @@ constexpr uint32_t STREAM_INTERVAL_MS   = 100;    // ~10 Hz (was 35/28 Hz — th
 constexpr uint32_t ANNOUNCE_INTERVAL_MS = 2000;   // re-announce until gateway known
 
 // Tunables (overridable at runtime via "configure")
-inline float fullscaleMt      = 1000.0f;  // |delta| mapped to adj = 1.0
-inline float actThreshold     = 0.3f;     // adj at/above which a sensor is "active"
+inline float actThresholdUt   = 300.0f;   // |field delta| in µT at/above which a sensor is "active"
 inline bool  adaptiveBaseline = false;    // continuously track slow drift (opt-in)
 inline float baselineTauMs    = 2000.0f;  // adaptive-baseline time constant (ms)
 
@@ -79,8 +78,14 @@ inline void resetBaseline() {
 
 // Apply runtime tunables from a "configure" command (all fields optional).
 inline void applyConfigure(const JsonDocument& doc) {
-    if (!doc["fullscale_mt"].isNull())      fullscaleMt      = doc["fullscale_mt"].as<float>();
-    if (!doc["act_threshold"].isNull())     actThreshold     = doc["act_threshold"].as<float>();
+    if (!doc["act_threshold_ut"].isNull()) {
+        actThresholdUt = doc["act_threshold_ut"].as<float>();
+    } else if (!doc["act_threshold"].isNull()) {
+        // Back-compat: the old activation level was a fraction of a full-scale
+        // (default 1000 µT), so convert it to the µT it used to mean.
+        float fs = doc["fullscale_mt"].isNull() ? 1000.0f : doc["fullscale_mt"].as<float>();
+        actThresholdUt = doc["act_threshold"].as<float>() * fs;
+    }
     if (!doc["adaptive_baseline"].isNull()) adaptiveBaseline = doc["adaptive_baseline"].as<bool>();
     if (!doc["baseline_tau_ms"].isNull())   baselineTauMs    = doc["baseline_tau_ms"].as<float>();
 }
@@ -157,33 +162,24 @@ inline void updateAdaptiveBaseline(const Vec3* samples, const bool* valid, float
         float m = vmag({samples[i].x - baseline[i].x,
                         samples[i].y - baseline[i].y,
                         samples[i].z - baseline[i].z});
-        float adj = fullscaleMt > 0.0f ? m / fullscaleMt : 0.0f;
-        if (adj >= actThreshold) continue;   // touch in progress — freeze this sensor
+        if (m >= actThresholdUt) continue;   // touch in progress — freeze this sensor
         baseline[i].x += a * (samples[i].x - baseline[i].x);
         baseline[i].y += a * (samples[i].y - baseline[i].y);
         baseline[i].z += a * (samples[i].z - baseline[i].z);
     }
 }
 
-// Build {"type":"magnet","mag":[..],"adj":[..],"act":[..]} into buf.
+// Build {"type":"magnet","mag":[uT..],"act":[idx..]} into buf. A sensor is
+// "active" once its µT delta from baseline reaches actThresholdUt.
 inline void buildMessage(const Vec3* samples, const bool* valid, char* buf, size_t cap) {
     int pos = snprintf(buf, cap, "{\"type\":\"magnet\",\"mag\":[");
-    for (size_t i = 0; i < NUM_SENSORS; ++i) {
-        float m = valid[i] ? vmag({samples[i].x - baseline[i].x,
-                                    samples[i].y - baseline[i].y,
-                                    samples[i].z - baseline[i].z}) : 0.0f;
-        pos += snprintf(buf + pos, cap - pos, "%s%.3f", i ? "," : "", m);
-    }
-    pos += snprintf(buf + pos, cap - pos, "],\"adj\":[");
     bool active[NUM_SENSORS] = {};
     for (size_t i = 0; i < NUM_SENSORS; ++i) {
         float m = valid[i] ? vmag({samples[i].x - baseline[i].x,
                                     samples[i].y - baseline[i].y,
                                     samples[i].z - baseline[i].z}) : 0.0f;
-        float adj = fullscaleMt > 0.0f ? m / fullscaleMt : 0.0f;
-        if (adj > 1.0f) adj = 1.0f;
-        active[i] = adj >= actThreshold;
-        pos += snprintf(buf + pos, cap - pos, "%s%.3f", i ? "," : "", adj);
+        active[i] = m >= actThresholdUt;
+        pos += snprintf(buf + pos, cap - pos, "%s%.3f", i ? "," : "", m);
     }
     pos += snprintf(buf + pos, cap - pos, "],\"act\":[");
     bool first = true;

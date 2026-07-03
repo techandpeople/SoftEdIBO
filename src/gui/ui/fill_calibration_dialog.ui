@@ -16,19 +16,19 @@
    <item>
     <widget class="QLabel" name="intro_label">
      <property name="wordWrap"><bool>true</bool></property>
-     <property name="text"><string>Inflates each chamber from empty in fixed time steps, waiting for the pressure to settle after each step, to measure its time→pressure fill curve. "Calibrate all" also measures combinations of chambers filling together (they share a pump, so fill slower). Curves are saved per chamber and used instead of live pressure control. Re-run with a smaller step to refine. Keep hands clear.</string></property>
+     <property name="text"><string>Inflates each chamber from empty while streaming pressure, to measure its time→pressure fill curve in one continuous pass. Curves are saved per chamber and used instead of live pressure control, and rank which chamber fills first. "Calibrate all" sweeps every chamber. Keep hands clear.</string></property>
     </widget>
    </item>
    <item>
     <layout class="QHBoxLayout" name="controls_row">
      <item>
-      <widget class="QLabel" name="step_label">
-       <property name="text"><string>Step size:</string></property>
+      <widget class="QLabel" name="detail_label">
+       <property name="text"><string>Detail:</string></property>
       </widget>
      </item>
      <item>
-      <widget class="QComboBox" name="step_combo">
-       <property name="whatsThis"><string>Inflate-step granularity for the sweep. Coarse is fast; finer steps measure more points on the curve. Re-run a chamber with a finer step to refine its curve.</string></property>
+      <widget class="QComboBox" name="detail_combo">
+       <property name="whatsThis"><string>How densely to sample the fill curve — the live telemetry cadence during the sweep. Finer captures more points on the curve at the cost of a little more radio traffic.</string></property>
       </widget>
      </item>
      <item>
@@ -39,7 +39,7 @@
      </item>
      <item>
       <widget class="QLabel" name="combo_status">
-       <property name="whatsThis"><string>Progress of a "Calibrate all" run: which sweep is in progress out of the total, and which node/slots it covers (solo = one chamber, combo = several filling together to measure their shared-pump load).</string></property>
+       <property name="whatsThis"><string>Progress of a "Calibrate all" run: which chamber sweep is in progress out of the total, and which node/slot it covers.</string></property>
        <property name="text"><string/></property>
       </widget>
      </item>
@@ -63,14 +63,33 @@
     <layout class="QHBoxLayout" name="button_row">
      <item>
       <widget class="QPushButton" name="all_btn">
-       <property name="whatsThis"><string>Run the timing sweep for every chamber alone, then for every combination of chambers on each node filling together (to measure the shared-pump slowdown). Confirms the run count first. Keep hands clear during the run.</string></property>
+       <property name="whatsThis"><string>Run the continuous timing sweep for every configured chamber, one at a time from empty. Keep hands clear during the run.</string></property>
        <property name="text"><string>Calibrate all</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="duty_btn">
+       <property name="whatsThis"><string>Measure each chamber's pump duty→fill-speed curve: sweep it from empty at several PWM duties and record how much slower a lower duty fills. Lets the "over (ms)" slow-fill pick the right duty from measured data instead of a rough estimate. Keep hands clear during the run.</string></property>
+       <property name="text"><string>Duty curves</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="deflate_btn">
+       <property name="whatsThis"><string>Measure each chamber's deflate (vacuum) curve: fill it, then hold the deflate valve open while recording the falling pressure until it stops dropping — the sensor's floor. Times deflates the gauge cannot supervise (targets at or below the floor, e.g. wrinkles), so the vacuum pull ends deterministically. Keep hands clear during the run.</string></property>
+       <property name="text"><string>Deflate curves</string></property>
       </widget>
      </item>
      <item>
       <widget class="QPushButton" name="stop_btn">
        <property name="whatsThis"><string>Abort the current calibration immediately and halt every chamber (close valves, pumps off). Does not run the vacuum pump.</string></property>
        <property name="text"><string>⏹ Stop</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QCheckBox" name="save_type_check">
+       <property name="whatsThis"><string>Save each measured curve as the template for its skin type + silicone (e.g. tree_round_organ), shared by every skin of that type, instead of onto just this physical chamber. Chambers with a type inherit the template; leave off to save a per-chamber override.</string></property>
+       <property name="text"><string>Save as skin-type template</string></property>
+       <property name="checked"><bool>true</bool></property>
       </widget>
      </item>
      <item>

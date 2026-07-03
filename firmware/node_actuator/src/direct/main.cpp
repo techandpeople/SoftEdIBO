@@ -44,7 +44,8 @@
 // median-filtered reads while a round is filling/measuring — so this cadence only
 // keeps cachedKpa warm for idle telemetry and is cheap (3 dedicated ADC pins).
 constexpr uint32_t PRESSURE_CHECK_MS = 20;
-constexpr uint32_t STATUS_REPORT_MS  = 500;
+// The status broadcast cadence is runtime-adjustable (commands::statusReportMs):
+// normally 500 ms, temporarily faster during a `status_rate` window.
 
 static uint32_t lastPressureMs = 0;
 static uint32_t lastStatusMs   = 0;
@@ -101,7 +102,12 @@ void setup() {
     // The "fw" tag is a build marker: it lets us confirm from the PC log which
     // firmware actually booted, so a flash that silently didn't take can't be
     // mistaken for the new code. Bump it whenever the actuator logic changes.
-    static const char ready_msg[] = "{\"status\":\"node_direct_ready\",\"fw\":\"coupled-fill-2\",\"rgbw\":" LED_RGBW_JSON "}";
+    // "kpa_min" self-reports the gauge floor (sensor low end) so the PC knows
+    // below which pressure a deflate needs a time budget instead of the sensor.
+    char ready_msg[160];
+    snprintf(ready_msg, sizeof(ready_msg),
+             "{\"status\":\"node_direct_ready\",\"fw\":\"progressive-close-1\",\"rgbw\":" LED_RGBW_JSON ",\"kpa_min\":%.0f}",
+             (double)pressure::FLOOR_KPA);
     se::broadcast(ready_msg);
 
     LOG("%s\n", ready_msg);
@@ -131,7 +137,7 @@ void loop() {
     // Commands (incl. "resume") are still processed above, so re-arming works.
     if (chambers::stopped) {
         chambers::emergencyStopAll();
-        if (now - lastStatusMs >= STATUS_REPORT_MS) {
+        if (now - lastStatusMs >= commands::statusReportMs(now)) {
             lastStatusMs = now;
             for (int i = 0; i < NUM_CHAMBERS; i++)
                 commands::sendStatus(i, chambers::cachedKpa[i]);
@@ -157,7 +163,7 @@ void loop() {
             DBG_PRINT("TEST_RUN dead-man fired (no keepalive) — stopping\n");
             chambers::testStop();
         } else {
-            if (now - lastStatusMs >= STATUS_REPORT_MS) {
+            if (now - lastStatusMs >= commands::statusReportMs(now)) {
                 lastStatusMs = now;
                 for (int i = 0; i < NUM_CHAMBERS; i++) {
                     chambers::cachedKpa[i] = pressure::readKpa(PSENSOR_PINS[i]);
@@ -228,7 +234,7 @@ void loop() {
     }
 
     // ---- Status broadcast ----
-    if (now - lastStatusMs >= STATUS_REPORT_MS) {
+    if (now - lastStatusMs >= commands::statusReportMs(now)) {
         lastStatusMs = now;
         for (int i = 0; i < NUM_CHAMBERS; i++)
             commands::sendStatus(i, chambers::cachedKpa[i]);

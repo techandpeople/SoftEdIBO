@@ -125,6 +125,8 @@ def _build_one_skin(skin_cfg: dict[str, Any],
          "fill_time_ms": ch.get("fill_time_ms"),
          "fill_profile": ch.get("fill_profile"),
          "fill_profiles": ch.get("fill_profiles"),
+         "deflate_profile": ch.get("deflate_profile"),
+         "duty_curve": ch.get("duty_curve"),
          "fill_mode": ch.get("fill_mode")}
         for ch in chambers
     ]

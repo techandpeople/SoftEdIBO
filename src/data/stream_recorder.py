@@ -2,7 +2,7 @@
 
 The study records the **raw sensor streams** (not video) so touch/organ data can
 be analysed and used to train a touch-gesture model later. This recorder taps
-the single firehose — `ESPNowGateway.on_message` — so it captures every node
+the single firehose — `Gateway.on_message` — so it captures every node
 message (`magnet`, `organ`, `status`, boot announces, …) with a PC-side receive
 timestamp, one JSON object per line.
 
@@ -10,7 +10,7 @@ Responsibility is narrow: subscribe, timestamp, write, unsubscribe. It owns the
 file and nothing else; persistence policy (when to record, where) is the
 SessionPanel's job.
 
-Two gateway contracts matter (`src/hardware/espnow_gateway.py`):
+Two gateway contracts matter (`src/hardware/gateway.py`):
 - `on_message` stores a ``weakref.WeakMethod`` of the callback, so we must
   register a **bound method** (`self.handle_message`) and stay alive while
   recording — the owner keeps a reference.
@@ -36,7 +36,7 @@ class StreamRecorder:
     """Records every gateway message of a session to a JSONL file.
 
     Args:
-        gateway: The shared ``ESPNowGateway`` to tap.
+        gateway: The shared ``Gateway`` to tap.
         path: Destination ``.jsonl`` file (parent dirs are created).
         session_id: Stored in the header line for traceability.
         skin_types: ``{touch_source: skin_type}`` for the skins recorded in

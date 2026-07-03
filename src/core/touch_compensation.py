@@ -15,8 +15,8 @@ actuation offset is removed. An optional ``suppress_pct`` implements the
 last-resort "ignore a sensor while its chamber is (near) fully actuated".
 
 Works in magnitude (uT) space, matching the PC detection path (QuadrantDetector
-consumes raw ``mag`` in uT and deliberately ignores the firmware ``adj``). The
-coupling matrix must therefore be measured in the same ``mag`` units.
+consumes raw ``mag`` in uT). The coupling matrix must therefore be measured in
+the same ``mag`` units.
 """
 
 from __future__ import annotations
@@ -24,9 +24,9 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 # Default activation threshold (uT) used to rederive the active-sensor set from
-# the compensated magnitudes. ~ the firmware default act (act_threshold 0.3 x
-# fullscale 1000 uT), so enabling compensation with a zero matrix preserves the
-# previous activation behaviour.
+# the compensated magnitudes. Matches the firmware default act (act_threshold_ut
+# 300), so enabling compensation with a zero matrix preserves the previous
+# activation behaviour.
 DEFAULT_THRESHOLD_UT = 300.0
 
 # A chamber must couple a sensor by at least this many uT (at ref level) for the

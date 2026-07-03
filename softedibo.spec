@@ -12,16 +12,14 @@
 #   _internal/          — bundled Python libs + assets
 #     config/
 #       settings.yaml
-#     firmware/
-#       gateway/firmware.bin                         (ESP32-C6, ESP-IDF)
-#       gateway/firmware-s3.bin                      (ESP32-S3, ESP-IDF)
-#       gateway/firmware-s3-ap.bin                   (ESP32-S3 + SoftAP, ESP-IDF)
-#       gateway/firmware-esp32.bin                   (ESP32-WROOM, Arduino)
-#       node_actuator/firmware-direct-release.bin
-#       node_actuator/firmware-direct-debug.bin
-#       node_actuator/firmware-multiplexed-release.bin
-#       node_actuator/firmware-multiplexed-debug.bin
-#       node_magnet_sensor/firmware-release.bin             (MLX90393 touch board)
+#     firmware/                                      (see scripts/build-firmware.sh)
+#       gateway/firmware-s3.bin                      (XIAO ESP32-S3, ESP-IDF)
+#       node_actuator/firmware-direct-{release,debug}.bin
+#       node_actuator/firmware-direct-rgbw-{release,debug}.bin
+#       node_actuator/firmware-multiplexed-{release,debug}.bin
+#       node_actuator/firmware-multiplexed-rgbw-{release,debug}.bin
+#       node_magnet_sensor/firmware-release.bin      (MLX90393 touch board)
+#       thymio_rcp/firmware.bin                      (XIAO ESP32-C6 RCP, WiFi-OTA app image)
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
@@ -60,15 +58,17 @@ main_a = Analysis(
         # Block editor assets (Tools => Behaviour Editor…). HTML + any vendored
         # Blockly copy; loaded lazily, only when the editor is opened.
         ("src/gui/blockly/", "src/gui/blockly/"),
-        ("firmware/gateway/firmware.bin",                 "firmware/gateway"),
-        ("firmware/gateway/firmware-s3.bin",              "firmware/gateway"),
-        ("firmware/gateway/firmware-s3-ap.bin",           "firmware/gateway"),
-        ("firmware/gateway/firmware-esp32.bin",           "firmware/gateway"),
-        ("firmware/node_actuator/firmware-direct-release.bin",      "firmware/node_actuator"),
-        ("firmware/node_actuator/firmware-direct-debug.bin",        "firmware/node_actuator"),
-        ("firmware/node_actuator/firmware-multiplexed-release.bin", "firmware/node_actuator"),
-        ("firmware/node_actuator/firmware-multiplexed-debug.bin",   "firmware/node_actuator"),
-        ("firmware/node_magnet_sensor/firmware-release.bin",               "firmware/node_magnet_sensor"),
+        ("firmware/gateway/firmware-s3.bin",                             "firmware/gateway"),
+        ("firmware/node_actuator/firmware-direct-release.bin",           "firmware/node_actuator"),
+        ("firmware/node_actuator/firmware-direct-debug.bin",             "firmware/node_actuator"),
+        ("firmware/node_actuator/firmware-direct-rgbw-release.bin",      "firmware/node_actuator"),
+        ("firmware/node_actuator/firmware-direct-rgbw-debug.bin",        "firmware/node_actuator"),
+        ("firmware/node_actuator/firmware-multiplexed-release.bin",      "firmware/node_actuator"),
+        ("firmware/node_actuator/firmware-multiplexed-debug.bin",        "firmware/node_actuator"),
+        ("firmware/node_actuator/firmware-multiplexed-rgbw-release.bin", "firmware/node_actuator"),
+        ("firmware/node_actuator/firmware-multiplexed-rgbw-debug.bin",   "firmware/node_actuator"),
+        ("firmware/node_magnet_sensor/firmware-release.bin",             "firmware/node_magnet_sensor"),
+        ("firmware/thymio_rcp/firmware.bin",                             "firmware/thymio_rcp"),
     ],
     hiddenimports=[
         *collect_submodules("src"),

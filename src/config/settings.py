@@ -111,13 +111,13 @@ class Settings:
 
     @property
     def gateway_port(self) -> str:
-        """Serial port for the ESP-NOW gateway."""
+        """Serial port for the SoftEdIBO gateway."""
         default = "COM3" if sys.platform == "win32" else "/dev/ttyUSB0"
         return self._data.get("gateway", {}).get("serial_port", default)
 
     @property
     def gateway_baud(self) -> int:
-        """Baud rate for the ESP-NOW gateway."""
+        """Baud rate for the SoftEdIBO gateway."""
         return self._data.get("gateway", {}).get("baud_rate", 115200)
 
     @property

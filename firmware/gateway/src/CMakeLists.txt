@@ -6,5 +6,6 @@ idf_component_register(
     # esp_now.h ships inside esp_wifi; usb_serial_jtag.h is in its own driver
     # component (IDF 5.x). cJSON comes from json. esp_http_server backs the
     # SoftAP-build WiFi-OTA image proxy (only compiled under -DGATEWAY_AP).
-    REQUIRES    esp_wifi nvs_flash esp_netif esp_event esp_driver_usb_serial_jtag json esp_http_server
+    # esp_driver_uart backs the C6 RCP link (only compiled under -DGATEWAY_THYMIO).
+    REQUIRES    esp_wifi nvs_flash esp_netif esp_event esp_driver_usb_serial_jtag esp_driver_uart json esp_http_server
 )

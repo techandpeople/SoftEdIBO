@@ -138,7 +138,11 @@ inline void engOpen(int i, uint8_t dir) {
 // engine opens valves and runs the round/measure cycle from controlTick().
 // ---------------------------------------------------------------------------
 
-inline void requestInflate(int n, float target, uint8_t duty) {
+// ``cap_ms`` (optional) is the per-chamber open-time budget forwarded to the
+// engine — the closing authority for a target the gauge can't see (a deflate
+// below the sensor floor, timed by the PC's calibrated deflate curve).
+
+inline void requestInflate(int n, float target, uint8_t duty, uint32_t cap_ms = 0) {
     if (n < 0 || n >= MAX_CHAMBERS) return;
     target = max(state[n].min_kpa, min(target, state[n].max_kpa));
     bool reversed = false;
@@ -146,10 +150,10 @@ inline void requestInflate(int n, float target, uint8_t duty) {
     if (reversed) recalcPumps();
     state[n].duty       = duty;
     state[n].target_kpa = target;
-    inflateEng.request(n, target, state[n].max_kpa - state[n].min_kpa);
+    inflateEng.request(n, target, state[n].max_kpa - state[n].min_kpa, cap_ms);
 }
 
-inline void requestDeflate(int n, float target, uint8_t duty) {
+inline void requestDeflate(int n, float target, uint8_t duty, uint32_t cap_ms = 0) {
     if (n < 0 || n >= MAX_CHAMBERS) return;
     target = max(state[n].min_kpa, min(target, state[n].max_kpa));
     bool reversed = false;
@@ -157,7 +161,7 @@ inline void requestDeflate(int n, float target, uint8_t duty) {
     if (reversed) recalcPumps();
     state[n].duty       = duty;
     state[n].target_kpa = target;
-    deflateEng.request(n, target, state[n].max_kpa - state[n].min_kpa);
+    deflateEng.request(n, target, state[n].max_kpa - state[n].min_kpa, cap_ms);
 }
 
 inline void holdChamber(int n) {

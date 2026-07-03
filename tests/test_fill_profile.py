@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pytest import approx
 
-from src.hardware.fill_profile import FillProfile
+from src.hardware.fill_profile import MAX_DEFLATE_MS, DeflateProfile, FillProfile
 
 
 def test_anchors_at_ambient_and_keeps_order():
@@ -68,3 +68,53 @@ def test_from_list_rejects_empty_or_degenerate():
     assert FillProfile.from_list([[0, 0]]) is None   # only an anchor → no rise
     assert FillProfile([]).is_empty
     assert FillProfile([(0, 0)]).is_empty
+
+
+# ---------------------------------------------------------------------------
+# DeflateProfile — the falling (vacuum-side) mirror
+# ---------------------------------------------------------------------------
+
+def test_deflate_anchors_at_start_and_falls_monotone():
+    # Sweep from ~full down to the gauge floor (~6 %), with a noisy bounce.
+    p = DeflateProfile([(100, 95), (500, 60), (900, 62), (1500, 6)])
+    assert p.points[0] == (0.0, 95.0)             # anchored at the start level
+    assert p.start_pct == 95
+    assert p.floor_pct == 6                       # measured floor, not assumed 0
+    pts = dict(p.points)
+    assert pts[900.0] == 60                       # bounce clamped down (monotone)
+    assert p.full_time_ms == 1500
+
+
+def test_deflate_time_from_to_interpolates():
+    # 100%@0 → 50%@1000 → 10%@3000 (tail slower).
+    p = DeflateProfile([(0, 100), (1000, 50), (3000, 10)])
+    assert p.time_from_to(100, 50) == approx(1000)
+    assert p.time_from_to(75, 50) == approx(500)   # halfway down the fast segment
+    assert p.time_from_to(50, 30) == approx(1000)  # halfway down the slow segment
+    assert p.time_from_to(30, 60) == 0             # non-falling request → 0
+
+
+def test_deflate_extrapolates_below_floor_with_cap():
+    # Floor measured at 10 %; tail slope = 2000 ms / 40 pct = 50 ms/pct.
+    p = DeflateProfile([(0, 100), (1000, 50), (3000, 10)])
+    # From 50 % to floor is 2000 ms; 10 pct below floor adds 10 * 50 = 500 ms.
+    assert p.extrapolate_ms(50, 0) == approx(2500)
+    # Never past the hard vacuum cap, however deep the target.
+    assert p.extrapolate_ms(100, -400) == MAX_DEFLATE_MS
+    # A target at/above the floor is just the measured time (no extrapolation).
+    assert p.extrapolate_ms(50, 10) == approx(2000)
+
+
+def test_deflate_rejects_empty_or_flat():
+    assert DeflateProfile.from_list(None) is None
+    assert DeflateProfile.from_list([]) is None
+    assert DeflateProfile([]).is_empty
+    assert DeflateProfile([(0, 50), (1000, 50)]).is_empty   # never fell
+
+
+def test_deflate_round_trips_through_list():
+    p = DeflateProfile([(0, 95), (800, 40.4), (2000, 6.0)])
+    back = DeflateProfile.from_list(p.to_list())
+    assert back is not None
+    assert back.floor_pct == approx(6.0)
+    assert back.time_from_to(95, 40.4) == approx(800)

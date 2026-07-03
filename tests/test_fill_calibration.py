@@ -3,15 +3,25 @@
 from pytest import approx
 
 from src.hardware.fill_calibration import (
+    ContinuousDeflateCalibrator,
+    ContinuousFillCalibrator,
     FillProfileCalibrator,
     MultiChamberFillCalibrator,
+    PlateauDetector,
     chambers_missing_calibration,
     combo_key,
+    get_type_deflate_profile,
+    get_type_profile,
     iter_actuator_chambers,
     iter_actuator_nodes,
     parse_combo_key,
+    resolve_fill_profiles,
+    set_deflate_profile,
     set_fill_profile,
     set_fill_profiles,
+    set_type_deflate_profile,
+    set_type_profile,
+    type_slug,
 )
 
 
@@ -45,6 +55,113 @@ def test_finer_step_yields_more_points():
     for pct in (20, 45, 70, 95):
         fine.record(pct)
     assert fine.steps > coarse.steps
+
+
+def test_continuous_sweep_builds_dense_curve_until_target():
+    cal = ContinuousFillCalibrator(target_pct=95)
+    # Stream of (elapsed_ms, pct) while the valve is held open from ambient.
+    assert cal.record(40, 8) is False
+    assert cal.record(80, 22) is False
+    assert cal.record(120, 41) is False
+    assert cal.record(160, 63) is False
+    assert cal.record(200, 96) is True        # crosses target
+    assert not cal.timed_out
+    assert cal.elapsed_ms == 200
+    assert cal.samples == 5
+    prof = cal.profile
+    assert prof.full_time_ms == 200
+    # Interpolates between the dense samples.
+    assert prof.time_for_pct(41) == approx(120)
+
+
+def test_continuous_sweep_times_out_on_creep():
+    cal = ContinuousFillCalibrator(target_pct=98, max_total_ms=300)
+    assert cal.record(100, 40) is False
+    assert cal.record(200, 60) is False
+    assert cal.record(300, 70) is True        # hits the ceiling, never 98 %
+    assert cal.timed_out
+    assert cal.profile.top_pct == 70
+
+
+def test_continuous_sweep_ignores_non_monotone_samples():
+    cal = ContinuousFillCalibrator(target_pct=95)
+    assert cal.record(100, 30) is False
+    assert cal.record(100, 34) is False       # duplicate timestamp — ignored
+    assert cal.record(80, 40) is False        # out-of-order — ignored
+    assert cal.samples == 1
+    assert cal.elapsed_ms == 100
+    assert cal.record(150, 96) is True        # later sample still lands
+
+
+def test_plateau_detector_declares_floor_when_drop_stops():
+    det = PlateauDetector(min_drop=0.5, settle_ms=600, min_ms=300)
+    assert det.update(100, 50.0) is False        # still early (min_ms)
+    assert det.update(400, 30.0) is False        # falling — floor keeps moving
+    assert det.update(800, 10.0) is False
+    assert det.update(1200, 9.8) is False        # < min_drop: not "falling"
+    assert det.update(1400, 9.9) is True         # 600 ms without a real drop
+    # A meaningful new drop rearms the window.
+    det2 = PlateauDetector(min_drop=0.5, settle_ms=600, min_ms=0)
+    det2.update(0, 10.0)
+    det2.update(500, 9.8)
+    assert det2.update(550, 8.0) is False        # real drop at 550 → window resets
+    assert det2.update(1100, 7.9) is False       # only 550 ms since the drop
+    assert det2.update(1200, 7.9) is True
+
+
+def test_continuous_deflate_sweep_ends_on_measured_floor():
+    cal = ContinuousDeflateCalibrator(plateau_drop_pct=1.0, plateau_ms=500)
+    # Falling stream; the gauge floor sits at ~6 % (ambient ≠ 0 on this sensor).
+    assert cal.record(300, 95) is False
+    assert cal.record(600, 60) is False
+    assert cal.record(900, 20) is False
+    assert cal.record(1200, 6.2) is False
+    assert cal.record(1500, 6.1) is False        # < 1 % drop — plateau window runs
+    assert cal.record(1800, 6.0) is True         # 600 ms without a real drop
+    assert not cal.timed_out
+    prof = cal.profile
+    assert prof.floor_pct == approx(6.0)
+    assert prof.time_from_to(95, 20) == approx(900 - 300)
+
+
+def test_continuous_deflate_sweep_times_out():
+    cal = ContinuousDeflateCalibrator(max_total_ms=1000,
+                                      plateau_drop_pct=1.0, plateau_ms=5000)
+    assert cal.record(400, 80) is False
+    assert cal.record(1000, 40) is True          # ceiling
+    assert cal.timed_out
+
+
+def test_set_deflate_profile_writes_and_clears():
+    data = _settings()
+    curve = [[0, 95], [900, 40], [2000, 6]]
+    assert set_deflate_profile(data, "AA:01", 0, curve) == 1
+    ch0 = data["robots"]["turtles"][0]["skins"][0]["chambers"][0]
+    assert ch0["deflate_profile"] == curve
+    by_slot = {c["slot"]: c for c in iter_actuator_chambers(data)}
+    assert by_slot[0]["deflate_profile"] == curve
+    assert set_deflate_profile(data, "AA:01", 0, None) == 1
+    assert "deflate_profile" not in ch0
+
+
+def test_resolver_inherits_deflate_template_and_override_wins():
+    data = {}
+    set_type_deflate_profile(data, "tree_round", "organ", 0, [[0, 95], [1500, 6]])
+    assert get_type_deflate_profile(data, "tree_round", "organ", 0) is not None
+    skins = [{
+        "skin_id": "b1", "skin_type": "tree_round", "skin_variant": "organ",
+        "chambers": [
+            {"mac": "AA:01", "slot": 0},                              # inherits
+            {"mac": "AA:01", "slot": 0,
+             "deflate_profile": [[0, 90], [800, 10]]},                # override wins
+        ],
+    }]
+    chs = resolve_fill_profiles(data, skins)[0]["chambers"]
+    assert chs[0]["deflate_profile"] == [[0, 95], [1500, 6]]
+    assert chs[1]["deflate_profile"] == [[0, 90], [800, 10]]
+    # Clearing prunes the whole map.
+    set_type_deflate_profile(data, "tree_round", "organ", 0, None)
+    assert "deflate_profiles_by_type" not in data
 
 
 def test_multi_chamber_sweeps_in_lockstep_with_dropout():
@@ -157,6 +274,50 @@ def test_set_fill_profiles_writes_combo_map_and_drops_legacy_scalar():
     # Clearing removes the map.
     assert set_fill_profiles(data, "AA:01", 1, None) == 1
     assert "fill_profiles" not in ch1
+
+
+def test_type_slug_composes_type_and_variant():
+    assert type_slug("tree_round", "organ") == "tree_round_organ"
+    assert type_slug("thymio", "") == "thymio"          # no variant
+    assert type_slug("", "organ") == ""                 # no type → no template
+
+
+def test_set_and_get_type_profile_round_trip_and_prune():
+    data = {}
+    curve = [[0, 0], [500, 40], [1200, 95]]
+    assert set_type_profile(data, "tree_round", "organ", 0, curve) is True
+    assert data["fill_profiles_by_type"]["tree_round_organ"]["0"] == curve
+    assert get_type_profile(data, "tree_round", "organ", 0) == curve
+    # A different slot of the same type lives alongside.
+    set_type_profile(data, "tree_round", "organ", 1, [[0, 0], [800, 90]])
+    assert set(data["fill_profiles_by_type"]["tree_round_organ"]) == {"0", "1"}
+    # Clearing prunes the slot, then the type, then the whole map.
+    set_type_profile(data, "tree_round", "organ", 0, None)
+    set_type_profile(data, "tree_round", "organ", 1, None)
+    assert "fill_profiles_by_type" not in data
+    # An un-typed skin can't key a template.
+    assert set_type_profile(data, "", "", 0, curve) is False
+    assert get_type_profile(data, "", "", 0) is None
+
+
+def test_resolve_fill_profiles_inherits_template_without_mutating():
+    data = {"fill_profiles_by_type": {
+        "tree_round_organ": {"0": [[0, 0], [900, 95]]}}}
+    skins = [{
+        "skin_id": "branch-1", "skin_type": "tree_round", "skin_variant": "organ",
+        "chambers": [
+            {"mac": "AA:01", "slot": 0},                          # inherits template
+            {"mac": "AA:01", "slot": 1},                          # no template → nothing
+            {"mac": "AA:01", "slot": 0, "fill_profile": [[0, 0], [100, 50]]},  # override wins
+        ],
+    }]
+    resolved = resolve_fill_profiles(data, skins)
+    chs = resolved[0]["chambers"]
+    assert chs[0]["fill_profile"] == [[0, 0], [900, 95]]     # inherited
+    assert "fill_profile" not in chs[1]                       # slot 1 has no template
+    assert chs[2]["fill_profile"] == [[0, 0], [100, 50]]      # own override untouched
+    # The source skin dicts are never mutated (template stays the single source).
+    assert "fill_profile" not in skins[0]["chambers"][0]
 
 
 def test_combos_do_not_gate_activity_start():

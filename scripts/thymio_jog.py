@@ -1,57 +1,47 @@
 #!/usr/bin/env python3
-"""Standalone Thymio smoke-test / jog tool over a wireless dongle (or USB).
+"""Standalone Thymio smoke-test / jog tool over the wireless RF dongle (thymiodirect).
 
-Uses tdmclient to talk to a running Thymio Device Manager (Thymio Suite). Plug in
-the RF dongle, power a paired Wireless Thymio, then:
+No Thymio Suite / TDM needed — thymiodirect talks to the dongle's serial port directly.
+One dongle relays to several Thymios at once (each a wireless *node id*). Plug in the RF
+dongle (paired with a powered Thymio) and:
 
-    python scripts/thymio_jog.py            # scripted smoke test (moves + LEDs)
-    python scripts/thymio_jog.py --repl     # interactive line jog
-    python scripts/thymio_jog.py --leds 0 32 0     # just set the top LED (green)
-    python scripts/thymio_jog.py --drive 150 150 --secs 1.5   # drive then stop
+    python scripts/thymio_jog.py                 # scripted smoke test (moves + LEDs)
+    python scripts/thymio_jog.py --list          # list node ids the dongle sees, exit
+    python scripts/thymio_jog.py --node 2 --repl # jog a specific Thymio by node id
+    python scripts/thymio_jog.py --leds 0 32 0   # set the top LED (green) and exit
+    python scripts/thymio_jog.py --drive 150 150 --secs 1.5
 
-This is deliberately independent of the SoftEdIBO app: it verifies the borrowed
-dongle + Thymio end-to-end and doubles as the command source when capturing the
-dongle's 802.15.4 traffic with the `c6_radio` sniffer (see
-docs/THYMIO_WIRELESS_CONTROL.md). It always stops the motors on exit.
-
-tdmclient auto-discovers a local TDM; pass --host/--port to reach a remote one.
-Thymio native variables: motor.{left,right}.target (~ -500..500),
-leds.top = [r, g, b] (0..32).
+Use --list to learn which node id is which robot (blink/drive one to tell them apart),
+then set those ids in Robot Config → Thymio. Reuses ThymioLink / ThymioDongle (the same
+transport the app uses) and always stops the motors on exit. Needs: pip install
+thymiodirect. Thymio native vars: motor.{left,right}.target (~ -500..500), leds.top =
+[r, g, b] (0..32).
 """
 from __future__ import annotations
 
 import argparse
+import os
 import sys
+import time
 
-from tdmclient import ClientAsync
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-
-async def set_motors(node, left: int, right: int) -> None:
-    await node.set_variables({
-        "motor.left.target":  [int(left)],
-        "motor.right.target": [int(right)],
-    })
+from src.robots.thymio.thymio_dongle import ThymioDongle   # noqa: E402
+from src.robots.thymio.thymio_link import ThymioLink       # noqa: E402
 
 
-async def set_leds(node, r: int, g: int, b: int) -> None:
-    await node.set_variables({"leds.top": [int(r), int(g), int(b)]})
-
-
-async def smoke(client, node) -> None:
+def smoke(link: ThymioLink) -> None:
     """A short, gentle sequence that proves movement and LEDs work."""
-    print("LED green");        await set_leds(node, 0, 32, 0)
-    print("forward");          await set_motors(node, 150, 150); await client.sleep(1.2)
-    print("stop");             await set_motors(node, 0, 0);     await client.sleep(0.4)
-    print("spin");             await set_motors(node, 150, -150); await client.sleep(1.0)
-    print("stop, LED off");    await set_motors(node, 0, 0);     await set_leds(node, 0, 0, 0)
+    print("LED green");     link.set_leds(0, 32, 0)
+    print("forward");       link.set_motors(150, 150); time.sleep(1.2)
+    print("stop");          link.set_motors(0, 0);     time.sleep(0.4)
+    print("spin");          link.set_motors(150, -150); time.sleep(1.0)
+    print("stop, LED off"); link.set_motors(0, 0);     link.set_leds(0, 0, 0)
 
 
-async def repl(client, node) -> None:
-    """Line-based manual jog. Commands are read one per line (blocking)."""
-    print(
-        "commands: f=fwd  b=back  l=left  r=right  s=stop  "
-        "m <L> <R>  c <r> <g> <b>  q=quit"
-    )
+def repl(link: ThymioLink) -> None:
+    """Line-based manual jog (commands read one per line)."""
+    print("commands: f=fwd b=back l=left r=right s=stop  m <L> <R>  c <r> <g> <b>  q=quit")
     speed = 150
     while True:
         try:
@@ -64,19 +54,19 @@ async def repl(client, node) -> None:
         if cmd == "q":
             break
         elif cmd == "f":
-            await set_motors(node, speed, speed)
+            link.set_motors(speed, speed)
         elif cmd == "b":
-            await set_motors(node, -speed, -speed)
+            link.set_motors(-speed, -speed)
         elif cmd == "l":
-            await set_motors(node, -speed, speed)
+            link.set_motors(-speed, speed)
         elif cmd == "r":
-            await set_motors(node, speed, -speed)
+            link.set_motors(speed, -speed)
         elif cmd == "s":
-            await set_motors(node, 0, 0)
+            link.set_motors(0, 0)
         elif cmd == "m" and len(args) == 2:
-            await set_motors(node, int(args[0]), int(args[1]))
+            link.set_motors(int(args[0]), int(args[1]))
         elif cmd == "c" and len(args) == 3:
-            await set_leds(node, int(args[0]), int(args[1]), int(args[2]))
+            link.set_leds(int(args[0]), int(args[1]), int(args[2]))
         else:
             print("?")
 
@@ -84,8 +74,11 @@ async def repl(client, node) -> None:
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--host", help="TDM host (default: auto-discover the local TDM)")
-    p.add_argument("--port", type=int, help="TDM port (default: 8596)")
+    p.add_argument("--port", help="dongle serial port (default: auto-detect)")
+    p.add_argument("--list", action="store_true",
+                   help="list the node ids the dongle currently sees, then exit")
+    p.add_argument("--node", type=int, default=None,
+                   help="node id of the Thymio to drive (default: first discovered)")
     p.add_argument("--repl", action="store_true", help="interactive line jog")
     p.add_argument("--leds", nargs=3, type=int, metavar=("R", "G", "B"),
                    help="set the top LED (0..32) and exit")
@@ -94,38 +87,36 @@ def main() -> int:
     p.add_argument("--secs", type=float, default=1.5, help="duration for --drive")
     args = p.parse_args()
 
-    kwargs = {}
-    if args.host:
-        kwargs["tdm_addr"] = args.host
-    if args.port:
-        kwargs["tdm_port"] = args.port
+    if args.list:
+        dongle = ThymioDongle(serial_port=args.port)
+        print("connecting to the dongle…")
+        if not dongle.connect():
+            print("could not connect — dongle plugged in and a Thymio powered ON + paired?")
+            return 1
+        print("node ids seen:", dongle.nodes or "(none)")
+        dongle.close()
+        return 0
 
-    client = ClientAsync(**kwargs)
-
-    async def prog():
-        print("waiting for a Thymio (is the dongle plugged in and the robot on?)…")
-        with await client.lock() as node:
-            print(f"locked node {node.id_str}")
-            try:
-                if args.leds is not None:
-                    await set_leds(node, *args.leds)
-                elif args.drive is not None:
-                    await set_motors(node, *args.drive)
-                    await client.sleep(args.secs)
-                elif args.repl:
-                    await repl(client, node)
-                else:
-                    await smoke(client, node)
-            finally:
-                await set_motors(node, 0, 0)   # always stop the wheels
-
+    link = ThymioLink(serial_port=args.port, node_id=args.node)
+    print("connecting to the Thymio via the dongle…")
+    if not link.connect():
+        print("could not connect — is the dongle plugged in and paired with a powered "
+              "Thymio? (and: pip install thymiodirect)")
+        return 1
     try:
-        client.run_async_program(prog)
-    except KeyboardInterrupt:
-        print("\ninterrupted — motors stopped on exit")
+        if args.leds is not None:
+            link.set_leds(*args.leds)
+        elif args.drive is not None:
+            link.set_motors(*args.drive)
+            time.sleep(args.secs)
+        elif args.repl:
+            repl(link)
+        else:
+            smoke(link)
+        return 0
     finally:
-        client.close()
-    return 0
+        link.set_motors(0, 0)   # always stop the wheels
+        link.close()
 
 
 if __name__ == "__main__":

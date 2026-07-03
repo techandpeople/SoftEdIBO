@@ -22,7 +22,7 @@
       </item>
       <item>
        <widget class="QRadioButton" name="rb_gateway">
-        <property name="text"><string>Gateway only  (the ESP-NOW gateway board)</string></property>
+        <property name="text"><string>Gateway only  (the SoftEdIBO gateway board)</string></property>
        </widget>
       </item>
       <item>

@@ -6,7 +6,7 @@
    <rect><x>0</x><y>0</y><width>640</width><height>460</height></rect>
   </property>
   <property name="windowTitle"><string>Serial Monitor</string></property>
-  <property name="whatsThis"><string>Live view of the raw serial traffic to and from the ESP-NOW gateway. Incoming gateway lines are shown as received; lines you send are echoed with a » marker. Type a raw line below and press Enter to send it — useful for poking the gateway with commands the structured UI can't express.</string></property>
+  <property name="whatsThis"><string>Live view of the raw serial traffic to and from the SoftEdIBO gateway. Incoming gateway lines are shown as received; lines you send are echoed with a » marker. Type a raw line below and press Enter to send it — useful for poking the gateway with commands the structured UI can't express.</string></property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>
     <widget class="QPlainTextEdit" name="output">

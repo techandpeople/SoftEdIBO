@@ -40,6 +40,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from src.activities import activity_kind
+
 
 @dataclass(frozen=True)
 class VerbField:
@@ -57,6 +59,10 @@ class Verb:
     kind: str                       # "action" | "control" | "condition"
     description: str
     fields: tuple[VerbField, ...] = field(default_factory=tuple)
+    # Activity kinds (activity_kind.KINDS) the verb is restricted to. Empty =
+    # valid everywhere. E.g. the Thymio wheel verbs only make sense in a
+    # thymio-targeted spec, and the editor only offers them there.
+    kinds: tuple[str, ...] = ()
 
 
 # ---------------------------------------------------------------------------
@@ -200,6 +206,24 @@ ACTIONS: tuple[Verb, ...] = (
     Verb("log", "action", "Write a line to the activity log (debugging).", (
         VerbField("message", "enum", ""),
     )),
+    # --- Thymio wheeled base (thymio-targeted specs only) ---
+    Verb("thymio_drive", "action",
+         "Set the Thymio's wheel speeds — optionally for a fixed time, then "
+         "stop. 0/0 stops the wheels.", (
+        VerbField("left", "int", 100,
+                  description="Left wheel target, -500..500 (negative = "
+                              "backwards)."),
+        VerbField("right", "int", 100,
+                  description="Right wheel target, -500..500. Opposite signs "
+                              "turn on the spot."),
+        VerbField("ms", "ms", 0,
+                  description="Drive this long then stop. 0 = keep driving "
+                              "until the next thymio_drive."),
+    ), kinds=(activity_kind.THYMIO,)),
+    Verb("thymio_leds", "action",
+         "Colour the Thymio's top LED.", (
+        VerbField("color", "color", "#8e44ad"),
+    ), kinds=(activity_kind.THYMIO,)),
 )
 
 CONTROL: tuple[Verb, ...] = (
@@ -297,11 +321,18 @@ def validate_spec(spec: dict[str, Any]) -> None:
     if initial not in states:
         raise SpecError(f"spec.initial {initial!r} is not a defined state")
 
+    # Optional activity target (robot kind + skin variant). Absent = legacy "any"
+    # behaviour that runs on whatever robot is picked.
+    target = spec.get("target")
+    if target is not None:
+        _validate_target(target)
+    kind = target.get("kind") if isinstance(target, dict) else None
+
     for sid, state in states.items():
         if not isinstance(state, dict):
             raise SpecError(f"state {sid!r} must be a dict")
-        _validate_steps(state.get("do", []), f"{sid}.do")
-        _validate_steps(state.get("on_touch", []), f"{sid}.on_touch")
+        _validate_steps(state.get("do", []), f"{sid}.do", kind)
+        _validate_steps(state.get("on_touch", []), f"{sid}.on_touch", kind)
         for i, tr in enumerate(state.get("transitions", []) or []):
             if not isinstance(tr, dict) or "to" not in tr:
                 raise SpecError(f"{sid}.transitions[{i}] needs a 'to'")
@@ -312,7 +343,26 @@ def validate_spec(spec: dict[str, Any]) -> None:
                            f"{sid}.transitions[{i}].when")
 
 
-def _validate_steps(steps: Any, where: str) -> None:
+def _validate_target(target: Any) -> None:
+    """Check an optional ``spec.target`` (robot kind + skin variant)."""
+    if not isinstance(target, dict):
+        raise SpecError("spec.target must be a dict")
+    kind = target.get("kind")
+    if not activity_kind.is_kind(kind):
+        raise SpecError(f"spec.target.kind {kind!r} is not a known activity kind")
+    # ``skin_variant`` is optional and validated against the type at session setup.
+
+
+def spec_target(spec: dict[str, Any]) -> dict[str, str] | None:
+    """The activity's declared target ``{kind, skin_variant}``, or ``None`` (legacy
+    'any' behaviour). Assumes ``spec`` already passed :func:`validate_spec`."""
+    t = spec.get("target")
+    if isinstance(t, dict) and activity_kind.is_kind(t.get("kind")):
+        return {"kind": t["kind"], "skin_variant": t.get("skin_variant", "") or ""}
+    return None
+
+
+def _validate_steps(steps: Any, where: str, kind: str | None = None) -> None:
     if not isinstance(steps, list):
         raise SpecError(f"{where} must be a list of steps")
     for i, step in enumerate(steps):
@@ -321,9 +371,14 @@ def _validate_steps(steps: Any, where: str) -> None:
         name = next(iter(step))
         if name not in STEP_NAMES:
             raise SpecError(f"{where}[{i}] unknown verb {name!r}")
+        v = _ALL_VERBS.get(name)
+        if v is not None and v.kinds and kind not in v.kinds:
+            raise SpecError(
+                f"{where}[{i}] verb {name!r} needs a spec.target of kind "
+                f"{' / '.join(v.kinds)} (got {kind!r})")
         params = step[name]
         if name in CONTROL_NAMES and isinstance(params, dict):
-            _validate_steps(params.get("do", []), f"{where}[{i}].do")
+            _validate_steps(params.get("do", []), f"{where}[{i}].do", kind)
 
 
 def _validate_cond(cond: Any, where: str) -> None:

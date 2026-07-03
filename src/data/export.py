@@ -20,6 +20,8 @@ import csv
 from typing import TYPE_CHECKING, TextIO
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from src.data.database import Database
     from src.data.models import InteractionEvent, SessionRecord
 
@@ -46,19 +48,22 @@ class SessionExporter:
 
     def export_session(self, session_id: str, path: str) -> int:
         """Export one session. Returns the number of event rows written."""
-        session = self._find_session(session_id)
-        with open(path, "w", newline="", encoding="utf-8") as f:
-            writer = self._writer(f)
-            return self._write_session(writer, session_id, session)
+        return self.export_sessions([session_id], path)
 
-    def export_all(self, path: str) -> int:
-        """Export every session. Returns the total event rows written."""
+    def export_sessions(self, session_ids: "Iterable[str]", path: str) -> int:
+        """Export the given sessions into one CSV. Returns total event rows."""
+        by_id = {s.session_id: s for s in self._db.get_all_sessions()}
         total = 0
         with open(path, "w", newline="", encoding="utf-8") as f:
             writer = self._writer(f)
-            for session in self._db.get_all_sessions():
-                total += self._write_session(writer, session.session_id, session)
+            for session_id in session_ids:
+                total += self._write_session(writer, session_id, by_id.get(session_id))
         return total
+
+    def export_all(self, path: str) -> int:
+        """Export every session. Returns the total event rows written."""
+        ids = [s.session_id for s in self._db.get_all_sessions()]
+        return self.export_sessions(ids, path)
 
     # ------------------------------------------------------------------
     # Internals
@@ -69,10 +74,6 @@ class SessionExporter:
         writer = csv.writer(f)
         writer.writerow(COLUMNS)
         return writer
-
-    def _find_session(self, session_id: str) -> "SessionRecord | None":
-        return next((s for s in self._db.get_all_sessions()
-                     if s.session_id == session_id), None)
 
     def _write_session(self, writer, session_id: str,
                        session: "SessionRecord | None") -> int:

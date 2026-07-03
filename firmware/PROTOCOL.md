@@ -55,7 +55,7 @@ runtime `set_tank_pressure` command; re-send `configure` to change them.
 | `cmd` | Fields | Notes |
 |---|---|---|
 | `rebaseline` | — | Re-zero (recapture the baseline of) all magnetic sensors |
-| `configure` | `fullscale_mt`, `act_threshold`, `adaptive_baseline`, `baseline_tau_ms` | Tune `adj` scale + activation level; opt-in adaptive baseline (tracks slow drift, frozen per-sensor while active). All optional |
+| `configure` | `act_threshold_ut`, `adaptive_baseline`, `baseline_tau_ms` | Set the µT activation threshold; opt-in adaptive baseline (tracks slow drift, frozen per-sensor while active). All optional. Legacy `fullscale_mt`/`act_threshold` (fraction) still accepted |
 
 ### Multiplexed-node only
 
@@ -145,9 +145,8 @@ it into cover / resistance event streams for activities.
 
 | Field | Shape |
 |---|---|
-| `raw` | `[[x,y,z], …]` — N entries, one per sensor |
-| `mag` | `[m1, …]` — N magnitudes |
-| `adj` | `[a1, …]` — N baseline-adjusted values |
+| `mag` | `[m1, …]` — N per-sensor magnitudes (µT), baseline-subtracted |
+| `act` | `[idx, …]` — indices of sensors whose `mag ≥ act_threshold_ut` |
 
 The PC decides what's touched based on the skin's configured layout
 (`skin.touch.sensor_grid` paired with `imu_geometry`). The firmware does **not**

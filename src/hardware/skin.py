@@ -27,8 +27,8 @@ from src.core.skin_config import (
 from src.core.touch_compensation import compensator_from_config
 from src.hardware.air_chamber import AirChamber, ChamberState
 from src.hardware.fill_calibration import combo_key, parse_combo_key
-from src.hardware.fill_profile import FillProfile
-from src.hardware.fill_scaling import duty_for_period, scale_fill_ms
+from src.hardware.fill_profile import DeflateProfile, FillProfile
+from src.hardware.fill_scaling import DutyModel, duty_for_period, scale_fill_ms
 from src.hardware.touch_event_router import TouchEventRouter
 from src.hardware.touch_source import CompensatedMagnetSource
 
@@ -127,6 +127,14 @@ class Skin:
         # baked into the curve). Runtime prefers an exact match over scaling the
         # solo curve; falls back to scale_fill_ms when no combination matches.
         self._combo_profiles: dict[int, dict[frozenset[int], FillProfile]] = {}
+        # local_idx → measured pump-duty→fill-speed model, or None. When present the
+        # runtime picks the "over (ms)" slow-fill duty from the measured curve
+        # instead of the rough linear duty_for_period fallback.
+        self._duty_models: dict[int, DutyModel | None] = {}
+        # local_idx → measured falling deflate curve, or None. Times a deflate the
+        # gauge cannot supervise: a target below the node's sensor floor gets an
+        # open-time budget from this curve instead of the (blind) closed loop.
+        self._deflate_profiles: dict[int, DeflateProfile | None] = {}
         # local_idx → fill mode ("time" | "pressure"). In "pressure" mode the
         # chamber inflates closed-loop on the gauge sensor even when a calibrated
         # curve exists, so the curve is ignored for runtime timing.
@@ -213,6 +221,9 @@ class Skin:
                 FillProfile.from_list(inp.get("fill_profile"))
                 or FillProfile.linear(fill_time))
             self._combo_profiles[local_idx] = self._parse_combos(inp.get("fill_profiles"))
+            self._duty_models[local_idx] = DutyModel.from_list(inp.get("duty_curve"))
+            self._deflate_profiles[local_idx] = \
+                DeflateProfile.from_list(inp.get("deflate_profile"))
             self._fill_modes[local_idx] = normalize_fill_mode(inp.get("fill_mode"))
             self._slots.append(node_slot)
             self._reverse[node_slot] = local_idx
@@ -434,6 +445,9 @@ class Skin:
             else:
                 chamber.state = ChamberState.IDLE
             self._ctrl.fill_load.note_stop(slot)
+            ms = self._deflate_ms(local_idx, chamber.pressure, new_target)
+            if ms is not None:
+                return self._ctrl.deflate(slot, value, ms=ms)
             return self._ctrl.deflate(slot, value)
 
         # set_pressure
@@ -509,6 +523,29 @@ class Skin:
             return self._ctrl.inflate(slot, value, ms=ms)
         return self._ctrl.inflate(slot, value)
 
+    # Targets this close to (or below) the measured deflate floor get a time
+    # budget: readings hover at the floor, so the closed loop can't be trusted
+    # to end the pull there.
+    _DEFLATE_FLOOR_MARGIN_PCT = 1.0
+
+    def _deflate_ms(self, local_idx: int, cur_pct: float,
+                    target_pct: float) -> int | None:
+        """Open-time budget (ms) for a deflate the gauge cannot supervise.
+
+        The calibrated deflate curve's **measured floor** (where the falling
+        reading plateaued) embodies the sensor's real low end — today ~ambient,
+        below zero once the -40 kPa sensors are in — so a target under it (with
+        a small margin) is timed off the curve (:meth:`DeflateProfile.extrapolate_ms`,
+        hard-capped) and sent as the firmware's per-chamber cap. Returns ``None``
+        (pure closed loop) when the target is comfortably above the floor or the
+        chamber has no measured deflate curve."""
+        profile = self._deflate_profiles.get(local_idx)
+        if profile is None or profile.is_empty:
+            return None
+        if target_pct >= profile.floor_pct + self._DEFLATE_FLOOR_MARGIN_PCT:
+            return None
+        return max(1, int(round(profile.extrapolate_ms(cur_pct, target_pct))))
+
     def _duty_for_period(self, local_idx: int, cur_pct: float, target_pct: float,
                          period_ms: int) -> int | None:
         """Pump duty that stretches an inflate to ~``period_ms`` (None = full speed).
@@ -524,6 +561,11 @@ class Skin:
                          self.skin_id, local_idx)
             return None
         natural_ms = profile.time_for_pct(target_pct) - profile.time_for_pct(cur_pct)
+        # Prefer the chamber's measured duty→speed curve; fall back to the rough
+        # linear model when it was never swept.
+        model = self._duty_models.get(local_idx)
+        if model is not None and not model.is_empty:
+            return model.duty_for_period(natural_ms, period_ms)
         return duty_for_period(natural_ms, period_ms)
 
     # ------------------------------------------------------------------
@@ -610,12 +652,11 @@ class Skin:
     def _on_magnet_touch_data(self, data: dict[str, Any]) -> None:
         """Process magnet sensor touch data for position tracking.
 
-        The node_magnet_sensor sends: {"type":"magnet", "raw":[...], "mag":[...], "adj":[...], "act":[...]}
+        The node_magnet_sensor sends: {"type":"magnet", "mag":[...], "act":[...]}
         - mag: raw magnitudes in μT (preferred — passed directly to QuadrantDetector)
         - act: list of active sensor indices (binary fallback)
-        The firmware 'adj' field is intentionally skipped: it depends on the
-        firmware fullscaleMt constant and saturates at 1.0 when that constant is
-        too small.  Raw μT values with absolute PC-side thresholds are more robust.
+        Raw μT values with absolute PC-side thresholds keep detection robust and
+        independent of any firmware normalisation.
         """
         if self._touch_position_tracker is None:
             return
@@ -644,9 +685,7 @@ class Skin:
     def _extract_sensor_magnitudes(data: dict[str, Any], count: int) -> list[float] | None:
         """Extract raw per-sensor magnitudes (μT) from a node_magnet_sensor message.
 
-        Tries mag (raw μT) → act (binary) in order.  The firmware 'adj' field
-        is deliberately skipped — it normalises against fullscaleMt which can
-        saturate, making all values 1.0 and breaking detection.
+        Tries mag (raw μT) → act (binary) in order.
         """
         return (Skin._try_mag(data, count)
                 or Skin._try_act(data, count))

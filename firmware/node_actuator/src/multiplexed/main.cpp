@@ -63,7 +63,13 @@ void sendError(const char* reason) {
 }
 
 void sendPong() {
-    sendRaw("{\"type\":\"pong\",\"rgbw\":" LED_RGBW_JSON "}");
+    // "kpa_min" self-reports the gauge floor (sensor low end) so the PC knows
+    // below which pressure a deflate needs a time budget instead of the sensor.
+    char pong[96];
+    snprintf(pong, sizeof(pong),
+             "{\"type\":\"pong\",\"rgbw\":" LED_RGBW_JSON ",\"kpa_min\":%.0f}",
+             (double)pressure::FLOOR_KPA);
+    sendRaw(pong);
 }
 
 void sendStatus(int chamber, float kpa) {
@@ -446,9 +452,10 @@ void applyChamberCmd(int n, const cmd_queue::Cmd& c) {
     using namespace cmd_queue;
     auto& ch = chambers::state[n];
 
-    // duty 0 (unset) -> full speed. ``fill_ms`` is no longer a separate time-fill
-    // path: the engine's coupled measure gives a trustworthy per-chamber pressure,
-    // so targeting is pressure-based (chamber_max_ms is the time backstop).
+    // duty 0 (unset) -> full speed. ``fill_ms`` is the optional per-chamber time
+    // budget: targeting is pressure-based via the engine, but a target the gauge
+    // can't see (deflate below the sensor floor) closes on this calibrated time
+    // instead; 0 keeps the engine's chamber_max_ms backstop.
     uint8_t duty = c.duty ? c.duty : chambers::DEFAULT_DUTY;
 
     switch (c.type) {
@@ -458,14 +465,14 @@ void applyChamberCmd(int n, const cmd_queue::Cmd& c) {
         // Only actuate if actually below target (else a repeated "+" at the cap
         // would creep past max one round at a time).
         if (chambers::cachedKpa[n] < target)
-            chambers::requestInflate(n, target, duty);
+            chambers::requestInflate(n, target, duty, c.fill_ms);
         break;
     }
     case CMD_DEFLATE: {
         float delta  = (ch.max_kpa - ch.min_kpa) * constrain(c.param, 0, 100) / 100.0f;
         float target = max(chambers::cachedKpa[n] - delta, ch.min_kpa);
         if (chambers::cachedKpa[n] > target)
-            chambers::requestDeflate(n, target, duty);
+            chambers::requestDeflate(n, target, duty, c.fill_ms);
         break;
     }
     case CMD_SET_PRESSURE: {
@@ -690,7 +697,10 @@ void setup() {
     // Broadcast the ready message so the gateway can forward it to the PC
     // even before the node has received its first command (and therefore
     // doesn't yet know the gateway's MAC).
-    static const char ready_msg[] = "{\"status\":\"node_multiplexed_ready\",\"fw\":\"coupled-fill-2\",\"rgbw\":" LED_RGBW_JSON "}";
+    char ready_msg[160];
+    snprintf(ready_msg, sizeof(ready_msg),
+             "{\"status\":\"node_multiplexed_ready\",\"fw\":\"progressive-close-1\",\"rgbw\":" LED_RGBW_JSON ",\"kpa_min\":%.0f}",
+             (double)pressure::FLOOR_KPA);
     se::broadcast(ready_msg);
 
     LOG("%s\n", ready_msg);

@@ -49,7 +49,7 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         self.setupUi(self)
 
         self._db = db
-        # Optional ESP-NOW gateway — only used to record raw sensor streams of a
+        # Optional SoftEdIBO gateway — only used to record raw sensor streams of a
         # real session. None in tests / headless contexts (then no recording).
         self._gateway = gateway
         self._stream_recorder = None   # StreamRecorder | None, active during a session

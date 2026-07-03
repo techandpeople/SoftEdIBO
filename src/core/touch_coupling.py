@@ -4,8 +4,8 @@ A magnet sits in the silicone above each touch sensor; inflating a nearby
 chamber deforms the silicone and shifts the magnet, so chamber actuation can
 masquerade as a touch. This module turns a *sweep* (inflate one chamber at a
 time, no touching) into a coupling matrix ``[chamber x sensor]`` of how much
-each chamber moves each sensor's normalised reading (``adj``), plus a derived
-chamber<->sensor map.
+each chamber moves each sensor's reading (raw µT, the ``mag`` field), plus a
+derived chamber<->sensor map.
 
 Pure and Qt-free: it works on already-collected samples or a recording JSONL,
 so it is fully unit-testable without hardware.
@@ -32,7 +32,7 @@ ACTIVE_MIN = 30.0   # a chamber at/above this is considered "inflated"
 REST_MAX = 10.0     # every chamber at/below this means "rest" (baseline)
 SETTLE_MS = 800.0   # guard window after a state change, dropped from the means
 
-# A single sweep sample: timestamp (ms), per-chamber pressure %, per-sensor adj.
+# A single sweep sample: timestamp (ms), per-chamber pressure %, per-sensor µT.
 Sample = tuple[float, dict[int, float], list[float]]
 
 
@@ -56,7 +56,7 @@ def classify_active(pressures: dict[int, float], *, active_min: float = ACTIVE_M
 
 @dataclass
 class CouplingMatrix:
-    """Per-chamber mean ``adj`` delta vs rest, for each sensor."""
+    """Per-chamber mean ``mag`` (µT) delta vs rest, for each sensor."""
     sensor_count: int
     deltas: dict[int, list[float]] = field(default_factory=dict)  # chamber -> [delta per sensor]
     baseline: list[float] = field(default_factory=list)           # rest mean per sensor
@@ -104,7 +104,7 @@ def build_coupling(samples: Iterable[Sample], sensor_count: int, *,
     prev_state: int | None | str = None
     last_change_ms: float = float("-inf")
 
-    for t_ms, pressures, adj in samples:
+    for t_ms, pressures, mag in samples:
         state = classify_active(pressures, active_min=active_min, rest_max=rest_max)
         if state != prev_state:
             last_change_ms = t_ms
@@ -113,7 +113,7 @@ def build_coupling(samples: Iterable[Sample], sensor_count: int, *,
             continue
         if t_ms - last_change_ms < settle_ms:   # still settling — skip guard window
             continue
-        vec = _fit(adj, sensor_count)
+        vec = _fit(mag, sensor_count)
         if state == "rest":
             for s in range(sensor_count):
                 rest_sum[s] += vec[s]
@@ -133,9 +133,9 @@ def build_coupling(samples: Iterable[Sample], sensor_count: int, *,
                           baseline=baseline, n_rest=rest_n, n_active=active_n)
 
 
-def _fit(adj: list[float], n: int) -> list[float]:
-    """Pad/truncate an adj vector to exactly ``n`` sensors."""
-    return [float(adj[s]) if s < len(adj) else 0.0 for s in range(n)]
+def _fit(vec: list[float], n: int) -> list[float]:
+    """Pad/truncate a per-sensor vector to exactly ``n`` sensors."""
+    return [float(vec[s]) if s < len(vec) else 0.0 for s in range(n)]
 
 
 # ---------------------------------------------------------------------------
@@ -146,14 +146,15 @@ def _epoch_ms(iso: str) -> float:
     return datetime.fromisoformat(iso).timestamp() * 1000.0
 
 
-def samples_from_recording(path: str | Path, field: str = "adj") -> Iterator[Sample]:
+def samples_from_recording(path: str | Path, field: str = "mag") -> Iterator[Sample]:
     """Yield :data:`Sample` tuples from a stream recording JSONL.
 
     Tracks the latest per-chamber pressure from ``status`` messages and emits a
     sample at each ``magnet`` message (the fast stream), pairing the chosen
-    magnet ``field`` vector with the last-known chamber pressures. Use
-    ``field="mag"`` to build the matrix in raw uT (what the PC detection path and
-    :mod:`src.core.touch_compensation` use); ``"adj"`` for the normalised field.
+    magnet ``field`` vector with the last-known chamber pressures. Defaults to
+    ``"mag"`` (raw uT — what the live stream, the PC detection path and
+    :mod:`src.core.touch_compensation` use). ``"adj"`` is only for older
+    recordings that still carried the normalised field (no longer streamed).
     """
     pressures: dict[int, float] = {}
     with open(path, encoding="utf-8") as f:
@@ -179,8 +180,9 @@ def samples_from_recording(path: str | Path, field: str = "adj") -> Iterator[Sam
 
 
 def build_coupling_from_recording(path: str | Path, sensor_count: int,
-                                  field: str = "adj", **kw) -> CouplingMatrix:
+                                  field: str = "mag", **kw) -> CouplingMatrix:
     """Convenience: parse a recording and build the coupling matrix.
 
-    ``field`` selects the magnet vector ("adj" normalised, or "mag" raw uT)."""
+    ``field`` selects the magnet vector ("mag" raw uT — the default; "adj" only
+    for older recordings that carried the normalised field)."""
     return build_coupling(samples_from_recording(path, field), sensor_count, **kw)

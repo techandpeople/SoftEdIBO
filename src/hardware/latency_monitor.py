@@ -15,7 +15,7 @@ import logging
 import time
 from typing import Any, Callable
 
-from src.hardware.espnow_gateway import ESPNowGateway
+from src.hardware.gateway import Gateway
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 class LatencyMonitor:
     """Measures round-trip latency to each ESP-NOW node through the gateway."""
 
-    def __init__(self, gateway: ESPNowGateway, timeout_ms: int = 2500):
+    def __init__(self, gateway: Gateway, timeout_ms: int = 2500):
         self._gateway = gateway
         self._timeout_s = timeout_ms / 1000.0
         self._pending: dict[str, float] = {}        # mac -> monotonic send time

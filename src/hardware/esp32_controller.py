@@ -1,9 +1,9 @@
-"""High-level controller for a single ESP32 node via the ESP-NOW gateway."""
+"""High-level controller for a single ESP32 node via the SoftEdIBO gateway."""
 
 import logging
 from typing import Any, Callable
 
-from src.hardware.espnow_gateway import ESPNowGateway
+from src.hardware.gateway import Gateway
 from src.hardware.fill_scaling import FillLoadTracker
 
 logger = logging.getLogger(__name__)
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 class ESP32Controller:
     """Controls a single remote ESP32 node through the gateway."""
 
-    def __init__(self, mac_address: str, gateway: ESPNowGateway):
+    def __init__(self, mac_address: str, gateway: Gateway):
         self.mac_address = mac_address
         self._gateway = gateway
         # Shared per-node fill-load tracker: every Skin on this node consults it
@@ -27,6 +27,11 @@ class ESP32Controller:
         # Latest magnet sensor geometry, captured from a `node_magnet_sensor_ready` boot announce.
         # Shape: {"sensors": N, "magnets": M, "variant": str|None, "geometry": {...}}.
         self._magnet_geometry: dict[str, Any] | None = None
+        # Gauge floor (kPa) self-reported by the node in ready/pong ("kpa_min"):
+        # the lowest pressure its sensor can see. 0 for today's 0..100 kPa parts
+        # and for old firmware that doesn't report it; -40 once the vacuum-capable
+        # sensors arrive. Below this a deflate needs a time budget, not the gauge.
+        self._sensor_floor_kpa: float = 0.0
         # Per-ring LED mounting angle (degrees), from the skin config. Added to
         # every LED command's angle so a physically-rotated ring shows the right
         # orientation without every activity having to compensate. Empty = no offset.
@@ -63,16 +68,28 @@ class ESP32Controller:
         return self.send_command("inflate", **payload)
 
     def deflate(self, chamber: int, delta: int = 10,
-                duty: int | None = None) -> bool:
+                ms: int | None = None, duty: int | None = None) -> bool:
         """Deflate a chamber by delta % of its max pressure (0-100).
+
+        When ``ms`` is given it becomes the chamber's open-time budget on the
+        node — the closing authority for a target the gauge can't see (below the
+        sensor floor), timed from the calibrated deflate curve. The firmware
+        still caps it and holds the HARD limits.
 
         ``duty`` (1-255) optionally lowers the deflate (vacuum) pump's PWM duty
         so the chamber empties more slowly; omit it for full speed.
         """
         payload: dict[str, Any] = {"chamber": chamber, "delta": delta}
+        if ms is not None:
+            payload["ms"] = int(ms)
         if duty is not None:
             payload["duty"] = max(1, min(255, int(duty)))
         return self.send_command("deflate", **payload)
+
+    @property
+    def sensor_floor_kpa(self) -> float:
+        """Lowest pressure this node's gauge can see (see ``_sensor_floor_kpa``)."""
+        return self._sensor_floor_kpa
 
     def hold(self, chamber: int) -> bool:
         """Hold pressure — stop pump, close inflate and deflate valves for this chamber."""
@@ -267,9 +284,8 @@ class ESP32Controller:
         """Register a callback for magnet sensor (`type:"magnet"`) messages from this node.
 
         Args:
-            callback: Called with the full message dict (raw, mag, adj, act, …)
-                as sent by the firmware. The ``source`` MAC added by the gateway
-                is preserved.
+            callback: Called with the full message dict (mag, act) as sent by the
+                firmware. The ``source`` MAC added by the gateway is preserved.
         """
         self._magnet_callbacks.append(callback)
 
@@ -338,6 +354,11 @@ class ESP32Controller:
         if data.get("source") == self.mac_address:
             self._last_status.update(data)
             logger.debug("Status from %s: %s", self.mac_address, data)
+
+            # Gauge floor self-report, carried by ready and pong messages.
+            kpa_min = data.get("kpa_min")
+            if isinstance(kpa_min, (int, float)):
+                self._sensor_floor_kpa = float(kpa_min)
 
             if data.get("type") == "debug":
                 logger.info("Debug from %s: %s", self.mac_address, data)

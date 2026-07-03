@@ -113,7 +113,7 @@ A sensor deactivates at (threshold − hysteresis), preventing flicker.</string>
      <item>
       <widget class="QPushButton" name="apply_btn">
        <property name="toolTip"><string>Send configure to the touch node
-(fullscale_mt=1000, act_threshold=0.3)</string></property>
+(act_threshold_ut=300)</string></property>
        <property name="text"><string>Apply to node</string></property>
       </widget>
      </item>

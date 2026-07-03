@@ -8,7 +8,7 @@
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>
     <widget class="QGroupBox" name="gateway_group">
-     <property name="title"><string>ESP-NOW Gateway</string></property>
+     <property name="title"><string>SoftEdIBO Gateway</string></property>
      <property name="whatsThis"><string>The USB gateway board that bridges this PC to the wireless nodes over ESP-NOW. Connect it before configuring robots or starting a session.</string></property>
      <layout class="QHBoxLayout" name="gateway_layout">
       <item>
