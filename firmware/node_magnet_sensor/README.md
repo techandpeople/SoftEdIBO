@@ -37,6 +37,13 @@ S2→Q3 (bottom-left), S3→Q4 (bottom-right)** — matches the PC `QuadrantDete
 - `mag` — per-sensor field-change magnitude in µT (`|sample − baseline|`).
 - `act` — indices of sensors whose `mag ≥ act_threshold_ut` (the value the PC prefers).
 
+**3-axis streaming (`[env:vector]` build, `-DMAG_VECTOR`):** the stream message
+additionally carries `"vec":[[dx,dy,dz],...]` — the per-sensor baseline-subtracted
+field delta in whole µT — and the boot announce gains `"vec":1`. `mag`/`act` are
+unchanged, so the PC pipeline is unaffected; the direction information enables
+vector touch compensation and richer offline analysis (`docs/TOUCH_COUPLING.md`).
+Flash `[env:release]` to revert to the scalar-only protocol.
+
 **Commands** (PC → board, via gateway):
 ```json
 {"cmd":"ping"}                                  // -> {"type":"pong"}
@@ -62,7 +69,8 @@ a coupling sweep confirms actuation contamination. See `docs/TOUCH_COUPLING.md`.
 ## Build & flash
 ```bash
 cd firmware/node_magnet_sensor
-pio run --target upload
+pio run --target upload                # default (scalar protocol)
+pio run -e vector --target upload      # + 3-axis "vec" streaming
 ```
 Uses the shared `firmware/common/se_espnow.h` (added to the include path in
 `platformio.ini`), the same ESP-NOW layer as the actuator nodes and the gateway.
