@@ -25,6 +25,8 @@ class TouchSegment:
         mags: per-sample list of per-sensor magnitudes (``mag`` vectors).
         acts: per-sample set of active sensor indices.
         times_ms: timestamp of each sample (ms).
+        vecs: per-sample per-sensor 3-axis deltas (the message's ``vec`` rows),
+            ``None`` for samples that carried no vector data.
         n_pulses: how many press→release touches this segment represents. 1 for a
             plain segment; >1 when several touches were merged into one logical
             gesture (e.g. a double/triple tap — see :func:`merge_segments`).
@@ -34,6 +36,7 @@ class TouchSegment:
     mags: list[list[float]] = field(default_factory=list)
     acts: list[set[int]] = field(default_factory=list)
     times_ms: list[float] = field(default_factory=list)
+    vecs: list[list[list[float]] | None] = field(default_factory=list)
     n_pulses: int = 1
 
     @property
@@ -62,6 +65,7 @@ def merge_segments(segments) -> TouchSegment | None:
         merged.mags.extend(s.mags)
         merged.acts.extend(s.acts)
         merged.times_ms.extend(s.times_ms)
+        merged.vecs.extend(s.vecs)
     merged.n_pulses = sum(s.n_pulses for s in segs)
     return merged
 
@@ -77,6 +81,11 @@ class TouchSegmenter:
         self._active = False
         self._cur: TouchSegment | None = None
         self._last_active: set[int] = set()
+
+    @property
+    def is_active(self) -> bool:
+        """True while a touch is in progress (between press and release)."""
+        return self._active
 
     @staticmethod
     def _act_set(msg: dict) -> set[int]:
@@ -115,6 +124,8 @@ class TouchSegmenter:
             self._cur.mags.append(self._mag_vec(msg))
             self._cur.acts.append(act)
             self._cur.times_ms.append(t_ms)
+            vec = msg.get("vec")
+            self._cur.vecs.append(vec if isinstance(vec, list) else None)
             self._cur.end_ms = t_ms
 
         if not act and self._active:                 # touch ends
@@ -136,3 +147,34 @@ class TouchSegmenter:
             self._active = False
             self._cur = None
         return out
+
+
+class PulseMerger:
+    """Groups quick successive touches into one logical gesture (multi-tap).
+
+    Live counterpart of the labeler's ``group_id`` merging: a finished segment
+    is held back for ``gap_ms``; touches starting within the gap accumulate,
+    and the merged gesture (``n_pulses`` = pulse count) is released once the
+    skin stays untouched past the gap. Without this, a live double-tap would be
+    classified as two single taps — training merges multi-taps, so inference
+    must too. Costs ``gap_ms`` of latency per gesture; the flush is driven by
+    the continuous magnet stream, so no timer is needed.
+    """
+
+    def __init__(self, gap_ms: float) -> None:
+        self.gap_ms = float(gap_ms)
+        self._buffer: list[TouchSegment] = []
+
+    def feed(self, seg: TouchSegment | None, now_ms: float,
+             touch_active: bool = False) -> TouchSegment | None:
+        """Feed each segmenter result (per message). Returns the merged gesture
+        once no follow-up pulse can arrive, else None."""
+        if seg is not None:
+            self._buffer.append(seg)
+            return None                     # hold — a follow-up pulse may come
+        if (self._buffer and not touch_active
+                and now_ms - self._buffer[-1].end_ms >= self.gap_ms):
+            merged = merge_segments(self._buffer)
+            self._buffer = []
+            return merged
+        return None

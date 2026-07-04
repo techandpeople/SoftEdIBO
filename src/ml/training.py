@@ -29,8 +29,8 @@ def _epoch_ms(iso: str) -> float:
     return datetime.fromisoformat(iso).timestamp() * 1000.0
 
 
-def segments_of(recording: Path):
-    """Re-segment a recording JSONL into (source, TouchSegment) pairs."""
+def _magnet_by_source(recording: Path) -> dict[str, list]:
+    """``{source: [(msg, t_ms), …]}`` for every magnet message in a recording."""
     by_source: dict[str, list] = {}
     with open(recording, encoding="utf-8") as f:
         for line in f:
@@ -38,16 +38,24 @@ def segments_of(recording: Path):
             if not line:
                 continue
             obj = json.loads(line)
-            if "msg" not in obj:
-                continue
-            msg = obj["msg"]
-            if msg.get("type") != "magnet":
-                continue
-            by_source.setdefault(msg.get("source", "?"), []).append(
-                (msg, _epoch_ms(obj["t"])))
+            msg = obj.get("msg")
+            if isinstance(msg, dict) and msg.get("type") == "magnet":
+                by_source.setdefault(msg.get("source", "?"), []).append(
+                    (msg, _epoch_ms(obj["t"])))
+    return by_source
+
+
+def segments_of(recording: Path):
+    """Re-segment a recording JSONL into (source, TouchSegment) pairs.
+
+    When a source carries pressure-compensated magnet messages (recorded
+    alongside the raw stream while compensation was enabled), only those are
+    segmented — live inference consumes the compensated stream, so training
+    must see the same data (no train/serve skew)."""
     out = []
-    for source, samples in by_source.items():
-        for seg in TouchSegmenter().segment_stream(samples):
+    for source, samples in _magnet_by_source(recording).items():
+        compensated = [(m, t) for m, t in samples if m.get("compensated")]
+        for seg in TouchSegmenter().segment_stream(compensated or samples):
             out.append((source, seg))
     return out
 
@@ -172,7 +180,11 @@ def train_models(pairs, models_dir: Path,
             report.results.append(res)
             continue
 
-        clf = RandomForestClassifier(n_estimators=200, random_state=0)
+        # balanced: real sessions are dominated by taps, with a handful of
+        # squeezes/strokes — unweighted trees would just learn the majority.
+        clf = RandomForestClassifier(n_estimators=200, random_state=0,
+                                     class_weight="balanced",
+                                     max_features="sqrt", min_samples_leaf=1)
         n_groups = len(set(groups))
         if n_groups >= 2:
             cv = GroupKFold(n_splits=min(n_groups, 5))

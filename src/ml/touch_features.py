@@ -38,6 +38,7 @@ def extract_features(seg: TouchSegment) -> dict[str, float]:
             "active_frac_max": 0.0, "active_frac_mean": 0.0,
             "n_distinct_sensors": 0.0, "n_transitions": 0.0,
             "is_sequential": 0.0,
+            "vec_present": 0.0, "vec_dir_consistency": 0.0, "vec_z_frac": 0.0,
         })
         return feats
 
@@ -60,18 +61,20 @@ def extract_features(seg: TouchSegment) -> dict[str, float]:
     feats["active_frac_max"] = max(active_fracs) if active_fracs else 0.0
     feats["active_frac_mean"] = _safe_mean(active_fracs)
 
-    # --- Sequence features (movement proxy, no coordinates) ---
+    feats.update(_sequence_features(seg))
+    feats.update(_vec_features(seg))
+    return feats
+
+
+def _sequence_features(seg: TouchSegment) -> dict[str, float]:
+    """Movement-proxy features from the active-set sequence (no coordinates)."""
     distinct: set[int] = set()
     for a in seg.acts:
         distinct |= a
-    feats["n_distinct_sensors"] = float(len(distinct))
 
     # Transitions between consecutive active-sets (how much the touch moved).
-    transitions = 0
-    for prev, cur in zip(seg.acts, seg.acts[1:]):
-        if prev != cur:
-            transitions += 1
-    feats["n_transitions"] = float(transitions)
+    transitions = sum(1 for prev, cur in zip(seg.acts, seg.acts[1:])
+                      if prev != cur)
 
     # Sequential = distinct sensors became active at different times (a stroke),
     # rather than all together (a press/squeeze). Compare first-activation order.
@@ -80,9 +83,62 @@ def extract_features(seg: TouchSegment) -> dict[str, float]:
         for s in a:
             first_seen.setdefault(s, i)
     distinct_onset_times = len(set(first_seen.values()))
-    feats["is_sequential"] = 1.0 if (len(distinct) >= 2
-                                     and distinct_onset_times >= 2) else 0.0
-    return feats
+    return {
+        "n_distinct_sensors": float(len(distinct)),
+        "n_transitions": float(transitions),
+        "is_sequential": 1.0 if (len(distinct) >= 2
+                                 and distinct_onset_times >= 2) else 0.0,
+    }
+
+
+def _dominant_sensor(seg: TouchSegment) -> int:
+    """Index of the sensor with the highest single ``mag`` reading."""
+    dominant, peak = 0, -1.0
+    for vec_row in seg.mags:
+        for s, v in enumerate(vec_row):
+            if v > peak:
+                peak, dominant = v, s
+    return dominant
+
+
+def _unit_deltas(seg: TouchSegment, sensor: int) -> tuple[list, list[float]]:
+    """(unit vectors, |z|-fractions) of ``sensor``'s per-sample 3-axis deltas."""
+    units: list[tuple[float, float, float]] = []
+    z_fracs: list[float] = []
+    for row in getattr(seg, "vecs", []) or []:
+        v = row[sensor] if (isinstance(row, list) and sensor < len(row)) else None
+        if not (isinstance(v, (list, tuple)) and len(v) >= 3):
+            continue
+        norm = (v[0] ** 2 + v[1] ** 2 + v[2] ** 2) ** 0.5
+        if norm < 1e-6:
+            continue
+        units.append((v[0] / norm, v[1] / norm, v[2] / norm))
+        z_fracs.append(abs(v[2]) / norm)
+    return units, z_fracs
+
+
+def _vec_features(seg: TouchSegment) -> dict[str, float]:
+    """Direction features from the 3-axis ``vec`` deltas, when streamed.
+
+    The magnitude collapses direction away; the unit vector of the dominant
+    sensor's delta tells pressing (stable direction) apart from sliding
+    (rotating direction), and vertical push from lateral shear. All-zero when
+    the segment has no vector data, so old recordings and scalar-only nodes
+    keep the same schema."""
+    units, z_fracs = _unit_deltas(seg, _dominant_sensor(seg))
+    if not units:
+        return {"vec_present": 0.0, "vec_dir_consistency": 0.0,
+                "vec_z_frac": 0.0}
+    mx = _safe_mean([u[0] for u in units])
+    my = _safe_mean([u[1] for u in units])
+    mz = _safe_mean([u[2] for u in units])
+    return {
+        "vec_present": 1.0,
+        # Resultant length of the unit vectors: 1.0 = direction held steady
+        # (press), lower = direction wandered (slide/stroke).
+        "vec_dir_consistency": (mx * mx + my * my + mz * mz) ** 0.5,
+        "vec_z_frac": _safe_mean(z_fracs),
+    }
 
 
 # Stable feature order for vectorisation.
@@ -91,6 +147,7 @@ FEATURE_NAMES: tuple[str, ...] = (
     "peak_mag", "mean_mag", "rise_ms",
     "active_frac_max", "active_frac_mean",
     "n_distinct_sensors", "n_transitions", "is_sequential",
+    "vec_present", "vec_dir_consistency", "vec_z_frac",
 )
 
 

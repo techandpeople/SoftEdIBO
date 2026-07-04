@@ -37,5 +37,6 @@ DEFINITIONS: dict[str, str] = {
 # milliseconds. Refine against real data.
 TAP_MAX_MS = 250          # at/under this and single-sensor → tap
 PRESS_MIN_MS = 600        # at/over this and stable → press
+MULTI_TAP_GAP_MS = 400    # touches this close group into one multi-tap gesture
 SQUEEZE_MIN_ACTIVE_FRAC = 0.6   # fraction of sensors active at peak → squeeze
 STROKE_MIN_DISTINCT = 2   # distinct sensors visited in sequence → stroke

@@ -102,6 +102,24 @@ class StreamRecorder:
         on_magnet(self.handle_message)
         self._magnet_sources.append(controller)
 
+    def attach_compensated(self, source: Any) -> None:
+        """Also record a skin's pressure-compensated magnet stream.
+
+        Live gesture inference consumes the compensated stream (it never passes
+        through the gateway), so the recording must carry it too or models get
+        trained on raw data they will never see at inference time. Only messages
+        the compensator actually rewrote (flagged ``compensated``) are written —
+        raw passthrough never duplicates lines. No-op without ``on_magnet``."""
+        on_magnet = getattr(source, "on_magnet", None)
+        if on_magnet is None:
+            return
+        on_magnet(self._handle_compensated)
+        self._magnet_sources.append(source)
+
+    def _handle_compensated(self, data: dict[str, Any]) -> None:
+        if data.get("compensated"):
+            self.handle_message(data)
+
     def handle_message(self, data: dict[str, Any]) -> None:
         """Write one message line. Runs on the gateway read thread."""
         with self._lock:

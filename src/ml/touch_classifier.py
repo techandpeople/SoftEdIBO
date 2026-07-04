@@ -19,7 +19,7 @@ from typing import Any, Callable
 from src.config.settings import Settings
 from src.ml import gesture_taxonomy as tax
 from src.ml.touch_features import full_feature_vector
-from src.ml.touch_segmenter import TouchSegment, TouchSegmenter
+from src.ml.touch_segmenter import PulseMerger, TouchSegment, TouchSegmenter
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +99,9 @@ class LiveTouchClassifier:
             getattr(skin, "skin_type", ""),
             skin_variant=getattr(skin, "skin_variant", ""))
         self._seg = TouchSegmenter()
+        # Group quick successive touches (double/triple taps) into one gesture
+        # before classifying — training merges them, so inference must too.
+        self._merger = PulseMerger(tax.MULTI_TAP_GAP_MS)
         self._t0: float | None = None
 
     def attach(self) -> bool:
@@ -114,8 +117,11 @@ class LiveTouchClassifier:
         now_ms = time.monotonic() * 1000.0
         if self._t0 is None:
             self._t0 = now_ms
-        seg = self._seg.feed(data, now_ms - self._t0)
-        if seg is not None:
-            label = self._clf.predict(seg)
+        t = now_ms - self._t0
+        seg = self._seg.feed(data, t)
+        gesture = self._merger.feed(seg, t, self._seg.is_active)
+        if gesture is not None:
+            label = self._clf.predict(gesture)
             if label != tax.UNKNOWN:
-                self._on_gesture(getattr(self._skin, "skin_id", ""), label, seg)
+                self._on_gesture(getattr(self._skin, "skin_id", ""), label,
+                                 gesture)
