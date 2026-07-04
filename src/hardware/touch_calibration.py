@@ -19,9 +19,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from src.core.skin_config import MAGNET_NODE_TYPES, YAML_KEY
+from src.core.skin_config import (
+    DEFAULT_MAX_KPA,
+    DEFAULT_MIN_KPA,
+    MAGNET_NODE_TYPES,
+    YAML_KEY,
+)
 from src.core.touch_compensation import coupling_to_config
-from src.core.touch_coupling import CouplingMatrix, build_coupling
+from src.core.touch_coupling import ACTIVE_MIN, CouplingMatrix, build_coupling
 
 # Sweep timing defaults. Dwell well past the coupling analyzer's steady-state
 # guard (settle_ms 800) so each level contributes plenty of settled samples.
@@ -101,8 +106,12 @@ def iter_touch_skins(settings_data: dict) -> list[dict]:
     coupling-calibrated), one entry per skin.
 
     Each entry: ``{robot_id, skin_id, touch_mac, chamber_mac, sensor_count,
-    slots, coupling, enabled}``. ``coupling`` is the stored matrix dict (or
-    ``None``); ``enabled`` reflects ``touch.compensation.enabled``."""
+    slots, limits, coupling, enabled}``. ``coupling`` is the stored matrix dict
+    (or ``None``); ``enabled`` reflects ``touch.compensation.enabled``;
+    ``limits`` maps each slot to its configured ``(min_kpa, max_kpa)`` — the
+    range the sweep uses to recompute inflation % from the status ``kpa`` (the
+    firmware's own ``pressure`` field is computed against the limits the node
+    currently holds, which lag the PC config)."""
     out: list[dict] = []
     for robot in _iter_robots(settings_data):
         node_types = {n.get("mac"): n.get("node_type")
@@ -121,6 +130,11 @@ def iter_touch_skins(settings_data: dict) -> list[dict]:
                 "chamber_mac": chambers[0].get("mac") if chambers else None,
                 "sensor_count": int(touch.get("sensor_count", 4)),
                 "slots": [int(c.get("slot", 0)) for c in chambers],
+                "limits": {
+                    int(c.get("slot", 0)): (
+                        float(c.get("min_pressure", DEFAULT_MIN_KPA)),
+                        float(c.get("max_pressure", DEFAULT_MAX_KPA)))
+                    for c in chambers},
                 "coupling": touch.get("coupling"),
                 "enabled": bool(comp.get("enabled", False)),
             })
@@ -184,6 +198,35 @@ def set_compensation(settings_data: dict, robot_id: str, skin_id: str, *,
         else:
             comp["suppress_pct"] = float(suppress_pct)
     return True
+
+
+def sweep_diagnostics(samples: Any, slots: list[int]) -> str:
+    """Explain an empty sweep result from its raw samples.
+
+    Distinguishes the two failure modes: no magnet samples at all (the touch
+    node never streamed) vs samples whose chamber levels never classified as
+    "inflated" (pressure never reached :data:`ACTIVE_MIN` % — stale kPa limits,
+    pumps not running, wrong chamber node). Returns a short multi-line hint for
+    the operator."""
+    samples = list(samples)
+    if not samples:
+        return ("Diagnostics: 0 magnet samples arrived — the touch node never "
+                "streamed during the sweep. Check that it is powered, paired "
+                "to the gateway, and that the skin's touch node_mac is right.")
+    peaks: dict[int, float] = {int(s): 0.0 for s in slots}
+    for sample in samples:
+        for slot, pct in (sample[1] or {}).items():
+            if int(slot) in peaks:
+                peaks[int(slot)] = max(peaks[int(slot)], float(pct))
+    lines = [f"Diagnostics: {len(samples)} magnet samples; "
+             "peak inflation seen per chamber:"]
+    lines += [f"  slot {slot}: {peak:.0f}%" for slot, peak in sorted(peaks.items())]
+    if all(peak < ACTIVE_MIN for peak in peaks.values()):
+        lines.append(
+            f"All below {ACTIVE_MIN:.0f}% — no sample ever classified as "
+            "'inflated'. Check the chambers' kPa limits in the skin config, "
+            "and that the pumps actually ran during the sweep.")
+    return "\n".join(lines)
 
 
 def coupling_config_from_samples(samples: Any, sensor_count: int, *,

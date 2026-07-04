@@ -2,6 +2,7 @@
 
 from src.hardware.touch_calibration import (
     SweepProgram,
+    sweep_diagnostics,
     coupling_config_from_samples,
     iter_touch_skins,
     set_compensation,
@@ -137,3 +138,29 @@ def test_coupling_config_from_samples_writes_curves():
     assert [round(p["pct"]) for p in points] == [50, 100]
     assert abs(points[0]["mag"][0] - 100.0) < 1.0
     assert abs(cfg["deltas"]["0"][0] - 200.0) < 1.0   # legacy view at ref 100
+
+
+# --- kPa limits + empty-sweep diagnostics ------------------------------------
+
+def test_iter_touch_skins_exposes_kpa_limits():
+    data = _settings()
+    chambers = data["robots"]["turtles"][0]["skins"][0]["chambers"]
+    chambers[0]["min_pressure"] = 5.0
+    chambers[0]["max_pressure"] = 30.0
+    skins = iter_touch_skins(data)
+    limits = skins[0]["limits"]
+    assert limits[0] == (5.0, 30.0)
+    assert limits[1] == (0.0, 8.0)       # defaults (DEFAULT_MIN/MAX_KPA)
+
+
+def test_sweep_diagnostics_no_samples():
+    text = sweep_diagnostics([], [0, 1])
+    assert "0 magnet samples" in text
+
+
+def test_sweep_diagnostics_levels_never_active():
+    samples = [(0.0, {0: 12.0, 1: 3.0}, [1.0]), (100.0, {0: 8.0, 1: 5.0}, [1.0])]
+    text = sweep_diagnostics(samples, [0, 1])
+    assert "2 magnet samples" in text
+    assert "slot 0: 12%" in text and "slot 1: 5%" in text
+    assert "kPa limits" in text          # the below-ACTIVE_MIN hint fired
