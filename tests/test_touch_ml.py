@@ -187,3 +187,140 @@ def test_skin_geometry_registry_and_filtering():
     assert set(skin_types_for("turtle")) | set(skin_types_for("tree")) == {
         "turtle_square", "turtle_side", "turtle_triangle", "tree_round"}
     assert geometry_for("") is None
+
+
+# ---------------------------------------------------------------------------
+# PulseMerger — live multi-tap grouping
+# ---------------------------------------------------------------------------
+
+def _seg(start, end, n_sensors=4):
+    from src.ml.touch_segmenter import TouchSegment
+    s = TouchSegment(start_ms=start, end_ms=end)
+    s.mags.append([5.0] + [0.0] * (n_sensors - 1))
+    s.acts.append({0})
+    s.times_ms.append(start)
+    s.vecs.append(None)
+    return s
+
+
+def test_pulse_merger_groups_quick_taps():
+    from src.ml.touch_segmenter import PulseMerger
+    m = PulseMerger(gap_ms=400.0)
+    assert m.feed(_seg(0, 100), 100.0) is None          # first tap held back
+    assert m.feed(None, 200.0) is None                  # within gap — waiting
+    assert m.feed(_seg(300, 380), 380.0) is None        # second tap joins
+    merged = m.feed(None, 800.0)                        # gap elapsed → flush
+    assert merged is not None and merged.n_pulses == 2
+    assert merged.start_ms == 0 and merged.end_ms == 380
+
+
+def test_pulse_merger_separates_slow_taps():
+    from src.ml.touch_segmenter import PulseMerger
+    m = PulseMerger(gap_ms=400.0)
+    m.feed(_seg(0, 100), 100.0)
+    first = m.feed(None, 600.0)                         # gap elapsed → single
+    assert first is not None and first.n_pulses == 1
+    m.feed(_seg(700, 800), 800.0)
+    second = m.feed(None, 1300.0)
+    assert second is not None and second.n_pulses == 1
+
+
+def test_pulse_merger_waits_while_touch_active():
+    from src.ml.touch_segmenter import PulseMerger
+    m = PulseMerger(gap_ms=400.0)
+    m.feed(_seg(0, 100), 100.0)
+    # Gap elapsed but a follow-up touch is in progress — must not flush.
+    assert m.feed(None, 600.0, touch_active=True) is None
+    m.feed(_seg(650, 700), 700.0)
+    merged = m.feed(None, 1200.0)
+    assert merged is not None and merged.n_pulses == 2
+
+
+# ---------------------------------------------------------------------------
+# vec (3-axis) features
+# ---------------------------------------------------------------------------
+
+def _msg_vec(mag, act, vec):
+    return {"type": "magnet", "mag": mag, "act": list(act), "vec": vec}
+
+
+def test_vec_features_zero_without_vector_data():
+    seg = TouchSegmenter().segment_stream(_press_stream())[0]
+    f = extract_features(seg)
+    assert f["vec_present"] == 0.0
+    assert f["vec_dir_consistency"] == 0.0 and f["vec_z_frac"] == 0.0
+
+
+def test_vec_features_press_vs_slide():
+    # Press: dominant sensor's delta holds one direction (straight down z).
+    press = [(_msg_vec([9.0, 0, 0, 0], [0], [[0, 0, 300]] * 4), float(t))
+             for t in range(0, 400, 50)]
+    press = [(_msg_vec([0.0] * 4, [], [[0, 0, 0]] * 4), -50.0)] + press + [
+        (_msg_vec([0.0] * 4, [], [[0, 0, 0]] * 4), 400.0)]
+    seg = TouchSegmenter().segment_stream(press)[0]
+    f = extract_features(seg)
+    assert f["vec_present"] == 1.0
+    assert f["vec_dir_consistency"] > 0.99          # direction held steady
+    assert f["vec_z_frac"] > 0.99                   # pure vertical push
+
+    # Slide: direction rotates in the XY plane sample to sample.
+    vecs = [[[300, 0, 50]] * 4, [[200, 200, 50]] * 4, [[0, 300, 50]] * 4,
+            [[-200, 200, 50]] * 4, [[-300, 0, 50]] * 4]
+    slide = [(_msg_vec([9.0, 0, 0, 0], [0], v), float(50 * i))
+             for i, v in enumerate(vecs)]
+    slide = [(_msg_vec([0.0] * 4, [], None), -50.0)] + slide + [
+        (_msg_vec([0.0] * 4, [], None), 300.0)]
+    seg2 = TouchSegmenter().segment_stream(slide)[0]
+    f2 = extract_features(seg2)
+    assert f2["vec_dir_consistency"] < 0.9          # direction wandered
+    assert f2["vec_dir_consistency"] < f["vec_dir_consistency"]
+
+
+def test_feature_vector_includes_vec_block():
+    assert "vec_present" in FEATURE_NAMES
+    seg = TouchSegmenter().segment_stream(_tap_stream())[0]
+    assert len(feature_vector(seg)) == len(FEATURE_NAMES)
+
+
+# ---------------------------------------------------------------------------
+# Train/serve parity — compensated stream preferred for training,
+# excluded from coupling calibration
+# ---------------------------------------------------------------------------
+
+def _write_recording(tmp_path, lines):
+    import json
+    rec = tmp_path / "rec.jsonl"
+    rec.write_text("\n".join(json.dumps(ln) for ln in lines), encoding="utf-8")
+    return rec
+
+
+def _mixed_recording(tmp_path):
+    """Raw stream shows a (false) touch on sensor 1; the compensated stream
+    (recorded alongside) removed it and shows only the real touch on sensor 0."""
+    def raw(t, mag, act):
+        return {"t": f"2024-01-01T00:00:{t:06.3f}",
+                "msg": {"type": "magnet", "source": "AA", "mag": mag,
+                        "act": act}}
+    def comp(t, mag, act):
+        out = raw(t, mag, act)
+        out["msg"]["compensated"] = True
+        return out
+    return _write_recording(tmp_path, [
+        raw(0.0, [0.0, 0.0], []),        comp(0.010, [0.0, 0.0], []),
+        raw(0.1, [5.0, 4.0], [0, 1]),    comp(0.110, [5.0, 0.5], [0]),
+        raw(0.2, [0.0, 0.0], []),        comp(0.210, [0.0, 0.0], []),
+    ])
+
+
+def test_training_segments_prefer_compensated_stream(tmp_path):
+    from src.ml.training import segments_of
+    segs = [seg for _src, seg in segments_of(_mixed_recording(tmp_path))]
+    assert len(segs) == 1
+    assert segs[0].acts[0] == {0}          # compensated view: sensor 1 removed
+
+
+def test_coupling_calibration_skips_compensated(tmp_path):
+    from src.core.touch_coupling import samples_from_recording
+    samples = list(samples_from_recording(_mixed_recording(tmp_path)))
+    assert len(samples) == 3               # only the raw magnet lines
+    assert all(s[2] in ([0.0, 0.0], [5.0, 4.0]) for s in samples)

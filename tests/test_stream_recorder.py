@@ -112,3 +112,34 @@ def test_is_recording_flag(tmp_path):
     assert rec.is_recording
     rec.stop()
     assert not rec.is_recording
+
+
+class _FakeCompensatedSource:
+    """Minimal compensated magnet source: on_magnet subscription + fire."""
+
+    def __init__(self):
+        self._subs = []
+
+    def on_magnet(self, cb):
+        self._subs.append(cb)
+
+    def fire(self, msg):
+        for cb in self._subs:
+            cb(msg)
+
+
+def test_attach_compensated_records_only_flagged_messages(tmp_path):
+    gw = _FakeGateway()
+    rec = StreamRecorder(tmp_path / "s.jsonl", gateway=gw)
+    rec.start()
+    src = _FakeCompensatedSource()
+    rec.attach_compensated(src)
+
+    src.fire({"source": "AA", "type": "magnet", "mag": [1], "compensated": True})
+    src.fire({"source": "AA", "type": "magnet", "mag": [1]})   # raw passthrough
+    rec.stop()
+
+    lines = _read_lines(tmp_path / "s.jsonl")
+    magnet = [ln for ln in lines[1:] if ln["msg"].get("type") == "magnet"]
+    assert len(magnet) == 1                       # unflagged one filtered out
+    assert magnet[0]["msg"]["compensated"] is True

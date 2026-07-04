@@ -275,7 +275,13 @@ def _track_pressure(msg: dict, pressures: dict[int, float]) -> None:
 
 def _magnet_sample(t_iso: str, msg: dict, pressures: dict[int, float],
                    field: str) -> Sample | None:
-    """Build one sample from a ``magnet`` message, or None if it lacks ``field``."""
+    """Build one sample from a ``magnet`` message, or None if it lacks ``field``.
+
+    Compensated messages (recorded alongside raw when compensation is on) are
+    skipped: the coupling must be measured on the raw µT, otherwise it would be
+    fitted against readings that already had a coupling subtracted."""
+    if msg.get("compensated"):
+        return None
     mag = msg.get(field) or []
     if not isinstance(mag, list):
         return None

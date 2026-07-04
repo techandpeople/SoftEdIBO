@@ -61,6 +61,22 @@ training says so instead of failing.
 5. **Infer.** `LiveTouchClassifier` (in `touch_classifier.py`) loads the model
    for a skin's type and emits `gesture` events live; inert until a model exists.
 
+## Train/serve parity & 3-axis features
+
+- Recordings carry the **compensated** magnet stream alongside raw whenever
+  pressure compensation is enabled (flagged `compensated`); training prefers it,
+  because live inference consumes the compensated stream (`subscribe_skin_magnet`).
+  The coupling calibration, conversely, always ignores compensated lines.
+- Live inference groups quick successive touches with a `PulseMerger`
+  (`MULTI_TAP_GAP_MS` = 400 ms) so double/triple taps reach the model as one
+  merged segment — matching how they are labelled and trained. Costs ~400 ms of
+  latency per gesture.
+- When the node streams 3-axis `vec` deltas (see `docs/TOUCH_COUPLING.md`),
+  segments carry them and three direction features are extracted
+  (`vec_present`, `vec_dir_consistency`, `vec_z_frac`) — pressing holds one
+  direction, sliding rotates it. All-zero on scalar-only data, so old
+  recordings stay valid.
+
 ## Honest limits
 
 - 4 sensors per skin cap what any method recovers — tap/press/stroke/squeeze are

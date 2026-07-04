@@ -398,12 +398,17 @@ class SessionPanel(QWidget, Ui_SessionPanel):
                 path, session_id=session_id, gateway=gateway,
                 skin_types=types, skin_variants=variants)
             recorder.start()
-            if simulation:
-                for robot in robots:
-                    for skin in getattr(robot, "skins", {}).values():
-                        tc = getattr(skin, "touch_controller", None)
-                        if tc is not None:
-                            recorder.attach_magnet(tc)
+            for robot in robots:
+                for skin in getattr(robot, "skins", {}).values():
+                    tc = getattr(skin, "touch_controller", None)
+                    if simulation and tc is not None:
+                        recorder.attach_magnet(tc)
+                    # Compensated stream too (when compensation is enabled the
+                    # touch_source wraps the raw controller): gesture inference
+                    # runs on it, so training data must match it.
+                    src = getattr(skin, "touch_source", None)
+                    if src is not None and src is not tc:
+                        recorder.attach_compensated(src)
             self._stream_recorder = recorder
         except Exception:   # noqa: BLE001 — recording must never break a session
             logger.exception("Failed to start stream recording for %s", session_id)
