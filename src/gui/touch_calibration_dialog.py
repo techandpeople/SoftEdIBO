@@ -31,7 +31,9 @@ from src.hardware.touch_calibration import (
     iter_touch_skins,
     set_compensation,
     set_touch_coupling,
+    sweep_diagnostics,
 )
+from src.hardware.units import kpa_to_pct
 
 _TICK_MS = 100
 
@@ -169,7 +171,12 @@ class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
         cfg, matrix = coupling_config_from_samples(
             list(self._samples), skin["sensor_count"])
         self._result = cfg
-        self.preview.setPlainText(self._format_matrix(matrix, skin))
+        preview = self._format_matrix(matrix, skin)
+        if not matrix.curves:
+            # Nothing classified as an inflated chamber — say why, so the
+            # operator can fix the setup instead of guessing.
+            preview += "\n\n" + sweep_diagnostics(self._samples, skin["slots"])
+        self.preview.setPlainText(preview)
         vec_note = " 3-axis data captured." if matrix.has_vec else ""
         self.status_label.setText(
             f"Done — {len(self._samples)} samples over "
@@ -274,10 +281,7 @@ class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
             return
         source = data.get("source")
         if data.get("type") == "status" and source == skin["chamber_mac"]:
-            ch = data.get("chamber")
-            pct = data.get("pressure")
-            if isinstance(ch, int) and isinstance(pct, (int, float)):
-                self._pressures[ch] = float(pct)
+            self._track_level(skin, data)
         elif data.get("type") == "magnet" and source == skin["touch_mac"]:
             mag = data.get("mag")
             vec = data.get("vec")
@@ -286,6 +290,24 @@ class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
                                       dict(self._pressures),
                                       [float(v) for v in mag],
                                       vec if isinstance(vec, list) else None))
+
+    def _track_level(self, skin: dict, data: dict) -> None:
+        """Fold one chamber ``status`` into the live per-slot levels (%).
+
+        Prefers the measured ``kpa`` recomputed against the *configured* range:
+        the firmware ``pressure`` % is computed against the limits the node
+        currently holds, which lag the PC config (8 kPa boot default, a dropped
+        set_max) — same policy as AirChamber."""
+        ch = data.get("chamber")
+        if not isinstance(ch, int):
+            return
+        kpa = data.get("kpa")
+        pct = data.get("pressure")
+        if isinstance(kpa, (int, float)):
+            lo, hi = skin["limits"].get(ch, (0.0, 0.0))
+            self._pressures[ch] = float(kpa_to_pct(float(kpa), lo, hi))
+        elif isinstance(pct, (int, float)):
+            self._pressures[ch] = float(pct)
 
     def closeEvent(self, ev) -> None:   # noqa: N802 (Qt override)
         self._active = False
