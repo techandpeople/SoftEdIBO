@@ -18,18 +18,17 @@ All entries must share the same ``controller`` (single-MAC invariant).
 """
 
 import logging
-import math
 import time
 from typing import Any, Callable, Optional
 
 from src.core.skin_config import (
     DEFAULT_FILL_MODE, FILL_MODE_PRESSURE, normalize_fill_mode)
-from src.core.touch_compensation import compensator_from_config
 from src.hardware.air_chamber import AirChamber, ChamberState
 from src.hardware.fill_calibration import combo_key, parse_combo_key
 from src.hardware.fill_profile import DeflateProfile, FillProfile
 from src.hardware.fill_scaling import DutyModel, duty_for_period, scale_fill_ms
 from src.hardware.touch_event_router import TouchEventRouter
+from src.hardware.touch_profiles import touch_profiles
 from src.hardware.touch_source import CompensatedMagnetSource
 
 logger = logging.getLogger(__name__)
@@ -83,6 +82,11 @@ class Skin:
         self.chamber_grid = chamber_grid
         self.touch = touch
         self.touch_controller = touch_controller
+        # Which touch-sensing technology this skin's board uses (magnet today).
+        # Selected by the ``touch.sensor`` field; every technology-specific
+        # decision — signal extraction, compensation, spatial detection — is
+        # delegated to this profile instead of assuming "magnet".
+        self._touch_profile = touch_profiles.for_config(touch)
         # ``organ``: {"slot": int, "node_mac": str?} — this skin has its OWN
         # organ+cover circuit (e.g. a Tree branch). ``slot`` indexes the
         # node's organ circuits (``configure`` ``organ_channels``); ``node_mac``
@@ -185,7 +189,16 @@ class Skin:
         detection path is byte-for-byte identical when compensation is off)."""
         if touch_controller is None:
             return None
-        compensator = compensator_from_config(touch)
+        threshold = float((touch or {}).get("act_threshold_ut") or 0.0)
+        if threshold > 0 and hasattr(touch_controller, "send_command"):
+            # The skin's saved sensitivity (calibrated in the guided capture /
+            # Test Actuators, resolved per skin type by the robot builder)
+            # becomes the node's live activation threshold at every build —
+            # same re-push semantics as stream_vec below (RAM-only firmware
+            # setting; harmless no-op while the node is offline).
+            touch_controller.send_command("configure",
+                                          act_threshold_ut=threshold)
+        compensator = self._touch_profile.build_compensator(touch)
         if compensator is None:
             return touch_controller
         logger.info("Pressure-informed touch compensation enabled for skin %s",
@@ -256,22 +269,37 @@ class Skin:
         return out
 
     def _push_pressure_limits(self) -> None:
-        """Push every chamber's max + min pressure to the firmware (e.g. once at
-        construction). No-op for controllers lacking setters (the simulator)."""
+        """Push every chamber's max + min pressure to the firmware once at
+        construction.
+
+        Prefers the controller's confirmed (ACK'd, retransmitted) path so a
+        dropped safety limit is retried instead of silently leaving the node on
+        a stale ceiling — the historical 20->50 kPa over-inflation. This runs
+        off-thread and is belt-and-suspenders with the fire-and-forget re-push
+        before every actuation (:meth:`_push_limits`). Falls back to that plain
+        push for controllers without confirmation (the simulator); no-op for
+        controllers lacking the setters."""
+        confirm = getattr(self._ctrl, "confirm_limits", None)
         for local_idx in range(len(self._slots)):
-            self._push_limits(local_idx)
+            if confirm is not None:
+                ch = self._chambers[local_idx]
+                confirm(self._slots[local_idx], ch.max_pressure, ch.min_pressure)
+            else:
+                self._push_limits(local_idx)
 
     def _push_limits(self, local_idx: int) -> None:
         """Push one chamber's max + min pressure to the firmware (max first, then
         min, so the firmware validates min against the fresh max).
 
-        Re-sent before every actuation because ESP-NOW is fire-and-forget (no ACK
-        yet): the one-shot push at construction can be dropped, and external tools
-        (e.g. the Test Actuators dialog, or an "ignore max" run) can leave a stale
-        ``max_kpa`` on the node. Without this the firmware clamps an inflate to
-        whatever limit it currently holds, so repeated steps could climb far past
-        the configured max. The Test Actuators dialog already re-pushes the same
-        way; this brings the live session in line."""
+        Fire-and-forget, re-sent before every actuation as a cheap backstop:
+        external tools (e.g. the Test Actuators dialog, or an "ignore max" run)
+        can leave a stale ``max_kpa`` on the node, and without this the firmware
+        clamps an inflate to whatever limit it currently holds, so repeated steps
+        could climb far past the configured max. The construction-time push is
+        now *confirmed* (see :meth:`_push_pressure_limits`), which is the real fix
+        for a dropped initial limit; this stays as the per-actuation refresh so
+        actuation never blocks on an ack. The Test Actuators dialog re-pushes the
+        same way."""
         set_max = getattr(self._ctrl, "set_max_pressure", None)
         set_min = getattr(self._ctrl, "set_min_pressure", None)
         ch = self._chambers[local_idx]
@@ -605,44 +633,18 @@ class Skin:
     # ------------------------------------------------------------------
 
     def _setup_touch_tracking(self, touch: dict[str, Any]) -> None:
-        """Initialize touch position tracking with quadrant detection.
+        """Initialize spatial touch tracking, if this sensor supports it.
 
-        The quadrant detector resolves *where* on the skin a touch lands from a
-        4-sensor magnet board, so it only engages when the touch node actually
-        exposes 4 sensors. Other layouts (e.g. the simulated T-button skins)
-        skip it — they still get touch *reactions* via the activity's on_magnet
-        handler; only spatial position tracking is unavailable."""
-        if int(touch.get("sensor_count", 0)) != 4:
-            return
+        The detector/tracker pair is built by the skin's touch profile (the
+        magnet profile resolves *where* a touch lands from a 4-sensor board, so
+        it only engages for that layout). Other sensors/layouts return nothing —
+        they still get touch *reactions* via the activity's on_magnet handler;
+        only spatial position tracking is unavailable."""
         try:
-            from src.hardware.quadrant_detector import QuadrantDetector, TouchPositionTracker
-
-            # Get magnet strength from touch config or default to strong
-            magnet_strength = touch.get("magnet_strength", "strong")
-
-            # Thresholds and hysteresis are now in raw μT units (absolute).
-            # Default 100 μT assumes the firmware re-zeroed at rest; tune via
-            # the Touch Tuning panel until rest < threshold < touch peak.
-            thresholds = touch.get("quadrant_thresholds", None)
-            hysteresis = float(touch.get("hysteresis", 20.0))
-            ema_alpha  = float(touch.get("ema_alpha", 0.25))
-
-            # Create quadrant detector
-            self._touch_detector = QuadrantDetector(
-                thresholds=thresholds,
-                hysteresis=hysteresis,
-                ema_alpha=ema_alpha,
-                magnet_strength=magnet_strength,
-            )
-
-            # Create position tracker
-            smoothing = touch.get("position_smoothing", 0.3)
-            min_duration = touch.get("min_touch_duration_ms", 100)
-            self._touch_position_tracker = TouchPositionTracker(
-                detector=self._touch_detector,
-                smoothing_alpha=smoothing,
-                min_touch_duration_ms=min_duration,
-            )
+            built = self._touch_profile.build_position_tracker(touch)
+            if built is None:
+                return
+            self._touch_detector, self._touch_position_tracker = built
 
             # Register for the compensated magnet stream (position tracking).
             if hasattr(self.touch_source, "on_magnet"):
@@ -650,8 +652,6 @@ class Skin:
 
             logger.info(f"Touch position tracking enabled for skin {self.skin_id}")
 
-        except ImportError:
-            logger.warning("Quadrant detector not available - touch position tracking disabled")
         except Exception:
             logger.exception(f"Failed to setup touch tracking for skin {self.skin_id}")
 
@@ -669,7 +669,7 @@ class Skin:
 
         try:
             sensor_count = self.touch.get("sensor_count", 4) if self.touch else 4
-            values = self._extract_sensor_magnitudes(data, sensor_count)
+            values = self._touch_profile.read_magnitudes(data, sensor_count)
             if values is None:
                 return
 
@@ -686,47 +686,6 @@ class Skin:
 
         except Exception:
             logger.exception("Error processing touch data for skin %s", self.skin_id)
-
-    @staticmethod
-    def _extract_sensor_magnitudes(data: dict[str, Any], count: int) -> list[float] | None:
-        """Extract raw per-sensor magnitudes (μT) from a node_magnet_sensor message.
-
-        Tries mag (raw μT) → act (binary) in order.
-        """
-        return (Skin._try_mag(data, count)
-                or Skin._try_act(data, count))
-
-    @staticmethod
-    def _try_mag(data: dict[str, Any], count: int) -> list[float] | None:
-        """Extract raw magnitudes in μT from the 'mag' field."""
-        raw = data.get("mag")
-        if not isinstance(raw, (list, tuple)) or len(raw) < count:
-            return None
-        try:
-            vals = [float(v) for v in raw[:count]]
-        except (TypeError, ValueError):
-            return None
-        if not all(math.isfinite(v) for v in vals):
-            return None
-        return [max(0.0, v) for v in vals]
-
-    @staticmethod
-    def _try_act(data: dict[str, Any], count: int) -> list[float] | None:
-        """Extract from 'act' (list of active sensor indices) as binary 0/1.
-
-        Used as last-resort fallback — the QuadrantDetector thresholds (μT) will
-        not fire on these 0/1 values unless the threshold is ≤1.0 μT, which is
-        unlikely in practice.  The fallback is kept so the tracker doesn't crash
-        when only 'act' is present.
-        """
-        raw = data.get("act")
-        if not isinstance(raw, (list, tuple)):
-            return None
-        try:
-            active = {int(i) for i in raw}
-            return [1.0 if i in active else 0.0 for i in range(count)]
-        except (TypeError, ValueError):
-            return None
 
     @property
     def has_touch_tracking(self) -> bool:

@@ -1,10 +1,13 @@
 """High-level controller for a single ESP32 node via the SoftEdIBO gateway."""
 
 import logging
+import threading
 from typing import Any, Callable
 
+from src.hardware.command_confirmer import CommandConfirmer
 from src.hardware.gateway import Gateway
 from src.hardware.fill_scaling import FillLoadTracker
+from src.hardware.touch_profiles import touch_profiles
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +39,10 @@ class ESP32Controller:
         # every LED command's angle so a physically-rotated ring shows the right
         # orientation without every activity having to compensate. Empty = no offset.
         self._led_angles: dict[int, float] = {}
+        # Confirmed (ACK'd, retransmitted) delivery for this node's set-once
+        # safety limits, so a dropped set_max/set_min can't leave the node on a
+        # stale ceiling (the 20->50 kPa over-inflation). See confirm_limits().
+        self._confirmer = CommandConfirmer(gateway, mac_address)
 
         self._gateway.on_message(self._handle_message)
 
@@ -135,6 +142,52 @@ class ESP32Controller:
         this is typically negative (e.g. -5 kPa).
         """
         return self.send_command("set_min_pressure", chamber=chamber, value=float(value))
+
+    def set_max_pressure_confirmed(self, chamber: int, value: float) -> bool:
+        """Like :meth:`set_max_pressure`, but block until the node ACKs the new
+        limit, retransmitting on loss (see :class:`CommandConfirmer`).
+
+        Returns ``False`` if the node never confirms (a stale ceiling risks
+        over-inflation, so the caller should warn) or rejects it. Blocks the
+        calling thread up to ~0.8 s — run it off the GUI/actuation thread
+        (:meth:`confirm_limits` does that)."""
+        return self._confirmer.confirm("set_max_pressure",
+                                       chamber=int(chamber), value=float(value))
+
+    def set_min_pressure_confirmed(self, chamber: int, value: float) -> bool:
+        """Like :meth:`set_min_pressure`, but confirmed (ACK'd + retransmitted);
+        see :meth:`set_max_pressure_confirmed`."""
+        return self._confirmer.confirm("set_min_pressure",
+                                       chamber=int(chamber), value=float(value))
+
+    def confirm_limits(self, chamber: int, max_pressure: float,
+                       min_pressure: float, *,
+                       on_result: Callable[[bool], None] | None = None) -> None:
+        """Reliably apply a chamber's max+min safety limits on the node, off-thread.
+
+        Runs the confirmed (ACK'd, retransmitted) pushes on a background daemon
+        thread so the caller never blocks, then invokes ``on_result(ok)`` where
+        ``ok`` means both limits were confirmed. Max is sent before min so the
+        firmware validates the min against the fresh max (mirrors the
+        fire-and-forget order in :meth:`set_max_pressure`). On failure it logs a
+        warning; the session's pre-actuation re-push stays a fire-and-forget
+        backstop, so a briefly-unreachable node still self-heals on the next
+        actuation."""
+        def _worker() -> None:
+            ok_max = self.set_max_pressure_confirmed(chamber, max_pressure)
+            ok_min = self.set_min_pressure_confirmed(chamber, min_pressure)
+            ok = ok_max and ok_min
+            if not ok:
+                logger.warning(
+                    "Couldn't confirm limits on %s chamber %d (max ok=%s, "
+                    "min ok=%s) — node may be unreachable; the pre-actuation "
+                    "re-push still self-heals", self.mac_address, chamber,
+                    ok_max, ok_min)
+            if on_result is not None:
+                on_result(ok)
+
+        threading.Thread(target=_worker, daemon=True,
+                         name=f"confirm-limits-{self.mac_address}").start()
 
     def configure(
         self,
@@ -363,14 +416,14 @@ class ESP32Controller:
             if data.get("type") == "debug":
                 logger.info("Debug from %s: %s", self.mac_address, data)
 
-            elif data.get("status") == "node_magnet_sensor_ready":
-                # Cache the magnet sensor board's self-described geometry so subscribers
-                # (skin grid panels, calibration UI, …) can read it later.
+            elif (ready := touch_profiles.for_ready_status(data.get("status"))) is not None:
+                # A touch board announced itself at boot. Cache the geometry it
+                # self-describes (per its profile) so subscribers (skin grid
+                # panels, calibration UI, …) can read it later.
                 self._magnet_geometry = {
-                    k: data[k] for k in ("sensors", "magnets", "variant", "geometry")
-                    if k in data
-                }
-                logger.info("magnet sensor ready from %s: %s", self.mac_address, self._magnet_geometry)
+                    k: data[k] for k in ready.geometry_keys if k in data}
+                logger.info("%s sensor ready from %s: %s",
+                            ready.name, self.mac_address, self._magnet_geometry)
 
             elif data.get("type") == "touch":
                 self._dispatch_touch(data)
@@ -378,7 +431,7 @@ class ESP32Controller:
             elif data.get("type") == "status" and "chamber" in data and "pressure" in data:
                 self._dispatch_chamber_pressure(data)
 
-            elif data.get("type") == "magnet":
+            elif touch_profiles.is_message_type(data.get("type")):
                 self._dispatch_magnet(data)
 
             elif data.get("type") == "organ":

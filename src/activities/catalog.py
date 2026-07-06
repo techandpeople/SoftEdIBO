@@ -42,6 +42,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from src.activities import activity_kind, skin_condition
+from src.ml.gesture_taxonomy import GESTURE_CLASSES
 
 
 @dataclass(frozen=True)
@@ -86,6 +87,19 @@ DUTY_FIELD = VerbField(
     name="duty", type="int", default=0,
     description="Pump PWM 1-255 — lower = gentler, slower stroke. 0 = full "
                 "speed (no duty sent). Needs no fill calibration.",
+)
+
+# Friendly 1-5 "power" dial the block editor shows instead of the raw ``duty``
+# PWM. Mapped onto the calibrated duty range at runtime (see
+# :func:`~src.hardware.fill_scaling.duty_for_power`): 1 = the per-skin-type
+# minimum usable stroke, 5 = full power. Level 5 is the default — full speed,
+# leaving any ``period_ms`` / calibrated slow-fill in charge — so a lower level
+# is an explicit "run gentler". Overrides ``duty`` when both are present.
+POWER_FIELD = VerbField(
+    name="power", type="int", default=5, choices=(1, 2, 3, 4, 5),
+    description="Pump strength 1-5: 1 = gentlest usable stroke (the calibrated "
+                "minimum for this skin type), 5 = full power. 5 leaves the "
+                "'over ms' slow-fill in charge; below 5 runs the pump gentler.",
 )
 
 # LED ring selector, shared by the verbs that drive lights. The multiplexed
@@ -164,6 +178,26 @@ ACTIONS: tuple[Verb, ...] = (
                   description="One full colour1 → colour2 → colour1 cycle."),
         RING_FIELD,
     )),
+    Verb("touch_progress", "action",
+         "Fill an LED ring as the child touches — a touch-counter you can see. "
+         "Light one more arc every 'per' touches, from 'bg_color' to 'on_color'. "
+         "Put it in a phase's 'on touch' so it repaints on each press; once all "
+         "'segments' arcs are lit it jumps to phase 'to' (leave 'to' empty to "
+         "just fill and let a transition handle the move). Counts touches since "
+         "the phase was entered, so it resets each phase.", (
+        VerbField("segments", "int", 4,
+                  description="Arcs to split the ring into (4 = quarters)."),
+        VerbField("per", "int", 1,
+                  description="Touches needed to light each further arc."),
+        VerbField("on_color", "color", "#2ecc71",
+                  description="Colour of a lit (filled) arc."),
+        VerbField("bg_color", "color", "#222222",
+                  description="Colour of an unlit (background) arc."),
+        RING_FIELD,
+        VerbField("to", "enum", "",
+                  description="Phase to jump to once the ring is full "
+                              "(empty = don't advance)."),
+    )),
     Verb("inflate", "action", "Drive a chamber up to a pressure %.", (
         CHAMBER_FIELD,
         VerbField("pct", "pct", 60, description="Target pressure (0-100 %)."),
@@ -171,6 +205,7 @@ ACTIONS: tuple[Verb, ...] = (
                   description="Fill gently over about this long (ms); the pump "
                               "slows to roughly match. 0 = full speed. Needs a "
                               "calibrated fill time, else falls back to full speed."),
+        POWER_FIELD,
         DUTY_FIELD,
     )),
     Verb("deflate", "action", "Empty a chamber back to 0 %.", (
@@ -179,6 +214,7 @@ ACTIONS: tuple[Verb, ...] = (
     Verb("set_pressure", "action", "Set a chamber's absolute target %.", (
         CHAMBER_FIELD,
         VerbField("pct", "pct", 0),
+        POWER_FIELD,
         DUTY_FIELD,
     )),
     Verb("beat", "action",
@@ -194,6 +230,7 @@ ACTIONS: tuple[Verb, ...] = (
         VerbField("aligned", "int", 2,
                   description="How many chambers share 'pct' in aligned mode."),
         VerbField("period_ms", "ms", 2000, description="One full cycle."),
+        POWER_FIELD,
         DUTY_FIELD,
     )),
     Verb("wait", "control", "Pause the sequence for a fixed time.", (
@@ -277,6 +314,17 @@ CONDITIONS: tuple[Verb, ...] = (
     Verb("touch_count", "condition",
          "True once the unit was touched at least 'min' times in this state.", (
         VerbField("min", "int", 10),
+    )),
+    Verb("gesture_count", "condition",
+         "True once the child made a gesture at least 'min' times in this state. "
+         "'kind' is either a raw touch (any press — no model needed) or an "
+         "ML-classified gesture (tap / press / compressions). Classified kinds "
+         "need a trained touch model for this skin type; without one they never "
+         "fire, so 'touch' is the safe default.", (
+        VerbField("kind", "enum", "touch", choices=("touch", *GESTURE_CLASSES),
+                  description="'touch' = any press; the rest are ML gestures "
+                              "needing a trained model for this skin type."),
+        VerbField("min", "int", 3),
     )),
     Verb("on_impact", "condition",
          "True once the Thymio was knocked ('impact': a sharp accelerometer "

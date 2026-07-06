@@ -17,8 +17,11 @@ Each skin is described by two independent fields in `config/settings.yaml`
   touch-gesture model. Registered in
   [src/hardware/skin_geometry.py](src/hardware/skin_geometry.py).
 - **`skin_variant`** — the silicone format (different chamber sizes per format).
-  Orthogonal to the shape; fed to the touch ML as a feature. One of:
-  `natural`, `wrinkles`, `organ`.
+  Orthogonal to the shape; fed to the touch ML as a feature. `natural` and
+  `wrinkles` exist for every type; the organ-bearing variants depend on the
+  type (`organ` for `tree_round`, `three_organ` for `turtle_square`,
+  `organ_rectangle` / `organ_triangle` / `organ_ellipse` for `thymio` — see
+  `VARIANTS_BY_TYPE` in [src/hardware/skin_geometry.py](src/hardware/skin_geometry.py)).
 
 So e.g. a wrinkled turtle top is `skin_type: turtle_square`,
 `skin_variant: wrinkles`.
@@ -76,10 +79,10 @@ boundaries, and what it buys is recoverable in software anyway (below).
   quadrant still works — the own-magnet dominates each sensor by distance.
 - Nothing is lost for gesture ML (uses magnitude/timing, polarity-agnostic) or
   for 1–2 sensor skins.
-- **Recover it for free:** (1) **Re-zero** subtracts the static cross-talk (the
-  firmware already sends baseline-subtracted `adj`); (2) tune **per-sensor
-  thresholds + hysteresis** in the Touch Tuning panel (§4) above the residual.
-  This handles the normal case.
+- **Recover it for free:** (1) **Re-zero** subtracts the static cross-talk (it
+  re-baselines the sensors, so resting readings settle near 0); (2) tune
+  **per-sensor thresholds + hysteresis** in the Touch Tuning panel (§4) above
+  the residual. This handles the normal case.
 - **Optional, for maximum separation:** a cross-talk "unmixing" calibration —
   press each quadrant alone, record the 4×4 response, invert it to separate the
   quadrants regardless of polarity (the linear/KNN idea from the thesis). Not
@@ -120,18 +123,24 @@ a quick threshold tune (no ML, no dataset):
 
 ## 6. Chamber fill times
 
-**Tools → Calibrate Fill Times…** measures, per chamber, how long it takes to
-inflate from empty to its max (using the pressure sensor as ground truth) and
-saves it as `fill_time_ms` in `config/settings.yaml`. Run it once per build /
-after silicone changes:
+**Tools → Calibrate Fill Times…** measures, per chamber, its **time→pressure
+fill curve** — how pressure climbs while the inflate valve is held open, with
+the pressure sensor as ground truth — and saves it as the chamber's
+`fill_profile` in `config/settings.yaml`. Run it once per build / after
+silicone changes:
 
 1. Connect the gateway and power the nodes (do this **outside** a running
-   session). On a reservoir node (`has_reservoirs: true`), let the tanks charge
-   to their target first — fill times are measured against a charged tank.
-2. Open the dialog, **Calibrate all** (or per chamber). Each chamber deflates,
-   then inflates while timed; the measured time appears per row. The list
-   **scrolls** when there are many chambers.
+   session).
+2. Open the dialog, **Calibrate all** (or per chamber). Each chamber deflates
+   to empty, then sweeps in one continuous pass: the inflate valve is held open
+   while the node streams pressure at a fast cadence, each reading becoming a
+   curve point. The result (and the chamber's fill-order rank) appears per row;
+   the list **scrolls** when there are many chambers.
 3. **Save**.
+
+Curves are also stored as per-type templates (keyed by `skin_type` +
+`skin_variant` under `fill_profiles_by_type`), so a chamber without its own
+measurement can fall back to the curve measured on an identical skin.
 
 You can also calibrate just one skin from **Configure Skin → Calibrate Fill**
 (same dialog, scoped to that skin's chambers) — handy after editing a single
@@ -140,26 +149,20 @@ skin without re-running everything.
 A hard **5 s ceiling** and the firmware `HARD_MAX` pressure cutoff always apply,
 so a stuck/unplugged sensor can't run a pump indefinitely.
 
-**At runtime**, a chamber with a `fill_time_ms` inflates **by time** so it doesn't
-depend on the laggy multiplexed pressure sensor. The window is the calibrated
-`fill_time` scaled by both the requested fill % **and** the node's concurrent
-load — `fill_time × requested% × max(1, active_chambers ÷ pumps)` — because the
-pumps (or the shared reservoir tank) are shared per node, so chambers inflating
-together fill each other slower. A lone chamber (or up to `pump_count` at once)
-keeps its measured time; the PC recomputes this automatically as chambers start
-and stop. The firmware then **maintains the level against slow leaks**: while idle
-it keeps reading pressure and tops the chamber back up if it droops — but only on
-a *drop*, so a child pressing the skin (which *raises* pressure) never triggers a
-top-up. Chambers without a `fill_time_ms` keep the classic pressure-target
-behaviour.
-
-**Reservoirs** aren't calibrated (a tank isn't a chamber, so it never appears in
-the dialog). The firmware keeps each tank at its target pressure on its own, and —
-so a refill never disturbs a fill measurement — the tank pump **pauses while any
-chamber on that node is inflating/deflating**, topping the tank back up once the
-chambers settle.
+**At runtime**, a chamber with a calibrated curve inflates **by time** so it
+doesn't depend on the laggy multiplexed pressure sensor. The open-valve window
+is interpolated from the curve (current level → target), then scaled by the
+node's concurrent load — `× max(1, active_chambers ÷ pumps)` — because the
+pumps are shared per node, so chambers inflating together fill each other
+slower. A lone chamber (or up to `pump_count` at once) keeps its measured time;
+the PC recomputes this automatically as chambers start and stop. The firmware
+then **maintains the level against slow leaks**: while idle it keeps reading
+pressure and tops the chamber back up if it droops — but only on a *drop*, so a
+child pressing the skin (which *raises* pressure) never triggers a top-up.
+Chambers without a calibrated curve keep the classic pressure-target behaviour
+(a legacy scalar `fill_time_ms` is still honoured, as a linear curve).
 
 When you start a session on real hardware, if any selected chamber has no
-calibrated fill time you're prompted to **calibrate now** (or start anyway with
+calibrated fill curve you're prompted to **calibrate now** (or start anyway with
 the pressure-based fallback). Calibrating there rebuilds the robots so the new
-times take effect — just start the session again.
+curves take effect — just start the session again.

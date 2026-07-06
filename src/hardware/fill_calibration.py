@@ -28,6 +28,7 @@ from typing import Any
 
 from src.core import skin_config
 from src.hardware.fill_profile import DeflateProfile, FillProfile
+from src.hardware.fill_scaling import FULL_DUTY, MIN_PUMP_DUTY
 
 # Defaults for a discrete-step sweep. The first (coarse) pass uses ~400 ms steps;
 # re-running with a smaller step refines the curve. The sweep stops a hair under
@@ -589,6 +590,50 @@ def set_type_deflate_profile(settings_data: dict, skin_type: Any,
     scheme as the fill templates)."""
     return _set_type_curve(settings_data, DEFLATE_TYPE_PROFILES_KEY,
                            skin_type, skin_variant, slot, profile)
+
+
+# ---------------------------------------------------------------------------
+# Per-skin-type minimum pump duty (the "power level 1" floor)
+# ---------------------------------------------------------------------------
+# The activity editor drives pumps on a 1-5 power scale (see
+# :func:`~src.hardware.fill_scaling.duty_for_power`). Level 1 maps to this floor —
+# the lowest PWM that still moves air — which depends on the silicone stiffness
+# and so is stored once per (skin_type, skin_variant), edited alongside the fill
+# curves in the Calibrate Fill dialog. Absent = the global :data:`MIN_PUMP_DUTY`.
+
+MIN_DUTY_BY_TYPE_KEY = "min_pump_duty_by_type"
+
+
+def get_type_min_duty(settings_data: dict, skin_type: Any, skin_variant: Any,
+                      default: int = MIN_PUMP_DUTY) -> int:
+    """The configured power-level-1 PWM floor for a skin type, or ``default``.
+
+    Clamped to ``[1, FULL_DUTY]`` so a stray value can't stall or over-drive."""
+    slug = type_slug(skin_type, skin_variant)
+    by_type = settings_data.get(MIN_DUTY_BY_TYPE_KEY) or {}
+    val = by_type.get(slug) if slug else None
+    try:
+        return max(1, min(FULL_DUTY, int(val)))
+    except (TypeError, ValueError):
+        return max(1, min(FULL_DUTY, int(default)))
+
+
+def set_type_min_duty(settings_data: dict, skin_type: Any, skin_variant: Any,
+                      value: int | None) -> bool:
+    """Persist (``None`` clears) a skin type's power-level-1 PWM floor.
+
+    Returns True if the type had a slug to key on. Prunes the empty branch."""
+    slug = type_slug(skin_type, skin_variant)
+    if not slug:
+        return False
+    by_type = settings_data.setdefault(MIN_DUTY_BY_TYPE_KEY, {})
+    if value is None:
+        by_type.pop(slug, None)
+    else:
+        by_type[slug] = max(1, min(FULL_DUTY, int(value)))
+    if not by_type:
+        settings_data.pop(MIN_DUTY_BY_TYPE_KEY, None)
+    return True
 
 
 def resolve_fill_profiles(settings_data: dict,

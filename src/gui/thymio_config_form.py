@@ -7,10 +7,12 @@ per-robot RobotConfigDialog both embed this form, so the Thymio schema
 in ``ui/thymio_config_form.ui``. The robot's skin nodes are NOT configured
 here — they are their own entries (robot panel "+ Node" → ``cfg["nodes"]``).
 
-The Discover button sniffs the 802.15.4 channel through the gateway's C6 and
-fills the address field; the gateway is fetched lazily via the injected
-``gateway_provider`` so the form works both where a live robot exists
-(RobotConfigDialog) and where only the panel's gateway does (RobotPanel).
+The Discover button has the gateway's C6 broadcast a LIST_NODES query and fills
+the address field with a robot that answers; the gateway is fetched lazily via
+the injected ``gateway_provider`` so the form works both where a live robot
+exists (RobotConfigDialog) and where only the panel's gateway does (RobotPanel).
+The From-cable button reads the address off a USB-cabled Thymio instead — no
+gateway, for a robot not yet paired to this network.
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ from PySide6.QtWidgets import QMessageBox, QWidget
 from src.gui.ui_thymio_config_form import Ui_ThymioConfigForm
 
 _DISCOVER_TITLE = "Discover Thymios"
+_CABLE_TITLE = "Read Thymio from cable"
 
 
 class ThymioConfigForm(QWidget, Ui_ThymioConfigForm):
@@ -49,6 +52,7 @@ class ThymioConfigForm(QWidget, Ui_ThymioConfigForm):
         self.wireless_check.toggled.connect(lambda _=False: self._update_enables())
         self.via_combo.currentIndexChanged.connect(lambda _=0: self._update_enables())
         self.discover_btn.clicked.connect(self._on_discover)
+        self.cable_btn.clicked.connect(self._on_read_cable)
         self._update_enables()
 
     # ------------------------------------------------------------------
@@ -100,14 +104,15 @@ class ThymioConfigForm(QWidget, Ui_ThymioConfigForm):
         self.channel_spin.setEnabled(gw)
         self.addr_edit.setEnabled(gw)
         self.discover_btn.setEnabled(gw)
+        self.cable_btn.setEnabled(gw)
         self.impact_spin.setEnabled(gw)
 
     def _on_discover(self) -> None:
         """Open the guided dongle-free scan and take the picked address.
 
-        The dialog runs a long sniff through the gateway's C6 while the user
-        powers the Thymios on (they announce themselves at boot), listing the
-        addresses live — see :class:`ThymioDiscoverDialog`.
+        The dialog has the gateway's C6 broadcast a LIST_NODES query while the
+        user powers the Thymios on; each powered robot answers with its address,
+        listed live — see :class:`ThymioDiscoverDialog`.
         """
         gateway = self._gateway_provider()
         if gateway is None or not getattr(gateway, "is_connected", False):
@@ -120,3 +125,33 @@ class ThymioConfigForm(QWidget, Ui_ThymioConfigForm):
         dlg = ThymioDiscoverDialog(gateway, self.channel_spin.value(), self)
         if dlg.exec() == QDialog.DialogCode.Accepted and dlg.address():
             self.addr_edit.setText(dlg.address())
+
+    def _on_read_cable(self) -> None:
+        """Read the address straight off a USB-cabled Thymio and fill the field.
+
+        Runs off-thread (the Aseba handshake takes a second or two) so the dialog
+        stays responsive; the button shows progress and is restored on completion.
+        This needs no gateway and no network — it's the way to onboard a robot that
+        isn't paired to this network yet, which wireless Discover cannot see.
+        """
+        from src.gui.async_task import run_async
+        from src.robots.thymio.thymio_cable import read_cabled_thymio_address
+
+        self.cable_btn.setEnabled(False)
+        self.cable_btn.setText("Reading…")
+        run_async(
+            read_cabled_thymio_address,
+            on_done=self._cable_done, on_error=self._cable_failed, parent=self,
+        )
+
+    def _cable_done(self, addr: str) -> None:
+        self._restore_cable_btn()
+        self.addr_edit.setText(addr)
+
+    def _cable_failed(self, exc: Exception) -> None:
+        self._restore_cable_btn()
+        QMessageBox.warning(self, _CABLE_TITLE, str(exc))
+
+    def _restore_cable_btn(self) -> None:
+        self.cable_btn.setText("From cable…")
+        self._update_enables()

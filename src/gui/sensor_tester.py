@@ -24,7 +24,7 @@ from __future__ import annotations
 import time
 from typing import Callable, Sequence
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (QGroupBox, QHBoxLayout, QLabel, QProgressBar,
                                QWidget)
 
@@ -49,6 +49,11 @@ _REZERO_TIMEOUT_MS = 12000    # give up waiting for the stream to resume
 class SensorTester(QGroupBox, Ui_SensorTester):
     """Live µT readout + adjustable sensitivity for a node's magnet sensors."""
 
+    # Emitted when the user flips the "Compensate actuation coupling" checkbox.
+    # The host owns the compensator + chamber levels, so it re-feeds the last
+    # reading (raw or compensated) in response — this widget only renders values.
+    compensation_toggled = Signal(bool)
+
     def __init__(
         self,
         count: int,
@@ -61,6 +66,10 @@ class SensorTester(QGroupBox, Ui_SensorTester):
         self._rezero = rezero_cb
         self._configure = configure_cb
         self._count = max(1, int(count))
+        # Whether the host has a coupling to apply. Tracked as an explicit flag,
+        # NOT via the checkbox's isVisible(): visibility is False until the whole
+        # widget tree is realised on screen, which would wrongly gate the logic.
+        self._compensation_available = False
 
         self._bars: list[QProgressBar] = []
         self._value_labels: list[QLabel] = []
@@ -98,6 +107,24 @@ class SensorTester(QGroupBox, Ui_SensorTester):
         self.threshold_spin.valueChanged.connect(self._on_threshold_changed)
         self.rezero_btn.clicked.connect(self._on_rezero)
         self.push_btn.clicked.connect(self._on_push)
+        self.compensate_cb.toggled.connect(self.compensation_toggled)
+
+    # ------------------------------------------------------------------
+    # Actuation-coupling compensation toggle
+    # ------------------------------------------------------------------
+
+    def set_compensation_available(self, available: bool) -> None:
+        """Show the raw↔compensated toggle only when the host has a calibrated,
+        enabled coupling to apply. Hidden (the default) means the panel just
+        renders the raw stream, so nothing changes for uncalibrated skins."""
+        self._compensation_available = bool(available)
+        self.compensate_cb.setVisible(self._compensation_available)
+
+    def compensation_enabled(self) -> bool:
+        """True when the host should feed compensated values (toggle available
+        and checked). Gated on the availability flag, not the checkbox's
+        visibility, which is only realised once the panel is shown."""
+        return self._compensation_available and self.compensate_cb.isChecked()
 
     # ------------------------------------------------------------------
     # Public API (called by the host on every ``magnet`` frame)

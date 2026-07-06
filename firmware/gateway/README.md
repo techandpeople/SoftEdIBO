@@ -43,7 +43,7 @@ NVS. The desktop app exposes this as **Tools → Gateway WiFi AP…**.
 ```jsonc
 // PC => gateway
 {"cmd":"get_ap"}
-{"cmd":"set_ap","ssid":"MyNet","pass":"secret12"}   // omit "pass" to keep current
+{"cmd":"set_ap","ssid":"MyNet","pass":"secret12","channel":6}   // pass/channel optional (keep current)
 // gateway => PC
 {"type":"ap_config","ssid":"SoftEdIBO","channel":1,"secured":true}
 {"type":"ap_set","ok":true,"ssid":"MyNet"}
@@ -64,10 +64,19 @@ gateway proxy is in `src/main.cpp`.
 // PC => gateway (no "target"): stage the image, then trigger the node
 {"cmd":"ota_store_begin","size":806976,"md5":"…"}
 {"type":"ota_store_ready"}                       // or {"type":"ota_store_error","reason":"no_psram"}
-{"cmd":"ota_store_data","data":"<base64>"}        // ×N, no per-chunk ack
+{"cmd":"ota_store_data","data":"<base64>"}        // ×N
+{"type":"ota_store_ack","len":8192}               // cumulative, every 4 KB stored — the PC
+                                                  // windows its sends on these (USB flow control)
 {"cmd":"ota_store_end"}
-{"type":"ota_stored","ok":true,"url":"http://192.168.4.1/fw"}
+{"type":"ota_stored","ok":true,"size":806976,"url":"http://192.168.4.1/fw"}
+// staging errors ("reason"): bad_size, no_psram, httpd_failed, not_storing,
+// size_mismatch (+got/want), md5_mismatch; ap_not_supported on a non-AP build
 ```
+
+The gateway MD5-checks the staged image before serving it, and injects its own
+AP `ssid`/`pass` into any forwarded `ota_wifi` command that doesn't carry one —
+so the PC never needs to know the AP credentials and a renamed AP can't break
+OTA.
 
 Requires [PlatformIO](https://platformio.org/). The XIAO ESP32-S3 needs ESP-IDF 5.x — the
 official `espressif32` 6.x ships Arduino core 2.x, so the env pins the **pioarduino**
@@ -92,14 +101,24 @@ idf.py set-target esp32s3 && idf.py build flash
 ```
 
 The gateway strips `"target"` before forwarding so nodes receive only the command fields.
+Two `"target"` values are special:
+
+- **no `"target"`** — gateway-local command (`get_ap`, `set_ap`, `ota_store_*` above);
+- **`"target":"thymio"`** — forwarded over UART to the companion C6 radio
+  co-processor (`thymio_*` commands, see `docs/THYMIO_WIRELESS_CONTROL.md`);
+  the C6's replies come back tagged `{"source":"thymio",...}`.
 
 **Gateway => PC** — every message from a node gets a `"source"` MAC added:
 ```json
-{"source":"AA:BB:CC:DD:EE:01","type":"status","chamber":0,"pressure":75,"kpa":6.00,"st":0}
-{"source":"AA:BB:CC:DD:EE:01","type":"pong"}
+{"source":"AA:BB:CC:DD:EE:01","type":"status","chamber":0,"pressure":75,"kpa":6.00,"st":0,"vi":0,"vd":0}
+{"source":"AA:BB:CC:DD:EE:01","type":"pong","rgbw":true,"kpa_min":0}
 {"source":"AA:BB:CC:DD:EE:01","type":"debug","ch":[...],"tx_ok":1520,"tx_fail":3,"drop":0,"up":342}
-{"status":"gateway_ready","mac":"AA:BB:CC:DD:EE:00"}
+{"status":"gateway_ready","mac":"AA:BB:CC:DD:EE:00","ap":"SoftEdIBO"}
 ```
+
+A PC line that fails to parse (usually USB byte loss) is reported back as
+`{"type":"error","reason":"bad_cmd_json","len":N,"raw":"…"}` instead of being
+silently dropped, so a swallowed command (e.g. a missed `stop`) is visible.
 
 All `"pressure"` values are **0-100 %** of the node's configured maximum pressure.
 The `"debug"` response is only available from nodes flashed with the debug firmware.
@@ -118,8 +137,8 @@ writes flash via `firmware/common/se_ota.h`. Driven PC-side by
 
 ```jsonc
 // PC => node
-{"target":"AA:..","cmd":"ota_begin","size":768929,"md5":"<hex>","chunk":144}
-{"target":"AA:..","cmd":"ota_data","seq":0,"data":"<base64 of 144 bytes>"}
+{"target":"AA:..","cmd":"ota_begin","size":768929,"md5":"<hex>","chunk":96}
+{"target":"AA:..","cmd":"ota_data","seq":0,"data":"<base64 of 96 bytes>"}
 {"target":"AA:..","cmd":"ota_end"}
 // node => PC
 {"source":"AA:..","type":"ota_ready"}
@@ -128,11 +147,14 @@ writes flash via `firmware/common/se_ota.h`. Driven PC-side by
 {"source":"AA:..","type":"ota_error","reason":"verify_failed"}
 ```
 
-Chunk = 144 raw bytes (→ 192 base64 chars, comfortably under the 250-byte
-ESP-NOW limit). The node tolerates a sliding window (re-ACKs duplicates, drops
-out-of-order future chunks); the PC retransmits on a per-sequence timeout and
-verifies the image with the MD5 from `ota_begin`. Nodes need an OTA partition
-table (`default.csv`); see each node's `platformio.ini`.
+Chunk = 96 raw bytes (→ 128 base64 chars; the gateway→node relay drops
+payloads over ~190 bytes, so chunks stay well under that — see
+`node_ota_updater.CHUNK_SIZE`). The node tolerates a sliding window (re-ACKs
+duplicates, drops out-of-order future chunks); the PC retransmits on a
+per-sequence timeout, verifies the image with the MD5 from `ota_begin`, and
+only treats the update as done when the freshly-booted new firmware broadcasts
+`ota_done`. Nodes need an OTA partition table (`default.csv`); see each node's
+`platformio.ini`.
 
 ## Behaviour
 
@@ -144,7 +166,11 @@ table (`default.csv`); see each node's `platformio.ini`.
   `"source"` field with the sender MAC.
 - Broadcast address `FF:FF:FF:FF:FF:FF` is pre-registered as peer for scan/ping.
 - Unknown sender MACs are dynamically added as peers on first send.
-- **Fire-and-forget** delivery — no retry logic. ESP-NOW provides link-layer
+- PC→node forwards are **paced** (`se::sendPaced` waits for the previous
+  frame's TX-done before sending the next), so a burst of back-to-back
+  commands (e.g. a batch inflate) can't overrun the radio's tiny TX queue and
+  silently drop frames.
+- Still **fire-and-forget** — no retransmit. ESP-NOW provides link-layer
   ACKs automatically; the app can resend if it doesn't see a pressure change.
 
 ## Performance notes

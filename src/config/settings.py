@@ -109,6 +109,25 @@ class Settings:
         """Persist the recordings folder (stored as given — absolute or relative)."""
         self._data.setdefault("data", {})["recordings_dir"] = str(path)
 
+    def touch_threshold_ut(self, skin_type: str) -> float | None:
+        """Saved magnet-sensor activation threshold (µT) for a skin type, or None.
+
+        The general default a node uses to flip a sensor active — calibrated once
+        per skin type (e.g. in the guided gesture capture) and reused everywhere
+        that skin type is driven. Stored under ``touch.act_threshold_ut.<type>``."""
+        by_type = self._data.get("touch", {}).get("act_threshold_ut", {})
+        v = by_type.get(skin_type) if isinstance(by_type, dict) else None
+        return float(v) if isinstance(v, (int, float)) else None
+
+    def set_touch_threshold_ut(self, skin_type: str, value: float) -> None:
+        """Persist a skin type's magnet-sensor activation threshold (µT) and save."""
+        if not skin_type:
+            return
+        touch = self._data.setdefault("touch", {})
+        by_type = touch.setdefault("act_threshold_ut", {})
+        by_type[skin_type] = float(value)
+        self.save()
+
     @property
     def gateway_port(self) -> str:
         """Serial port for the SoftEdIBO gateway."""
@@ -124,3 +143,8 @@ class Settings:
     def gateway_auto_connect(self) -> bool:
         """Whether to connect the gateway automatically on app startup."""
         return self._data.get("gateway", {}).get("auto_connect", True)
+
+    @property
+    def auto_scan_on_connect(self) -> bool:
+        """Whether to scan for nodes automatically right after the gateway connects."""
+        return self._data.get("gateway", {}).get("auto_scan_on_connect", True)

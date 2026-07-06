@@ -273,9 +273,15 @@ inline void applyChamberCmd(int n, const cmd_queue::Cmd& c) {
         break;
     case CMD_VALVE_MANUAL: {
         // chamber = chamber, param = side (0=inflate, 1=deflate), cfg_chambers = open (0/1)
-        // Manual (dev) override takes the chamber out of the engine's hands.
-        chambers::inflateEng.drop(n, [](int i) { chambers::stop(i); });
-        chambers::deflateEng.drop(n, [](int i) { chambers::stop(i); });
+        // Manual (dev) override takes the chamber out of the engine's hands. If the
+        // drop closed an engine-opened valve the shared pumps must be recomputed
+        // NOW, or the pump keeps dead-heading against all-closed valves until some
+        // later engine event happens to recalc (and meanwhile pulls the manifold to
+        // deep vacuum, which is what made the next valve too hard to open).
+        bool closed = false;
+        chambers::inflateEng.drop(n, [&](int i) { chambers::stop(i); closed = true; });
+        chambers::deflateEng.drop(n, [&](int i) { chambers::stop(i); closed = true; });
+        if (closed) chambers::recalcPumps();
         chambers::setManualValve(n, c.param, c.cfg_chambers != 0);
         break;
     }
@@ -287,6 +293,16 @@ inline void applyChamberCmd(int n, const cmd_queue::Cmd& c) {
     default:
         break;
     }
+}
+
+// Confirm (or NACK) a set-once safety limit the PC asked to be confirmed. A no-op
+// for any other command or when the PC didn't tag the command with a `seq`, so
+// callers can invoke it unconditionally after applying/rejecting a chamber cmd.
+inline void ackConfirmable(const cmd_queue::Cmd& c, bool ok, const char* err = nullptr) {
+    using namespace cmd_queue;
+    if (c.seq == NO_SEQ || (c.type != CMD_SET_MAX && c.type != CMD_SET_MIN)) return;
+    se::node::sendAck(c.type == CMD_SET_MAX ? "set_max_pressure" : "set_min_pressure",
+                      c.seq, c.chamber, ok, err);
 }
 
 inline void process(const cmd_queue::Cmd& c) {
@@ -352,8 +368,12 @@ inline void process(const cmd_queue::Cmd& c) {
         for (int i = 0; i < NUM_CHAMBERS; i++) applyChamberCmd(i, c);
         return;
     }
-    if (n < 0 || n >= NUM_CHAMBERS) return;
+    if (n < 0 || n >= NUM_CHAMBERS) {
+        ackConfirmable(c, false, "bad_chamber");   // NACK: PC fails fast, no retry
+        return;
+    }
     applyChamberCmd(n, c);
+    ackConfirmable(c, true);   // confirm set_max/set_min AFTER applying it
 }
 
 inline void parseAndQueue(const uint8_t* data, int len) {
@@ -368,8 +388,8 @@ inline void parseAndQueue(const uint8_t* data, int len) {
     else if (strcmp(cmd, "inflate") == 0)           { c.type = CMD_INFLATE;      c.chamber = doc["chamber"] | -1; c.param = doc["delta"] | 10; c.fill_ms = doc["ms"] | 0; c.duty = doc["duty"] | 0; }
     else if (strcmp(cmd, "deflate") == 0)           { c.type = CMD_DEFLATE;      c.chamber = doc["chamber"] | -1; c.param = doc["delta"] | 10; c.fill_ms = doc["ms"] | 0; c.duty = doc["duty"] | 0; }
     else if (strcmp(cmd, "set_pressure") == 0)      { c.type = CMD_SET_PRESSURE; c.chamber = doc["chamber"] | -1; c.param = doc["value"] | 0; c.duty = doc["duty"] | 0; }
-    else if (strcmp(cmd, "set_max_pressure") == 0)  { c.type = CMD_SET_MAX;      c.chamber = doc["chamber"] | -1; c.param_kpa = doc["value"] | chambers::DEFAULT_MAX_KPA; }
-    else if (strcmp(cmd, "set_min_pressure") == 0)  { c.type = CMD_SET_MIN;      c.chamber = doc["chamber"] | -1; c.param_kpa = doc["value"] | chambers::DEFAULT_MIN_KPA; }
+    else if (strcmp(cmd, "set_max_pressure") == 0)  { c.type = CMD_SET_MAX;      c.chamber = doc["chamber"] | -1; c.param_kpa = doc["value"] | chambers::DEFAULT_MAX_KPA; c.seq = doc["seq"] | NO_SEQ; }
+    else if (strcmp(cmd, "set_min_pressure") == 0)  { c.type = CMD_SET_MIN;      c.chamber = doc["chamber"] | -1; c.param_kpa = doc["value"] | chambers::DEFAULT_MIN_KPA; c.seq = doc["seq"] | NO_SEQ; }
     else if (strcmp(cmd, "hold") == 0)              { c.type = CMD_HOLD;         c.chamber = doc["chamber"] | -1; }
     else if (strcmp(cmd, "stop") == 0)              { c.type = CMD_STOP;         c.chamber = -1; }
     else if (strcmp(cmd, "resume") == 0)            { c.type = CMD_RESUME;       c.chamber = -1; }

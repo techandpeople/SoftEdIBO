@@ -124,6 +124,12 @@
    <item>
     <layout class="QHBoxLayout" name="train_row">
      <item>
+      <widget class="QPushButton" name="capture_btn">
+       <property name="toolTip"><string>Collect a fresh training set live: the app prompts each gesture and you perform it a few times, then trains and shows the accuracy. Needs a connected gateway with a touch node.</string></property>
+       <property name="text"><string>Guided live capture…</string></property>
+      </widget>
+     </item>
+     <item>
       <spacer name="train_spacer">
        <property name="orientation"><enum>Qt::Horizontal</enum></property>
        <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>

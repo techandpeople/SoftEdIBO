@@ -213,6 +213,27 @@ inline void toGateway(const char* s) {
     if (gatewayKnown) se::send(gatewayMac, s);
 }
 
+// Confirm a set-once command was *applied* (not merely received), so the PC can
+// stop retransmitting it. Emitted only when the PC tagged the command with a
+// `seq`; the PC matches the ack by (source MAC, seq). `ok=false` + `err` is a
+// NACK for a command the node rejected (e.g. bad chamber) so the PC fails fast
+// instead of retrying. Used for the safety limits set_max/set_min, whose silent
+// loss over fire-and-forget ESP-NOW leaves the node clamping to a stale ceiling
+// (an observed 20->50 kPa over-inflation). See docs/ACK_RELIABILITY.md.
+inline void sendAck(const char* cmd, uint16_t seq, int chamber,
+                    bool ok, const char* err = nullptr) {
+    if (!gatewayKnown) return;
+    char buf[96];
+    int len = snprintf(buf, sizeof(buf),
+        "{\"type\":\"ack\",\"cmd\":\"%s\",\"seq\":%u,\"chamber\":%d,\"ok\":%s",
+        cmd, (unsigned)seq, chamber, ok ? "true" : "false");
+    if (!ok && err && len > 0 && len < (int)sizeof(buf))
+        len += snprintf(buf + len, sizeof(buf) - len, ",\"err\":\"%s\"", err);
+    if (len > 0 && len < (int)sizeof(buf))
+        len += snprintf(buf + len, sizeof(buf) - len, "}");
+    esp_now_send(gatewayMac, reinterpret_cast<uint8_t*>(buf), len);
+}
+
 }  // namespace node
 
 }  // namespace se

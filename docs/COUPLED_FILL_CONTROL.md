@@ -24,7 +24,7 @@ others' cutoff. This is why "inflate the whole skin" never settled correctly: th
 only trustworthy reading is taken when a chamber is **isolated** (its valve closed
 and the line settled, or it is the only open valve of its direction).
 
-## The algorithm — "actuate coupled, measure isolated"
+## The algorithm — "actuate coupled, close progressively, verify isolated"
 
 One `coupled_fill::Engine` drives **one direction**; a board owns two (inflate,
 deflate), independent because the two manifolds are independent. State machine:
@@ -33,19 +33,31 @@ deflate), independent because the two manifolds are independent. State machine:
    window (`group_window_ms`) so sibling per-chamber commands are batched and
    **open together**.
 2. **FILLING** — open every chamber in the group at once + run the pumps. While
-   coupled, the line is the only trustworthy reading, so the round ends when the
-   line first reaches the **lowest target among the open chambers** (that chamber
-   is done). Spikes are rejected (see below).
-3. **SETTLING** — every valve is now shut, so after `settle_ms` each gauge reads
-   its **own** chamber. Drop the chambers that really reached target (±`tol_frac`
-   of range); whatever is still short re-opens for the next, higher round. A round
-   that opened a single chamber was never coupled, so its fill reading is already
-   trustworthy and the settle is skipped.
+   coupled every open chamber **equalises with the line**, so when the line
+   reaches the **lowest open target** that chamber holds exactly its target —
+   close **just it** (progressive close, `EV_CHAMBER_DONE`) and keep pumping the
+   rest without stopping. The line keeps moving to the next target; chambers
+   close one by one in target order (inflate: lowest max first; deflate: highest
+   min first, since the line falls). A chamber whose target the gauge cannot see
+   (a deflate below the sensor floor) closes on its **per-chamber time budget**
+   instead — `capMs`, sent by the PC as `ms` from the calibrated deflate curve
+   (0 = the tuning's `chamber_max_ms`). Spikes are rejected (see below). The
+   whole round only ends at once on a safety path (`hard_max_kpa`,
+   `round_max_ms`).
+3. **SETTLING** — entered **once**, after the **last** open valve closes (the
+   pumps only ever stop when everything has closed). After `settle_ms` each
+   gauge reads its **own** chamber, so every requested chamber is verified
+   isolated (±`tol_frac` of range); whatever is still short re-opens for a
+   correction round. A round that opened a single chamber was never coupled, so
+   its reading is already trustworthy and the settle wait is skipped.
 
-The set shrinks each round; the last chamber opens **alone**, so its gauge reads
-itself → precise. A reading taken while coupled is never trusted. **No chamber is
-ever abandoned**: a chamber leaves the pending set only when an isolated measure
-confirms its target or a safety cap (`chamber_max_ms`, `seq_max_ms`) expires.
+Closing a chamber while coupled is exact — it had equalised with the line, so it
+traps the line's pressure. A reading taken while coupled is never trusted for
+the final verify. **No chamber is ever abandoned**: a chamber leaves the pending
+set only when an isolated measure confirms its target, when its time budget is
+spent (`capMs`/`chamber_max_ms` — for a target below the gauge floor the budget
+IS the closing authority, so it also counts as done at the verify), or when
+`seq_max_ms` aborts the whole sequence.
 
 ## Dynamic grouping — why it must coalesce per-chamber frames
 
@@ -81,10 +93,11 @@ overshoot:
 2. **`min_round` gate** — ignore the cutoff for `min_round_single_ms` (1-chamber
    round, tight) or `min_round_ms` (2+ chambers, rides out the bigger manifold
    kick) after a round opens.
-3. **Consecutive-read debounce** (`cutoff_debounce`) — the cutoff must persist
-   across N control ticks.
+3. **Per-chamber consecutive-read debounce** (`cutoff_debounce`, `overCnt[i]`) —
+   a chamber's cutoff must persist across N control ticks before it closes.
 
-`hard_max_kpa` (inflate) bypasses all three as the safety backstop.
+`hard_max_kpa` (inflate) and the time budgets bypass all three as the safety
+backstops.
 
 ## Per-board tuning (`coupled_fill::Tuning`)
 
@@ -99,9 +112,10 @@ mux scan), so its windows are looser.
 | `settle_ms`           |    150 |         300 | settle closed before measuring isolated              |
 | `round_max_ms`        |   6000 |        8000 | per-round cap (leak / can't reach)                   |
 | `seq_max_ms`          |  25000 |       45000 | whole-sequence safety cap                            |
-| `chamber_max_ms`      |   5000 |        5000 | per-chamber cumulative-open cap (stuck gauge/vacuum) |
-| `cutoff_debounce`     |      3 |           2 | consecutive over-target reads to end a round         |
+| `chamber_max_ms`      |   5000 |        5000 | per-chamber cumulative-open cap (stuck gauge/vacuum); a request's `capMs` overrides it |
+| `cutoff_debounce`     |      3 |           2 | consecutive at-target reads to close a chamber       |
 | `tol_frac`            |   0.10 |        0.10 | reached tolerance, fraction of range                 |
+| `hard_max_kpa`        |    100 |         100 | single-sample inflate cut (`HARD_MAX_KPA` / `HARD_CHAMBER_MAX_KPA` — effectively uncapped by design; time is the real bound) |
 
 ## The `millis()` underflow bug (the finding)
 
@@ -169,7 +183,8 @@ Wireless debugging over ESP-NOW is the only way to catch these on a battery node
 
 - `dbg ev:rx` — the command + which valves were open the instant it arrived.
 - `dbg ev:eng` — round/measure trace; `code` is `coupled_fill::Event`
-  (0 open, 1 end, 2 measure, 3 done, 4 abort), `mask` the affected chambers.
+  (0 open, 1 round-end, 2 measure, 3 done, 4 abort, 5 chamber-done — one chamber
+  closed at its target while the rest keep filling), `mask` the affected chambers.
 - `dbg ev:dry` — a pump running with no open valve, or more pumps than the open
   valves should need (`recalcPumps` makes both impossible — fires only on a
   regression).
@@ -178,7 +193,7 @@ Wireless debugging over ESP-NOW is the only way to catch these on a battery node
 **`fw` marker.** The boot `node_*_ready` message carries `"fw":"…"`. **Bump it
 whenever the actuator logic changes** so a flash can be confirmed from the log —
 not bumping it (it sat at `round-min2`) cost a debug cycle of not knowing whether
-the OTA had taken. Current marker: `coupled-fill-1`.
+the OTA had taken. Current marker: `progressive-close-1` (both boards).
 
 **Flashing.** OTA flashes the **prebuilt merged** `firmware/node_actuator/firmware-*.bin`.
 Rebuild them with `scripts/build-firmware.sh` — building into `.pio/` alone does
@@ -186,10 +201,15 @@ Rebuild them with `scripts/build-firmware.sh` — building into `.pio/` alone do
 
 ## Safety backstops (unchanged in spirit)
 
-- `hard_max_kpa` — single-sample inflate cut, no debounce.
-- `chamber_max_ms` — per-chamber cumulative-open cap; also the only backstop for a
-  deflate into vacuum, which the gauge cannot see (clamps below atmosphere to 0).
-- `seq_max_ms` — whole-sequence cap; aborts and closes any open valves.
+- `hard_max_kpa` — single-sample inflate cut, no debounce. Set to 100 kPa
+  (effectively uncapped): the unreliable gauge must not gate fills, so
+  over-pressure is bounded by TIME, not by this ceiling.
+- `capMs` / `chamber_max_ms` — per-chamber cumulative-open budget: the PC's `ms`
+  (a calibrated deflate time) when sent, else 5 s. Also the only backstop for a
+  deflate below the gauge floor, which the sensor cannot see (it clamps readings
+  at `pressure::FLOOR_KPA`, reported to the PC as `kpa_min`).
+- `round_max_ms` / `seq_max_ms` — per-round and whole-sequence caps; the sequence
+  cap aborts and closes any open valves.
 - `actuationWatchdog` — last-resort per-chamber timeout (now signed).
 - Emergency stop, manual dead-man and the continuous bench test bypass the engine
   and are unchanged.

@@ -1,8 +1,19 @@
 # Confirmed command delivery (Tier 2 ACK plan)
 
-Design only — not implemented yet. Captures the agreed plan to make a small set
-of **safety-critical, set-once** commands reliably *applied* by the node, rather
-than fire-and-forget over ESP-NOW.
+Captures the agreed plan to make a small set of **safety-critical, set-once**
+commands reliably *applied* by the node, rather than fire-and-forget over ESP-NOW.
+
+> **Status.** The **safety limits `set_max_pressure` / `set_min_pressure` are
+> implemented** end-to-end (both actuator boards + PC) — the highest-priority
+> case, since a silently-lost `set_max` caused the 20→50 kPa over-inflation. The
+> node ACKs each *after applying* it
+> (`{"type":"ack","cmd":…,"seq":N,"chamber":C,"ok":…}`, a shared `se::node::sendAck`
+> in [firmware/common/se_espnow.h]), and `CommandConfirmer`
+> ([src/hardware/command_confirmer.py]) retransmits the same `seq` until the ack
+> lands. The session applies limits this way at skin construction
+> (`Skin._push_pressure_limits`, off-thread), keeping the fire-and-forget
+> pre-actuation re-push as a backstop. **Still planned:** confirming
+> `stop`/`resume`/`configure`, and the blanket Tier 1 gateway retry below.
 
 ## Why
 
@@ -27,11 +38,18 @@ tiers are complementary; Tier 1 can be added later as blanket coverage.
 
 ## What exists today (build on, don't reinvent)
 
-- `sendAck(cmd)` → `{"type":"ack","cmd":"<cmd>"}` — **direct node only**, no seq,
-  no chamber. Sent for `stop`/`resume`/`test_run`/`test_stop`
-  ([firmware/node_actuator/src/direct/commands.h]). The **multiplexed node sends no
-  ACKs at all**, and `sendAck` is not in `common/`.
-- The **PC ignores** generic `type:ack` (only `ota_ack` is consumed).
+- `commands::sendAck(cmd)` → `{"type":"ack","cmd":"<cmd>"}` — **direct node only**,
+  no seq, no chamber. Still sent for `stop`/`resume`/`test_run`/`test_stop`/
+  `status_rate` ([firmware/node_actuator/src/direct/commands.h]); left as-is.
+- The seq-carrying limit ack now lives in `common/` as `se::node::sendAck(cmd,
+  seq, chamber, ok, err)` ([firmware/common/se_espnow.h]), wired into **both**
+  boards' command handlers for `set_max`/`set_min` (the `ackConfirmable` helper).
+- The **PC consumes** seq-carrying `type:ack` via `CommandConfirmer`
+  ([src/hardware/command_confirmer.py]); the old seq-less stop/resume acks and
+  `ota_ack` are still handled separately.
+- The gateway **paces** its ESP-NOW sends (`se::sendPaced` waits for the TX-done
+  callback before the next frame, fixing burst drops) — pacing only, **not** a
+  retry, so Tier 1 remains unimplemented.
 - OTA already implements a full ack+seq+timeout+retry exchange on the PC
   ([src/hardware/node_ota_updater.py], `_handle` + `_wait_for`) — the reference
   pattern: a read-thread handler records acks under a lock and sets a
@@ -50,7 +68,7 @@ Confirm (set-once, **idempotent**, safety/critical):
 | `stop` / `resume`  | emergency stop must not silently fail    |
 | `set_max_pressure` | safety ceiling; stale value over-inflates |
 | `set_min_pressure` | safety floor (vacuum)                    |
-| `configure`        | set-once node config (chambers/pumps/tanks) |
+| `configure`        | set-once node config (chambers/organ channels) |
 
 Do **not** confirm (stay fire-and-forget):
 
@@ -136,10 +154,15 @@ apply + jitter), 3 retries (~800 ms worst case). On final failure:
   nodes *today*. (Caveat: no seq means a late ack can match a new send; tolerable
   for idempotent, rare stop/resume.)
 - **Phase B — firmware.** Add `seq` to `Cmd`, shared `se::sendAck(seq,chamber,
-  ok)`, wired in both nodes for the 5 confirmable commands; NACK on rejects. PC
-  switches to seq-based matching.
+  ok)`, wired in both nodes for the confirmable commands; NACK on rejects. PC
+  switches to seq-based matching. **Done for `set_max`/`set_min`** (`seq` added to
+  the shared `Cmd`, `se::node::sendAck` + `ackConfirmable` on both boards, NACK on
+  bad chamber, `CommandConfirmer` matching by `(mac, seq)`). `stop`/`resume`/
+  `configure` not yet seq-confirmed — the direct board still acks stop/resume
+  without a seq, which no confirmer consumes yet.
 - **Phase C — GUI + policy.** Surface confirm failures (banner/toast); decide the
-  emergency-stop "retry forever vs. alarm" policy.
+  emergency-stop "retry forever vs. alarm" policy. `confirm_limits` currently logs
+  a warning on failure (no GUI banner yet).
 
 ## Testing
 

@@ -39,6 +39,13 @@ class Gateway:
         self._serial: serial.Serial | None = None
         self._running = False
         self._read_thread: threading.Thread | None = None
+        # Serializes serial writes so frames from concurrent senders can't
+        # interleave mid-line and corrupt the JSON. Senders are multi-threaded:
+        # the GUI/actuation thread, the OTA worker, and (per-node, at session
+        # start) the confirmed-limit push threads all call send() on this one
+        # port. The read thread never takes it, so an ack can still be parsed
+        # while a write is in progress.
+        self._write_lock = threading.Lock()
         # WeakMethod refs so old controllers are GC'd after robot reconfiguration.
         self._callbacks: list[weakref.ref] = []
         # Strong refs to raw serial taps (e.g. the serial monitor). Held strongly
@@ -238,8 +245,9 @@ class Gateway:
         try:
             line = json.dumps(message)
             payload = (line + "\n").encode("utf-8")
-            for _ in range(max(1, repeat)):
-                self._serial.write(payload)
+            with self._write_lock:
+                for _ in range(max(1, repeat)):
+                    self._serial.write(payload)
             logger.debug("Sent to %s: %s%s", target_mac, command,
                          f" (x{repeat})" if repeat > 1 else "")
             self._emit_raw("tx", line)
@@ -260,7 +268,8 @@ class Gateway:
         message = {"cmd": command, **kwargs}
         try:
             line = json.dumps(message)
-            self._serial.write((line + "\n").encode("utf-8"))
+            with self._write_lock:
+                self._serial.write((line + "\n").encode("utf-8"))
             self._emit_raw("tx", line)
             return True
         except serial.SerialException:
@@ -277,7 +286,8 @@ class Gateway:
             return False
         line = text if text.endswith("\n") else text + "\n"
         try:
-            self._serial.write(line.encode("utf-8"))
+            with self._write_lock:
+                self._serial.write(line.encode("utf-8"))
             self._emit_raw("tx", line.rstrip("\n"))
             return True
         except serial.SerialException:

@@ -65,20 +65,28 @@ static void doWifiOta(const char* ssid, const char* pass, const char* url, Print
         return;
     }
 
-    // Retry the pull: the AP link (shared radio, contended by ESP-NOW) can drop a
-    // sustained download. httpUpdate reboots into the new image on success, so a good
-    // attempt never returns; we only loop on failure.
+    // Retry the pull (OTA_ATTEMPTS): the AP link (shared radio, contended by
+    // ESP-NOW) can drop a sustained download. A successful attempt never returns
+    // (we reboot into the new image), so the loop only runs on failure — except an
+    // ACTIVATE failure, which is not a transport drop and is handled below instead.
     // Download + write + verify via HTTPUpdate, but activate ourselves so we can
     // report the EXACT esp_err (HTTPUpdate only surfaces a generic "err 9").
     httpUpdate.rebootOnUpdate(false);
     WiFiClient client;
-    t_httpUpdate_return r = httpUpdate.update(client, url);
-    if (r == HTTP_UPDATE_OK) {                        // written, verified AND activated
-        io.println("{\"type\":\"ota_wifi_ok\",\"src\":\"c6\"}");
-        delay(200);
-        esp_restart();
+    int uerr = 0;
+    for (int attempt = 1; attempt <= OTA_ATTEMPTS; ++attempt) {
+        t_httpUpdate_return r = httpUpdate.update(client, url);
+        if (r == HTTP_UPDATE_OK) {                    // written, verified AND activated
+            io.println("{\"type\":\"ota_wifi_ok\",\"src\":\"c6\"}");
+            delay(200);
+            esp_restart();
+        }
+        uerr = httpUpdate.getLastError();
+        if (uerr == UPDATE_ERROR_ACTIVATE || attempt == OTA_ATTEMPTS) break;
+        io.printf("{\"type\":\"ota_wifi_retry\",\"src\":\"c6\",\"attempt\":%d,\"err\":%d}\n",
+                  attempt, uerr);
+        delay(1000);
     }
-    int uerr = httpUpdate.getLastError();
     if (uerr == UPDATE_ERROR_ACTIVATE) {
         // Image is written+verified in the inactive slot; only the boot-partition
         // switch failed. Re-do it here to get the real reason + running-slot state.
@@ -103,11 +111,12 @@ static void doWifiOta(const char* ssid, const char* pass, const char* url, Print
 }
 
 // ---- 802.15.4 promiscuous sniffer (Phase 1: capture the Thymio RF protocol) ----
-// Frames are streamed as JSON over Serial1 so the S3 relays them to the PC. The hex
-// payload is capped so a line fits the S3's 256-char relay buffer (no S3 reflash); the
-// true length is still reported as "len". Never armed at boot — a radio hiccup is
+// Frames are streamed as JSON over Serial1 so the S3 relays them to the PC. 127 is
+// the full 802.15.4 PSDU, so nothing is ever cut; the worst-case line (~320 chars)
+// needs the S3's 384-char relay buffer (gateways on the old 256-char build truncate
+// near-max frames — reflash the S3 too). Never armed at boot — a radio hiccup is
 // always recoverable by a reboot.
-static constexpr uint8_t  SNIFF_MAX_BYTES = 96;
+static constexpr uint8_t  SNIFF_MAX_BYTES = 127;
 static constexpr uint32_t SNIFF_HOP_MS    = 1500;   // dwell per channel when hopping
 
 struct SniffFrame {
@@ -125,13 +134,37 @@ static volatile bool s_sniffing = false;
 static uint8_t       s_sniffCh    = 11;   // current channel
 static uint8_t       s_sniffFixed = 0;    // 0 = hop 11..26, else locked channel
 
-// The 802.15.4 radio is enabled once and left up. esp_ieee802154_enable() allocates the
-// ZB_MAC interrupt; calling it again without a matching disable() leaks that allocation
-// until "No free interrupt inputs for ZB_MAC" — after which the radio silently stops
-// transmitting even though esp_ieee802154_transmit() still returns ESP_OK. So gate it.
+// The 802.15.4 radio is enabled ONCE per boot and then left up, for two reasons:
+// (1) esp_ieee802154_enable() allocates the ZB_MAC interrupt; calling it again without
+// a matching disable() leaks that allocation until "No free interrupt inputs for
+// ZB_MAC" — after which the radio silently stops transmitting even though
+// esp_ieee802154_transmit() still returns ESP_OK. So gate it.
+// (2) esp_ieee802154_disable() poisons the modem for the REST OF THE BOOT: a later
+// re-enable comes up deaf (only-first-discover-works) and a later WiFi STA join
+// times out (OtaPark). So radioDown() must only run on paths that end in a reboot.
 static bool s_radioEnabled = false;
-static void radioUp()   { if (!s_radioEnabled) { esp_ieee802154_enable();  s_radioEnabled = true;  } }
+static bool s_radioUsed    = false;   // any 15.4 enable() this boot (poisons WiFi join)
+static void radioUp()   { if (!s_radioEnabled) { esp_ieee802154_enable();  s_radioEnabled = true;
+                                                 s_radioUsed = true; } }
 static void radioDown() { if (s_radioEnabled)  { esp_ieee802154_disable(); s_radioEnabled = false; } }
+
+// ---- WiFi-OTA parking (radio-poisoned boots) ----
+// esp_ieee802154_disable() does NOT return the C6's shared modem to a WiFi-usable
+// state: once the 802.15.4 radio has been up in a boot, a later WiFi STA join times
+// out (seen live: every ota_wifi that followed link/sniff/discovery use failed with
+// reason "wifi"; every fresh-boot attempt joined fine). So when the radio has been
+// used, ota_wifi parks the request here and reboots; setup() resumes it on the clean
+// boot BEFORE anything touches the 15.4 radio. Same RTC_NOINIT pattern as the nodes'
+// se_ota.h otaDoneFlag (survives esp_restart, garbage after power-on — hence magic).
+struct OtaPark {
+    uint32_t magic;
+    char     ssid[33];
+    char     pass[65];
+    char     url[128];
+    bool     viaUsb;                  // which transport to report on after the reboot
+};
+static RTC_NOINIT_ATTR OtaPark s_otaPark;
+static constexpr uint32_t OTA_PARK_MAGIC = 0x4F544150;   // "OTAP"
 
 // Set by the driver when a transmit (incl. its ACK wait) completes — lets thTx() pace
 // back-to-back frames instead of bursting them into a busy radio (which drops them).
@@ -180,7 +213,9 @@ static void sniffStart(uint8_t fixed_ch, Print& io) {
 static void sniffStop(Print& io) {
     if (!s_sniffing) return;
     s_sniffing = false;
-    radioDown();
+    // The radio STAYS up: esp_ieee802154_disable() poisons the modem for the rest
+    // of the boot — the next enable comes up deaf (only-first-scan-works) and a
+    // WiFi join fails outright (see OtaPark). Down only on reboot-bound paths.
     io.println("{\"type\":\"sniff\",\"src\":\"c6\",\"state\":\"stop\"}");
 }
 
@@ -504,10 +539,14 @@ static void thymioRxPump() {
 static void thymioDiscoverPump() {
     if (!s_thDiscover || s_sniffing) return;
     uint32_t now = millis();
-    if (now - s_thDiscLast >= 500) {               // re-broadcast the query ~2 Hz
-        s_thDiscLast = now;
-        thDiscoverBroadcast();
-        esp_ieee802154_receive();                  // stay armed for the NODE_PRESENT replies
+    if (now - s_thDiscLast >= 100) {               // broadcast + re-arm at 10 Hz, EXACTLY
+        s_thDiscLast = now;                        // the thymioLinkPump cadence (which is
+        thDiscoverBroadcast();                     // rock-solid). thDiscoverBroadcast is
+        esp_ieee802154_receive();                  // paced, so TX is done before receive().
+        // Do NOT re-arm RX between beats: an extra esp_ieee802154_receive() mid-frame
+        // aborts the reception in progress, so a faster re-arm actually DROPPED the
+        // NODE_PRESENT reply (0 frames some sessions). One receive() per paced TX,
+        // like the link, is what receives reliably.
     }
     if (!s_rxQ) return;
     SniffFrame f;
@@ -545,7 +584,17 @@ static void handleLine(char* line, Print& io) {
     JsonDocument doc;
     if (deserializeJson(doc, line) == DeserializationError::Ok) {
         const char* cmd = doc["cmd"] | "";
-        if (strcmp(cmd, "ota_wifi") == 0) {
+        if (strcmp(cmd, "reboot") == 0) {
+            // Clean-radio reset. esp_ieee802154_disable() does NOT restore the C6's
+            // RX after repeated link/discover cycles (RX dies cumulatively — TX still
+            // works, the Thymio's RF LED still blinks, but replies are never heard) nor
+            // let WiFi rejoin (see OtaPark). A reboot is the only reliable reset, so the
+            // PC reboots the C6 before a discovery pass to guarantee it can hear replies.
+            io.println("{\"type\":\"rebooting\",\"src\":\"c6\"}");
+            io.flush();
+            delay(100);
+            esp_restart();
+        } else if (strcmp(cmd, "ota_wifi") == 0) {
             // The whole 802.15.4 side must be quiet before WiFi shares the
             // radio: stop the Thymio poller (wheels to zero — a Thymio holds
             // its last target), the sniffer, and the radio itself.
@@ -554,6 +603,24 @@ static void handleLine(char* line, Print& io) {
             s_thLink = false;
             sniffStop(io);          // free the shared radio for WiFi before updating
             radioDown();            // ...also if a tx (not a sniff) had brought it up
+            if (s_radioUsed) {
+                // WiFi can't join anymore this boot (see OtaPark) — park the
+                // request and reboot; setup() resumes it on the clean boot. The
+                // start banner is sent NOW so the PC's updater switches to its
+                // (long) done-wait instead of resending ota_wifi into the reboot.
+                s_otaPark.magic  = OTA_PARK_MAGIC;
+                snprintf(s_otaPark.ssid, sizeof(s_otaPark.ssid), "%s",
+                         (const char*)(doc["ssid"] | ""));
+                snprintf(s_otaPark.pass, sizeof(s_otaPark.pass), "%s",
+                         (const char*)(doc["pass"] | ""));
+                snprintf(s_otaPark.url, sizeof(s_otaPark.url), "%s",
+                         (const char*)(doc["url"] | ""));
+                s_otaPark.viaUsb = (&io == static_cast<Print*>(&Serial));
+                io.println("{\"type\":\"ota_wifi_start\",\"src\":\"c6\"}");
+                io.flush();
+                delay(100);          // let the line drain onto the wire
+                esp_restart();
+            }
             doWifiOta(doc["ssid"] | "", doc["pass"] | "", doc["url"] | "", io);
             s_thLink = wasLink;     // only reached on failure (success reboots)
         } else if (strcmp(cmd, "ping") == 0) {
@@ -611,8 +678,16 @@ static void handleLine(char* line, Print& io) {
             if (doc["on"] | true) {
                 thymioStopForSniff();          // zero wheels if the link was driving
                 s_thLink = false;
-                radioUp();
+                s_sniffing = false;
                 if (!s_rxQ) s_rxQ = xQueueCreate(24, sizeof(SniffFrame));
+                // NO down→up "fresh radio" here: esp_ieee802154_disable() poisons
+                // the modem for the rest of the boot, so re-enabling gave a DEAF
+                // radio every scan after the first (and the same poisoning is why
+                // a WiFi join fails after any 15.4 use — see OtaPark). Once up the
+                // radio stays up; a scan just re-tunes and re-arms RX.
+                bool fresh = !s_radioEnabled;
+                radioUp();
+                if (fresh) delay(50);          // settle before arming RX (see sniffStart)
                 esp_ieee802154_set_promiscuous(true);   // hear replies addressed to the host
                 esp_ieee802154_set_rx_when_idle(true);
                 esp_ieee802154_set_channel(s_thDiscCh);
@@ -621,8 +696,8 @@ static void handleLine(char* line, Print& io) {
                 s_thDiscLast = 0;
                 s_thDiscover = true;
             } else {
-                s_thDiscover = false;
-            }
+                s_thDiscover = false;          // radio stays up (a disable would poison
+            }                                  // every later scan/link in this boot)
             io.printf("{\"type\":\"thymio_discover\",\"src\":\"c6\",\"on\":%d,\"ch\":%u}\n",
                       s_thDiscover ? 1 : 0, s_thDiscCh);
         } else if (strcmp(cmd, "thymio_rx_debug") == 0) {
@@ -708,6 +783,17 @@ void setup() {
     // refused (WiFi-OTA "activate" fails with UPDATE_ERROR_ACTIVATE / err 9). Confirm
     // ourselves so OTA can activate, and so a good OTA sticks instead of rolling back.
     esp_ota_mark_app_valid_cancel_rollback();
+    // A parked WiFi-OTA (see OtaPark): resume it on this clean boot, before any
+    // 15.4 use can poison the WiFi join. One-shot — clear the magic FIRST so a
+    // crash mid-update can't boot-loop into it. On success doWifiOta never
+    // returns (reboots into the new image, whose banner is the PC's done signal);
+    // on failure fall through to a normal boot (the fail line already went out).
+    if (s_otaPark.magic == OTA_PARK_MAGIC) {
+        s_otaPark.magic = 0;
+        Print& io = s_otaPark.viaUsb ? static_cast<Print&>(Serial)
+                                     : static_cast<Print&>(Serial1);
+        doWifiOta(s_otaPark.ssid, s_otaPark.pass, s_otaPark.url, io);
+    }
     delay(300);
     // Announce on BOTH transports. This banner doubles as the WiFi-OTA "done" signal,
     // so it MUST reach the S3 over the UART (the host reads Serial1, not the C6's USB).

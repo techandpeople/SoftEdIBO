@@ -71,6 +71,14 @@ class ThymioLink:
             time.sleep(0.1)
 
     def close(self) -> None:
+        # Zero the motors first (best-effort): the Thymio latches its last target,
+        # so tearing the link down mid-drive would leave it rolling until the
+        # battery dies. Mirrors ThymioGatewayLink.close().
+        if self.connected:
+            try:
+                self.stop()
+            except Exception:   # noqa: BLE001 — the dongle may already be gone
+                logger.debug("Thymio link: motor-zero on close failed", exc_info=True)
         self._active = False
         # Only tear down the dongle if we own it — a shared dongle outlives its links.
         if self._owns_dongle:

@@ -75,12 +75,16 @@ class TouchTuningPanel(QGroupBox, Ui_TouchTuningPanel):
 
     def _apply_node_config(self) -> None:
         """Send configure to the firmware to set the node's activation threshold
-        (the µT at/above which it reports a sensor in ``act``) to a sensible
-        default."""
+        (the µT at/above which it reports a sensor in ``act``) to this skin
+        type's saved sensitivity (calibrated in the guided gesture capture /
+        Test Actuators), falling back to the firmware default."""
         ctrl = getattr(self._skin, "touch_controller", None)
         if ctrl is None or not hasattr(ctrl, "send_command"):
             return
-        ctrl.send_command("configure", act_threshold_ut=300.0)
+        from src.config.settings import Settings
+        saved = Settings().touch_threshold_ut(
+            getattr(self._skin, "skin_type", "") or "")
+        ctrl.send_command("configure", act_threshold_ut=saved or 300.0)
 
     def _apply_adaptive_baseline(self) -> None:
         """Toggle the node's adaptive baseline (and its time constant)."""

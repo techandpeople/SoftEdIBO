@@ -27,17 +27,17 @@ gets a `whatsThis` (feeds the "?" help mode; `toolTip` is the fallback).
 Live monitor widgets (`src/gui/monitor/`) used to be hand-built in Python because
 they are dynamic/QPainter. They now follow the `.ui` rule too:
 
-- **Form/display panels** are `.ui`: `chamber_widget.ui`, `tank_widget.ui`,
+- **Form/display panels** are `.ui`: `chamber_widget.ui`,
   `touch_tuning_panel.ui`. The Python class multiply-inherits
   `(QWidget/QGroupBox, Ui_X)` and calls `setupUi(self)`.
-- **QPainter canvases are promoted widgets** — the project's first. The painter
-  class lives in its own module (`monitor/pressure_bar.py:PressureBar`,
-  `monitor/tank_bar.py:TankBar`) so the generated `ui_*` can `import` it without
-  a circular import, and the `.ui` promotes a placeholder to it via
-  `<customwidget><header>src.gui.monitor.pressure_bar</header>`. Promoted widgets
-  are built by `setupUi` with the **default constructor**, so they take no
-  required args (e.g. `TankBar` defaults `kind="pressure"` and exposes
-  `set_kind()` for the panel to call afterwards).
+- **QPainter canvases are promoted widgets**. The painter class lives in its
+  own module (`monitor/pressure_bar.py:PressureBar`) so the generated `ui_*`
+  can `import` it without a circular import, and the `.ui` promotes a
+  placeholder to it via
+  `<customwidget><header>src.gui.monitor.pressure_bar</header>`. Promoted
+  widgets are built by `setupUi` with the **default constructor**, so they take
+  no required args. (The same mechanism promotes `HelpButton` from
+  `src/gui/help_mode.py` in `observer_panel.ui`.)
 - **Dynamic containers** (`skin_widget`, `robot_monitor_widget`,
-  `robot_monitor_panel`) stay hand-built: they populate children in runtime
-  loops, so a `.ui` would only hold an empty shell.
+  `robot_monitor_panel`, `organ_panel`) stay hand-built: they populate children
+  in runtime loops, so a `.ui` would only hold an empty shell.

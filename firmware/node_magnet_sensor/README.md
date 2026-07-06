@@ -16,7 +16,9 @@ which this firmware computes automatically (see below).
 
 - **Board:** ESP32-WROOM-32 (esp32dev) — kept on its own ESP for now.
 - **Primary I2C** (sensors S0..S3): SDA = IO21, SCL = IO22, addrs `0x18 0x19 0x1A 0x1B`.
-- **Secondary I2C** (optional S5): SDA = IO16, SCL = IO17, addr `0x1A`.
+- **Secondary I2C** (optional 5th sensor, S4): SDA = IO16, SCL = IO17, addr `0x1A`.
+  It only takes a slot when it actually responds, so it always lands after the
+  quadrant sensors.
 - MLX90393 config: gain 2×, OSR 2, filter 3 (≈28 Hz with 4 sensors).
 
 Sensor order is significant: **S0→Q1 (top-left), S1→Q2 (top-right),
@@ -25,7 +27,9 @@ S2→Q3 (bottom-left), S3→Q4 (bottom-right)** — matches the PC `QuadrantDete
 
 ## ESP-NOW protocol
 
-**Boot** (broadcast):
+**Boot** (broadcast; re-broadcast every 2 s until the gateway is known, so a
+late-connecting PC still sees it — and sent even if no sensor responds, so a
+board with dead sensors stays visible in scans):
 ```json
 {"status":"node_magnet_sensor_ready","sensors":4,"variant":"mlx90393"}
 ```
@@ -35,7 +39,8 @@ S2→Q3 (bottom-left), S3→Q4 (bottom-right)** — matches the PC `QuadrantDete
 {"type":"magnet","mag":[uT,...],"act":[active_idx,...]}
 ```
 - `mag` — per-sensor field-change magnitude in µT (`|sample − baseline|`).
-- `act` — indices of sensors whose `mag ≥ act_threshold_ut` (the value the PC prefers).
+- `act` — indices of sensors whose `mag ≥ act_threshold_ut` (the value the PC
+  prefers; firmware default 300 µT until configured).
 
 **3-axis streaming:** the stream message can additionally carry
 `"vec":[[dx,dy,dz],...]` — the per-sensor baseline-subtracted field delta in
@@ -77,11 +82,15 @@ a coupling sweep confirms actuation contamination. See `docs/TOUCH_COUPLING.md`.
 ## Build & flash
 ```bash
 cd firmware/node_magnet_sensor
-pio run --target upload                # default (scalar protocol)
-pio run -e vector --target upload      # + 3-axis "vec" streaming
+pio run -e release --target upload     # default (scalar protocol)
+pio run -e vector  --target upload     # + 3-axis "vec" streaming from boot
+pio run -e debug   --target upload     # Serial logs (-DDEBUG_BUILD)
 ```
 Uses the shared `firmware/common/se_espnow.h` (added to the include path in
 `platformio.ini`), the same ESP-NOW layer as the actuator nodes and the gateway.
+The board also accepts the shared `ota_*` commands (`se_ota.h`, ESP-NOW chunk
+stream + WiFi pull); the OTA partition table (`default.csv`) is set in
+`platformio.ini` — a board on a non-OTA table needs one cable flash first.
 
 ---
 
@@ -100,10 +109,11 @@ A colleague flagged that **more I2C will be needed to support ~3× the sensors**
 ### Gaps to close when implementing
 1. **Hardware:** add a TCA9548A on the primary bus (IO21/IO22). Each touch point
    = (mux channel, MLX address).
-2. **Firmware (this file):** replace the fixed `PRIMARY_ADDR[4]` + single extra
-   bus with a sensor table of `{mux_channel, address}`, select the channel
-   before each `readData`, and let `streamCount` grow to 12. The `mag`/`act`
-   arrays already scale with `streamCount`.
+2. **Firmware:** replace the fixed `PRIMARY_ADDR[4]` + single extra bus
+   (`main.cpp`) with a sensor table of `{mux_channel, address}`, select the
+   channel before each `readData`, and raise `se::magnet::MAX_SENSORS`
+   (`firmware/common/se_magnet.h`, currently 5) to 12. The `mag`/`act` arrays
+   already scale with the wired sensor count.
 3. **PC side:** `QuadrantDetector` is **hardcoded to exactly 4 sensors**
    (`src/hardware/quadrant_detector.py` — `raise ValueError` if ≠ 4). With 12
    sensors the 4-quadrant model no longer fits; route sensors to chambers via

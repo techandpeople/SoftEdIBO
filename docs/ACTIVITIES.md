@@ -1,19 +1,18 @@
 # Activities & Behaviors
 
-Living document — describes the **current** Activity system (what's shipped)
-and the **planned** behavior framework that adds tunable, persistable, multi-
-state behaviors (Organ Swap, Breathing, etc.) on top of the existing
-hardware.
+Living document — describes the **current** Activity system (what's shipped),
+plus the original phased plan for the behavior framework (kept for design
+rationale; several parts were later superseded).
 
-The framework is delivered in phases:
+The framework was delivered in phases:
 
 | Phase | Goal | Status |
 |-------|------|--------|
 | 1a    | Documentation + design alignment | **done** |
-| 1b    | DB-backed activity presets + tunable params + auto-generated GUI | **done** |
-| 1c    | Organ Swap activity skeleton (mocked hardware) | **done** |
-| 1d    | Firmware extensions: organ ADC + WS2818 LED + Python wrappers | planned |
-| 1e    | Wire Organ Swap to real hardware end-to-end | planned |
+| 1b    | DB-backed activity presets + tunable params + auto-generated GUI | **done**, later removed — behaviours replaced presets (see below) |
+| 1c    | Organ Swap activity skeleton (mocked hardware) | **done**, later removed — see below |
+| 1d    | Firmware extensions: organ ADC + LED + Python wrappers | **done** (`organ.h` on both nodes, `set_led`, `on_organ`) |
+| 1e    | Wire organ sensing to activities end-to-end | **done** — as the declarative `organs` condition (not as `OrganSwapActivity`) |
 | 2     | Declarative activities authored from the GUI (state-machine in DB) | **done** — see "Behaviour engine" below |
 
 ---
@@ -30,7 +29,7 @@ class BaseActivity:
     description: str
 
     def prepare_robots(self, robots): ...   # optional: wrap robots (e.g. simulate)
-    def _setup(self, session, robots): ...  # called by Session at start
+    def setup(self, session, robots): ...   # called by Session at start (subclasses override _setup)
     def start(self): ...
     def pause(self): ...
     def resume(self): ...
@@ -38,20 +37,20 @@ class BaseActivity:
     def get_state(self): ...
 ```
 
-Registered in `src/activities/__init__.py` (`ACTIVITIES = [...]`) and looked
-up by `get_activity(name)` from `SessionPanel`.
+### There are no code-defined activities any more
 
-### Shipped activities
+`ACTIVITIES` in `src/activities/__init__.py` is **empty**: the old hardcoded
+game activities (Group Touch / Organ Swap), the standalone
+`SimulationActivity`, and the auto-registered seed behaviours were all
+removed. **Every activity is a declarative behaviour** authored in the block
+editor and stored in the DB (`declarative_activities` table), run by
+`ScriptedActivity`; example behaviours ship as importable JSON in
+[`config/examples/behaviours/`](../config/examples/behaviours/). The session
+dropdown is populated by `available_activities(db)` / resolved by
+`get_activity(name, db)`.
 
-| Activity | File | Behavior |
-|----------|------|----------|
-| Group Touch | `group_touch.py` | Originally the only "real" activity. Now also benefits from the shared `simulation_mode` flag — run it against `SimulatedRobot` for testing by ticking the box in the SessionSetupDialog. |
-
-`SimulationActivity` (in `simulation_activity.py`) is intentionally **not**
-registered any more. Simulation became a per-activity boolean — every
-activity gets it for free via `BaseActivity.simulation_mode`. The class is
-kept on disk as a one-line shim in case we want to expose a "pure
-simulation" entry in the dropdown again.
+Simulation is a per-activity boolean — every activity gets it for free via
+`BaseActivity.simulation_mode` (the checkbox in the SessionSetupDialog).
 
 ### Where activities show up
 
@@ -74,11 +73,16 @@ hospital study's behaviours. Two layers:
   with a cooperative sequence scheduler (`wait` / `wait_for_touch` suspend a
   running sequence). The verb set lives in
   [`catalog.py`](../src/activities/catalog.py) — actions (`set_led`,
-  `set_led_halves`, `beat`, `inflate`/`deflate`/`set_pressure`, `wrinkle`,
-  `stop`), control flow (`sequence`, `repeat`, `for_each_chamber`,
-  `wait`, `wait_for_touch`) and conditions (`elapsed_ms`, `touch_count`,
-  `organs`, `any`/`all`/`not`, `always`). The catalogue is the single source of
-  truth and also drives the editor blocks. Specs are validated by `validate_spec`.
+  `set_led_halves`, `fade`, `beat`, `inflate`/`deflate`/`set_pressure`,
+  `stop`, `log`, and the Thymio wheel/LED/sound verbs `thymio_drive` /
+  `thymio_leds` / `thymio_sound`), control flow (`sequence`, `repeat`,
+  `for_each_chamber`, `if_robot`, `wait`, `wait_for_touch`) and conditions
+  (`elapsed_ms`, `touch_count`, `on_impact`, `on_lifted`, `organs`,
+  `robot_is`, `any`/`all`/`not`, `always`). The catalogue is the single source
+  of truth and also drives the editor blocks. Specs are validated by
+  `validate_spec` (`wrinkle` is deprecated — accepted in saved specs as an
+  alias of `deflate`).
+
   `inflate`/`set_pressure`/`beat` also take an optional `duty` (1-255): the pump
   PWM, lower = a gentler / lower-energy stroke, `0` = full speed. Unlike
   `period_ms` it needs no fill calibration, so it tunes a beat's energy directly.
@@ -94,10 +98,21 @@ hospital study's behaviours. Two layers:
   `all_good`/`all_bad` mean "every organ matches", `count` compares the good and
   bad counts via their operators (e.g. `good >= 3 and bad <= 0` to cure).
 
-- **Authoring:** **Tools => Activity Editor…**
+  A spec may declare a **target**: new-style targets carry a **skin
+  condition** — `{"skin": "natural" | "wrinkles" | "organs"}` (see
+  [`skin_condition.py`](../src/activities/skin_condition.py)) — meaning the
+  behaviour is written for that silicone set and runs on **any** robot;
+  robot-specific parts are gated inside the spec with `if_robot` blocks (or
+  `robot_is` transition conditions). The session setup pre-selects the
+  matching activity and warns when a chosen robot's configured skin variants
+  don't match the condition. Legacy `{"kind": thymio|turtle|tree}` targets
+  (see [`activity_kind.py`](../src/activities/activity_kind.py)) still narrow
+  the behaviour to one robot topology.
+
+- **Authoring:** **Tools → Activity Editor…**
   ([`activity_editor_dialog.py`](../src/gui/activity_editor_dialog.py)) is a
-  tabbed dialog. Its **Visual Editor** tab
-  ([`behavior_editor_panel.py`](../src/gui/behavior_editor_panel.py)) is a
+  thin frame around the editor panel
+  ([`behavior_editor_panel.py`](../src/gui/behavior_editor_panel.py)), a
   Scratch-like **block editor** (Blockly in a `QWebEngineView`). Blocks compile
   to a spec on Save and are stored in the `declarative_activities` table; the
   exact workspace is stashed under the spec's ignored `_blockly` key for exact
@@ -106,22 +121,31 @@ hospital study's behaviours. Two layers:
   into blocks from the spec itself, so it opens editable and re-saveable rather
   than blank. **Blockly / QtWebEngine load only inside the editor** —
   never during a session. Blockly is loaded from a vendored copy
-  (`scripts/fetch_blockly.sh`) or the CDN as a fallback. Its **Presets** tab
-  ([`activity_preset_panel.py`](../src/gui/activity_preset_panel.py)) is the
-  per-activity parameter-preset manager (see below).
+  (`scripts/fetch_blockly.sh`) or the CDN as a fallback. (The former
+  **Presets** tab is gone — behaviours authored here *are* the activities, so
+  there is no separate per-activity preset surface any more.)
 
 Saved behaviours appear in the session activity dropdown via
-[`available_activities(db)` / `get_activity(name, db)`](../src/activities/__init__.py),
-alongside three code-defined **seed conditions** (Heartbeat / Movement /
-Texture) in [`seed_behaviors.py`](../src/activities/seed_behaviors.py) — the
-study's comportamentos 1-3 / 4-6 / 7-9, each a 3-phase timeline advancing on
-time **or** enough touches. Representation notes: half-and-half LED is painted
-per-pixel in software (`set_led_halves`); "wrinkle" pulls a vacuum (timed
-deflate, open-loop). Editor and runtime are both exercisable in simulation.
+[`available_activities(db)` / `get_activity(name, db)`](../src/activities/__init__.py).
+The study's three seed conditions (Heartbeat / Movement / Texture — behaviours
+1-3 / 4-6 / 7-9, each a 3-phase timeline advancing on time **or** enough
+touches) are **no longer auto-registered**: they are kept as reference specs
+in [`seed_behaviors.py`](../src/activities/seed_behaviors.py) (also test
+fixtures), and the importable JSON examples in
+[`config/examples/behaviours/`](../config/examples/behaviours/) are the ones
+to load. Representation notes: half-and-half LED is painted per-pixel in
+software (`set_led_halves`); a "wrinkle" look pulls a vacuum (timed deflate,
+open-loop). Editor and runtime are both exercisable in simulation.
 
 ---
 
-## Planned: behavior framework
+## Original plan: behavior framework (historical)
+
+> **Superseded.** The "Python plugin + DB preset" hybrid below was built
+> (Phases 1b/1c) and then dropped: the declarative behaviour engine proved
+> expressive enough, so the hardcoded Python activities and the preset GUI
+> were removed. Kept for design rationale; the organ/LED firmware parts
+> shipped as designed.
 
 ### Design choices (decided in the planning round)
 
@@ -226,7 +250,11 @@ All values above are editable in the GUI via the preset form.
 
 ---
 
-## Firmware extensions (Phase 1d)
+## Firmware extensions (Phase 1d — shipped)
+
+See [firmware/PROTOCOL.md](../firmware/PROTOCOL.md) for the wire format as
+implemented (`organ.h` on both nodes; the multiplexed node adds a per-slot
+`slot` field, and LED verbs gained `ring` / `fade_ms`).
 
 ### Organ sensing
 
@@ -268,13 +296,14 @@ flaky.
 
 ### New Python wrappers (`ESP32Controller`)
 
-- `set_led(color, pattern, period_ms=1000, count=None) -> bool`
-- `on_organ(callback) -> None`  # callback signature: `(resistance_ohm: float)`
+- `set_led(color, pattern, period_ms=1000, count=None, ...) -> bool`
+- `on_organ(callback) -> None`  # callback signature: `(resistance_ohm: float, slot: int)`
 
 The `_handle_message` dispatcher routes `type=="organ"` messages to the
-registered callbacks. There is one resistance reading per node (one ADC
-input wired in parallel to all organ slots of that robot) — slot-level
-decomposition lives on the PC side via the catalogue.
+registered callbacks. The direct node has one organ circuit (slot 0); the
+multiplexed node reads one circuit per configured `organ_channels` mux channel
+and reports its `slot`. Per-organ decomposition of a circuit's parallel
+resistance lives on the PC side (`OrganResolver` / the organ catalogue).
 
 ---
 
@@ -310,10 +339,13 @@ The values flow:
 where the controller converts the `%/s` values to per-tick step sizes on
 its 100-ms internal timer.
 
-### Preset editor (`Tools => Activity Editor…` → Presets tab)
+### Preset editor (removed)
 
-Implemented in
-[`src/gui/activity_preset_dialog.py`](../src/gui/activity_preset_dialog.py).
+> **Removed.** The Presets tab / preset editor GUI was dropped when the
+> hardcoded activities went away — block-authored behaviours replaced presets
+> as "the thing you tune". The DB table + CRUD below still exist (unused by
+> the GUI). Historical description follows.
+
 Layout:
 
 ```
@@ -490,7 +522,7 @@ skins:
 - Edited in the **SkinConfigDialog** via a "Sensor → Chamber mapping"
   table that auto-rebuilds when the user changes sensor count or chamber
   count.
-- Activities subscribe to `controller.on_imu(...)` and read the mapping
+- Activities subscribe to `controller.on_magnet(...)` and read the mapping
   to decide which chamber to drive when a sensor fires.
 - In simulation, clicking a sensor's **T-button** on `SkinGridView` also
   pulses the mapped chamber in blue — visual confirmation without an
@@ -501,11 +533,17 @@ before lookup.
 
 ---
 
-## Phase 2 — Declarative activities from the GUI
+## Phase 2 — Declarative activities from the GUI (shipped)
 
-After Phase 1 lands (OrganSwap on real hardware), the next layer lets
-educators and researchers **author new activities without writing
-Python**. The activity definition becomes data (a JSON state machine
+> **Shipped** — see the "Behaviour engine" section above for what actually
+> exists. This section is the original design; the shipped spec shape differs
+> in detail (states carry `do` / `on_touch` / `transitions`, single-key step
+> and condition dicts — [`catalog.py`](../src/activities/catalog.py) is the
+> source of truth), and the editor is the Blockly block editor under
+> **Tools → Activity Editor…**, not the tree editor sketched here.
+
+This layer lets educators and researchers **author new activities without
+writing Python**. The activity definition becomes data (a JSON state machine
 stored in the DB), interpreted by a generic `ScriptedActivity`.
 
 ### Why declarative, not "paste Python"
@@ -600,7 +638,7 @@ A `BaseActivity` subclass that:
 Action & condition dispatch is a registry — adding a new verb is just
 registering a function. Spec authors gain it automatically.
 
-### Editor UI (Tools => Custom Activities…)
+### Editor UI (shipped as Tools → Activity Editor…)
 
 - List existing declarative activities (rename / duplicate / delete).
 - Visual state-machine editor: a tree of states; each state has
@@ -611,8 +649,9 @@ registering a function. Spec authors gain it automatically.
 
 ### Where this fits with Phase 1
 
-- Python plugin activities (Phase 1c, e.g. `OrganSwapActivity`) remain
-  the path for performance-sensitive or hardware-specific behaviours.
+- Python plugin activities (Phase 1c, e.g. `OrganSwapActivity`) were meant to
+  remain the path for performance-sensitive or hardware-specific behaviours —
+  in the end they were removed; the declarative engine covers everything.
 - Declarative activities are for the long tail — researcher-authored
   variations, school-specific tweaks, exploratory designs.
 - Both share the `ACTIVITIES` registry and the SessionPanel flow; the
@@ -629,7 +668,7 @@ The behaviour framework builds on top of work already shipped this session:
   → dropdown + Apply + Save). Reuse layouts across skins; same pattern
   is now used for activity presets.
 - **Activity presets** (this phase) — DB-backed bundles of tunable
-  values, edited via the **Presets** tab of `Tools => Activity Editor…`.
+  values. (The preset-editing GUI was later removed; the DB CRUD remains.)
 - **`simulation_mode` per activity** (this phase) — replaces the standalone
   `SimulationActivity` with a checkbox; baseline `SIM_PARAMS` give every
   activity tunable inflate/deflate speeds for free.
@@ -641,12 +680,10 @@ The behaviour framework builds on top of work already shipped this session:
   the shape mask.
 - **`SkinGridView`** ([src/gui/monitor/skin_grid_view.py](../src/gui/monitor/skin_grid_view.py))
   — spatial render of the skin during activities, with per-chamber
-  pressure fill and a touch-pulse overlay tied to `controller.on_imu`.
-  Same widget will display behavior state (e.g. tint the whole skin red
-  in `sick`, green in `cured`).
+  pressure fill and a touch-pulse overlay tied to `controller.on_magnet`.
 - **`node_magnet_sensor` plumbing** ([src/hardware/esp32_controller.py](../src/hardware/esp32_controller.py)
-  → `on_imu`, [src/gui/node_config_dialog.py](../src/gui/node_config_dialog.py)
-  → 4-sensor type). The new `on_organ` follows the exact same pattern.
+  → `on_magnet`, [src/gui/node_config_dialog.py](../src/gui/node_config_dialog.py)
+  → 4-sensor type). `on_organ` follows the exact same pattern.
 - **Unified Serial output** (`LOG` always, `DBG_PRINT` only in debug
   builds) and **boot broadcast** of `{"status":"node_*_ready"}` across
   all firmwares. The new `node_organ` extensions inherit the same.

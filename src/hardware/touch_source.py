@@ -65,6 +65,15 @@ class CompensatedMagnetSource:
             self._attached = True
             self._ctrl.on_magnet(self._handle)
 
+    def set_threshold_ut(self, value: float) -> None:
+        """Retune the compensator's activation threshold (µT) at runtime.
+
+        The compensated stream rederives ``act`` from the residual magnitudes at
+        its own threshold, so when a new sensitivity is pushed to the node the
+        compensator must follow — otherwise the node and the compensated stream
+        would disagree about what counts as a touch."""
+        self._comp.threshold_ut = float(value)
+
     def _handle(self, data: dict[str, Any]) -> None:
         try:
             out = self._comp.apply(data, self._levels(),

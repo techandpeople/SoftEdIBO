@@ -2,7 +2,7 @@
 """Drive a Thymio dongle-free via the C6's CONTINUOUS on-board link.
 
 The leak-fixed `rcp_c6` keeps the Thymio's RF link hot BY ITSELF — once `thymio_link` is
-on, the C6 polls the Thymio at ~25 Hz in firmware and holds the motor/LED targets. This
+on, the C6 polls the Thymio at ~10 Hz in firmware and holds the motor/LED targets. This
 tool opens the C6 once, turns the link on, and just sends target updates: **instant**, no
 per-command port-reopen (which resets the C6 and cost seconds), link stays hot the whole
 session. This is the reliable dongle-free drive — needs a **U.FL-antenna C6** to reach the

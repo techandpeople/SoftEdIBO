@@ -138,3 +138,27 @@ def test_duty_for_period_floors_at_min_duty():
     from src.hardware.fill_scaling import duty_for_period, MIN_PUMP_DUTY
     # A very long period would compute a stalling duty; clamp to the floor.
     assert duty_for_period(100, 100000) == MIN_PUMP_DUTY
+
+
+def test_duty_for_power_maps_endpoints_to_floor_and_full():
+    from src.hardware.fill_scaling import duty_for_power, MIN_PUMP_DUTY, FULL_DUTY
+    assert duty_for_power(1) == MIN_PUMP_DUTY          # level 1 = gentlest usable
+    assert duty_for_power(5) == FULL_DUTY              # level 5 = full power
+    # Midpoint sits halfway across [min, max].
+    assert duty_for_power(3) == round((MIN_PUMP_DUTY + FULL_DUTY) / 2)
+
+
+def test_duty_for_power_respects_configured_floor():
+    from src.hardware.fill_scaling import duty_for_power, FULL_DUTY
+    assert duty_for_power(1, min_duty=120) == 120
+    assert duty_for_power(5, min_duty=120) == FULL_DUTY
+    # Even spacing across the configured span.
+    assert duty_for_power(2, min_duty=120) == round(120 + (FULL_DUTY - 120) / 4)
+
+
+def test_duty_for_power_clamps_out_of_range_levels():
+    from src.hardware.fill_scaling import duty_for_power, MIN_PUMP_DUTY, FULL_DUTY
+    assert duty_for_power(0) == MIN_PUMP_DUTY          # below 1 clamps up to 1
+    assert duty_for_power(9) == FULL_DUTY              # above 5 clamps down to 5
+    # A floor above full is clamped so the pump never over-drives / inverts.
+    assert duty_for_power(1, min_duty=999) == FULL_DUTY

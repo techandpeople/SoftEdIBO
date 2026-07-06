@@ -47,9 +47,14 @@ class TrainTouchDialog(BaseDialog, Ui_TrainTouchDialog):
     # thread so log lines can safely touch the QPlainTextEdit.
     _train_log = Signal(str)
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, parent: QWidget | None = None, gateway=None,
+                 skins: list | None = None) -> None:
         super().__init__(parent)
         self.setupUi(self)
+        self._gateway = gateway
+        # Configured skins — handed to the guided capture so it can read a
+        # skin's pressure-compensated stream (capture during inflation).
+        self._skins = list(skins or [])
         # recording path → list[LabelRow] (insertion order matches the list widget)
         self._recordings: dict[str, list[labeling.LabelRow]] = {}
 
@@ -75,8 +80,15 @@ class TrainTouchDialog(BaseDialog, Ui_TrainTouchDialog):
         self.export_csv_btn.clicked.connect(self._export_csv)
         self.import_model_btn.clicked.connect(self._import_model)
         self.export_model_btn.clicked.connect(self._export_model)
+        self.capture_btn.clicked.connect(self._open_capture)
         self.train_btn.clicked.connect(self._train)
         self._train_log.connect(self.log.appendPlainText)
+
+        # Guided live capture needs a connected gateway to stream touches from.
+        connected = gateway is not None and gateway.is_connected
+        self.capture_btn.setEnabled(connected)
+        if not connected:
+            self.capture_btn.setToolTip("Connect the gateway first (Robots tab).")
 
     # ------------------------------------------------------------------
     # Recordings
@@ -337,6 +349,16 @@ class TrainTouchDialog(BaseDialog, Ui_TrainTouchDialog):
         shutil.copyfile(src, dst)
         self.log.appendPlainText(
             f"Imported model for {skin_type} ← {Path(src).name}")
+
+    # ------------------------------------------------------------------
+    # Guided live capture
+    # ------------------------------------------------------------------
+
+    def _open_capture(self) -> None:
+        """Collect a fresh training set live and train it in one guided flow."""
+        from src.gui.gesture_capture_dialog import GestureCaptureDialog
+        GestureCaptureDialog(self._gateway, skins=self._skins,
+                             parent=self).exec()
 
     # ------------------------------------------------------------------
     # Train

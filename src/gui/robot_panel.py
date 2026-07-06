@@ -26,14 +26,14 @@ from src.gui.ui_robot_panel import Ui_RobotPanel
 from src.hardware.gateway import Gateway
 from src.hardware.latency_monitor import LatencyMonitor
 from src.hardware.serial_ports import list_esp32_ports
-from src.robots.base_robot import BaseRobot, RobotStatus
+from src.robots.base_robot import BaseRobot
 
 _YAML_KEY = {"turtle": "turtles", "tree": "trees", "thymio": "thymios"}
 
 # Human-friendly label per robot type (used in dialog titles / default IDs).
 _ROBOT_LABEL = {"turtle": "Turtle", "tree": "Tree", "thymio": "Thymio"}
 
-_TEST_DRIVE = "Test Drive"
+_TEST_THYMIO = "Test Thymio…"
 
 # Known node types and their default slot counts (fallback only — each node
 # stores its own ``max_slots`` in settings.yaml).
@@ -330,6 +330,16 @@ class RobotPanel(QWidget, Ui_RobotPanel):
         self._settings.data["gateway"]["serial_port"] = port
         self._settings.data["gateway"]["baud_rate"]   = baud
         self._settings.save()
+        self.auto_scan_if_enabled()
+
+    def auto_scan_if_enabled(self) -> None:
+        """Kick off a node scan right after connect, if the user enabled it.
+
+        Shared by this panel's own Connect handler and MainWindow's startup
+        auto-connect, so both connection paths honour the setting.
+        """
+        if self._settings.auto_scan_on_connect and self._gateway.is_connected:
+            self._on_scan()
 
     def start_scan(self, on_done=None) -> None:
         """Broadcast a node scan and refresh after ~2 s — non-blocking.
@@ -701,24 +711,25 @@ class RobotPanel(QWidget, Ui_RobotPanel):
         btn_box.accepted.connect(dlg.accept)
         btn_box.rejected.connect(dlg.reject)
 
-        # Quick wheeled-base check against the LIVE robot (needs the app to
-        # have loaded this Thymio — i.e. an already-saved entry).
-        drive_btn = QPushButton(_TEST_DRIVE)
-        drive_btn.setWhatsThis(
-            "Drives this Thymio forward for about a second with the top LED "
-            "green, then stops — a quick end-to-end check of the wheel link. "
-            "Needs 'Drive wheels wirelessly' saved and the transport up "
-            "(dongle plugged / gateway connected)."
+        # Interactive test panel against the LIVE robot (needs the app to have
+        # loaded this Thymio — i.e. an already-saved entry).
+        test_btn = QPushButton(_TEST_THYMIO)
+        test_btn.setWhatsThis(
+            "Open the Test Thymio panel: jog the wheels, colour the top LED, play "
+            "sounds and watch the live accelerometer/mic + impact + lift readout. "
+            "Needs 'Drive wheels wirelessly' saved and the transport up (dongle "
+            "plugged / gateway connected); the sensor readout needs the Gateway C6 "
+            "transport."
         )
         robot = self._live_thymio(cfg.get("thymio_id", ""))
         if robot is None:
-            drive_btn.setEnabled(False)
-            drive_btn.setToolTip("Save the robot and connect it first.")
+            test_btn.setEnabled(False)
+            test_btn.setToolTip("Save the robot and connect it first.")
         else:
-            drive_btn.clicked.connect(
-                lambda _=False, r=robot, b=drive_btn: self._run_drive_test(r, b))
+            test_btn.clicked.connect(
+                lambda _=False, r=robot, f=form: self._open_test_thymio(r, f, dlg))
         btn_row = QHBoxLayout()
-        btn_row.addWidget(drive_btn)
+        btn_row.addWidget(test_btn)
         btn_row.addStretch()
         btn_row.addWidget(btn_box)
 
@@ -736,51 +747,18 @@ class RobotPanel(QWidget, Ui_RobotPanel):
                 return robot
         return None
 
-    def _run_drive_test(self, robot, btn: QPushButton) -> None:
-        """Forward ~0.8 s with the top LED green, then stop and LED off.
+    def _open_test_thymio(self, robot, form, parent) -> None:
+        """Open the interactive Test Thymio panel for the live robot.
 
-        Robots are built at startup but their wheeled-base link is only opened
-        by ``robot.connect()`` — which nothing calls outside a session — so
-        connect first (off-thread: the dongle path can block on discovery).
-        """
-        btn.setEnabled(False)
-        btn.setText("Driving…")
+        The dialog drives the robot's own link (dongle or gateway C6) and shows the
+        live acc/mic + impact + lift readout (gateway C6 only). It connects the link
+        on open (off-thread) and closes it again on exit. A threshold calibrated by
+        knocking is written back into ``form`` so saving the config persists it."""
+        from src.gui.test_thymio_dialog import TestThymioDialog
 
-        def _restore() -> None:
-            btn.setEnabled(True)
-            btn.setText(_TEST_DRIVE)
-
-        def _stop() -> None:
-            robot.set_motors(0, 0)
-            robot.set_leds(0, 0, 0)
-            _restore()
-
-        def _drive() -> None:
-            robot.set_leds(0, 32, 0)
-            robot.set_motors(150, 150)
-            QTimer.singleShot(800, _stop)
-
-        def _connected(ok: bool) -> None:
-            if not ok:
-                _restore()
-                QMessageBox.warning(
-                    self, _TEST_DRIVE,
-                    "Could not reach the Thymio's wheeled base.\n\nCheck that "
-                    "'Drive wheels wirelessly' is saved, the transport is up "
-                    "(dongle plugged / gateway connected) and the Thymio is "
-                    "powered on.")
-                return
-            _drive()
-
-        def _failed(exc: Exception) -> None:
-            _restore()
-            QMessageBox.warning(self, _TEST_DRIVE, f"Connect failed: {exc}")
-
-        if robot.status == RobotStatus.CONNECTED:
-            _drive()
-        else:
-            run_async(robot.connect, on_done=_connected, on_error=_failed,
-                      parent=self)
+        dlg = TestThymioDialog(
+            robot, on_save_threshold=form.set_impact_threshold, parent=parent)
+        dlg.exec()
 
     def _on_configure_thymio(self, robot_index: int) -> None:
         robots_list = self._settings.data.get("robots", {}).get("thymios", [])

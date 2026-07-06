@@ -80,7 +80,13 @@
      <item>
       <widget class="QPushButton" name="discover_btn">
        <property name="text"><string>Discover…</string></property>
-       <property name="whatsThis"><string>Find this robot's address over the air — no dongle. Opens a guided scan: power each Thymio ON while it runs (they announce themselves at boot) and pick this robot's address from the live list. Needs the gateway connected.</string></property>
+       <property name="whatsThis"><string>Find this robot's address over the air — no dongle. Opens a guided scan: the gateway asks the network who is there and every powered robot answers with its address; pick this robot's from the live list. Only finds robots already paired to this network. Needs the gateway connected.</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="cable_btn">
+       <property name="text"><string>From cable…</string></property>
+       <property name="whatsThis"><string>Read this robot's address straight off its USB cable — no dongle, no network. Plug the Thymio into the PC with its micro-USB cable and press this: it reads the robot's id over USB and fills the address. Use it for a brand-new robot that isn't on this network yet (wireless Discover can't see those). Close Thymio Suite first so it doesn't hold the port.</string></property>
       </widget>
      </item>
     </layout>

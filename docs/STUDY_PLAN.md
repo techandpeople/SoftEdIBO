@@ -4,7 +4,9 @@ Living document for the children's study. Tracks what the study needs, what
 already exists, what is being added, and what is still open. Check items off
 as they land so work can resume after an interruption.
 
-Last updated: 2026-06-11 (initial version + organ/cover sensing chain).
+Last updated: 2026-07-05 (statuses synced to code: declarative behaviours
+replaced `OrganSwapActivity`/presets; organ monitor panel + simulation drive
+done; firmware hard-cap values corrected).
 
 ---
 
@@ -33,10 +35,14 @@ the child must swap the bad organ(s) for good ones, then close the silicone
 cover over the skin. The cover **closes an electrical circuit** — that is how
 the ESP32 knows the cover is back on. Only then is the robot "cured".
 
-`OrganSwapActivity` already implements the sick/cured state machine and works
-on any robot type, so the same activity covers all three setups; per-setup
-presets (difficulty, colors, timings) come from the existing ActivityPreset
-system.
+The organ/cover logic runs on the declarative behaviour engine
+(`ScriptedActivity`): a behaviour targeting the **organs** skin condition uses
+the `organs` condition verb (per-skin organ verdicts resolved by
+`OrganResolver` from the circuit reading) and runs on any robot type, so the
+same behaviour covers all three setups — robot-specific parts sit inside
+`if_robot` blocks. (The earlier hardcoded `OrganSwapActivity` and the
+ActivityPreset system were removed in favour of block-authored behaviours —
+see [ACTIVITIES.md](ACTIVITIES.md).)
 
 ---
 
@@ -70,7 +76,7 @@ One ADC line measures **both** the organ identity and the cover state:
 > **TODO (hardware):** confirm IO36 is reachable on the direct-node PCB
 > (header / test pad).
 
-Detection semantics (PC side, `OrganSwapActivity`):
+Detection semantics (PC side, the organs-condition behaviour):
 
 | Reading | Meaning | Patient state |
 |---|---|---|
@@ -115,6 +121,8 @@ Skins without one share a single whole-robot patient.
       activity is fully testable without hardware (`None` = cover off).
 - [x] `OrganSwapActivity`: third state **`open`** (cover off) with its own
       LED color; transitions sick ⇄ open ⇄ cured driven by organ readings.
+      (Activity since removed — organ states are now authored as declarative
+      behaviours with the `organs` condition.)
 - [x] Behavioral event logging from the activity (see §4).
 - [x] `PROTOCOL.md` — document the `organ` broadcast.
 - [x] Firmware builds (`pio run -e direct`), Python tests pass.
@@ -127,11 +135,13 @@ Skins without one share a single whole-robot patient.
       from `configure`'s `organ_channels` (highest channels, scrubbed from the
       chamber autodetect). Wired into `_robot_builder` from a node's
       `organ_channels` YAML field. Tree gets one patient per branch.
-- [x] **OrganSwap per-patient state machines** — a skin with its own
+- [x] **Per-patient state machines** — a skin with its own
       `organ: {slot}` block is its own patient (Tree branch, own LED + cover);
       skins without one fold into a single whole-robot patient (Turtle shared
       circuit, Thymio). Events/targets use the patient id (`<robot>` or
-      `<robot>/<skin>`).
+      `<robot>/<skin>`). (Since superseded in form: `ScriptedActivity` runs
+      every behaviour per skin, with organ verdicts per unit via
+      `OrganResolver`.)
 - [x] **Child-safety actuation watchdog** — both firmwares force-stop any
       chamber stuck INFLATING/DEFLATING past 10 s (sensor-failure burst
       protection). See §8.
@@ -143,12 +153,14 @@ Skins without one share a single whole-robot patient.
       `interaction_events` to CSV, attributing each row to `robot_id` +
       `participant` via the session's assignments (decodes patient/skin
       targets). Wired into the Data panel's existing export buttons.
-- [ ] **GUI: organ/cover state in the monitor** — show per-patient activity
-      state (sick / open / cured) + last resistance in `RobotMonitorWidget`;
-      tint `SkinGridView` per state (red / blue / green).
-- [ ] **GUI: simulation drive for organ swap** — debug buttons (or organ
-      catalogue picker) that call `sim_set_organ(ohm, slot)` on the simulated
-      controllers, so a full session can be rehearsed before the study.
+- [x] **GUI: organ state in the monitor** — `OrganPanel`
+      (`src/gui/monitor/organ_panel.py`), shown beside the skin grid: one dot
+      per organ (green = good, red = bad, outline = absent) plus a state-LED
+      dot mirroring the hardware light.
+- [x] **GUI: simulation drive for organs** — in simulation each `OrganPanel`
+      dot is clickable (cycles none → good → bad), feeding the matching
+      parallel resistance into the simulated organ circuit, so a full session
+      can be rehearsed before the study.
 - [x] **Raw sensor stream recording** — `src/data/stream_recorder.py`
       (`StreamRecorder`) taps the gateway and writes every message of a session
       to `data/recordings/<session_id>.jsonl` (header + 1 line/msg, boot
@@ -163,15 +175,18 @@ Skins without one share a single whole-robot patient.
       [TOUCH_ML.md](TOUCH_ML.md). Recording → live label (observer panel) →
       `scripts/label_touches.py` → `scripts/train_touch_model.py`. scikit-learn
       is the optional `ml` extra; the classifier is inert without a model.
-- [ ] **Per-setup presets** — author and save three ActivityPresets
-      ("Hospital – Turtle", "Hospital – Thymio", "Hospital – Tree") with the
-      organ catalogues matching the physically built organs (measure real
-      resistor values, set `cured_total_resistance_ohm` accordingly).
+- [ ] **Per-condition behaviours** (replaces the per-setup ActivityPresets —
+      presets were removed) — author/tune the study behaviours per skin
+      condition (importable examples in `config/examples/behaviours/`), with
+      the organ matching tuned to the physically built organs (measure real
+      resistor values; set the organ catalogue / `organ_tolerance_ohm`
+      accordingly).
 - [ ] **Thymio movement reactions** (optional polish) — wheeled "happy dance"
-      on cure via `ThymioRobot.set_motors`. Wireless control without the RF dongle
-      is planned via an S3-host + C6-RCP 802.15.4 link — see
-      [THYMIO_WIRELESS_CONTROL.md](THYMIO_WIRELESS_CONTROL.md) (Phase 0 bring-up in
-      `firmware/thymio_rcp/`); the tdm-client/USB path stays the quick fallback.
+      on cure. The building blocks are done: dongle-free wireless control via
+      the gateway's C6 works (see
+      [THYMIO_WIRELESS_CONTROL.md](THYMIO_WIRELESS_CONTROL.md)) and the
+      behaviour engine has `thymio_drive` / `thymio_leds` / `thymio_sound`
+      verbs — remaining: author the reaction in the study behaviours.
 - [ ] **Tree sharing events** — log `assign_to` / `share_with` calls as
       events so branch-sharing behavior is in the same timeline.
 - [ ] **Pilot run** — full dry run in simulation, then with one real node:
@@ -201,14 +216,17 @@ Already logged today:
 - `touch` / `press` (+ release) per `skin_id:chamber`, attributed to the
   participant assigned to the skin (TouchAssignmentPanel flow).
 
-Added by `OrganSwapActivity`, keyed by **patient id** in ``target`` (a whole
-robot ``<robot>`` or a single branch ``<robot>/<skin>``):
+Added by the behaviour engine (`ScriptedActivity`), keyed by **unit id** in
+``target`` (``<robot>/<skin>`` — each skin runs the behaviour independently):
 
 | type | action | target | metadata |
 |---|---|---|---|
-| `activity` | `state` | patient_id | `{"from": "...", "to": "..."}` |
-| `cover` | `open` / `close` | patient_id | — |
-| `organ` | `reading` | patient_id | resistance in Ω (`-1`/`inf` when cover off) |
+| `activity` | `state` | unit_id | `{"from": "...", "to": "..."}` |
+
+(The removed `OrganSwapActivity` also logged `cover open/close` and
+`organ reading` rows; today the raw `organ` broadcasts — including the
+open-circuit "cover off" readings — are captured by the sensor-stream
+recording, `data/recordings/<session>.jsonl`, joinable on timestamps.)
 
 Added by the **observer quick-tag panel** (live coding, no video):
 
@@ -295,7 +313,7 @@ pipeline; sensor-only ML as a later, additive layer** (see decision §6.4).
 1. **PCB**: is IO36 routed to a usable connector on the direct node? If not,
    which pin do we sacrifice / patch?
 2. **Tree mux channels**: confirm which 74HC4067 channels remain free after
-   chambers + tanks on the actual build (need 3 — one per branch). Set them in
+   the chambers on the actual build (need 3 — one per branch). Set them in
    each Tree node's `organ_channels:` YAML; each skin gets `organ: {slot: i}`.
 3. **Organ resistor values**: pick values with ≥ 25 % separation between all
    plausible parallel combinations so ADC noise never confuses two states
@@ -309,10 +327,13 @@ pipeline; sensor-only ML as a later, additive layer** (see decision §6.4).
 The robots are handled directly by children, so **no chamber may over-inflate
 and burst**. Layered defences, innermost first:
 
-1. **Per-chamber hard cap in firmware** — `HARD_*_KPA` limits (direct 12 kPa,
-   multiplexed 12 kPa chamber / 80 kPa tank) are enforced inside the control
-   loop regardless of any PC command. A target above the cap is clamped; a
-   reading at the cap stops the actuation.
+1. **Per-chamber hard cap in firmware** — `HARD_MAX_KPA` /
+   `HARD_CHAMBER_MAX_KPA` (100 kPa on both boards; ±80 kPa for the multiplexed
+   tank limits, unused on the current tankless build) are enforced inside the
+   control loop regardless of any PC command. A target above the cap is
+   clamped; a reading at the cap stops the actuation. These are last-resort
+   backstops — the protective ceiling children actually meet is the far lower
+   configured per-chamber max (next item).
 2. **Per-chamber configured max** — `set_max_pressure` (kPa) is pushed from the
    `Skin` constructor on connect, so each chamber keeps its safe ceiling **even
    if the PC crashes mid-session**. Default 8 kPa, never above the hard cap.

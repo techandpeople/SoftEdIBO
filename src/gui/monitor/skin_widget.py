@@ -11,13 +11,15 @@ sees where each chamber sits on the physical surface and how full it is.
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QGroupBox, QHBoxLayout, QSizePolicy, QVBoxLayout
+from PySide6.QtWidgets import (QCheckBox, QGroupBox, QHBoxLayout, QSizePolicy,
+                               QVBoxLayout)
 
 from src.gui.monitor.chamber_widget import ChamberWidget
 from src.gui.monitor.organ_panel import OrganPanel
 from src.gui.monitor.skin_grid_view import SkinGridView
 from src.gui.monitor.touch_tuning_panel import TouchTuningPanel
 from src.hardware.skin import Skin
+from src.hardware.touch_source import CompensatedMagnetSource
 
 
 class SkinWidget(QGroupBox):
@@ -71,6 +73,25 @@ class SkinWidget(QGroupBox):
             top.addWidget(self._organ_panel, alignment=Qt.AlignmentFlag.AlignTop)
         if self._grid_view is not None or self._organ_panel is not None:
             outer.addLayout(top)
+
+        # Raw↔compensated toggle for the sensor highlight, shown only when this
+        # skin has a calibrated + enabled coupling (so ``touch_source`` is the
+        # compensating source). Default compensated: the grid then lights the same
+        # touches the activities react to, instead of false ones from actuation.
+        if (self._grid_view is not None
+                and isinstance(getattr(skin, "touch_source", None),
+                               CompensatedMagnetSource)):
+            compensate_cb = QCheckBox("Compensate actuation coupling")
+            compensate_cb.setChecked(True)
+            help_text = (
+                "Subtract the calibrated actuation coupling from the sensor "
+                "highlight, so an inflating chamber no longer flashes a false "
+                "touch on the grid — matching what the activities detect. "
+                "Uncheck to see the raw sensor field for diagnosis.")
+            compensate_cb.setToolTip(help_text)
+            compensate_cb.setWhatsThis(help_text)
+            compensate_cb.toggled.connect(self._grid_view.set_compensated)
+            outer.addWidget(compensate_cb, alignment=Qt.AlignmentFlag.AlignCenter)
 
         # Live tuning panel for skins with 4-sensor quadrant touch detection.
         # Keep it compact: it must NOT stretch to the (now wider) grid view's

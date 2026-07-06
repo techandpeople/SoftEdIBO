@@ -113,13 +113,11 @@ def test_press_features_show_duration_not_sequence():
 # Rule baseline
 # ---------------------------------------------------------------------------
 
-def test_rule_baseline_separates_tap_press_stroke():
+def test_rule_baseline_separates_tap_and_press():
     seg_tap = TouchSegmenter().segment_stream(_tap_stream())[0]
     seg_press = TouchSegmenter().segment_stream(_press_stream())[0]
-    seg_stroke = TouchSegmenter().segment_stream(_stroke_stream())[0]
     assert rule_baseline.classify(seg_tap) == tax.TAP
     assert rule_baseline.classify(seg_press) == tax.PRESS
-    assert rule_baseline.classify(seg_stroke) == tax.STROKE
 
 
 # ---------------------------------------------------------------------------
@@ -141,16 +139,20 @@ def test_merge_segments_empty_is_none():
     assert merge_segments([]) is None
 
 
-def test_rule_baseline_labels_double_and_triple_tap():
+def test_rule_baseline_labels_compressions_bout():
+    # A single pulse is a tap; a run of several merged pulses is a
+    # compressions bout (COMPRESSIONS_MIN_PULSES = 3).
     one = TouchSegmenter().segment_stream(_tap_stream())[0]
     double = merge_segments(
         TouchSegmenter().segment_stream(_tap_stream() + _tap_stream()))
-    triple = merge_segments(
+    bout = merge_segments(
         TouchSegmenter().segment_stream(
             _tap_stream() + _tap_stream() + _tap_stream()))
     assert rule_baseline.classify(one) == tax.TAP
-    assert rule_baseline.classify(double) == tax.DOUBLE_TAP
-    assert rule_baseline.classify(triple) == tax.TRIPLE_TAP
+    assert double.n_pulses == 2                       # below the bout threshold
+    assert rule_baseline.classify(double) != tax.COMPRESSIONS
+    assert bout.n_pulses >= tax.COMPRESSIONS_MIN_PULSES
+    assert rule_baseline.classify(bout) == tax.COMPRESSIONS
 
 
 # ---------------------------------------------------------------------------

@@ -446,7 +446,12 @@ def compensator_from_config(touch: Mapping[str, Any] | None) -> TouchCompensator
     ``touch.compensation`` tuning block (``enabled``, ``threshold_ut``,
     ``margin_frac``, ``guard_ms``, ``guard_level_eps``, ``suppress_pct``).
     Absent tuning keys default to the pre-upgrade behaviour (no margin, no
-    guard), so stored configs keep working unchanged."""
+    guard), so stored configs keep working unchanged.
+
+    The activation threshold resolves ``compensation.threshold_ut`` →
+    ``touch.act_threshold_ut`` (the sensitivity pushed to the node, e.g. the
+    per-skin-type saved value) → :data:`DEFAULT_THRESHOLD_UT`, so the
+    compensated ``act`` and the node's own detection agree by default."""
     touch = touch or {}
     coupling = touch.get("coupling")
     tuning = touch.get("compensation") or {}
@@ -469,7 +474,9 @@ def compensator_from_config(touch: Mapping[str, Any] | None) -> TouchCompensator
     return TouchCompensator(
         couplings,
         sensor_count=sensor_count,
-        threshold_ut=float(tuning.get("threshold_ut", DEFAULT_THRESHOLD_UT)),
+        threshold_ut=float(tuning.get(
+            "threshold_ut",
+            touch.get("act_threshold_ut") or DEFAULT_THRESHOLD_UT)),
         margin_frac=float(tuning.get("margin_frac", 0.0)),
         guard=guard,
         suppress_pct=None if suppress is None else float(suppress),

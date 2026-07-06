@@ -315,9 +315,17 @@ inline void manualSafetyTick(uint32_t now) {
     for (int i = 0; i < 2; i++)
         if (manualPumpOn[i] && (int32_t)(now - manualPumpTs[i]) >= (int32_t)MANUAL_MAX_ON_MS)
             setManualPump(i, false);
+    bool deadmanClosed = false;
     for (int i = 0; i < NUM_CHAMBERS * 2; i++)
-        if (manualValveOn[i] && (int32_t)(now - manualValveTs[i]) >= (int32_t)MANUAL_MAX_ON_MS)
+        if (manualValveOn[i] && (int32_t)(now - manualValveTs[i]) >= (int32_t)MANUAL_MAX_ON_MS) {
             setManualValve(i / 2, i % 2, false);
+            deadmanClosed = true;
+        }
+    // A manual-open valve counts into recalcPumps(), so an engine round can leave
+    // a pump running for it after the engine itself finished. When the dead-man
+    // closes that valve the pump must be recomputed or it dead-heads. Skipped
+    // while a manual pump is on — that is operator-owned (own dead-man above).
+    if (deadmanClosed && !manualPumpOn[0] && !manualPumpOn[1]) recalcPumps();
 
     // 2. HARD limit cutoff, both directions:
     //    - inflate pump cut (+ inflate valve closed) if a chamber hits HARD_MAX;

@@ -30,6 +30,11 @@ from PySide6.QtCore import QObject, QTimer
 from src.activities import catalog
 from src.activities.base_activity import BaseActivity
 from src.activities.organ_resolver import OrganResolver
+from src.hardware.fill_scaling import (
+    MIN_PUMP_DUTY,
+    POWER_MAX_LEVEL,
+    duty_for_power,
+)
 from src.hardware.organ_sensor import OrganSensor
 from src.robots.base_robot import BaseRobot
 
@@ -76,6 +81,17 @@ class _Unit:
     touch_seq: int = 0
     touch_seq_by_chamber: dict[int, int] = field(default_factory=dict)
     active_touch: set[int] = field(default_factory=set)
+    # Classified gestures (tap/stroke/…) counted in the current state, by label,
+    # plus the live classifier feeding them (kept alive here). Empty/None when the
+    # skin has no trained model — raw-touch `gesture_count` still works.
+    gesture_counts: dict[str, int] = field(default_factory=dict)
+    gesture_clf: Any = None
+    # A phase jump requested from inside a per-press handler (touch_progress),
+    # applied at the next tick so it never mutates the running aux list mid-run.
+    pending_state: str | None = None
+    # This skin type's power-level-1 PWM floor (see fill_scaling.duty_for_power);
+    # resolved from settings at setup, defaults to the global stall floor.
+    min_duty: int = MIN_PUMP_DUTY
     # Organ status, for `organs` conditions: per-organ good/bad/absent verdict
     # resolved from this skin's organ circuit, plus the sensor(s) feeding it.
     organ_verdicts: dict[str, str] = field(default_factory=dict)
@@ -97,18 +113,17 @@ class ScriptedActivity(BaseActivity):
     @staticmethod
     def _robot_type_for(kind: str) -> type[BaseRobot]:
         """Resolve an activity kind to its robot class (lazy import to avoid a
-        cycle: robots import activities). Unknown → BaseRobot (accepts anything)."""
-        from src.activities.activity_kind import THYMIO, TURTLE, TREE
-        if kind == THYMIO:
-            from src.robots.thymio.thymio_robot import ThymioRobot
-            return ThymioRobot
-        if kind == TURTLE:
-            from src.robots.turtle.turtle_robot import TurtleRobot
-            return TurtleRobot
-        if kind == TREE:
-            from src.robots.tree.tree_robot import TreeRobot
-            return TreeRobot
-        return BaseRobot
+        cycle: robots import activities). The kind→class-name registry lives in
+        :mod:`activity_kind`; only the name→class resolution happens here.
+        Unknown → BaseRobot (accepts anything)."""
+        from src.activities.activity_kind import robot_type_name
+        from src.robots.thymio.thymio_robot import ThymioRobot
+        from src.robots.tree.tree_robot import TreeRobot
+        from src.robots.turtle.turtle_robot import TurtleRobot
+        by_name: dict[str, type[BaseRobot]] = {
+            "ThymioRobot": ThymioRobot, "TurtleRobot": TurtleRobot,
+            "TreeRobot": TreeRobot}
+        return by_name.get(robot_type_name(kind) or "", BaseRobot)
 
     def __init__(self, name: str, description: str, spec: dict[str, Any]):
         super().__init__(name=name, description=description)
@@ -143,6 +158,7 @@ class ScriptedActivity(BaseActivity):
     def _setup(self, session: "Session", robots: list[BaseRobot]) -> None:
         self._units.clear()
         self._phase_listeners.clear()
+        settings_data = self._load_settings_data()
         for robot in robots:
             skins = getattr(robot, "skins", {})
             for skin in skins.values():
@@ -151,9 +167,11 @@ class ScriptedActivity(BaseActivity):
                     unit_id=f"{robot.robot_id}/{skin.skin_id}",
                     robot=robot, skin=skin, ctrl=ctrl,
                     chambers=sorted(skin.chambers.keys()),
+                    min_duty=self._resolve_min_duty(settings_data, skin),
                 )
                 self._units[unit.unit_id] = unit
                 self._subscribe_touch(unit)
+                self._subscribe_gestures(unit)
                 self._subscribe_impact(unit)
                 self._subscribe_lifted(unit)
                 self._setup_organs(unit, skin)
@@ -168,6 +186,26 @@ class ScriptedActivity(BaseActivity):
                 self._subscribe_lifted(unit)
         logger.info("ScriptedActivity %r set up: %d units",
                     self.name, len(self._units))
+
+    @staticmethod
+    def _load_settings_data() -> dict:
+        """The app settings dict (for per-skin-type pump-duty floors), or {}."""
+        try:
+            from src.config.settings import Settings
+            return Settings().data
+        except Exception:   # noqa: BLE001 — settings must never block a session
+            logger.exception("could not load settings for pump-duty floor")
+            return {}
+
+    @staticmethod
+    def _resolve_min_duty(settings_data: dict, skin: Any) -> int:
+        """This skin type's power-level-1 PWM floor, or the global default."""
+        if skin is None:
+            return MIN_PUMP_DUTY
+        from src.hardware.fill_calibration import get_type_min_duty
+        return get_type_min_duty(settings_data,
+                                 getattr(skin, "skin_type", ""),
+                                 getattr(skin, "skin_variant", ""))
 
     def start(self) -> None:
         for unit in self._units.values():
@@ -315,6 +353,8 @@ class ScriptedActivity(BaseActivity):
         unit.impact_count = 0
         unit.impact_levels.clear()
         unit.lifted_count = 0
+        unit.gesture_counts.clear()
+        unit.pending_state = None
         unit.aux.clear()
         body = self._states.get(state, {}).get("do", [])
         unit.runner = self._run_steps(unit, body, {})
@@ -330,6 +370,13 @@ class ScriptedActivity(BaseActivity):
 
     def _on_tick(self) -> None:
         for unit in self._units.values():
+            # A per-press handler (touch_progress) may have requested a jump last
+            # tick; apply it here, at a clean tick boundary, before anything else.
+            if unit.pending_state is not None:
+                target, unit.pending_state = unit.pending_state, None
+                if target in self._states:
+                    self._enter_state(unit, target)
+                continue
             if self._check_transitions(unit):
                 continue                       # state changed; body restarted
             self._advance(unit)
@@ -356,6 +403,8 @@ class ScriptedActivity(BaseActivity):
         if name == "touch_count":
             need = val.get("min", val) if isinstance(val, dict) else val
             return unit.touch_count >= int(need)
+        if name == "gesture_count":
+            return self._eval_gesture_count(unit, val)
         if name == "on_impact":
             if isinstance(val, dict):
                 need = int(val.get("min", 1))
@@ -384,6 +433,21 @@ class ScriptedActivity(BaseActivity):
         if name == "always":
             return bool(val)
         return False
+
+    @staticmethod
+    def _eval_gesture_count(unit: _Unit, val: Any) -> bool:
+        """`gesture_count` condition: N presses (kind 'touch') or N of an
+        ML-classified gesture. Classified kinds read the per-label counter fed by
+        the live classifier; without a trained model that counter stays empty, so
+        the condition simply never fires (raw 'touch' always works)."""
+        if isinstance(val, dict):
+            kind = str(val.get("kind", "touch"))
+            need = int(val.get("min", 1))
+        else:
+            kind, need = "touch", int(val) if val is not None else 1
+        if kind == "touch":
+            return unit.touch_count >= need
+        return unit.gesture_counts.get(kind, 0) >= need
 
     @staticmethod
     def _unit_kind(unit: _Unit) -> str:
@@ -544,7 +608,7 @@ class ScriptedActivity(BaseActivity):
         period = max(100, int(params.get("period_ms", 2000)))
         # An optional duty makes every up-stroke gentler/slower — the beat's
         # "energy". The release back to 0 stays at full speed (a normal vent).
-        duty = self._duty(params)
+        duty = self._duty(unit, params)
         chambers = list(unit.chambers)
         if not chambers:
             yield ("ms", period)
@@ -730,11 +794,13 @@ class ScriptedActivity(BaseActivity):
                                  ring=self._parse_ring(params),
                                  fade_ms=self._fade_ms(params),
                                  angle=self._angle(params))
+        elif verb == "touch_progress":
+            self._touch_progress(unit, params)
         elif verb in ("inflate", "set_pressure"):
             self._set_pressure(unit, self._resolve_chamber(unit, params, ctx),
                                int(params.get("pct", 60 if verb == "inflate" else 0)),
                                period_ms=int(params.get("period_ms", 0)),
-                               duty=self._duty(params))
+                               duty=self._duty(unit, params))
         elif verb in ("deflate", "wrinkle"):
             self._set_pressure(unit, self._resolve_chamber(unit, params, ctx), 0)
         elif verb == "stop":
@@ -767,15 +833,48 @@ class ScriptedActivity(BaseActivity):
     # Hardware helpers
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _duty(params: dict) -> int | None:
-        """Read an optional pump ``duty`` (1-255) from a step's params. 0 / absent
-        means 'send no duty — run at full speed'."""
+    def _duty(self, unit: _Unit, params: dict) -> int | None:
+        """Resolve a step's pump duty (1-255), or ``None`` for full-speed/auto.
+
+        Prefers the friendly 1-5 ``power`` dial, mapped onto this skin type's
+        calibrated duty range (level 1 = its minimum, 5 = full). Level 5 returns
+        ``None`` so a full-power stroke still lets any ``over ms`` slow-fill act —
+        keeping the historical default. Falls back to a raw ``duty`` (advanced /
+        legacy specs); 0 / absent there means 'no duty — full speed'."""
+        power = params.get("power")
+        if power not in (None, ""):
+            try:
+                level = int(power)
+            except (TypeError, ValueError):
+                return None
+            if level >= POWER_MAX_LEVEL:
+                return None                    # full power — let period_ms act
+            return duty_for_power(level, getattr(unit, "min_duty", MIN_PUMP_DUTY))
         try:
             duty = int(params.get("duty") or 0)
         except (TypeError, ValueError):
             return None
         return duty if duty > 0 else None
+
+    def _touch_progress(self, unit: _Unit, params: dict) -> None:
+        """Paint the LED ring as a touch-fill progress bar; advance when full.
+
+        Lights ``touch_count // per`` of ``segments`` equal arcs in ``on_color``
+        (the rest ``bg_color``). Dropped in a phase's ``on_touch`` it repaints on
+        each press; once every arc is lit and a ``to`` phase is set it schedules
+        the jump via ``pending_state`` (applied next tick, so it never disturbs
+        the running on_touch handler list)."""
+        segments = max(1, int(params.get("segments", 4) or 4))
+        per = max(1, int(params.get("per", 1) or 1))
+        on_color = str(params.get("on_color", "#2ecc71"))
+        bg_color = str(params.get("bg_color", "#222222"))
+        filled = max(0, min(segments, unit.touch_count // per))
+        colors = [on_color] * filled + [bg_color] * (segments - filled)
+        self._set_led_halves(unit, colors, ring=self._parse_ring(params),
+                             fade_ms=self._fade_ms(params))
+        to = str(params.get("to", "") or "")
+        if to and filled >= segments and to in self._states:
+            unit.pending_state = to
 
     def _set_pressure(self, unit: _Unit, chamber, pct: int,
                       period_ms: int = 0, duty: int | None = None) -> None:
@@ -924,6 +1023,35 @@ class ScriptedActivity(BaseActivity):
         from src.hardware.touch_source import subscribe_skin_magnet
         subscribe_skin_magnet(unit.skin,
                               lambda data, u=unit: self._on_magnet(u, data))
+
+    def _subscribe_gestures(self, unit: _Unit) -> None:
+        """Attach a live ML gesture classifier so `gesture_count` can count
+        classified gestures (tap/stroke/…).
+
+        Inert and cheap when the skin has no trained model for its type — the
+        classifier's ``attach()`` returns False and never subscribes — so
+        raw-touch `gesture_count` keeps working while classified kinds simply
+        never fire. Mirrors :meth:`_subscribe_touch`; the classifier taps the same
+        compensated magnet stream itself (both subscribers coexist)."""
+        if unit.skin is None:
+            return
+        try:
+            from src.ml.touch_classifier import LiveTouchClassifier
+            clf = LiveTouchClassifier(
+                unit.skin,
+                lambda sid, label, seg, u=unit: self._on_gesture(u, label))
+            if clf.attach():
+                unit.gesture_clf = clf
+        except Exception:   # noqa: BLE001 — ML deps optional; must not block a session
+            logger.debug("gesture classifier unavailable on %s",
+                         unit.unit_id, exc_info=True)
+
+    def _on_gesture(self, unit: _Unit, label: str) -> None:
+        """Gateway-thread callback: count one classified gesture (by label).
+
+        Plain int increment mirrors `touch_count`/`impact_count` — read on the
+        GUI tick in `_eval_gesture_count`, so no lock is needed."""
+        unit.gesture_counts[label] = unit.gesture_counts.get(label, 0) + 1
 
     def _on_magnet(self, unit: _Unit, data: dict[str, Any]) -> None:
         active = data.get("act") or []

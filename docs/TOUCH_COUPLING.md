@@ -110,20 +110,32 @@ Three robustness layers on top of the plain subtraction:
   the raw controller; the Skin exposes it as `skin.touch_source` and `skin.on_magnet`.
   Detection consumers (activities, gesture ML, the skin's QuadrantDetector +
   TouchEventRouter) read the compensated stream via `subscribe_skin_magnet`; the
-  recorder / live monitor / this calibration tool keep using the raw controller
-  (they need uncompensated uT). The per-chamber level comes from the Skin's own
-  AirChamber model, so it works regardless of fill mode.
+  live monitor and this calibration tool keep using the raw controller (they
+  need uncompensated uT). The stream recorder captures the raw stream *and*,
+  when compensation is on, the compensated one (extra lines flagged
+  `compensated` — the gesture ML trains on them; see docs/TOUCH_ML.md); the
+  coupling analyzer skips flagged lines, so such recordings still calibrate on
+  raw uT. The per-chamber level comes from the Skin's own AirChamber model, so
+  it works regardless of fill mode.
 - **Calibration:** Tools → **Calibrate Touch Coupling…**
   (`src/gui/touch_calibration_dialog.py`): the sweep sequence is a pure
   `SweepProgram` (rest → per chamber an ascending staircase of levels → deflate;
   "Levels per chamber" picks the staircase, 1 = the legacy full-inflation-only
   sweep). The dialog executes it against the gateway, holds **fast telemetry**
-  on the chamber node so level bins track the staircase closely, collects
-  `mag` (+`vec` when streamed) + `status`, builds the curves via
-  `build_coupling`, and stores them as `touch.coupling` (`curves`, plus the
+  on the chamber node so level bins track the staircase closely, and collects
+  `mag` (+`vec` when streamed) + `status`. Chamber levels are recomputed from
+  each status's measured `kpa` against the skin's *configured* min/max
+  (`units.kpa_to_pct`) — the firmware's own `pressure` % is computed against
+  the limits the node currently holds, which lag the PC config — falling back
+  to the firmware % only when no `kpa` is present. The curves are built via
+  `build_coupling` and stored as `touch.coupling` (`curves`, plus the
   legacy `deltas` for older readers); the tuning block `touch.compensation`
   (`enabled`, `threshold_ut`, `margin_frac`, `guard_ms`, `suppress_pct`) is
-  written alongside. Settings helpers + sample→config core in
+  written alongside. When a sweep yields no curves, `sweep_diagnostics` is
+  appended to the preview, separating the two failure modes: no magnet samples
+  at all (the touch node never streamed) vs. per-chamber peak levels that never
+  reached `ACTIVE_MIN` (20 %), so nothing classified as inflated (stale kPa
+  limits, pumps not running). Settings helpers + sample→config core in
   `src/hardware/touch_calibration.py` (tested).
 
 The curves are measured in **`mag` (uT)** — the same field the PC detection path

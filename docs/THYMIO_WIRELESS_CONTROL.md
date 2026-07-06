@@ -39,7 +39,7 @@ The Thymio speaks **Aseba over IEEE 802.15.4**. An Aseba message is `[len][sourc
 |---|---|---|---|
 | SET_VARIABLES | 0xA00C | host→node | **write** variables (motors, LEDs, anything) |
 | GET_VARIABLES | 0xA00B | host→node | **request** a variable range |
-| VARIABLES | 0x9006 | node→host | the node's **reply** with variable values |
+| VARIABLES | 0x9005 | node→host | the node's **reply** with variable values |
 
 SET_VARIABLES body = `[dest_node][start_addr][value0][value1]…`. Writing motors =
 SET_VARIABLES(start=0x56, [left, right]); reading the accelerometer = GET_VARIABLES(
@@ -91,8 +91,8 @@ it stays 0** — for impact use raw `acc` instead (see below).
 ### Reproduce it
 1. Flash a XIAO **ESP32-C6** with `rcp_c6`
    (`pio run -d firmware/thymio_rcp -e rcp_c6 -t upload`) — it has `sniff*`, `tx`,
-   `thymio_sound`, and the continuous `thymio_link`. (Chip antenna is fine — see the
-   antenna note.)
+   `thymio_sound`, `thymio_discover`, and the continuous `thymio_link`. (Chip antenna is
+   fine — see the antenna note.)
 2. Find the channel: drive the robot (`thymio_jog.py --drive 100 -100 --secs 180`) while
    sniffing (`thymio_sniff_capture.py --no-drive --debug --gateway <C6>`); `grep 8144` —
    the `"ch"` of a frame carrying PAN 0x4481 is the channel (was **25**).
@@ -112,20 +112,36 @@ active slot; `thymio_set {idx,addr}` registers a robot, `thymio_drive`/`thymio_l
 `thymio_sound` take an `idx`. In the app: Robot Config → each Thymio's `wireless_via: gateway`
 + **Address (C6)** → **Discover…**. That opens a **guided, dongle-free scan**
 (`ThymioDiscoverDialog` + `thymio_discovery.discover_thymios`): the C6 **broadcasts a
-`LIST_NODES` query ~2 Hz** (the `thymio_discover` command) and every powered robot answers
+`LIST_NODES` query ~10 Hz** (the `thymio_discover` command) and every powered robot answers
 with its address, appearing **live, in first-seen order** — so turning robots on one at a time
-maps address → robot. Pick one and it fills the field; no dongle, no hand-editing config. From
-the CLI: `thymio_link.py --index N --addr <hex>`. (Slot 0 with no address rides a built-in
-default, so the single-Thymio flow needs no address.)
+maps address → robot. Pick one and it fills the field; no dongle, no hand-editing config. Next
+to it, **From cable…** reads the address off a **USB-cabled** robot instead
+(`thymio_cable.read_cabled_thymio_address`): the Thymio's Aseba node id, read over USB via
+`thymiodirect`, is its 802.15.4 short address **byte-swapped** (node id `0x256a` ⇒ address
+`6a25`) — useful to grab the address of a robot you can't reach wirelessly yet (e.g. before it
+is paired, or to confirm which address is which); close Thymio Suite first so it frees the
+port. From the CLI: `thymio_link.py --index N --addr <hex>`. (Slot 0 with no address rides a
+built-in default, so the single-Thymio flow needs no address.)
 
 > **Discovery is active, not passive** — a Wireless Thymio does **not** announce itself at boot
 > (hard-tested: reboot a robot with the sniffer armed and nothing appears). It *does* reply to a
 > `LIST_NODES` broadcast, exactly how the dongle enumerates, so `thymio_discover` broadcasts the
 > query and reports each `NODE_PRESENT` reply. Even an idle, powered robot answers — no need to
 > drive it. **Only robots already on this network (PAN 0x4481) reply**; a fresh robot must be
-> paired onto the network once (dongle, or `_rf.setup`/`_rf.nodeid` over a USB cable) first.
-> Reception needs a decent antenna: the boxed gateway's chip-antenna C6 is too weak to hear the
-> replies reliably — use the U.FL C6 (same weakness that made the link flaky).
+> paired onto the network once with the RF dongle (Thymio Suite) first — the **From cable…**
+> tooling only *reads* a robot's address over USB, it does not pair.
+>
+> **Two RX bugs made discovery flaky before 2026-07-05 (both fixed; it was NOT the antenna):**
+> (1) the discover pump re-armed `esp_ieee802154_receive()` every 20 ms, which *aborts a frame
+> being received* — the fast `NODE_PRESENT` reply was dropped, giving a binary "≈20 frames or
+> exactly 0" per scan. Fixed by doing one `receive()` per paced broadcast at 100 ms, the exact
+> `thymioLinkPump` cadence (the always-reliable link never re-arms mid-frame). (2) repeated
+> discover on/off cumulatively deafens the C6 RX and `esp_ieee802154_disable()` does **not**
+> restore it (same modem poison as the WiFi-OTA `wifi` failure). So the C6 never disables its
+> 15.4 radio within a boot; instead `discover_thymios` **reboots the C6 first** (`{"cmd":
+> "reboot"}` → `esp_restart`, re-announces `rcp_ready`) for a guaranteed-clean radio — the C6
+> is a separate chip from the S3, so this doesn't disturb ESP-NOW/node control. Verified 5/5
+> end-to-end; the chip antenna hears fine at desk range once the RX is armed correctly.
 >
 > The exact broadcast frame (captured verbatim from a real dongle, ch 25):
 > `41 88 <seq> 81 44 ff ff 37 32  82 00 32 37 11  a0 01 00 05 00` — FCF `8841` (broadcast, no
@@ -133,7 +149,7 @@ default, so the single-Thymio flow needs no address.)
 > `83 00 <dst> <src> 11`), then `LIST_NODES` (`0xA011`) with protocol version 5. The robot
 > replies with msgType `0x900C` (`NODE_PRESENT`); its MAC src is the address.
 
-### Movement, LEDs — proven; Sound — done; Sensors — planned
+### Movement, LEDs — proven; Sound — done; Sensors — implemented
 - **Proven:** full standalone control — SET_VARIABLES (motors, LEDs, any writable variable)
   over the C6's own continuous link, no dongle.
 - **Sound — DONE (2026-07-03).** `sound.system`/`sound.freq`/`sound.play` are *native
@@ -143,17 +159,26 @@ default, so the single-Thymio flow needs no address.)
   from `thymiodirect`'s assembler on a real Thymio and is baked into the C6 firmware
   (`thPlaySystem`/`thPlayFreq`). Loading + running it leaves `motor.*.target` untouched, so a
   **driving robot keeps driving through a beep**. See "Sound" below.
-- **Read sensors (accel, mic, prox, buttons…):** same link, other way — we already *send*
-  `GET_VARIABLES` every poll; the next step is to catch + parse the node's `VARIABLES`
-  (`0x9005`) reply on the C6 and forward it. Firmware, not new R&D — but note the full-space
-  poll reply (128 words) exceeds one 802.15.4 frame, so poll a small range instead, e.g.
-  `GET_VARIABLES(0x62, 24)` returns `acc`(0x62-0x64) + `mic.intensity`(0x79) in one frame.
+- **Read sensors (accel, mic, ground) — DONE in firmware + PC (on-hardware check pending).**
+  The link poll doubles as a read: every cycle the C6 sends `GET_VARIABLES(0x54, 38)` — one
+  contiguous window that fits a single 802.15.4 frame and covers `prox.ground.delta`
+  (0x54-0x55), `acc` (0x62-0x64) and `mic.intensity` (0x79) — then `thymioRxPump` catches the
+  node's `VARIABLES` (0x9005) reply (heard because the link keeps the radio promiscuous) and
+  forwards it as `{"type":"thymio_sensors","idx":N,"acc":[…],"mic":…,"ground":[…]}`.
+  `{"cmd":"thymio_rx_debug","on":true}` streams the raw reply frames so the parse can be
+  eyeballed. On the PC, `ThymioGatewayLink` consumes `thymio_sensors` (`robot.on_sensors(cb)`).
+  The full-space poll (128 words) would exceed one frame, which is why only this small window
+  is polled. (The firmware still flags the parse **unverified on hardware**.)
 - **Impact vs. touch (accelerometer) — poll raw `acc`, NOT the tap event.** The obvious idea
   (read the on-board `acc._tap` flag) does **not** work here: `acc._tap` is produced by the
   Thymio's *default gesture program*, which our loaded bytecode replaces — so it stays 0.
   Instead read raw `acc` (rest ≈ `[0,0,20]`, z = gravity): a knock ("pancada") is a large
   transient deviation, a gentle touch barely moves it. `acc` reads cleanly at ~99 Hz over USB;
-  at the C6's 10 Hz a hard knock is still a clear deviation. Threshold is configurable.
+  at the C6's 10 Hz a hard knock is still a clear deviation. The PC does the detection:
+  `ThymioGatewayLink._detect_impact` edge-triggers when the deviation crosses a **configurable
+  `impact_threshold`** (set in Robot Config / the Test Thymio dialog, re-arming below a
+  fraction of it), counting knocks and grading each 1/2/3 — exposed as `robot.on_impact(cb)`
+  (dongle path has no sensor read, so it stubs this).
 - **Via the gateway:** the `thymio_link`/`tx`/`thymio_sound` commands work through the S3
   gateway to its own C6 (`{"target":"thymio",…}`). The boxed gateway C6's **chip antenna is
   plenty** (see the antenna note below) — no U.FL needed for a table/room study.
@@ -345,10 +370,16 @@ overrides the injection.)
 > join the S3's AP. Usual causes: (a) the gateway landed on a different `/dev/ttyACM*` and the
 > app talked to the wrong device — the box can present two USB serials (the S3 **and** a
 > Thymio-II if one is plugged); pin the gateway to its `/dev/serial/by-id/...` path; (b) the
-> C6's 802.15.4 radio was left busy (a prior Test Drive/Discover) — the firmware now quiets the
-> poller/sniffer/radio before WiFi, but that fix has to be flashed first (power-cycle the box
-> for a clean radio and OTA immediately). The node ESP-NOW flood also contends for the S3
-> radio — quiet/unplug the other nodes for the C6 update if it's flaky.
+> C6's 802.15.4 radio was **used earlier in the same boot** (link/sniff/discovery — with
+> auto-discovery that is nearly every session). Quieting the radio is not enough:
+> `esp_ieee802154_disable()` does not return the shared modem to a WiFi-usable state, so the
+> STA join times out until a clean boot. Since 2026-07-05 the firmware self-heals: `ota_wifi`
+> on a radio-used boot parks the request in RTC RAM (`OtaPark`, the nodes' `otaDoneFlag`
+> pattern), replies `ota_wifi_start`, reboots, and `setup()` resumes the download on the clean
+> boot before any 15.4 use — verified live (discovery armed on purpose, then OTA: parked,
+> rebooted, completed). A C6 still running a pre-park build needs one power-cycle for a clean
+> radio, then OTA immediately. The node ESP-NOW flood also contends for the S3 radio —
+> quiet/unplug the other nodes for the C6 update if it's flaky.
 
 > The old USB↔C6-UART flashing bridge (the `c6_bridge` gateway command + the BOOT/RST
 > auto-press wires) and `scripts/flash_c6_via_s3.sh` were **removed** — WiFi-OTA replaced
@@ -486,12 +517,14 @@ Thymio **paired** + powered; **(c)** close the main app (it holds the gateway po
    e.g. look for `0x96` (150) or its little-endian 16-bit form in the payload.
 4. **MAC header** (first bytes of each frame): FCF, sequence number, PAN id, src/dst
    addresses — needed to forge a frame the Thymio accepts. Frames are capped to 96
-   payload bytes over the relay (the true length is in `len`); bump `SNIFF_MAX_BYTES`
-   (C6) + the S3 relay `line[]` if you need full 127-byte frames.
+   payload bytes over the relay (the true length is in `len`); `SNIFF_MAX_BYTES` is now
+   the full 127-byte PSDU, matched by the S3 relay's 384-char `line[]` (reflash the S3).
 5. **`--no-drive`** logs frames while you jog by hand; **`sniff_ch`/`sniff_stop`** are
    plain gateway commands (`{"target":"thymio","cmd":"sniff_stop"}`) if driving the C6
-   directly. The RCP disables the radio on `sniff_stop` and before any `ota_wifi`, so
-   WiFi and 802.15.4 never fight over the shared antenna.
+   directly. `sniff_stop` stops *streaming* but leaves the 15.4 radio enabled — disabling
+   it mid-boot poisons later RX/WiFi (see the OTA note above), so the radio is only torn
+   down by a reboot. For WiFi vs 802.15.4 sharing, `ota_wifi` on a radio-used boot parks
+   the request and reboots into a clean radio (`OtaPark`), so they never fight.
 
 (Sniffing lives in the one `rcp_c6` build now — the boxed C6 sniffs on command, so no
 separate sniffer firmware and the WiFi-OTA route stays intact. A spare C6 on USB running
