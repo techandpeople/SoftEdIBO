@@ -11,6 +11,7 @@ from src.hardware.fill_calibration import (
     chambers_missing_calibration,
     combo_key,
     get_type_deflate_profile,
+    get_type_min_duty,
     get_type_profile,
     iter_actuator_chambers,
     iter_actuator_nodes,
@@ -20,6 +21,7 @@ from src.hardware.fill_calibration import (
     set_fill_profile,
     set_fill_profiles,
     set_type_deflate_profile,
+    set_type_min_duty,
     set_type_profile,
     type_slug,
 )
@@ -310,6 +312,23 @@ def test_set_and_get_type_profile_round_trip_and_prune():
     # An un-typed skin can't key a template.
     assert set_type_profile(data, "", "", 0, curve) is False
     assert get_type_profile(data, "", "", 0) is None
+
+
+def test_set_and_get_type_min_duty_round_trip_and_prune():
+    from src.hardware.fill_scaling import MIN_PUMP_DUTY, FULL_DUTY
+    data: dict = {}
+    # Absent → the global default floor.
+    assert get_type_min_duty(data, "tree_round", "organ") == MIN_PUMP_DUTY
+    assert set_type_min_duty(data, "tree_round", "organ", 150) is True
+    assert data["min_pump_duty_by_type"]["tree_round_organ"] == 150
+    assert get_type_min_duty(data, "tree_round", "organ") == 150
+    # A stray value is clamped into [1, FULL_DUTY].
+    set_type_min_duty(data, "tree_round", "organ", 9999)
+    assert get_type_min_duty(data, "tree_round", "organ") == FULL_DUTY
+    # Clearing prunes the whole map; an un-typed skin can't key one.
+    set_type_min_duty(data, "tree_round", "organ", None)
+    assert "min_pump_duty_by_type" not in data
+    assert set_type_min_duty(data, "", "", 150) is False
 
 
 def test_resolve_fill_profiles_inherits_template_without_mutating():

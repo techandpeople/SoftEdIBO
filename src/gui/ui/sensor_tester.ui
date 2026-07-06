@@ -23,6 +23,14 @@
     <layout class="QVBoxLayout" name="sensors_vbox"/>
    </item>
    <item>
+    <widget class="QCheckBox" name="compensate_cb">
+     <property name="visible"><bool>false</bool></property>
+     <property name="whatsThis"><string>Subtract the calibrated actuation coupling from each sensor's reading, so an inflating chamber no longer fakes a touch here. Shows the same compensated values the activities and monitor react to. Uncheck to see the raw sensor field (useful for diagnosing the hardware or re-checking the coupling). Only available when this skin has a calibrated, enabled touch-coupling matrix.</string></property>
+     <property name="text"><string>Compensate actuation coupling</string></property>
+     <property name="checked"><bool>true</bool></property>
+    </widget>
+   </item>
+   <item>
     <layout class="QHBoxLayout" name="controls_row">
      <item>
       <widget class="QLabel" name="threshold_label">

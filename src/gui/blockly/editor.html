@@ -39,15 +39,18 @@
       <block type="se_state"></block>
       <block type="se_transition"></block>
     </category>
-    <category name="Actions" colour="230">
+    <category name="Lights" colour="230">
       <block type="se_set_led"></block>
       <block type="se_set_led_halves"></block>
       <block type="se_set_led_quarters"></block>
       <block type="se_fade"></block>
-      <block type="se_beat"></block>
+      <block type="se_touch_progress"></block>
+    </category>
+    <category name="Chambers" colour="30">
       <block type="se_inflate"></block>
       <block type="se_deflate"></block>
       <block type="se_set_pressure"></block>
+      <block type="se_beat"></block>
       <block type="se_stop"></block>
     </category>
     <category name="Thymio" colour="160">
@@ -65,6 +68,7 @@
     <category name="Conditions" colour="20">
       <block type="se_elapsed"></block>
       <block type="se_touch_count"></block>
+      <block type="se_gesture_count"></block>
       <block type="se_on_impact"></block>
       <block type="se_on_lifted"></block>
       <block type="se_organs"></block>
@@ -97,6 +101,20 @@
     var DEFAULT_COLOUR = '#8e44ad';
     var PATTERN_OPTIONS = [['solid', 'solid'], ['pulse', 'pulse'],
                            ['blink', 'blink'], ['comet', 'comet'], ['off', 'off']];
+    // Pump strength on a friendly 1-5 dial instead of a raw 0-255 PWM. 1 = the
+    // gentlest usable stroke (the calibrated per-skin-type minimum), 5 = full
+    // power. Mapped onto the calibrated duty range at runtime (fill_scaling.
+    // duty_for_power); 5 is the default and leaves any "over ms" slow-fill acting.
+    // Listed 5→1 so the dropdown defaults to its first option, 5 (full) — the
+    // historical "full speed" default — with no imperative init needed.
+    var POWER_OPTIONS = [['5 (full)', '5'], ['4', '4'], ['3', '3'],
+                         ['2', '2'], ['1 (gentle)', '1']];
+    // Gesture kinds for the "skip after N gestures" condition: a raw touch (any
+    // press, no model needed) or an ML-classified gesture (needs a trained model
+    // for the skin type). Kept in sync with gesture_taxonomy.GESTURE_CLASSES
+    // (tap / press / compressions) — 'compressions' is the study's active gesture.
+    var GESTURE_KINDS = [['a touch', 'touch'], ['a tap', 'tap'],
+                         ['a press', 'press'], ['compressions', 'compressions']];
 
     function init() {
       if (workspace) return;            // both loaders fired — ignore the 2nd
@@ -217,37 +235,55 @@
                  + '"ring" picks one of the multiplexed board\'s four rings '
                  + '(0..3) or "all rings".' },
 
+        { type: 'se_touch_progress',
+          message0: 'touch fill — %1 arcs, %2 touch(es) each',
+          args0: [{ type: 'field_number', name: 'SEGMENTS', value: 4, min: 1, max: 8 },
+                  { type: 'field_number', name: 'PER', value: 1, min: 1 }],
+          message1: 'from %1 to %2 on ring %3',
+          args1: [{ type: 'field_input', name: 'BG', text: '#222222' },
+                  { type: 'field_input', name: 'ON', text: '#2ecc71' },
+                  { type: 'field_dropdown', name: 'RING', options: RING }],
+          message2: 'when full go to phase %1',
+          args2: [{ type: 'field_input', name: 'TO', text: '' }],
+          previousStatement: 'Step', nextStatement: 'Step', colour: 230,
+          tooltip: 'A touch-counter you can see. Put it in a phase\'s "on touch": '
+                 + 'every "each" touches lights one more of the ring\'s arcs '
+                 + '(4 arcs = quarters), from the "from" colour to the "to" '
+                 + 'colour. Once every arc is lit it jumps to the named phase — '
+                 + 'leave that blank to just fill and let a transition move on. '
+                 + 'Counts touches since the phase started, so it resets each phase.' },
+
         { type: 'se_inflate',
-          message0: 'inflate chamber %1 to %2 %% over %3 ms pump %4',
+          message0: 'inflate chamber %1 to %2 %% over %3 ms power %4',
           args0: [{ type: 'field_dropdown', name: 'CHAMBER', options: CH },
                   { type: 'field_number', name: 'PCT', value: 60, min: 0, max: 100 },
                   { type: 'field_number', name: 'PERIOD', value: 0, min: 0 },
-                  { type: 'field_number', name: 'DUTY', value: 0, min: 0, max: 255 }],
-          previousStatement: 'Step', nextStatement: 'Step', colour: 230,
+                  { type: 'field_dropdown', name: 'POWER', options: POWER_OPTIONS }],
+          previousStatement: 'Step', nextStatement: 'Step', colour: 30,
           tooltip: '"over (ms)" optionally fills gently over about that long by '
-                 + 'slowing the pump (0 = full speed). It is approximate and needs '
-                 + 'a calibrated fill time; without one it fills at full speed. '
-                 + '"pump" sets the pump PWM directly (1-255, lower = gentler; '
-                 + '0 = full speed) and needs no calibration.' },
+                 + 'slowing the pump (needs a calibrated fill time). "power" is '
+                 + 'the pump strength on a 1-5 dial: 1 = gentlest usable, 5 = full '
+                 + '(the default, which leaves "over ms" in charge). Lower it for '
+                 + 'a gentler, quieter fill — no calibration needed.' },
 
         { type: 'se_deflate',
           message0: 'deflate chamber %1',
           args0: [{ type: 'field_dropdown', name: 'CHAMBER', options: CH }],
-          previousStatement: 'Step', nextStatement: 'Step', colour: 230 },
+          previousStatement: 'Step', nextStatement: 'Step', colour: 30 },
 
         { type: 'se_set_pressure',
-          message0: 'set chamber %1 to %2 %% pump %3',
+          message0: 'set chamber %1 to %2 %% power %3',
           args0: [{ type: 'field_dropdown', name: 'CHAMBER', options: CH },
                   { type: 'field_number', name: 'PCT', value: 0, min: 0, max: 100 },
-                  { type: 'field_number', name: 'DUTY', value: 0, min: 0, max: 255 }],
-          previousStatement: 'Step', nextStatement: 'Step', colour: 230,
+                  { type: 'field_dropdown', name: 'POWER', options: POWER_OPTIONS }],
+          previousStatement: 'Step', nextStatement: 'Step', colour: 30,
           tooltip: 'Set a chamber to an exact fill %. Set it to 0 % to empty '
-                 + '(wrinkle) the chamber. "pump" sets the pump PWM directly '
-                 + '(1-255, lower = gentler; 0 = full speed).' },
+                 + '(wrinkle) the chamber. "power" is the pump strength on a 1-5 '
+                 + 'dial: 1 = gentlest, 5 = full (default).' },
 
         { type: 'se_stop',
           message0: 'hold all chambers',
-          previousStatement: 'Step', nextStatement: 'Step', colour: 230 },
+          previousStatement: 'Step', nextStatement: 'Step', colour: 30 },
 
         // --- Thymio wheeled base (no-ops on robots without wheels; wrap in
         // "if robot is Thymio" so the Turtle/Tree skip it explicitly) ---
@@ -317,6 +353,17 @@
         { type: 'se_touch_count',
           message0: 'touched at least %1 times', args0: [{ type: 'field_number', name: 'MIN', value: 15, min: 1 }],
           output: 'Cond', colour: 20 },
+
+        { type: 'se_gesture_count',
+          message0: 'after %1 %2 times',
+          args0: [{ type: 'field_dropdown', name: 'KIND', options: GESTURE_KINDS },
+                  { type: 'field_number', name: 'MIN', value: 3, min: 1 }],
+          output: 'Cond', colour: 20,
+          tooltip: 'True once the child made this gesture at least N times in the '
+                 + 'phase. "a touch" counts any press (no model needed); the rest '
+                 + '(tap / press / compressions) are ML gestures and need a trained '
+                 + 'touch model for the skin type, else they never fire. Pair it '
+                 + 'with a "go to phase" transition to skip after N gestures.' },
 
         { type: 'se_on_impact',
           message0: 'Thymio hit at least %1 times, at least %2',
@@ -457,19 +504,18 @@
           this.appendDummyInput()
             .appendField('one cycle every')
             .appendField(new Blockly.FieldNumber(2000, 100), 'PERIOD')
-            .appendField('ms , pump')
-            .appendField(new Blockly.FieldNumber(0, 0, 255), 'DUTY')
-            .appendField('(0 = full)');
+            .appendField('ms , power')
+            .appendField(new Blockly.FieldDropdown(POWER_OPTIONS), 'POWER');
           this.setPreviousStatement(true, 'Step');
           this.setNextStatement(true, 'Step');
-          this.setColour(230);
+          this.setColour(30);
           this.setTooltip(
             'One heartbeat cycle across the chambers — wrap it in '
             + '"repeat forever" for a continuous beat. "strength" is the peak '
             + 'fill %. Only "some strong, the rest soft" uses the soft-chamber '
             + 'row (those chambers beat to the soft %, the rest to strength). '
-            + '"pump" lowers the pump PWM (1-255) for a gentler, lower-energy '
-            + 'stroke; 0 = full speed.');
+            + '"power" is the pump strength on a 1-5 dial (1 = gentlest, '
+            + '5 = full) for the up-strokes; the release stays full speed.');
           this.updateShape_(this.getFieldValue('MODE'));
         },
         updateShape_: function (mode) {
@@ -531,11 +577,13 @@
     // ---- Compile workspace -> spec ------------------------------------
     function num(b, f) { return Number(b.getFieldValue(f)); }
 
-    // A pump duty of 0 means "no duty — full speed", so omit it rather than
-    // sending 0 (which the firmware would clamp to a near-stopped pump).
-    function withDuty(obj, b) {
-      var d = num(b, 'DUTY');
-      if (d > 0) obj.duty = d;
+    // The 1-5 "power" dial. 5 (full) is the default and means "no explicit duty
+    // — full speed, letting any 'over ms' slow-fill act", so omit it to keep
+    // specs clean and back-compatible. 1-4 carry an explicit gentler power the
+    // runtime maps onto the skin type's calibrated duty range.
+    function withPower(obj, b) {
+      var p = num(b, 'POWER');
+      if (p && p < 5) obj.power = p;
       return obj;
     }
 
@@ -581,17 +629,25 @@
         case 'se_fade':
           return { fade: withRing({ color1: b.getFieldValue('C1'), color2: b.getFieldValue('C2'),
                            period_ms: num(b, 'PERIOD') }, b) };
+        case 'se_touch_progress': {
+          var tp = withRing({ segments: num(b, 'SEGMENTS'), per: num(b, 'PER'),
+                              on_color: b.getFieldValue('ON'),
+                              bg_color: b.getFieldValue('BG') }, b);
+          var tpTo = (b.getFieldValue('TO') || '').trim();
+          if (tpTo) tp.to = tpTo;
+          return { touch_progress: tp };
+        }
         case 'se_beat':
-          return { beat: withDuty({ mode: b.getFieldValue('MODE'), pct: num(b, 'PCT'),
+          return { beat: withPower({ mode: b.getFieldValue('MODE'), pct: num(b, 'PCT'),
                            pct2: num(b, 'PCT2'), aligned: num(b, 'ALIGNED'),
                            period_ms: num(b, 'PERIOD') }, b) };
         case 'se_inflate':
-          return { inflate: withDuty({ chamber: b.getFieldValue('CHAMBER'), pct: num(b, 'PCT'),
+          return { inflate: withPower({ chamber: b.getFieldValue('CHAMBER'), pct: num(b, 'PCT'),
                               period_ms: num(b, 'PERIOD') }, b) };
         case 'se_deflate':
           return { deflate: { chamber: b.getFieldValue('CHAMBER') } };
         case 'se_set_pressure':
-          return { set_pressure: withDuty({ chamber: b.getFieldValue('CHAMBER'), pct: num(b, 'PCT') }, b) };
+          return { set_pressure: withPower({ chamber: b.getFieldValue('CHAMBER'), pct: num(b, 'PCT') }, b) };
         case 'se_stop':
           return { stop: {} };
         case 'se_thymio_drive':
@@ -628,6 +684,8 @@
       switch (b.type) {
         case 'se_elapsed':     return { elapsed_ms: num(b, 'MS') };
         case 'se_touch_count': return { touch_count: { min: num(b, 'MIN') } };
+        case 'se_gesture_count': return { gesture_count: { kind: b.getFieldValue('KIND'),
+                                                           min: num(b, 'MIN') } };
         case 'se_on_impact':   return { on_impact: { min: num(b, 'MIN'),
                                                      level: num(b, 'LEVEL') } };
         case 'se_on_lifted':   return { on_lifted: { min: num(b, 'MIN') } };
@@ -717,7 +775,19 @@
       catch (e) { console.warn('setFieldValue', name, val, e); }
     }
 
-    function setDuty(b, p) { if (p && p.duty) setF(b, 'DUTY', p.duty); }
+    // Set the 1-5 power dropdown from a spec: an explicit 'power', or a legacy
+    // raw 'duty' converted to the nearest level (floor ~190 → 1, 255 → 5), else
+    // the default 5 (full).
+    function setPower(b, p) {
+      if (!p) return;
+      if (p.power != null) { setF(b, 'POWER', String(p.power)); return; }
+      if (p.duty) {
+        var MIN = 190, span = 255 - MIN;
+        var duty = Math.max(MIN, Math.min(255, p.duty));
+        var lvl = 1 + Math.round((duty - MIN) / span * 4);
+        setF(b, 'POWER', String(Math.max(1, Math.min(5, lvl))));
+      }
+    }
 
     function connectStack(parent, inputName, firstChild) {
       if (firstChild) {
@@ -779,18 +849,26 @@
           if (b.updateShape_) b.updateShape_(p.mode);
           setF(b, 'PCT', p.pct); setF(b, 'PCT2', p.pct2);
           setF(b, 'ALIGNED', p.aligned); setF(b, 'PERIOD', p.period_ms);
-          setDuty(b, p); break;
+          setPower(b, p); break;
+        case 'touch_progress':
+          b = newStepBlock('se_touch_progress');
+          setF(b, 'SEGMENTS', p.segments != null ? p.segments : 4);
+          setF(b, 'PER', p.per != null ? p.per : 1);
+          setF(b, 'ON', p.on_color != null ? p.on_color : '#2ecc71');
+          setF(b, 'BG', p.bg_color != null ? p.bg_color : '#222222');
+          setF(b, 'RING', p.ring);
+          setF(b, 'TO', p.to != null ? p.to : ''); break;
         case 'inflate':
           b = newStepBlock('se_inflate');
           setF(b, 'CHAMBER', p.chamber); setF(b, 'PCT', p.pct);
-          setF(b, 'PERIOD', p.period_ms); setDuty(b, p); break;
+          setF(b, 'PERIOD', p.period_ms); setPower(b, p); break;
         case 'deflate':
           b = newStepBlock('se_deflate'); setF(b, 'CHAMBER', p.chamber); break;
         case 'set_pressure': case 'wrinkle':
           b = newStepBlock('se_set_pressure');
           setF(b, 'CHAMBER', p.chamber);
           setF(b, 'PCT', verb === 'wrinkle' ? 0 : p.pct);
-          setDuty(b, p); break;
+          setPower(b, p); break;
         case 'stop': b = newStepBlock('se_stop'); break;
         case 'thymio_drive':
           b = newStepBlock('se_thymio_drive');
@@ -841,6 +919,10 @@
           setF(b, 'MS', (v && v.ms != null) ? v.ms : v); break;
         case 'touch_count':
           b = newStepBlock('se_touch_count');
+          setF(b, 'MIN', (v && v.min != null) ? v.min : v); break;
+        case 'gesture_count':
+          b = newStepBlock('se_gesture_count');
+          setF(b, 'KIND', (v && v.kind != null) ? v.kind : 'touch');
           setF(b, 'MIN', (v && v.min != null) ? v.min : v); break;
         case 'on_impact': {
           b = newStepBlock('se_on_impact');

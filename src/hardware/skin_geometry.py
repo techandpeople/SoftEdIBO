@@ -147,13 +147,17 @@ SKIN_GEOMETRIES: dict[str, SkinGeometry] = {
         notes="Tree branch, Ø99 round, single central sensor.",
     ),
     # Thymio — 'D' (rotated +90°): semicircular bulge on top, flat bottom.
-    # Square bounding box so it isn't stretched tall/narrow.
+    # 134 mm wide × 120 mm tall. Four MLX90393 sensors in a 2×2 (top pair in the
+    # bulge, bottom pair on the flat edge).
     "thymio": SkinGeometry(
-        skin_type="thymio", shape="thymio", size_mm=(120.0, 120.0),
-        # 2×2 within the box; top pair sits inside the upper semicircle.
-        sensors_mm=((36.0, 66.0), (84.0, 66.0), (36.0, 100.0), (84.0, 100.0)),
+        skin_type="thymio", shape="thymio", size_mm=(134.0, 120.0),
+        # Corners measured from the BOTTOM-left (y up), converted to the
+        # registry's top-left origin (y down, y' = 120 - y). Index → position
+        # matches the firmware stream order: S0 = top-right, S1 = bottom-left,
+        # S2 = bottom-right, S3 = top-left  →  grid  [S3 S0 / S1 S2].
+        sensors_mm=((105.0, 30.0), (40.0, 90.0), (105.0, 90.0), (40.0, 30.0)),
         robot_kind="thymio",
-        notes="TODO: measure — Thymio bulge-up 'D' sensor positions.",
+        notes="Measured 2026-07-05 (~mm), 134×120, 2×2.",
     ),
 }
 

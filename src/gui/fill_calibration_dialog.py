@@ -49,12 +49,14 @@ from src.hardware.fill_calibration import (
     ContinuousDeflateCalibrator,
     ContinuousFillCalibrator,
     PlateauDetector,
+    get_type_min_duty,
     get_type_profile,
     iter_actuator_chambers,
     set_deflate_profile,
     set_duty_curve,
     set_fill_profile,
     set_type_deflate_profile,
+    set_type_min_duty,
     set_type_profile,
     type_slug,
 )
@@ -147,6 +149,7 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
                 self.rows_layout.addWidget(self._build_row(ch))
         self.rows_layout.addStretch(1)
         self._refresh_ranks()
+        self._prefill_min_power()
 
         self.all_btn.setEnabled(bool(self._chambers) and gateway is not None)
         self.duty_btn.setEnabled(bool(self._chambers) and gateway is not None)
@@ -612,16 +615,54 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
     # Save
     # ------------------------------------------------------------------
 
+    def _prefill_min_power(self) -> None:
+        """Show the stored power-level-1 PWM floor for the skin type(s) here.
+
+        Uses the first typed chamber's saved value; the .ui default (190) stands
+        when nothing has a skin type or none is stored."""
+        for ch in self._chambers:
+            if type_slug(ch.get("skin_type", ""), ch.get("skin_variant", "")):
+                self.min_power_spin.setValue(
+                    get_type_min_duty(self._settings.data,
+                                      ch.get("skin_type", ""),
+                                      ch.get("skin_variant", "")))
+                return
+
+    def _save_min_power(self) -> int:
+        """Persist the power-level-1 PWM floor for each distinct skin type shown,
+        writing only the ones whose value actually changed. Returns how many were
+        updated (so a value-only edit still counts as a save)."""
+        val = int(self.min_power_spin.value())
+        seen: set[str] = set()
+        n = 0
+        for ch in self._chambers:
+            st, sv = ch.get("skin_type", ""), ch.get("skin_variant", "")
+            slug = type_slug(st, sv)
+            if not slug or slug in seen:
+                continue
+            seen.add(slug)
+            if get_type_min_duty(self._settings.data, st, sv) != val:
+                set_type_min_duty(self._settings.data, st, sv, val)
+                n += 1
+        return n
+
     def _commit(self) -> bool:
-        """Persist the measured fill curves without closing. Returns True on
-        success. Shared by Save (which then closes) and Apply (which stays open
-        so the user can keep refining other chambers).
+        """Persist the measured fill curves (and the min-power floor) without
+        closing. Returns True on success. Shared by Save (which then closes) and
+        Apply (which stays open so the user can keep refining other chambers).
 
         With "Save as skin-type template" ticked, each curve is stored against its
         (skin_type, skin_variant, slot) so every skin of that type inherits it, and
         the per-chamber override is cleared so the template shows through. Chambers
         with no skin type fall back to a per-chamber save so nothing is lost."""
+        n_min = self._save_min_power()
         if not (self._results or self._duty_results or self._deflate_results):
+            if n_min:                       # a min-power-only edit still saves
+                self._settings.save()
+                self.saved.emit()
+                self.combo_status.setText(
+                    f"Saved min power for {n_min} skin type(s).")
+                return True
             QMessageBox.information(self, "Save", "Nothing calibrated yet.")
             return False
         as_type = self.save_type_check.isChecked()
@@ -642,6 +683,8 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
             parts.append(f"{n_curves - n_type} chamber override(s)")
         if self._duty_results:
             parts.append(f"{len(self._duty_results)} duty curve(s)")
+        if n_min:
+            parts.append(f"min power for {n_min} type(s)")
         self.combo_status.setText("Saved " + ", ".join(parts) + ".")
         return True
 

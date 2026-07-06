@@ -99,9 +99,10 @@ class LiveTouchClassifier:
             getattr(skin, "skin_type", ""),
             skin_variant=getattr(skin, "skin_variant", ""))
         self._seg = TouchSegmenter()
-        # Group quick successive touches (double/triple taps) into one gesture
-        # before classifying — training merges them, so inference must too.
-        self._merger = PulseMerger(tax.MULTI_TAP_GAP_MS)
+        # Group a run of presses (a compressions bout) into one gesture before
+        # classifying — training merges them over the same BOUT_GAP_MS silence
+        # window, so inference must too (train/serve parity).
+        self._merger = PulseMerger(tax.BOUT_GAP_MS)
         self._t0: float | None = None
 
     def attach(self) -> bool:

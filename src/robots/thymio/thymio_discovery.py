@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
 from typing import Any
 
@@ -27,6 +28,8 @@ logger = logging.getLogger(__name__)
 _PAN_THYMIO = 0x4481        # the Thymio dongle network
 _HOST_ADDR  = 0x3237        # the dongle/host short address (never a robot)
 _BROADCAST  = 0xFFFF
+# The C6 reboots in ~1 s and re-announces with rcp_ready; give it margin.
+_REBOOT_TIMEOUT = 5.0
 
 
 def parse_thymio_addr(data_hex: str) -> int | None:
@@ -104,6 +107,45 @@ def _wait(secs: float, stop: Any) -> None:
         time.sleep(0.1)
 
 
+def _is_rcp_ready(text: str) -> bool:
+    try:
+        return json.loads(text).get("type") == "rcp_ready"
+    except (ValueError, TypeError):
+        return False
+
+
+def reboot_c6(gateway: Any, timeout: float = _REBOOT_TIMEOUT) -> bool:
+    """Reboot the gateway's C6 and wait for its fresh-boot ``rcp_ready`` banner.
+
+    Discovery needs a CLEAN 802.15.4 radio: after a link/discover session the C6's
+    RX dies cumulatively (TX still works — the Thymio's RF LED still blinks — but
+    replies are never heard), and ``esp_ieee802154_disable()`` does not restore it.
+    A reboot is the only reliable reset, so we reboot before every scan. The C6 is a
+    separate chip from the S3 gateway, so this does not disturb ESP-NOW/node control.
+
+    Returns True once the banner is seen (radio is clean), False on timeout (the
+    caller may still attempt the scan best-effort).
+    """
+    ready = threading.Event()
+
+    def _watch(direction: str, text: str) -> None:
+        if direction == "rx" and _is_rcp_ready(text):
+            ready.set()
+
+    gateway.on_raw(_watch)
+    try:
+        gateway.send("thymio", "reboot")
+        deadline = time.monotonic() + timeout
+        while not ready.is_set() and time.monotonic() < deadline:
+            time.sleep(0.05)
+    finally:
+        gateway.remove_raw_callback(_watch)
+    if not ready.is_set():
+        logger.warning("Thymio discovery: C6 did not re-announce after reboot "
+                       "(no rcp_ready in %.1fs) — scanning anyway", timeout)
+    return ready.is_set()
+
+
 def discover_thymios(gateway: Any, channel: int = 25, secs: float = 6.0,
                      on_found: Any = None, stop: Any = None) -> list[str]:
     """Actively discover the Thymios on `channel` via the gateway's C6.
@@ -138,6 +180,11 @@ def discover_thymios(gateway: Any, channel: int = 25, secs: float = 6.0,
             return
         found[addr] = None
         _notify_found(on_found, addr)
+
+    # Start from a clean radio: repeated discover cycles deafen the C6's RX, and only
+    # a reboot restores it (see reboot_c6). Skip if the caller asked us to stop.
+    if stop is None or not stop.is_set():
+        reboot_c6(gateway)
 
     gateway.on_raw(_on_raw)
     try:

@@ -53,6 +53,31 @@ def scale_fill_ms(base_ms: float, active_chambers: int, pump_count: int) -> int:
 FULL_DUTY = 255
 MIN_PUMP_DUTY = 190
 
+# The activity editor exposes pump strength as a friendly 1-5 "power" scale
+# instead of a raw 0-255 PWM (see :func:`duty_for_power`): level 1 = the gentlest
+# usable stroke, level 5 = full power.
+POWER_MIN_LEVEL = 1
+POWER_MAX_LEVEL = 5
+
+
+def duty_for_power(level: int, min_duty: int = MIN_PUMP_DUTY,
+                   max_duty: int = FULL_DUTY) -> int:
+    """Map a 1-5 pump-power ``level`` onto a PWM duty over ``[min_duty, max_duty]``.
+
+    Level 1 is the gentlest usable stroke — ``min_duty``, the calibrated stall
+    floor below which a diaphragm pump moves no air — and level 5 is full power
+    (``max_duty``, normally :data:`FULL_DUTY` = 255). Intermediate levels
+    interpolate linearly, so the 1-5 dial spans exactly the useful part of the
+    duty range. ``min_duty`` is configurable per skin type (a stiffer silicone
+    stalls higher). Levels are clamped to 1-5 and the result to ``[1, FULL_DUTY]``
+    so a mis-set floor can never produce a stalled pump. The firmware pressure
+    cutoff remains the real backstop, so a rough duty is safe."""
+    lo = max(1, min(FULL_DUTY, int(min_duty)))
+    hi = max(lo, min(FULL_DUTY, int(max_duty)))
+    lvl = max(POWER_MIN_LEVEL, min(POWER_MAX_LEVEL, int(level)))
+    frac = (lvl - POWER_MIN_LEVEL) / (POWER_MAX_LEVEL - POWER_MIN_LEVEL)
+    return int(round(lo + frac * (hi - lo)))
+
 
 def duty_sweep(count: int = 4, top: int = FULL_DUTY,
                floor: int = MIN_PUMP_DUTY) -> tuple[int, ...]:

@@ -170,6 +170,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         if ok:
             self._home_panel.set_gateway_status(True)
             self._robot_panel.sync_gateway_ui()
+            self._robot_panel.auto_scan_if_enabled()
 
     # ------------------------------------------------------------------
     # Robot loading
@@ -196,20 +197,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         # Thymios — one RF dongle relays to several at once (each a node id), so all
         # the wireless ones share a single ThymioDongle owned by the window.
         thymios = robot_data.get("thymios", [])
-        wireless = [t for t in thymios if t.get("wireless")]
-        # Two wireless transports: the RF dongle (thymiodirect, shared across robots by
-        # node id) or the gateway's C6 (802.15.4, dongle-free). `wireless_via: "gateway"`
-        # picks the C6; anything else (default) uses the dongle.
-        dongle_users = [t for t in wireless if t.get("wireless_via", "dongle") != "gateway"]
-        old_dongle, self._thymio_dongle = getattr(self, "_thymio_dongle", None), None
-        if old_dongle is not None:
-            old_dongle.close()                     # config reload: drop the previous one
-        if dongle_users:
-            from src.robots.thymio.thymio_dongle import ThymioDongle
-            # dongle_port omitted → auto-detect; first robot that names one wins.
-            port = next((t.get("dongle_port") for t in dongle_users if t.get("dongle_port")),
-                        None)
-            self._thymio_dongle = ThymioDongle(serial_port=port)
+        self._rebuild_thymio_dongle(thymios)
 
         gateway_idx = 0        # slot each C6-driven Thymio takes on the one C6
         for thymio_cfg in thymios:
@@ -217,23 +205,9 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             # for it, so existing configs and the sim path are untouched.
             link = None
             if thymio_cfg.get("wireless"):
+                link = self._build_thymio_link(thymio_cfg, gateway_idx)
                 if thymio_cfg.get("wireless_via") == "gateway":
-                    from src.robots.thymio.thymio_gateway_link import (
-                        DEFAULT_IMPACT_THRESHOLD, ThymioGatewayLink)
-                    link = ThymioGatewayLink(
-                        gateway=self._gateway,
-                        channel=int(thymio_cfg.get("channel", 25)),
-                        index=gateway_idx,
-                        address=thymio_cfg.get("thymio_addr") or None,
-                        impact_threshold=float(thymio_cfg.get("impact_threshold")
-                                               or DEFAULT_IMPACT_THRESHOLD),
-                    )
                     gateway_idx += 1
-                else:
-                    from src.robots.thymio.thymio_link import ThymioLink
-                    # node_id picks this robot out of the shared dongle; blank/0 → first.
-                    node_id = thymio_cfg.get("node_id") or None
-                    link = ThymioLink(dongle=self._thymio_dongle, node_id=node_id)
             robots.append(ThymioRobot(
                 robot_id=thymio_cfg["thymio_id"],
                 gateway=self._gateway,
@@ -244,6 +218,51 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             ))
 
         return robots
+
+    def _rebuild_thymio_dongle(self, thymios: list[dict]) -> None:
+        """(Re)create the single shared RF dongle for the dongle-driven Thymios.
+
+        Two wireless transports exist: the RF dongle (thymiodirect, shared across
+        robots by node id) or the gateway's C6 (802.15.4, dongle-free);
+        ``wireless_via: "gateway"`` picks the C6, anything else the dongle. Only
+        ONE shared dongle is supported — differing ``dongle_port`` values are
+        logged and the first (sorted) wins."""
+        dongle_users = [t for t in thymios if t.get("wireless")
+                        and t.get("wireless_via", "dongle") != "gateway"]
+        old_dongle, self._thymio_dongle = getattr(self, "_thymio_dongle", None), None
+        if old_dongle is not None:
+            old_dongle.close()                     # config reload: drop the previous one
+        if not dongle_users:
+            return
+        from src.robots.thymio.thymio_dongle import ThymioDongle
+        # dongle_port omitted → auto-detect; first robot that names one wins.
+        ports = {t.get("dongle_port") for t in dongle_users if t.get("dongle_port")}
+        port = next(iter(sorted(ports)), None)
+        if len(ports) > 1:
+            logger.warning(
+                "Thymio dongle: %d different dongle_port values configured %s — "
+                "only one shared dongle is supported, using %s; robots paired "
+                "to another dongle will not connect", len(ports), sorted(ports), port)
+        self._thymio_dongle = ThymioDongle(serial_port=port)
+
+    def _build_thymio_link(self, thymio_cfg: dict, gateway_idx: int):
+        """The wheeled-base link a wireless Thymio config asks for: the gateway's
+        C6 (``wireless_via: "gateway"``, one slot per robot) or the shared RF
+        dongle (this robot picked out by ``node_id``; blank/0 → first)."""
+        if thymio_cfg.get("wireless_via") == "gateway":
+            from src.robots.thymio.thymio_gateway_link import (
+                DEFAULT_IMPACT_THRESHOLD, ThymioGatewayLink)
+            return ThymioGatewayLink(
+                gateway=self._gateway,
+                channel=int(thymio_cfg.get("channel", 25)),
+                index=gateway_idx,
+                address=thymio_cfg.get("thymio_addr") or None,
+                impact_threshold=float(thymio_cfg.get("impact_threshold")
+                                       or DEFAULT_IMPACT_THRESHOLD),
+            )
+        from src.robots.thymio.thymio_link import ThymioLink
+        return ThymioLink(dongle=self._thymio_dongle,
+                          node_id=thymio_cfg.get("node_id") or None)
 
     def _load_robots_safe(self) -> list[BaseRobot]:
         """Wrapper around ``_load_robots`` that catches config errors.
@@ -295,7 +314,12 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         """Tools => Train Touch Models… — train per-skin-type gesture models
         from recorded sessions + their label CSVs."""
         from src.gui.train_touch_dialog import TrainTouchDialog
-        TrainTouchDialog(parent=self).exec()
+        # Skins of all configured robots — the guided capture binds to the one
+        # owning the streaming node (compensated stream during inflation).
+        skins = [s for r in self._robots
+                 for s in (getattr(r, "skins", None) or {}).values()]
+        TrainTouchDialog(parent=self, gateway=self._gateway,
+                         skins=skins).exec()
 
     def _open_fill_calibration(self) -> None:
         """Tools => Calibrate Fill Times… — measure each chamber's inflate time

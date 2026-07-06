@@ -32,6 +32,19 @@
       </widget>
      </item>
      <item>
+      <widget class="QLabel" name="min_power_label">
+       <property name="text"><string>Min power PWM:</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QSpinBox" name="min_power_spin">
+       <property name="whatsThis"><string>The pump PWM (1-255) that "power level 1" — the gentlest — maps to in the activity editor's 1-5 power dial; level 5 is always full (255). Below ~190 a diaphragm pump stalls and moves no air, so that is the usual floor. Saved per skin type for the type(s) shown here. Raise it if a stiffer silicone needs more push to start.</string></property>
+       <property name="minimum"><number>60</number></property>
+       <property name="maximum"><number>255</number></property>
+       <property name="value"><number>190</number></property>
+      </widget>
+     </item>
+     <item>
       <spacer name="controls_spacer">
        <property name="orientation"><enum>Qt::Horizontal</enum></property>
        <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>

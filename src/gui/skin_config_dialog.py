@@ -994,7 +994,14 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
                 if saved.get("fill_time_ms") is not None:
                     cfg["fill_time_ms"] = saved["fill_time_ms"]
             chambers.append(cfg)
-        skin_cfgs = [{"skin_id": skin_id, "chambers": chambers}]
+        # Touch config (coupling matrix + compensation tuning) isn't edited in
+        # the chamber rows — it comes from the touch-coupling calibration tool —
+        # so carry it over from the saved skin. The test dialog uses it to
+        # subtract actuation coupling from the live sensor readout (an inflated
+        # chamber otherwise fakes a touch); absent/uncalibrated → raw, unchanged.
+        skin_cfgs = [{"skin_id": skin_id, "chambers": chambers,
+                      "skin_type": self.skin_type_combo.currentData() or "",
+                      "touch": self._load_skin_cfg().get("touch")}]
         # LED ring layout for this node's type, so the dialog shows one tester per
         # ring (node_multiplexed has four). Defaults to a single ring if unknown.
         node_types = {n.get("mac"): n.get("node_type") for n in self._robot_nodes()}

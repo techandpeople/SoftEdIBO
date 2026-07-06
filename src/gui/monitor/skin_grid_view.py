@@ -50,7 +50,7 @@ _NEIGHBOURS = ((-1, 0), (1, 0), (0, -1), (0, 1))
 class SkinGridView(QWidget):
     """Spatial view of a skin's chambers + current pressure levels."""
 
-    _magnet_msg = Signal(object)  # thread-safe bridge for on_magnet callbacks
+    _magnet_msg = Signal(str, object)  # (stream tag "raw"/"comp", on_magnet data)
 
     def __init__(self, skin: Skin, cell_px: int = 40,
                  parent: QWidget | None = None) -> None:
@@ -89,15 +89,31 @@ class SkinGridView(QWidget):
 
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
+        # Sensor highlight source. The node's own ``act`` set (raw) fires on
+        # actuation coupling too — an inflating chamber shifts the magnet and
+        # fakes a touch — so by default we render the skin's COMPENSATED stream
+        # (``skin.on_magnet`` recomputes ``act`` from the residual), matching what
+        # the activities actually react to. We also subscribe to the raw stream so
+        # the toggle (set_compensated) can show the uncompensated field for
+        # diagnosis. When the skin has no calibrated coupling the two streams are
+        # identical, so we subscribe raw-only and hide the toggle (see SkinWidget).
+        from src.hardware.touch_source import (CompensatedMagnetSource,
+                                               subscribe_skin_magnet)
+        self._can_compensate = isinstance(
+            getattr(skin, "touch_source", None), CompensatedMagnetSource)
+        self._show_compensated = self._can_compensate
         ctrl = getattr(skin, "touch_controller", None)
         if ctrl is not None and hasattr(ctrl, "on_magnet"):
             # Force QueuedConnection: gateway uses a Python threading.Thread (not
             # QThread), so AutoConnection delivers the signal synchronously in the
             # wrong thread.  QueuedConnection always routes through the event loop.
             self._magnet_msg.connect(
-                self._on_magnet_msg, Qt.ConnectionType.QueuedConnection
+                self._on_magnet_dispatch, Qt.ConnectionType.QueuedConnection
             )
-            ctrl.on_magnet(self._magnet_msg.emit)
+            ctrl.on_magnet(lambda d: self._magnet_msg.emit("raw", d))
+            if self._can_compensate:
+                subscribe_skin_magnet(
+                    skin, lambda d: self._magnet_msg.emit("comp", d))
 
         self._sensor_buttons: dict[int, QPushButton] = {}
         # T-buttons only make sense in simulation — on real hardware the
@@ -391,6 +407,21 @@ class SkinGridView(QWidget):
             if (r, c + 1) not in cell_set:
                 p.drawLine(x + w - inset, y + inset,
                            x + w - inset, y + h - inset)
+
+    def set_compensated(self, on: bool) -> None:
+        """Switch the sensor highlight between the compensated detection stream
+        (the default — what the activities react to) and the raw sensor field.
+
+        No-op when this skin has no calibrated coupling: the two streams are then
+        identical, so there is nothing to switch (the toggle stays hidden)."""
+        if self._can_compensate:
+            self._show_compensated = bool(on)
+
+    def _on_magnet_dispatch(self, tag: str, data: dict[str, Any]) -> None:
+        """Route one tagged magnet frame to the renderer iff it is the stream the
+        current mode wants, so the raw and compensated frames don't both paint."""
+        if tag == ("comp" if self._show_compensated else "raw"):
+            self._on_magnet_msg(data)
 
     def _on_magnet_msg(self, data: dict[str, Any]) -> None:
         active = data.get("act") or []

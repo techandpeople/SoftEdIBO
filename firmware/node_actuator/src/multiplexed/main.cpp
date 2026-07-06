@@ -255,10 +255,12 @@ void parseAndQueue(const uint8_t* data, int len) {
         c.type = cmd_queue::CMD_SET_MAX;
         c.chamber = doc["chamber"] | -1;
         c.param_kpa = doc["value"] | config::DEFAULT_CHAMBER_MAX_KPA;
+        c.seq = doc["seq"] | cmd_queue::NO_SEQ;
     } else if (strcmp(cmd, "set_min_pressure") == 0) {
         c.type = cmd_queue::CMD_SET_MIN;
         c.chamber = doc["chamber"] | -1;
         c.param_kpa = doc["value"] | config::DEFAULT_CHAMBER_MIN_KPA;
+        c.seq = doc["seq"] | cmd_queue::NO_SEQ;
     } else if (strcmp(cmd, "hold") == 0) {
         c.type = cmd_queue::CMD_HOLD;
         c.chamber = doc["chamber"] | -1;
@@ -501,7 +503,13 @@ void applyChamberCmd(int n, const cmd_queue::Cmd& c) {
         // chamber = chamber, param = side (0=inflate, 1=deflate), cfg_chambers = open (0/1)
         // Enter manual override: drop the engine sequences + close everything first
         // so the manual action starts from a clean slate; auto-cleared by dead-man.
-        if (!manualActive) { chambers::abortSequences(); chambers::closeAll(); }
+        // recalcPumps() right after, or a pump the engine had running keeps
+        // dead-heading against the now all-closed valves.
+        if (!manualActive) {
+            chambers::abortSequences();
+            chambers::closeAll();
+            chambers::recalcPumps();
+        }
         manualActive = true;
         manualTs     = millis();
         applyManualValve(n, c.param, c.cfg_chambers != 0);
@@ -509,7 +517,11 @@ void applyChamberCmd(int n, const cmd_queue::Cmd& c) {
     }
     case CMD_PUMP_MANUAL: {
         // param = pump role (0=pressure, 1=vacuum), cfg_chambers = on (0/1)
-        if (!manualActive) { chambers::abortSequences(); chambers::closeAll(); }
+        if (!manualActive) {
+            chambers::abortSequences();
+            chambers::closeAll();
+            chambers::recalcPumps();
+        }
         manualActive = true;
         manualTs     = millis();
         applyManualPump(c.param, c.cfg_chambers != 0);
@@ -518,6 +530,16 @@ void applyChamberCmd(int n, const cmd_queue::Cmd& c) {
     default:
         break;
     }
+}
+
+// Confirm (or NACK) a set-once safety limit the PC asked to be confirmed. A no-op
+// for any other command or when the PC didn't tag the command with a `seq`, so
+// callers can invoke it unconditionally after applying/rejecting a chamber cmd.
+void ackConfirmable(const cmd_queue::Cmd& c, bool ok, const char* err = nullptr) {
+    using namespace cmd_queue;
+    if (c.seq == NO_SEQ || (c.type != CMD_SET_MAX && c.type != CMD_SET_MIN)) return;
+    se::node::sendAck(c.type == CMD_SET_MAX ? "set_max_pressure" : "set_min_pressure",
+                      c.seq, c.chamber, ok, err);
 }
 
 void processCommand(const cmd_queue::Cmd& c) {
@@ -596,8 +618,12 @@ void processCommand(const cmd_queue::Cmd& c) {
         for (int i = 0; i < limit; i++) applyChamberCmd(i, c);
         return;
     }
-    if (n < 0 || n >= limit) return;
+    if (n < 0 || n >= limit) {
+        ackConfirmable(c, false, "bad_chamber");   // NACK: PC fails fast, no retry
+        return;
+    }
     applyChamberCmd(n, c);
+    ackConfirmable(c, true);   // confirm set_max/set_min AFTER applying it
 }
 
 // Enforce hard limits while in manual override (called at the pressure cadence
@@ -699,7 +725,7 @@ void setup() {
     // doesn't yet know the gateway's MAC).
     char ready_msg[160];
     snprintf(ready_msg, sizeof(ready_msg),
-             "{\"status\":\"node_multiplexed_ready\",\"fw\":\"progressive-close-1\",\"rgbw\":" LED_RGBW_JSON ",\"kpa_min\":%.0f}",
+             "{\"status\":\"node_multiplexed_ready\",\"fw\":\"pump-recalc-1\",\"rgbw\":" LED_RGBW_JSON ",\"kpa_min\":%.0f}",
              (double)pressure::FLOOR_KPA);
     se::broadcast(ready_msg);
 

@@ -19,9 +19,9 @@ The system supports multiple robot types (Turtle, Tree, Thymio) and activity mod
 | Seeed XIAO ESP32-S3 (gateway) | 1 | Connected to PC via USB; also runs a WiFi SoftAP (WiFi-OTA) + a UART link to a companion XIAO ESP32-C6 for dongle-free Thymio control |
 | Seeed XIAO ESP32-C6 (Thymio RCP) | 0-1 | Optional — impersonates the Thymio RF dongle over 802.15.4 (drive wheels/LEDs/sound, no dongle). See [docs/THYMIO_WIRELESS_CONTROL.md](docs/THYMIO_WIRELESS_CONTROL.md) |
 | ESP32-WROOM-32 (`node_direct`) | 1 per direct board | 3 chambers, direct ADC sensors, onboard pumps |
-| ESP32-WROOM-32 (`node_multiplexed`) | 1 per multiplexed board | Up to 12 chambers; optional shared pressure/vacuum tanks |
+| ESP32-WROOM-32 (`node_multiplexed`) | 1 per multiplexed board | Up to 12 chambers (runtime configurable) |
 | DRV3297 motor driver | 1 (`node_direct`) / up to 3 (`node_multiplexed`) | Drives pumps with PWM |
-| Air pump | 2 (`node_direct`) / up to 6 (`node_multiplexed`) | Inflate/deflate supply (tank-fed when `has_reservoirs: true`) |
+| Air pump | 2 (`node_direct`) / up to 6 (`node_multiplexed`) | Inflate/deflate supply — pumps push directly into the chambers |
 | XGZP6847A pressure sensor | 1 per chamber | Analog output (0-3.3 V) |
 | Solenoid valves | 2 per chamber | Inflate + deflate via ULN2803A |
 
@@ -33,7 +33,7 @@ For each node, choose the matching firmware target:
 | Firmware | Path | When to use |
 |----------|------|-------------|
 | `node_actuator` env `direct` / `direct_debug` | [firmware/node_actuator/](firmware/node_actuator/) | Direct board (fixed 3 chambers) |
-| `node_actuator` env `multiplexed` / `multiplexed_debug` | [firmware/node_actuator/](firmware/node_actuator/) | Multiplexed board (default 12 chambers, runtime configurable; tanks optional) |
+| `node_actuator` env `multiplexed` / `multiplexed_debug` | [firmware/node_actuator/](firmware/node_actuator/) | Multiplexed board (default 12 chambers, runtime configurable) |
 | `node_magnet_sensor` | [firmware/node_magnet_sensor/](firmware/node_magnet_sensor/) | 4× MLX90393 magnetic touch board (`node_magnet_sensor` protocol) |
 
 ---
@@ -42,7 +42,7 @@ For each node, choose the matching firmware target:
 
 ```
 PC --USB--> Gateway (XIAO ESP32-S3) --ESP-NOW--> node_direct      (3 chambers, direct GPIO valves + own pumps)
-                                    │        └-> node_multiplexed (up to 12 chambers, optional shared pressure/vacuum tanks)
+                                    │        └-> node_multiplexed (up to 12 chambers)
                                     └--UART--> C6 --802.15.4--> Thymio  (dongle-free wheels/LEDs/sound; optional)
 ```
 
@@ -50,20 +50,18 @@ PC --USB--> Gateway (XIAO ESP32-S3) --ESP-NOW--> node_direct      (3 chambers, d
 
 ```
 SessionPanel
-  +-- Activity (GroupTouch, Simulation, ...)
+  +-- Activity (declarative behaviours run by ScriptedActivity)
         +-- Robot (Turtle / Tree / Thymio / Simulated)
               +-- Node(s)  (ESP32, identified by MAC + node_type + max_slots)
-                +-- Reservoir(s)  (auto-derived from node_multiplexed with has_reservoirs: true, slots N and N+1)
-              +-- Skin(s)  (logical grouping of 1-3 chambers from any node of this robot)
+              +-- Skin(s)  (logical grouping of 1-3 chambers from one node of this robot)
                     +-- AirChamber  (local index 0-2, pressure 0-100 %)
 ```
 
-          - **Node** is a physical ESP32. Its `node_type` (`node_direct` or `node_multiplexed`) determines which firmware to flash.
-- **Skin** groups 1-3 chambers. Chambers can come from different nodes of the same robot. Activities address chambers by local skin index (0, 1, 2) — no knowledge of node topology required.
-          - **Reservoir** is an optional per-robot shared air tank (pressure or vacuum). For `node_multiplexed` with `has_reservoirs: true`, pressure and vacuum reservoirs are internal to the same MAC.
+- **Node** is a physical ESP32. Its `node_type` (`node_direct` or `node_multiplexed`) determines which firmware to flash.
+- **Skin** groups 1-3 chambers, all on the same node (a skin never spans MACs). Activities address chambers by local skin index (0, 1, 2) — no knowledge of node topology required.
 - **Pressure** is expressed as **0-100 %** of the maximum pressure configured on each node.
 - **Per-chamber max pressure** is set in `settings.yaml` and enforced both in the app and on the ESP32 (hardware safety — survives app crashes).
-          - **Pressure sensing** uses the XGZP6847A datasheet transfer function (see [pressure.h](firmware/common/pressure.h)).
+- **Pressure sensing** uses the XGZP6847A datasheet transfer function (see [pressure.h](firmware/common/pressure.h)).
 
 **Touch sensing (optional).** A skin may reference a `node_magnet_sensor` (4-sensor magnet sensor/touch board) via its `touch:` block — see [firmware/PROTOCOL.md](firmware/PROTOCOL.md). The activity-time view (`SkinGridView`) overlays a pulsing yellow outline on the active sensor cells so the operator sees where each touch lands relative to the chamber regions.
 
@@ -71,7 +69,7 @@ SessionPanel
 
 **Sensor stream recording + touch-gesture ML.** A session can record every sensor message to `data/recordings/<id>.jsonl` (toggle in the setup dialog — no video). Those recordings, plus gestures tagged live in the observer panel, feed a **per-`skin_type`, coordinate-free** touch-gesture classifier (tap / press / stroke / squeeze). `scikit-learn` is the optional `ml` extra; the classifier is inert without a trained model. See [docs/TOUCH_ML.md](docs/TOUCH_ML.md).
 
-See [docs/ACTIVITIES.md](docs/ACTIVITIES.md) for the broader behavior-framework plan.
+**Activities are declarative behaviours.** No activities are hard-coded: every activity is a behaviour spec authored in the block editor (**Tools → Activity Editor…**), stored in the DB (or imported from JSON examples in `config/examples/behaviours/`) and interpreted at session time by `ScriptedActivity`. See [docs/ACTIVITIES.md](docs/ACTIVITIES.md).
 
 ---
 
@@ -120,27 +118,30 @@ On first launch, a setup wizard guides you through flashing the firmware to the 
 
 ### Configuration (`config/settings.yaml`)
 
-Robots are configured as a flat list of skins per type. Each skin maps to an ESP32 node (by MAC address) and specifies which chamber slots it uses. An optional `max_pressure` field sets per-chamber safety limits in kPa.
+Robots are configured per type (`turtles:` / `trees:` / `thymios:`), each with its own `nodes:` (ESP32s by MAC) and `skins:` on top. A skin lists its chambers — each a `{mac, slot}` pair on a single node — with optional per-chamber `max_pressure` / `min_pressure` safety limits in kPa. It is all editable from the GUI (Robots panel); the commented examples in [config/settings.yaml](config/settings.yaml) show the full shape (skin types, touch blocks, Thymio entries).
 
 ```yaml
 robots:
   turtles:
     - id: turtle_1
+      nodes:
+        - mac: "AA:BB:CC:DD:EE:01"
+          node_type: "node_multiplexed"
+          max_slots: 12
       skins:
         - skin_id: shell_top
           name: Shell Top
-          mac: "AA:BB:CC:DD:EE:01"
-          slots: [0, 1, 2]
-          max_pressure:       # optional — defaults to 8.0 kPa
-            0: 8.0            # chamber 0 capped at 8.0 kPa
-            1: 6.0            # chamber 1 capped at 6.0 kPa
+          skin_type: turtle_square
+          chambers:
+            - {mac: "AA:BB:CC:DD:EE:01", slot: 0, max_pressure: 8.0}
+            - {mac: "AA:BB:CC:DD:EE:01", slot: 1, max_pressure: 6.0}
   trees: []
   thymios: []
 ```
 
-- Multiple skins can share the same MAC (up to 3 slots total per node).
+- Multiple skins can share the same node MAC; each skin groups up to 3 of that node's slots.
 - `max_pressure` is sent to the ESP32 node on startup as kPa. The gateway forwards it unchanged; the node enforces it independently — even if the app crashes, chambers will not exceed their configured limit.
-- If `max_pressure` is omitted, all chambers default to 8.0 kPa.
+- If `max_pressure` is omitted, chambers default to 8.0 kPa.
 
 ---
 
@@ -178,7 +179,7 @@ cd firmware/node_actuator && pio run -e direct      --target upload
 cd firmware/node_actuator && pio run -e multiplexed --target upload
 
 # Sensor node (4x MLX90393 touch board)
-cd firmware/node_magnet_sensor && pio run --target upload
+cd firmware/node_magnet_sensor && pio run -e release --target upload
 
 # Thymio radio co-processor (optional) — Seeed XIAO ESP32-C6
 cd firmware/thymio_rcp && pio run -e rcp_c6 --target upload
@@ -215,12 +216,13 @@ The CI pipeline automatically selects the firmware environment:
 | `src/hardware/air_chamber.py` | AirChamber model — pressure 0-100 %, configurable max |
 | `src/hardware/esp32_controller.py` | Real hardware controller (via the SoftEdIBO gateway) |
 | `src/hardware/simulated_controller.py` | Mock controller for simulation mode |
+| `src/hardware/touch_profiles.py` | Touch-sensor technology seam (magnet today, capacitive skeleton) — see [docs/TOUCH_SENSORS.md](docs/TOUCH_SENSORS.md) |
 | `src/data/stream_recorder.py` | Per-session JSONL recorder of all gateway sensor messages |
 | `src/data/export.py` | Session CSV export with robot/participant attribution |
 | `src/ml/` | Touch-gesture pipeline (segmenter, features, classifier) — see [docs/TOUCH_ML.md](docs/TOUCH_ML.md) |
 | `src/gui/skin_shapes.py` | Shared skin-outline masks (round/triangle/thymio) + aspect ratio |
 | `src/robots/` | TurtleRobot, TreeRobot, ThymioRobot, SimulatedRobot |
-| `src/activities/` | Activity registry + GroupTouch + OrganSwap |
+| `src/activities/` | Activity registry + declarative behaviour engine (`ScriptedActivity`, verb catalogue) |
 | `src/gui/monitor/` | Live pressure monitor widgets |
 | `scripts/label_touches.py` / `scripts/train_touch_model.py` | Offline touch-gesture labelling + training (`.[ml]` extra) |
 | `src/log.py` | Centralized logging setup (console + rotating file) |

@@ -1,0 +1,227 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>GestureCaptureDialog</class>
+ <widget class="QDialog" name="GestureCaptureDialog">
+  <property name="geometry">
+   <rect><x>0</x><y>0</y><width>660</width><height>560</height></rect>
+  </property>
+  <property name="windowTitle"><string>Guided gesture capture</string></property>
+  <layout class="QVBoxLayout" name="root_layout">
+   <item>
+    <widget class="QLabel" name="source_label">
+     <property name="toolTip"><string>Locks onto the first touch node that streams data. Touch the skin to connect it.</string></property>
+     <property name="text"><string>Waiting for a touch node… (touch the skin once)</string></property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QStackedWidget" name="stack">
+     <widget class="QWidget" name="page_setup">
+      <layout class="QVBoxLayout" name="setup_layout">
+       <item>
+        <widget class="QLabel" name="setup_intro">
+         <property name="wordWrap"><bool>true</bool></property>
+         <property name="text"><string>Pick the skin type, how many repetitions per gesture, and which gestures to record. Capture on a resting skin (no inflation). Then Start: the app will prompt one gesture at a time.</string></property>
+        </widget>
+       </item>
+       <item>
+        <layout class="QFormLayout" name="setup_form">
+         <item row="0" column="0">
+          <widget class="QLabel" name="type_label"><property name="text"><string>Skin type:</string></property></widget>
+         </item>
+         <item row="0" column="1">
+          <widget class="QComboBox" name="type_combo">
+           <property name="toolTip"><string>Which skin type this dataset trains a model for (models/touch_&lt;type&gt;.joblib).</string></property>
+          </widget>
+         </item>
+         <item row="1" column="0">
+          <widget class="QLabel" name="variant_label"><property name="text"><string>Silicone variant:</string></property></widget>
+         </item>
+         <item row="1" column="1">
+          <widget class="QComboBox" name="variant_combo">
+           <property name="editable"><bool>true</bool></property>
+           <property name="toolTip"><string>Optional silicone format — used as a touch feature so one model can adapt across formats. Leave blank if unsure.</string></property>
+          </widget>
+         </item>
+         <item row="2" column="0">
+          <widget class="QLabel" name="reps_label"><property name="text"><string>Repetitions each:</string></property></widget>
+         </item>
+         <item row="2" column="1">
+          <widget class="QSpinBox" name="reps_spin">
+           <property name="minimum"><number>1</number></property>
+           <property name="maximum"><number>50</number></property>
+           <property name="value"><number>5</number></property>
+           <property name="toolTip"><string>How many times to perform each selected gesture.</string></property>
+          </widget>
+         </item>
+        </layout>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="gestures_box">
+         <property name="title"><string>Gestures to record</string></property>
+         <layout class="QVBoxLayout" name="gestures_layout"/>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="sensor_group">
+         <property name="title"><string>Touch test &amp; sensitivity</string></property>
+         <property name="toolTip"><string>Watch each sensor light up as you touch the skin, and set how firm a touch counts. Saved per skin type and reused everywhere.</string></property>
+         <layout class="QHBoxLayout" name="sensor_holder"/>
+        </widget>
+       </item>
+       <item>
+        <spacer name="setup_spacer">
+         <property name="orientation"><enum>Qt::Vertical</enum></property>
+         <property name="sizeHint" stdset="0"><size><width>20</width><height>20</height></size></property>
+        </spacer>
+       </item>
+       <item>
+        <layout class="QHBoxLayout" name="setup_buttons">
+         <item>
+          <spacer name="setup_btn_spacer">
+           <property name="orientation"><enum>Qt::Horizontal</enum></property>
+           <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+          </spacer>
+         </item>
+         <item>
+          <widget class="QPushButton" name="start_btn">
+           <property name="enabled"><bool>false</bool></property>
+           <property name="text"><string>Start</string></property>
+          </widget>
+         </item>
+        </layout>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="page_capture">
+      <layout class="QVBoxLayout" name="capture_layout">
+       <item>
+        <spacer name="capture_top_spacer">
+         <property name="orientation"><enum>Qt::Vertical</enum></property>
+         <property name="sizeHint" stdset="0"><size><width>20</width><height>20</height></size></property>
+        </spacer>
+       </item>
+       <item>
+        <widget class="QLabel" name="do_label">
+         <property name="alignment"><set>Qt::AlignCenter</set></property>
+         <property name="text"><string>Do this gesture:</string></property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QLabel" name="prompt_label">
+         <property name="alignment"><set>Qt::AlignCenter</set></property>
+         <property name="styleSheet"><string>font-size: 30pt; font-weight: bold;</string></property>
+         <property name="text"><string>—</string></property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QLabel" name="prompt_hint">
+         <property name="alignment"><set>Qt::AlignCenter</set></property>
+         <property name="wordWrap"><bool>true</bool></property>
+         <property name="text"><string/></property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QLabel" name="count_label">
+         <property name="alignment"><set>Qt::AlignCenter</set></property>
+         <property name="styleSheet"><string>font-size: 14pt;</string></property>
+         <property name="text"><string>0 / 0</string></property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QProgressBar" name="progress_bar">
+         <property name="value"><number>0</number></property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QLabel" name="tally_label">
+         <property name="alignment"><set>Qt::AlignCenter</set></property>
+         <property name="text"><string/></property>
+        </widget>
+       </item>
+       <item>
+        <layout class="QHBoxLayout" name="capture_grid_row"/>
+       </item>
+       <item>
+        <widget class="QLabel" name="last_capture_label">
+         <property name="alignment"><set>Qt::AlignCenter</set></property>
+         <property name="styleSheet"><string>color: #566573;</string></property>
+         <property name="toolTip"><string>What the last captured gesture looked like on the stream: duration, pulses, peak field and — for slides — the direction of travel.</string></property>
+         <property name="whatsThis"><string>Summary of the most recent captured gesture: its label, duration in milliseconds, number of pulses (multi-taps), peak magnetic field, the sensors involved and, when the touch travelled across the skin, its direction (e.g. S1→S0 ← left).</string></property>
+         <property name="text"><string/></property>
+        </widget>
+       </item>
+       <item>
+        <spacer name="capture_bot_spacer">
+         <property name="orientation"><enum>Qt::Vertical</enum></property>
+         <property name="sizeHint" stdset="0"><size><width>20</width><height>20</height></size></property>
+        </spacer>
+       </item>
+       <item>
+        <layout class="QHBoxLayout" name="capture_buttons">
+         <item>
+          <widget class="QPushButton" name="cancel_btn">
+           <property name="text"><string>Cancel</string></property>
+          </widget>
+         </item>
+         <item>
+          <spacer name="capture_btn_spacer">
+           <property name="orientation"><enum>Qt::Horizontal</enum></property>
+           <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+          </spacer>
+         </item>
+         <item>
+          <widget class="QPushButton" name="undo_btn">
+           <property name="toolTip"><string>Discard the last captured gesture and prompt it again (fumbled a repetition).</string></property>
+           <property name="text"><string>Undo last</string></property>
+          </widget>
+         </item>
+        </layout>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="page_results">
+      <layout class="QVBoxLayout" name="results_layout">
+       <item>
+        <widget class="QLabel" name="result_label">
+         <property name="styleSheet"><string>font-size: 16pt; font-weight: bold;</string></property>
+         <property name="text"><string>Training…</string></property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QLabel" name="confusion_label">
+         <property name="text"><string>Confusion (rows = performed, columns = predicted):</string></property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QTableWidget" name="confusion_table"/>
+       </item>
+       <item>
+        <widget class="QPlainTextEdit" name="report_text">
+         <property name="readOnly"><bool>true</bool></property>
+         <property name="styleSheet"><string>font-family: monospace;</string></property>
+        </widget>
+       </item>
+       <item>
+        <layout class="QHBoxLayout" name="results_buttons">
+         <item>
+          <spacer name="results_btn_spacer">
+           <property name="orientation"><enum>Qt::Horizontal</enum></property>
+           <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+          </spacer>
+         </item>
+         <item>
+          <widget class="QPushButton" name="close_btn">
+           <property name="text"><string>Close</string></property>
+          </widget>
+         </item>
+        </layout>
+       </item>
+      </layout>
+     </widget>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

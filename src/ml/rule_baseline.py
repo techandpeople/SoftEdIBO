@@ -20,20 +20,12 @@ def classify(seg: TouchSegment) -> str:
     if f["n_samples"] == 0:
         return tax.UNKNOWN
 
-    # Squeeze: many sensors active at once dominates.
-    if f["active_frac_max"] >= tax.SQUEEZE_MIN_ACTIVE_FRAC:
-        return tax.SQUEEZE
-    # Stroke: distinct sensors activated in sequence (movement).
-    if (f["is_sequential"] >= 1.0
-            and f["n_distinct_sensors"] >= tax.STROKE_MIN_DISTINCT):
-        return tax.STROKE
-    # Repeated taps: a merged multi-tap gesture carries its pulse count.
+    # Compressions: a bout of several press→release pulses in a row — the
+    # merged gesture carries the pulse count.
     pulses = int(f.get("n_pulses", 1))
-    if pulses >= 3:
-        return tax.TRIPLE_TAP
-    if pulses == 2:
-        return tax.DOUBLE_TAP
-    # Tap vs press by duration.
+    if pulses >= tax.COMPRESSIONS_MIN_PULSES:
+        return tax.COMPRESSIONS
+    # Tap vs press by duration (both single-pulse).
     if f["duration_ms"] <= tax.TAP_MAX_MS:
         return tax.TAP
     if f["duration_ms"] >= tax.PRESS_MIN_MS:

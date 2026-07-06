@@ -117,6 +117,18 @@ def _unit_deltas(seg: TouchSegment, sensor: int) -> tuple[list, list[float]]:
     return units, z_fracs
 
 
+def dominant_z_frac(seg: TouchSegment) -> float | None:
+    """Mean |z|-fraction of the dominant sensor's 3-axis deltas, or ``None``
+    when the segment carries no vector data.
+
+    Near 1.0 = the magnet was pushed straight down (tap/press); clearly lower =
+    lateral shear — the x/y signature of a finger actually travelling across the
+    skin. Used by :mod:`src.ml.touch_motion` to tell a real slide apart from
+    separate touches on different sensors."""
+    _units, z_fracs = _unit_deltas(seg, _dominant_sensor(seg))
+    return _safe_mean(z_fracs) if z_fracs else None
+
+
 def _vec_features(seg: TouchSegment) -> dict[str, float]:
     """Direction features from the 3-axis ``vec`` deltas, when streamed.
 

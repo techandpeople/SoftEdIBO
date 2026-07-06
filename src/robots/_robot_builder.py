@@ -145,7 +145,8 @@ def _build_one_skin(skin_cfg: dict[str, Any],
         chamber_inputs=chamber_inputs,
         grid=skin_cfg.get("grid"),
         chamber_grid=skin_cfg.get("chamber_grid"),
-        touch=skin_cfg.get("touch"),
+        touch=_touch_with_saved_threshold(skin_cfg.get("touch"),
+                                          skin_cfg.get("skin_type", "")),
         touch_controller=touch_ctrl,
         shape=skin_cfg.get("shape", "rect"),
         organ=skin_cfg.get("organ"),
@@ -160,3 +161,24 @@ def _resolve_touch_ctrl(skin_cfg: dict[str, Any],
     """Return the controller for the magnet sensor referenced by ``skin_cfg.touch``."""
     touch_cfg = skin_cfg.get("touch") or {}
     return controllers.get(touch_cfg.get("node_mac")) if touch_cfg else None
+
+
+def _touch_with_saved_threshold(touch_cfg: dict[str, Any] | None,
+                                skin_type: str) -> dict[str, Any] | None:
+    """Overlay the skin type's saved sensitivity onto a touch config.
+
+    The µT activation threshold calibrated once per skin type (guided gesture
+    capture / Test Actuators → ``Settings.touch_threshold_ut``) becomes the
+    general default: the Skin pushes it to the node at build and the pressure
+    compensator rederives ``act`` at the same value. An explicit per-skin
+    ``act_threshold_ut`` in the config always wins; without a saved value the
+    config passes through untouched."""
+    if not touch_cfg or not skin_type or touch_cfg.get("act_threshold_ut"):
+        return touch_cfg
+    from src.config.settings import Settings
+    saved = Settings().touch_threshold_ut(skin_type)
+    if saved is None:
+        return touch_cfg
+    out = dict(touch_cfg)
+    out["act_threshold_ut"] = saved
+    return out

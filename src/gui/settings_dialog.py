@@ -75,6 +75,14 @@ class SettingsDialog(BaseDialog, Ui_SettingsDialog):
         self.gw_auto_check = QCheckBox("Connect automatically on startup")
         form.addRow("", self.gw_auto_check)
 
+        self.gw_scan_check = QCheckBox("Scan for nodes on connect")
+        self.gw_scan_check.setWhatsThis(
+            "Broadcast a node scan automatically each time the gateway connects "
+            "(on startup and when you click Connect), so the robot panel is "
+            "populated without pressing Scan Nodes. Turn off to avoid the extra "
+            "RF traffic when you only need a quick connection.")
+        form.addRow("", self.gw_scan_check)
+
         # Insert just above the Save/Cancel button box.
         self.verticalLayout.insertWidget(self.verticalLayout.count() - 1, group)
 
@@ -117,6 +125,7 @@ class SettingsDialog(BaseDialog, Ui_SettingsDialog):
         if baud_idx >= 0:
             self.gw_baud_combo.setCurrentIndex(baud_idx)
         self.gw_auto_check.setChecked(self._settings.gateway_auto_connect)
+        self.gw_scan_check.setChecked(self._settings.auto_scan_on_connect)
 
         db = self._settings.db_cfg
         backend = db.get("backend", "sqlite").lower()
@@ -157,6 +166,7 @@ class SettingsDialog(BaseDialog, Ui_SettingsDialog):
         d["gateway"]["serial_port"] = port.strip()
         d["gateway"]["baud_rate"] = int(self.gw_baud_combo.currentText())
         d["gateway"]["auto_connect"] = self.gw_auto_check.isChecked()
+        d["gateway"]["auto_scan_on_connect"] = self.gw_scan_check.isChecked()
 
         d.setdefault("database", {})
         backend = "sqlite" if self.backend_combo.currentIndex() == 0 else "postgresql"

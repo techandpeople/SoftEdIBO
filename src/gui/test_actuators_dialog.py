@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
 )
 
 from src.core.skin_config import FILL_MODE_PRESSURE, normalize_fill_mode
+from src.core.touch_compensation import compensator_from_config
 from src.gui.led_ring_tester import LedRingTester
 from src.gui.sensor_tester import SensorTester
 from src.gui.base_dialog import BaseDialog
@@ -55,7 +56,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
     # Emitted from the gateway read thread with the node's magnet-sensor stream
     # (per-sensor µT). Connected to _on_magnet_data on the main thread, which
     # lazily builds the sensor tester the first time a node actually streams it.
-    _magnet_received = Signal(list)                # per-sensor magnitudes (µT)
+    _magnet_received = Signal(list, object)        # per-sensor µT, optional vec
 
     # Monospace valve/pump button base; the open variant adds a green fill so an
     # actually-open valve is obvious at a glance.
@@ -109,6 +110,27 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         # Live magnet-sensor readout. Built lazily the first time the node streams
         # a ``magnet`` frame, so nodes without touch sensors show nothing extra.
         self._sensor_tester: SensorTester | None = None
+        # Spatial touch grid (2×2 for the Thymio's 4 sensors, in its 'D' shape),
+        # driven by the same magnet stream. Its skin type selects the geometry.
+        self._sensor_grid = None
+        self._skin_type: str = (skin_cfgs[0].get("skin_type", "")
+                                if skin_cfgs else "")
+        # Pressure-informed touch compensation for the sensor readout: a chamber
+        # inflated to max shifts the magnet under a sensor and fakes a touch, so
+        # the panel would show a false active sensor with nobody touching. When
+        # this skin has a calibrated + enabled coupling matrix we subtract the
+        # expected actuation offset (mirroring the live detection path); a toggle
+        # in the sensor panel flips back to the raw field for hardware diagnosis.
+        # ``None`` when no coupling is configured → the panel stays raw, unchanged.
+        self._compensator = self._build_compensator(skin_cfgs)
+        # Live inflation level (% of configured range) per node slot, folded from
+        # each chamber ``status``. This is the signal the compensator scales the
+        # coupling by (same basis as the live Skin: % against the configured min/max).
+        self._levels: dict[int, float] = {}
+        # Last raw reading, kept so toggling compensation re-renders immediately
+        # (magnet frames also arrive continuously, but a toggle should feel instant).
+        self._last_mag: list[float] = []
+        self._last_vec = None
 
         self.setupUi(self)
         self.setWindowTitle(f"Test Actuators — {mac}")
@@ -206,6 +228,30 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         self._gateway.on_message(self._on_gateway_message)
         self.finished.connect(self._on_closed)
 
+    def _build_compensator(self, skin_cfgs: list[dict]):
+        """Build the touch compensator for this node's sensors, or ``None``.
+
+        The sensor panel only ever shows readings from ``self._mac`` (the panel
+        is filtered to this node in :meth:`_on_gateway_message`), so it applies
+        only to a node that folds sensing into its actuator board (node_direct),
+        where the coupling matrix — keyed by chamber slot — matches the slots this
+        dialog already tracks. Prefer the skin whose ``touch.node_mac`` is this
+        node; fall back to any coupling that yields a compensator. Returns ``None``
+        when no skin has a calibrated + enabled coupling (see
+        :func:`compensator_from_config`), so the readout stays raw as before."""
+        best = None
+        for cfg in skin_cfgs:
+            touch = cfg.get("touch")
+            if not touch:
+                continue
+            comp = compensator_from_config(touch)
+            if comp is None:
+                continue
+            if touch.get("node_mac") == self._mac:
+                return comp
+            best = best or comp
+        return best
+
     # ------------------------------------------------------------------
     # UI
     # ------------------------------------------------------------------
@@ -292,7 +338,8 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         if msg_type == "magnet":
             mag = data.get("mag")
             if isinstance(mag, list):
-                self._magnet_received.emit([float(v) for v in mag])
+                self._magnet_received.emit([float(v) for v in mag],
+                                           data.get("vec"))
             return
         if msg_type != "status":
             return
@@ -313,7 +360,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         if isinstance(chamber, int) and isinstance(vi, int) and isinstance(vd, int):
             self._valves_received.emit(chamber, vi, vd)
 
-    def _on_magnet_data(self, mag: list) -> None:
+    def _on_magnet_data(self, mag: list, vec=None) -> None:
         """Main thread: feed the sensor tester, building it on the first frame.
 
         The tester is created lazily (and only if the node actually streams a
@@ -322,6 +369,13 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         if self._sensor_tester is None:
             self._sensor_tester = SensorTester(
                 len(mag), self._rezero_sensors, self._configure_sensors)
+            # Offer the raw↔compensated toggle only when this skin has a
+            # calibrated + enabled coupling to apply; re-render on toggle so it
+            # feels instant instead of waiting for the next magnet frame.
+            self._sensor_tester.set_compensation_available(
+                self._compensator is not None)
+            self._sensor_tester.compensation_toggled.connect(
+                lambda _on: self._render_sensors())
             # Insert into the right column, above its trailing spacer (index 0), so
             # the panel sits to the RIGHT of the chambers/pump/run controls and is
             # pinned to the top-right rather than stacked below everything.
@@ -331,11 +385,48 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
             # next event loop pass, and until then the layout treats it as zero —
             # so _grow_to_fit would read a too-small hint and not make room.
             self._sensor_tester.show()
+            # A spatial grid above the bars: shows *where* each touch lands (2×2
+            # in the skin's shape), highlighted at the tester's live threshold.
+            from src.gui.sensor_grid_view import SensorGridView
+            from src.hardware.skin_geometry import geometry_for
+            self._sensor_grid = SensorGridView(
+                geometry_for(self._skin_type),
+                lambda: self._sensor_tester.threshold_spin.value())
+            self._sensor_tester.threshold_spin.valueChanged.connect(
+                self._sensor_grid.refresh)
+            self.right_col.insertWidget(0, self._sensor_grid,
+                                        alignment=Qt.AlignmentFlag.AlignHCenter)
+            self._sensor_grid.show()
             # The panel is a new right-hand column (not inside the chamber scroll
             # area), so it must not squeeze the rest: grow the dialog to fit its
             # new preferred size rather than compress the columns beside it.
             self._grow_to_fit()
+        self._last_mag = [float(v) for v in mag]
+        self._last_vec = vec
+        self._render_sensors()
+
+    def _render_sensors(self) -> None:
+        """Feed the sensor panel + grid with the last reading — compensated for
+        actuation coupling when available and toggled on, else the raw field.
+
+        Compensation subtracts each chamber's expected offset (scaled by its live
+        inflation level) so an inflated chamber no longer fakes a touch, matching
+        what the live detection path (activities, monitor) sees. When compensating
+        with vector calibration the residual magnitude already folds in the 3-axis
+        offset, so the stale raw ``vec`` is dropped from the grid's motion trail."""
+        if self._sensor_tester is None:
+            return
+        compensated = (self._compensator is not None
+                       and self._sensor_tester.compensation_enabled())
+        if compensated:
+            mag, _act = self._compensator.compensate(
+                self._last_mag, self._levels, vec=self._last_vec)
+            vec = None
+        else:
+            mag, vec = self._last_mag, self._last_vec
         self._sensor_tester.update_values(mag)
+        if self._sensor_grid is not None:
+            self._sensor_grid.feed(mag, vec)
 
     def _grow_to_fit(self) -> None:
         """Grow the dialog to its preferred size (never shrink, never past the
@@ -375,6 +466,12 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         "ignore max" run leaves it on the 8 kPa boot default, so every reading
         above that clamps to 100 %. Recomputing from the config the dialog already
         holds keeps the readout honest regardless of what the node holds."""
+        # Track this chamber's inflation level (%) for the touch compensator on
+        # the same basis the live Skin uses — % against the configured kPa range
+        # when the firmware reports kPa, else its raw percentage. Kept even when
+        # there is no pressure label so a slot without a row still feeds coupling.
+        self._levels[chamber] = (float(self._pct_for_kpa(chamber, kpa))
+                                 if kpa == kpa else float(pressure))
         lbl = self._pressure_labels.get(chamber)
         if not lbl:
             return
