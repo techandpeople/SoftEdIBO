@@ -80,11 +80,19 @@ jobs:
         if: steps.fwplan.outputs.components != ''
         run: pip install platformio esptool
 
-      - name: Cache PlatformIO toolchain
+      # Cache only the DOWNLOAD cache (~/.platformio/.cache), never the extracted
+      # install tree (~/.platformio/packages, platforms). Caching the whole tree
+      # let a mismatched pioarduino framework be restored — framework-arduinoespressif32
+      # present-but-invalid (or only its -libs), which resolves to None and fails
+      # the C6 build with `FRAMEWORK_DIR None`. Caching just the tarballs means the
+      # install is always re-extracted fresh from content-addressed downloads, so a
+      # broken install can never be cached, and restore-keys is safe (a stale download
+      # can't corrupt an install — worst case it is re-fetched).
+      - name: Cache PlatformIO downloads
         if: steps.fwplan.outputs.components != ''
         uses: actions/cache@v4
         with:
-          path: ~/.platformio
+          path: ~/.platformio/.cache
           key: ${{ runner.os }}-pio-${{ hashFiles('firmware/**/platformio.ini') }}
           restore-keys: ${{ runner.os }}-pio-
 
