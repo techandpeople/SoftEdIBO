@@ -91,6 +91,37 @@ void sendStatus(int chamber, float kpa) {
     esp_now_send(gatewayMac, reinterpret_cast<const uint8_t*>(buf), len);
 }
 
+// Batched status: every chamber in ONE frame (parallel arrays) instead of one esp_now_send
+// per chamber. Cuts the status frame count num_chambers× — the biggest win during a
+// status_rate fast window — freeing ESP-NOW airtime the Thymio's co-channel 802.15.4
+// shares. "pressure" is omitted (redundant — the PC recomputes it from "kpa"; kpa is
+// authoritative). Even a full 12-chamber frame is ~200 B, under the 250 B ESP-NOW limit,
+// so it is always a single frame (no splitting). kpa at 0.1 kPa. An old PC ignores it (no
+// "chamber" field); an old node still sends the scalar frame the new PC also parses.
+void sendStatusAll() {
+    if (!gatewayKnown) return;
+    const int n = config::state.num_chambers;
+    char buf[256];
+    int len = snprintf(buf, sizeof(buf), "{\"type\":\"status\",\"kpa\":[");
+    for (int i = 0; i < n; i++)
+        len += snprintf(buf + len, sizeof(buf) - len, "%s%.1f", i ? "," : "",
+                        chambers::cachedKpa[i]);
+    len += snprintf(buf + len, sizeof(buf) - len, "],\"st\":[");
+    for (int i = 0; i < n; i++)
+        len += snprintf(buf + len, sizeof(buf) - len, "%s%d", i ? "," : "",
+                        (int)chambers::state[i].state);
+    len += snprintf(buf + len, sizeof(buf) - len, "],\"vi\":[");
+    for (int i = 0; i < n; i++)
+        len += snprintf(buf + len, sizeof(buf) - len, "%s%d", i ? "," : "",
+                        pca_valves::isOpen(i, 0) ? 1 : 0);
+    len += snprintf(buf + len, sizeof(buf) - len, "],\"vd\":[");
+    for (int i = 0; i < n; i++)
+        len += snprintf(buf + len, sizeof(buf) - len, "%s%d", i ? "," : "",
+                        pca_valves::isOpen(i, 1) ? 1 : 0);
+    len += snprintf(buf + len, sizeof(buf) - len, "]}");
+    esp_now_send(gatewayMac, reinterpret_cast<const uint8_t*>(buf), len);
+}
+
 #ifdef DEBUG_BUILD
 // Which valves are open the instant an actuation command lands (the info the user
 // wants kept), streamed over ESP-NOW so it lands in the PC log without a cable.
@@ -268,6 +299,9 @@ void parseAndQueue(const uint8_t* data, int len) {
         c.type = cmd_queue::CMD_STOP;
     } else if (strcmp(cmd, "resume") == 0) {
         c.type = cmd_queue::CMD_RESUME;
+    } else if (strcmp(cmd, "tare") == 0) {
+        c.type = cmd_queue::CMD_TARE;
+        c.chamber = -1;
     } else if (strcmp(cmd, "valve_manual") == 0) {
         c.type = cmd_queue::CMD_VALVE_MANUAL;
         c.chamber = doc["chamber"] | -1;
@@ -336,8 +370,9 @@ void parseAndQueue(const uint8_t* data, int len) {
         // which loop()'s leds::update() renders. "ring" (0..3) selects one of the
         // four rings; omitted / -1 addresses all four at once.
         // {"cmd":"set_led","ring":0..3,"color":"#RRGGBB",
-        //  "pattern":"off|solid|blink|pulse|comet","period_ms":N,"count":N,
-        //  "fade_ms":N,"index":N}
+        //  "pattern":"off|solid|blink|pulse|comet|fade","period_ms":N,"count":N,
+        //  "fade_ms":N,"index":N}  "fade" adds "color2":"#RRGGBB" and cross-fades
+        //  c1<->c2 on the node (the PC used to stream that colour sweep frame by frame).
         const char* col = doc["color"]     | "#000000";
         const char* pat = doc["pattern"]   | "solid";
         uint32_t period = doc["period_ms"] | 0;
@@ -349,8 +384,15 @@ void parseAndQueue(const uint8_t* data, int len) {
         leds::parseHexColor(col, r, g, b);
         if (strcmp(pat, "off") == 0) { r = g = b = 0; }   // "off" = dark, any colour
         int idx = doc["index"] | -1;
-        if (idx >= 0) leds::setPixel(ring, idx, r, g, b, fade);   // single pixel (test panel)
-        else          leds::set(ring, r, g, b, leds::patternFromStr(pat), period, count, fade, offset);
+        if (idx >= 0) {
+            leds::setPixel(ring, idx, r, g, b, fade);   // single pixel (test panel)
+        } else if (strcmp(pat, "fade") == 0) {
+            uint8_t r2, g2, b2;                         // second colour of the cross-fade
+            leds::parseHexColor(doc["color2"] | "#000000", r2, g2, b2);
+            leds::setFade(ring, r, g, b, r2, g2, b2, period, count, fade, offset);
+        } else {
+            leds::set(ring, r, g, b, leds::patternFromStr(pat), period, count, fade, offset);
+        }
         return;
     } else if (strcmp(cmd, "set_led_halves") == 0) {
         // Split ring(s) into len(colors) equal arcs (the purple/yellow look) in
@@ -576,6 +618,11 @@ void processCommand(const cmd_queue::Cmd& c) {
         return;
     }
 
+    // Zero the pressure sensors at the current (vented) reading; needs the mux
+    // channel map, so it runs after the error guard. Non-actuating. (No ack —
+    // this board only acks the confirmable set_max/set_min, like stop/resume.)
+    if (c.type == CMD_TARE) { chambers::tare(); return; }
+
     if (c.type == CMD_CONFIGURE) {
         config::state.num_chambers          = max(1, min((int)c.cfg_chambers, MAX_CHAMBERS));
         config::state.tank_pressure_min_kpa = constrain(c.cfg_p_min, config::HARD_TANK_MIN_KPA, config::HARD_TANK_MAX_KPA);
@@ -717,6 +764,7 @@ void setup() {
     }
 
     autodetect();
+    chambers::loadTare();      // per-chamber ambient zero (NVS)
     pca_valves::closeAllValves();
     pumps::stopAll();
 
@@ -725,7 +773,7 @@ void setup() {
     // doesn't yet know the gateway's MAC).
     char ready_msg[160];
     snprintf(ready_msg, sizeof(ready_msg),
-             "{\"status\":\"node_multiplexed_ready\",\"fw\":\"pump-recalc-1\",\"rgbw\":" LED_RGBW_JSON ",\"kpa_min\":%.0f}",
+             "{\"status\":\"node_multiplexed_ready\",\"fw\":\"tare-2-batch\",\"rgbw\":" LED_RGBW_JSON ",\"kpa_min\":%.0f}",
              (double)pressure::FLOOR_KPA);
     se::broadcast(ready_msg);
 
@@ -775,10 +823,8 @@ void loop() {
         lastPressureMs = now;
         // Autonomous control suspended. Refresh chamber pressures and enforce
         // hard limits on whatever the operator is driving manually.
-        for (int i = 0; i < config::state.num_chambers; i++) {
-            int m = config::state.chamber_mux_ch[i];
-            if (m >= 0) chambers::cachedKpa[i] = mux::readKpa(m);
-        }
+        for (int i = 0; i < config::state.num_chambers; i++)
+            chambers::cachedKpa[i] = chambers::readKpaMedian(i);   // ambient-zeroed
         manualPressureSafety();
     }
 
@@ -794,9 +840,7 @@ void loop() {
 
     if (now - lastStatusMs >= STATUS_REPORT_MS) {
         lastStatusMs = now;
-        for (int i = 0; i < config::state.num_chambers; i++) {
-            sendStatus(i, chambers::cachedKpa[i]);
-        }
+        sendStatusAll();
 #ifdef DEBUG_BUILD
         checkDryPumps();
 #endif

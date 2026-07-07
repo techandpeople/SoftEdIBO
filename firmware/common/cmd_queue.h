@@ -19,6 +19,9 @@ enum CmdType : uint8_t {
     // Telemetry cadence: temporarily raise the status broadcast rate (dense
     // pressure for calibration / live gauges / touch coupling), auto-reverting.
     CMD_STATUS_RATE,
+    // Zero the pressure sensors: capture each chamber's current reading as its
+    // ambient offset (caller must have vented to atmosphere first). Persisted.
+    CMD_TARE,
     // Configuration / status.
     CMD_CONFIGURE, CMD_PING
 #ifdef DEBUG_BUILD

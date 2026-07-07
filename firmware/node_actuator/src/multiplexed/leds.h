@@ -27,7 +27,7 @@
 
 namespace leds {
 
-enum Pattern : uint8_t { STATIC, BLINK, PULSE, COMET };
+enum Pattern : uint8_t { STATIC, BLINK, PULSE, COMET, FADE };
 
 // Max arcs/colours a "set_led_halves" command may carry (also the max comet count),
 // and the largest ring (the 24-LED one) — sizes the per-ring colour buffers.
@@ -71,6 +71,7 @@ struct Ring {
     uint8_t  segB[MAX_SEGMENTS] = {0};
     int      segCount = 1;
     float    segOffset = 0.0f;   // split/comet rotation, as a fraction of the ring (0..1)
+    uint8_t  fadeToR = 0, fadeToG = 0, fadeToB = 0;   // FADE second colour: base<->fadeTo
     uint8_t  fromR[MAX_RING_LEDS] = {0};
     uint8_t  fromG[MAX_RING_LEDS] = {0};
     uint8_t  fromB[MAX_RING_LEDS] = {0};
@@ -123,6 +124,7 @@ inline Pattern patternFromStr(const char* s) {
     if (strcmp(s, "blink") == 0) return BLINK;
     if (strcmp(s, "pulse") == 0) return PULSE;
     if (strcmp(s, "comet") == 0) return COMET;
+    if (strcmp(s, "fade")  == 0) return FADE;
     return STATIC;   // "off" (caller passes black) / "solid" / anything else
 }
 
@@ -157,6 +159,17 @@ inline void renderComet_(const Ring& R, int n,
 inline void computeAnimated_(const Ring& R, int n,
                              uint8_t* oR, uint8_t* oG, uint8_t* oB, uint32_t now) {
     if (R.pattern == COMET) { renderComet_(R, n, oR, oG, oB, now); return; }
+    if (R.pattern == FADE) {   // whole ring cross-fades base (c1) <-> fadeTo (c2)
+        uint32_t t = (now - R.start) % R.period;
+        float frac = (float)t / R.period;
+        float tri  = frac < 0.5f ? frac * 2.0f : (1.0f - frac) * 2.0f;   // 0 -> 1 -> 0
+        for (int i = 0; i < n; i++) {
+            oR[i] = lerp8_(R.baseR[i], R.fadeToR, tri);
+            oG[i] = lerp8_(R.baseG[i], R.fadeToG, tri);
+            oB[i] = lerp8_(R.baseB[i], R.fadeToB, tri);
+        }
+        return;
+    }
     float scale = 1.0f;
     if (R.pattern == BLINK || R.pattern == PULSE) {
         uint32_t t = (now - R.start) % R.period;
@@ -251,6 +264,28 @@ inline void set(int ring, uint8_t r, uint8_t g, uint8_t b,
     }
 }
 
+// Whole ring(s) cross-fading between two colours: base (c1) <-> fadeTo (c2) as a
+// triangle 0->1->0 over `period` (one c1->c2->c1 cycle). count<=0 = run forever;
+// a bounded fade rests on c1 when done (see update()). ring < 0 = all rings.
+// Moves the PC's old per-frame colour stream onto the node — one frame/cycle.
+inline void setFade(int ring, uint8_t r, uint8_t g, uint8_t b,
+                    uint8_t r2, uint8_t g2, uint8_t b2,
+                    uint32_t period, int32_t count,
+                    uint32_t fadeMs = DEFAULT_FADE_MS, float offset = 0.0f) {
+    if (ring >= NUM_RINGS) return;
+    int lo, hi; ringRange_(ring, lo, hi);
+    uint32_t now = millis();
+    for (int k = lo; k < hi; k++) {
+        Ring& R = rings[k];
+        uint16_t n = strips[k].numPixels();
+        for (uint16_t i = 0; i < n; i++) { R.baseR[i] = r; R.baseG[i] = g; R.baseB[i] = b; }
+        R.segR[0] = r; R.segG[0] = g; R.segB[0] = b; R.segCount = 1;
+        R.fadeToR = r2; R.fadeToG = g2; R.fadeToB = b2;
+        R.segOffset = offset;
+        apply_(R, FADE, period, count, fadeMs, now);
+    }
+}
+
 // Split ring(s) into `k` equal contiguous arcs. Arc boundaries match node_direct
 // (seg = i*k/n over each ring's own pixel count). Keeps the k colours for COMET.
 // ring < 0 = all rings.
@@ -322,10 +357,13 @@ inline void update() {
         if (R.pattern != STATIC && R.cycles >= 0) {
             uint32_t elapsed = now - R.start;
             if (elapsed >= (uint32_t)R.cycles * R.period) {
+                bool wasFade = (R.pattern == FADE);
                 R.pattern = STATIC;
-                for (int i = 0; i < MAX_RING_LEDS; i++) { R.baseR[i] = R.baseG[i] = R.baseB[i] = 0; }
-                R.segCount = 1; R.segR[0] = R.segG[0] = R.segB[0] = 0;
-                R.fadeMs = 0;   // snap to dark
+                if (!wasFade) {   // FADE rests on its base colour (c1); others go dark
+                    for (int i = 0; i < MAX_RING_LEDS; i++) { R.baseR[i] = R.baseG[i] = R.baseB[i] = 0; }
+                    R.segCount = 1; R.segR[0] = R.segG[0] = R.segB[0] = 0;
+                }
+                R.fadeMs = 0;   // snap to the resting colour
                 renderRing_(k, now);
                 continue;
             }

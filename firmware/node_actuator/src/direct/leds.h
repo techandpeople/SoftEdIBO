@@ -24,7 +24,7 @@
 
 namespace leds {
 
-enum Pattern : uint8_t { STATIC, BLINK, PULSE, COMET };
+enum Pattern : uint8_t { STATIC, BLINK, PULSE, COMET, FADE };
 
 // Max arcs/colours a "set_led_halves" command may carry (also the max comet count).
 constexpr int MAX_SEGMENTS = 8;
@@ -64,6 +64,10 @@ inline int      segCount_ = 1;
 // arc boundaries (so "halves" can sit top/bottom instead of left/right) and the
 // comet start position. Set from the "angle" command field (degrees / 360).
 inline float    segOffset_ = 0.0f;
+
+// Second colour for the FADE pattern: the whole ring cross-fades base_ (c1)
+// <-> fadeTo_ (c2) each period. Unused by the other patterns.
+inline uint8_t  fadeToR_ = 0, fadeToG_ = 0, fadeToB_ = 0;
 
 // Cross-fade source: a snapshot of the displayed output the instant a new command
 // landed, and the rolling displayed buffer that feeds the next snapshot.
@@ -115,6 +119,7 @@ inline Pattern patternFromStr(const char* s) {
     if (strcmp(s, "blink") == 0) return BLINK;
     if (strcmp(s, "pulse") == 0) return PULSE;
     if (strcmp(s, "comet") == 0) return COMET;
+    if (strcmp(s, "fade")  == 0) return FADE;
     return STATIC;   // "off" (caller passes black) / "solid" / anything else
 }
 
@@ -147,6 +152,17 @@ inline void renderComet_(uint8_t* oR, uint8_t* oG, uint8_t* oB, uint32_t now) {
 // Stage 1: resolve the target colour of each pixel for the current pattern/time.
 inline void computeAnimated_(uint8_t* oR, uint8_t* oG, uint8_t* oB, uint32_t now) {
     if (pattern_ == COMET) { renderComet_(oR, oG, oB, now); return; }
+    if (pattern_ == FADE) {   // whole ring cross-fades base (c1) <-> fadeTo (c2)
+        uint32_t t = (now - start_) % period_;
+        float frac = (float)t / period_;
+        float tri  = frac < 0.5f ? frac * 2.0f : (1.0f - frac) * 2.0f;   // 0 -> 1 -> 0
+        for (int i = 0; i < NUM_LEDS; i++) {
+            oR[i] = lerp8_(baseR_[i], fadeToR_, tri);
+            oG[i] = lerp8_(baseG_[i], fadeToG_, tri);
+            oB[i] = lerp8_(baseB_[i], fadeToB_, tri);
+        }
+        return;
+    }
     float scale = 1.0f;
     if (pattern_ == BLINK || pattern_ == PULSE) {
         uint32_t t = (now - start_) % period_;
@@ -218,6 +234,21 @@ inline void setAll(uint8_t r, uint8_t g, uint8_t b,
     apply_(p, period, count, fadeMs);
 }
 
+// Whole ring cross-fading between two colours: base (c1) <-> fadeTo (c2) as a
+// triangle 0->1->0 over `period` (one c1->c2->c1 cycle). count<=0 = run forever;
+// a bounded fade rests on c1 when done (see update()). Moves the PC's old
+// per-frame colour stream onto the node — one frame instead of ~20/cycle.
+inline void setFade(uint8_t r, uint8_t g, uint8_t b,
+                    uint8_t r2, uint8_t g2, uint8_t b2,
+                    uint32_t period, int32_t count,
+                    uint32_t fadeMs = DEFAULT_FADE_MS, float offset = 0.0f) {
+    for (int i = 0; i < NUM_LEDS; i++) { baseR_[i] = r; baseG_[i] = g; baseB_[i] = b; }
+    segR_[0] = r; segG_[0] = g; segB_[0] = b; segCount_ = 1;
+    fadeToR_ = r2; fadeToG_ = g2; fadeToB_ = b2;
+    segOffset_ = offset;
+    apply_(FADE, period, count, fadeMs);
+}
+
 // Split the ring into `k` equal contiguous arcs (k clamped to 1..NUM_LEDS), rotated
 // by `offset` (fraction of the ring) so the split can sit at any angle. Keeps the k
 // colours for COMET (one comet per arc colour).
@@ -277,10 +308,13 @@ inline void update() {
     if (pattern_ != STATIC && cycles_ >= 0) {
         uint32_t elapsed = now - start_;
         if (elapsed >= (uint32_t)cycles_ * period_) {
+            bool wasFade = (pattern_ == FADE);
             pattern_ = STATIC;
-            for (int i = 0; i < NUM_LEDS; i++) { baseR_[i] = baseG_[i] = baseB_[i] = 0; }
-            segCount_ = 1; segR_[0] = segG_[0] = segB_[0] = 0;
-            fadeMs_ = 0;   // snap to dark
+            if (!wasFade) {   // FADE rests on its base colour (c1); others go dark
+                for (int i = 0; i < NUM_LEDS; i++) { baseR_[i] = baseG_[i] = baseB_[i] = 0; }
+                segCount_ = 1; segR_[0] = segG_[0] = segB_[0] = 0;
+            }
+            fadeMs_ = 0;   // snap to the resting colour
             render_(now);
             return;
         }

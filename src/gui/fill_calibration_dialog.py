@@ -41,6 +41,7 @@ from PySide6.QtWidgets import (
 )
 
 from src.gui.base_dialog import BaseDialog
+from src.gui.calibration_indicator import CalibrationLedIndicator
 from src.gui.ui_fill_calibration_dialog import Ui_FillCalibrationDialog
 from src.hardware.fast_telemetry import FastTelemetry
 from src.hardware.fill_calibration import (
@@ -118,6 +119,9 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
         self._settings = settings
         self._gateway = gateway
         self._active = True
+        # Softly pulses every actuator ring while a sweep runs so the rig
+        # visibly reads as "busy calibrating". Driven from _set_buttons_enabled.
+        self._led = CalibrationLedIndicator(settings, gateway)
         # ``chambers`` lets a caller scope the dialog to a subset (e.g. one
         # skin's chambers from the skin config dialog). When omitted, calibrate
         # every actuator chamber across all configured robots.
@@ -583,6 +587,9 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
         self.combo_status.setText(f"Run {idx}/{total} — {mac} slot {slot}{extra}")
 
     def _set_buttons_enabled(self, on: bool) -> None:
+        # Buttons disabled == a sweep (or queued batch) is running: pulse the
+        # rings while busy, fade them off when control returns to the operator.
+        self._led.off() if on else self._led.on()
         self.all_btn.setEnabled(on and bool(self._chambers))
         self.duty_btn.setEnabled(on and bool(self._chambers))
         self.deflate_btn.setEnabled(on and bool(self._chambers))

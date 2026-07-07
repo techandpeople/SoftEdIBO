@@ -85,34 +85,53 @@ def test_coupling_config_from_samples():
     # chamber 0 inflated dwell (well past settle window)
     for _ in range(20):
         samples.append((t, {0: 100.0, 1: 0.0}, [210.0, 12.0])); t += 100
-    cfg, matrix = coupling_config_from_samples(samples, sensor_count=2)
+    cfg, model = coupling_config_from_samples(samples, sensor_count=2)
     assert cfg["unit"] == "uT"
     assert cfg["sensor_count"] == 2
     # chamber 0 delta on sensor 0 ≈ 200, sensor 1 ≈ 2
-    assert abs(cfg["deltas"]["0"][0] - 200.0) < 1.0
-    assert abs(cfg["deltas"]["0"][1] - 2.0) < 1.0
+    row = model.deltas()[0]
+    assert abs(row[0] - 200.0) < 1.0
+    assert abs(row[1] - 2.0) < 1.0
+    # the config carries it as a single-chamber measured state
+    state0 = next(s for s in cfg["states"] if s["chambers"] == [0])
+    assert abs(state0["mag"][0] - 200.0) < 1.0
 
 
-# --- SweepProgram + curve config --------------------------------------------
+# --- SweepProgram: grid + combinations --------------------------------------
 
 
-def test_levels_for_counts():
-    assert SweepProgram.levels_for(1) == (100.0,)
-    assert SweepProgram.levels_for(4) == (25.0, 50.0, 75.0, 100.0)
-    assert SweepProgram.levels_for(5)[0] == 25.0     # floored, not 20
-    assert SweepProgram.levels_for(0) == (100.0,)    # clamped
+def test_grid_levels():
+    # 10 % steps, floored at ACTIVE_MIN (20 %): 20, 30, …, 100.
+    assert SweepProgram.grid_levels(10.0) == (
+        20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0)
+    assert SweepProgram.grid_levels(50.0) == (50.0, 100.0)
+    assert SweepProgram.grid_levels(100.0) == (100.0,)
 
 
-def test_sweep_program_step_sequence():
-    prog = SweepProgram([0, 1], (50.0, 100.0))
-    assert [(s.action, s.slot, s.level) for s in prog.steps] == [
-        ("deflate_all", None, 0.0),
-        ("set_pressure", 0, 50.0), ("set_pressure", 0, 100.0), ("deflate", 0, 0.0),
-        ("set_pressure", 1, 50.0), ("set_pressure", 1, 100.0), ("deflate", 1, 0.0),
-    ]
+def test_sweep_program_visits_all_subsets_over_grid():
+    prog = SweepProgram([0, 1], step_pct=50.0)          # grid = (50, 100)
+    steps = [(s.action, s.levels) for s in prog.steps]
+    assert ("rest", {}) in steps
+    # singles
+    assert ("state", {0: 50.0}) in steps and ("state", {0: 100.0}) in steps
+    assert ("state", {1: 50.0}) in steps
+    # the full pair grid (co-inflation, different pressures per member)
+    assert ("state", {0: 50.0, 1: 100.0}) in steps
+    assert ("state", {0: 100.0, 1: 50.0}) in steps
+    assert ("state", {0: 100.0, 1: 100.0}) in steps
+    assert prog.n_states == 2 + 2 + 4 and prog.n_rests == 3
     progress = [s.progress for s in prog.steps]
-    assert progress[0] == 0 and progress == sorted(progress)
+    assert progress == sorted(progress)
     assert all(s.wait_ms > 0 for s in prog.steps)
+
+
+def test_sweep_program_max_order_limits_combos():
+    single = SweepProgram([0, 1, 2], step_pct=100.0, max_order=1)  # grid = (100,)
+    assert single.n_states == 3
+    assert all(len(s.levels) <= 1 for s in single.steps)
+    full = SweepProgram([0, 1, 2], step_pct=100.0)                 # all subsets
+    assert full.n_states == 7                                      # 3+3+1
+    assert full.est_seconds > single.est_seconds
 
 
 def test_set_compensation_margin_and_guard():
@@ -124,7 +143,7 @@ def test_set_compensation_margin_and_guard():
     assert comp["margin_frac"] == 0.25 and comp["guard_ms"] == 800.0
 
 
-def test_coupling_config_from_samples_writes_curves():
+def test_coupling_config_from_samples_writes_multi_level_states():
     samples = []
     t = 0.0
     for _ in range(20):
@@ -133,11 +152,13 @@ def test_coupling_config_from_samples_writes_curves():
         samples.append((t, {0: 50.0}, [110.0])); t += 100
     for _ in range(20):
         samples.append((t, {0: 100.0}, [210.0])); t += 100
-    cfg, matrix = coupling_config_from_samples(samples, sensor_count=1)
-    points = cfg["curves"]["0"]
-    assert [round(p["pct"]) for p in points] == [50, 100]
-    assert abs(points[0]["mag"][0] - 100.0) < 1.0
-    assert abs(cfg["deltas"]["0"][0] - 200.0) < 1.0   # legacy view at ref 100
+    cfg, model = coupling_config_from_samples(samples, sensor_count=1)
+    states0 = sorted((s for s in cfg["states"] if s["chambers"] == [0]),
+                     key=lambda s: s["levels"]["0"])
+    assert [round(s["levels"]["0"]) for s in states0] == [50, 100]
+    assert abs(states0[0]["mag"][0] - 100.0) < 1.0
+    assert abs(states0[1]["mag"][0] - 200.0) < 1.0
+    assert cfg["bin_pct"] == 10.0
 
 
 # --- kPa limits + empty-sweep diagnostics ------------------------------------
@@ -164,3 +185,21 @@ def test_sweep_diagnostics_levels_never_active():
     assert "2 magnet samples" in text
     assert "slot 0: 12%" in text and "slot 1: 5%" in text
     assert "kPa limits" in text          # the below-ACTIVE_MIN hint fired
+
+
+def test_sweep_diagnostics_names_coinflated_neighbor():
+    # slot 2 inflated to 40 % but slot 1 was co-inflated → dropped from matrix.
+    samples = [
+        (0.0, {0: 3.0, 1: 30.0, 2: 40.0}, [1.0]),
+        (100.0, {0: 3.0, 1: 30.0, 2: 35.0}, [1.0]),
+    ]
+    # measured = only slots 0 and 1 landed; slot 2 is missing.
+    text = sweep_diagnostics(samples, [0, 1, 2], measured={0, 1})
+    assert "slot 2 reached 40% but was dropped" in text
+    assert "chamber 1 was co-inflated" in text
+
+
+def test_sweep_diagnostics_no_hint_when_all_measured():
+    samples = [(0.0, {0: 80.0, 1: 3.0}, [1.0])]
+    text = sweep_diagnostics(samples, [0, 1], measured={0, 1})
+    assert "was dropped" not in text

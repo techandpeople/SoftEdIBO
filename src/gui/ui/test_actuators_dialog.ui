@@ -61,7 +61,7 @@
             <property name="maximumSize"><size><width>160</width><height>16777215</height></size></property>
             <property name="styleSheet"><string notr="true">font-family: Courier; font-size: 10pt;</string></property>
             <property name="text"><string>Inflate Pump: OFF</string></property>
-            <property name="whatsThis"><string>Toggle the inflate pump on/off directly (bench test). The firmware auto-closes a manually driven pump after ~5 s unless the dialog keeps re-asserting it, so it stops on its own if the link drops.</string></property>
+            <property name="whatsThis"><string>Toggle the inflate pump on/off directly (bench test). The label flips on click, but the GREEN fill only appears when the node reports the pump ACTUALLY running (~2×/s) — so it lights up whoever runs it, including when you press a chamber's Inflate (the pump runs for the fill), not just this manual toggle. The firmware auto-closes a manually driven pump after ~5 s unless the dialog keeps re-asserting it, so it stops on its own if the link drops.</string></property>
            </widget>
           </item>
           <item>
@@ -69,7 +69,17 @@
             <property name="maximumSize"><size><width>160</width><height>16777215</height></size></property>
             <property name="styleSheet"><string notr="true">font-family: Courier; font-size: 10pt;</string></property>
             <property name="text"><string>Deflate Pump: OFF</string></property>
-            <property name="whatsThis"><string>Toggle the deflate pump on/off directly (bench test). The firmware auto-closes a manually driven pump after ~5 s unless the dialog keeps re-asserting it, so it stops on its own if the link drops.</string></property>
+            <property name="whatsThis"><string>Toggle the deflate pump on/off directly (bench test). The label flips on click, but the GREEN fill only appears when the node reports the pump ACTUALLY running (~2×/s) — so it lights up whoever runs it, including when you press a chamber's Deflate (the pump runs for the fill), not just this manual toggle. The firmware auto-closes a manually driven pump after ~5 s unless the dialog keeps re-asserting it, so it stops on its own if the link drops.</string></property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="vent_btn">
+            <property name="minimumSize"><size><width>150</width><height>0</height></size></property>
+            <property name="maximumSize"><size><width>150</width><height>16777215</height></size></property>
+            <property name="styleSheet"><string notr="true">font-family: Courier; font-size: 10pt;</string></property>
+            <property name="text"><string>Vent</string></property>
+            <property name="toolTip"><string>Vent every chamber to atmosphere (no pump), alternating deflate/inflate. Press again to close.</string></property>
+            <property name="whatsThis"><string>Bring every chamber to atmosphere with no pump. It ALTERNATES each chamber's deflate and inflate valve every ~2 s: with the pumps off, each manifold's path to atmosphere (through its own off pump) is one-way, so the deflate side lets an inflated chamber bleed OUT and the inflate side lets a vacuumed one draw air IN — and this board only allows one side open at a time, hence the alternation. No pump runs, so nothing is pressurised. Press again to close (both sides), or use STOP ALL / close the dialog. Use it to bring the skin to true rest before zeroing the sensors.</string></property>
            </widget>
           </item>
           <item>

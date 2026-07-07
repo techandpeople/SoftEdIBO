@@ -32,13 +32,22 @@ PAGE_NODE = 2
 PAGE_DONE = 3
 # Read-only bundled assets live in BUNDLE (_internal/ when frozen, repo root in dev)
 #
-# Gateway firmware — one build for the Seeed XIAO ESP32-S3, does everything: ESP-NOW
-# chamber control + a SoftAP for the Thymios / WiFi-OTA + the C6 802.15.4 route
-# (-DGATEWAY_AP -DGATEWAY_THYMIO). Merged image, flashes at 0x0.
+# Gateway firmware — the gateway is a Seeed XIAO ESP32-S3 (main) optionally wired to a
+# companion XIAO ESP32-C6 (Thymio RCP). Each is its own chip and its own USB device, so
+# the flash page offers a board dropdown that flashes either one on its own (or both, one
+# after the other). Both are merged images flashed at 0x0.
+#   - S3: ESP-NOW chamber control + SoftAP/WiFi-OTA + the C6 UART link (-DGATEWAY_AP
+#     -DGATEWAY_THYMIO), firmware-s3.bin.
+#   - C6: 802.15.4 radio co-processor for wireless Thymio (docs/THYMIO_WIRELESS_CONTROL.md),
+#     firmware-c6.bin (the merged bundle; firmware.bin is the app-only WiFi-OTA image).
 GATEWAY_FIRMWARES: dict[str, dict[str, Any]] = {
-    "Seeed XIAO ESP32-S3  (USB-C)": {
-        "chip":    "esp32s3",
-        "release": Settings.BUNDLE / "firmware" / "gateway" / "firmware-s3.bin",
+    "Gateway S3  (main board, USB-C)": {
+        "chip":     "esp32s3",
+        "firmware": Settings.BUNDLE / "firmware" / "gateway" / "firmware-s3.bin",
+    },
+    "Companion C6  (Thymio RCP, optional)": {
+        "chip":     "esp32c6",
+        "firmware": Settings.BUNDLE / "firmware" / "thymio_rcp" / "firmware-c6.bin",
     },
 }
 
@@ -200,6 +209,13 @@ class _FlashPage(QWizardPage, Ui_FlashPage):
     # auto-selecting the port (e.g. "ACM" for gateway, "USB" for nodes).
     _preferred_port_hint: str = ""
 
+    # Subclasses that let the user flash several boards/units in one visit set this
+    # to the button label (e.g. "Flash Another Node"). The base then owns the whole
+    # affordance: the button, enabling it after a successful flash, resetting for the
+    # next flash, and re-arming when the user simply picks a different target. Left
+    # empty means no such button (single-shot flash page).
+    _another_label: str = ""
+
     def __init__(self, title: str, subtitle: str, firmware_path: Path,
                  chip: str = "esp32"):
         super().__init__()
@@ -210,6 +226,7 @@ class _FlashPage(QWizardPage, Ui_FlashPage):
         self._chip = chip
         self._proc: QProcess | None = None
         self._done = False
+        self._another_btn: QPushButton | None = None
 
         # The static frame (port row, flash button, progress, log) lives in the
         # .ui; subclasses add their selectors into ``extra_layout`` and
@@ -217,6 +234,14 @@ class _FlashPage(QWizardPage, Ui_FlashPage):
         self.log.setMaximumBlockCount(1000)
         self.refresh_btn.clicked.connect(self._refresh_ports)
         self.flash_btn.clicked.connect(self._start_flash)
+
+        # Optional "flash another" button (into the .ui's extra_bottom_layout, just
+        # above the log). Present only when a subclass opts in via _another_label.
+        if self._another_label:
+            self._another_btn = QPushButton(self._another_label)
+            self._another_btn.clicked.connect(self._reset_for_another)
+            self._another_btn.setEnabled(False)
+            self.extra_bottom_layout.addWidget(self._another_btn)
 
         self._refresh_ports()
 
@@ -305,6 +330,9 @@ class _FlashPage(QWizardPage, Ui_FlashPage):
             self.progress.setValue(100)
             self.log.appendPlainText("\nFlash completed successfully.")
             self._done = True
+            # Offer to flash the next board/unit without leaving the page.
+            if self._another_btn is not None:
+                self._another_btn.setEnabled(True)
         else:
             self.log.appendPlainText(f"\nFlash failed (exit code {exit_code}).")
             self.flash_btn.setEnabled(True)
@@ -313,23 +341,76 @@ class _FlashPage(QWizardPage, Ui_FlashPage):
     def isComplete(self) -> bool:
         return self._done
 
+    def _reset_for_another(self) -> None:
+        """Re-arm the page to flash another board/unit; keep _done so Next stays
+        enabled (the user has already flashed at least one)."""
+        self.log.clear()
+        self.progress.setValue(0)
+        self.flash_btn.setEnabled(True)
+        if self._another_btn is not None:
+            self._another_btn.setEnabled(False)
+
+    def _rearm_if_flashed(self) -> None:
+        """Re-arm Flash when the user picks a different firmware/target after a
+        completed flash — an explicit "flash this one next" gesture, so they need not
+        click the "Flash Another…" button first. Subclasses call this from their
+        selector-change handler. No-op mid-flash (``_done`` is False while a flash runs)
+        or when idle (Flash still enabled), and on pages without the button."""
+        if self._another_btn is not None and self._done and not self.flash_btn.isEnabled():
+            self._reset_for_another()
+
 
 class FlashGatewayPage(_FlashPage):
-    """Flash page for the gateway; lets the user pick the board variant."""
+    """Flash page for the gateway; a dropdown picks which board (S3 or C6).
 
-    # XIAO C6 gateway appears as /dev/ttyACM* (USB-JTAG, not USB-UART)
+    The gateway is a XIAO ESP32-S3 (main) optionally wired to a companion XIAO
+    ESP32-C6 that speaks 802.15.4 to Thymio robots (docs/THYMIO_WIRELESS_CONTROL.md).
+    Each is its own chip and its own USB device, so the board dropdown lets you flash
+    either one on its own — flash just the C6 without touching the S3, or vice versa —
+    and "Flash Another Board" flashes the second one right after, without leaving the
+    page (swap the cable, pick the other board). Mirrors FlashNodePage.
+    """
+
+    # Both the S3 and the C6 enumerate as /dev/ttyACM* (native USB-Serial/JTAG).
     _preferred_port_hint = "ACM"
+    _another_label = "Flash Another Board"
 
     def __init__(self):
         first = next(iter(GATEWAY_FIRMWARES.values()))
         super().__init__(
             "Flash Gateway Firmware",
-            "Connect the gateway board (appears as /dev/ttyACM0), then click Flash.",
-            first["release"],
+            "Pick the board, connect it (appears as /dev/ttyACM*), then click Flash. "
+            "The S3 and the companion C6 are separate USB devices — flash either on "
+            "its own, or both one after the other.",
+            first["firmware"],
             chip=first["chip"],
         )
-        # One gateway build (the S3, all features) — nothing to pick, so no board
-        # selector or SoftAP checkbox.
+
+        # Board selector — S3 (main) or the optional companion C6 (Thymio RCP).
+        board_row = QHBoxLayout()
+        board_row.addWidget(QLabel("Board:"))
+        self._board_combo = QComboBox()
+        self._board_combo.setMinimumWidth(320)
+        for label in GATEWAY_FIRMWARES:
+            self._board_combo.addItem(label)
+        self._board_combo.setWhatsThis(
+            "Which gateway board to flash. 'Gateway S3' is the main board (USB–ESP-NOW "
+            "bridge + WiFi + Thymio UART link). 'Companion C6' is the optional XIAO "
+            "ESP32-C6 that drives Thymio robots over 802.15.4 — only on gateways with "
+            "wireless-Thymio support. Each is a separate USB device, so you can flash "
+            "one without the other (e.g. re-flash only the C6, leaving the S3 alone)."
+        )
+        self._board_combo.currentTextChanged.connect(self._on_board_changed)
+        board_row.addWidget(self._board_combo)
+        board_row.addStretch()
+        self.extra_layout.addLayout(board_row)
+
+    def _on_board_changed(self, label: str) -> None:
+        entry = GATEWAY_FIRMWARES[label]
+        self._firmware = entry["firmware"]
+        self._chip = entry["chip"]
+        # Picking a different board after a flash re-arms Flash for it (base handles it).
+        self._rearm_if_flashed()
 
     def nextId(self) -> int:
         # Continue to the node page only when the user chose to flash both.
@@ -344,6 +425,7 @@ class FlashNodePage(_FlashPage):
 
     # Nodes use a classic USB-UART bridge — appears as /dev/ttyUSB*
     _preferred_port_hint = "USB"
+    _another_label = "Flash Another Node"
 
     def __init__(self):
         first_label = next(iter(NODE_FIRMWARES))
@@ -384,13 +466,6 @@ class FlashNodePage(_FlashPage):
         self.extra_layout.addWidget(self._rgbw_check)
         self._on_type_changed(self._type_combo.currentText())
 
-        # "Flash another node" button — enabled after each successful flash,
-        # into the .ui's extra_bottom_layout (just above the log).
-        self._another_btn = QPushButton("Flash Another Node")
-        self._another_btn.clicked.connect(self._reset_for_another)
-        self._another_btn.setEnabled(False)
-        self.extra_bottom_layout.addWidget(self._another_btn)
-
     def _on_type_changed(self, _label: str) -> None:
         # The RGBW toggle only makes sense for node types with an RGBW build.
         fw = NODE_FIRMWARES[self._type_combo.currentText()]
@@ -406,24 +481,14 @@ class FlashNodePage(_FlashPage):
         if self._rgbw_check.isChecked() and f"{base}_rgbw" in fw:
             base = f"{base}_rgbw"
         self._firmware = fw[base]
-
-    def _on_finished(self, exit_code: int, exit_status) -> None:
-        super()._on_finished(exit_code, exit_status)
-        if exit_code == 0:
-            self._another_btn.setEnabled(True)
-
-    def _reset_for_another(self) -> None:
-        """Prepare for flashing the next node; keep _done=True so Next stays enabled."""
-        self.log.clear()
-        self.progress.setValue(0)
-        self.flash_btn.setEnabled(True)
-        self._another_btn.setEnabled(False)
-        # _done remains True — user has already flashed at least one node
+        # Changing type/debug/RGBW after a flash re-arms Flash for the new selection.
+        self._rearm_if_flashed()
 
     def nextId(self) -> int:
         return PAGE_DONE
 
-    # isComplete inherited from _FlashPage: returns _done
+    # isComplete, _on_finished, _reset_for_another, and the "Flash Another Node"
+    # button are all inherited from _FlashPage (opted in via _another_label).
 
 
 class DonePage(QWizardPage, Ui_DonePage):

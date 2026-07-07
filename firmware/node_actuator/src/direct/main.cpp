@@ -75,6 +75,7 @@ void setup() {
     Serial.begin(115200);
 
     chambers::hardware_init();
+    chambers::loadTare();      // per-chamber ambient zero (NVS) before any read
     leds::hardware_init();
     organ::hardware_init();
     magnet::hardware_init();   // optional MLX90393 touch board (auto-detected)
@@ -94,7 +95,7 @@ void setup() {
 #endif
 
     for (int i = 0; i < NUM_CHAMBERS; i++)
-        chambers::cachedKpa[i] = pressure::readKpa(PSENSOR_PINS[i]);
+        chambers::cachedKpa[i] = chambers::readKpaMedian(i);   // ambient-zeroed
 
     // Broadcast the ready message so the gateway can forward it to the PC
     // even before the node has received its first command (and therefore
@@ -106,7 +107,7 @@ void setup() {
     // below which pressure a deflate needs a time budget instead of the sensor.
     char ready_msg[160];
     snprintf(ready_msg, sizeof(ready_msg),
-             "{\"status\":\"node_direct_ready\",\"fw\":\"pump-recalc-1\",\"rgbw\":" LED_RGBW_JSON ",\"kpa_min\":%.0f}",
+             "{\"status\":\"node_direct_ready\",\"fw\":\"tare-2-batch\",\"rgbw\":" LED_RGBW_JSON ",\"kpa_min\":%.0f}",
              (double)pressure::FLOOR_KPA);
     se::broadcast(ready_msg);
 
@@ -139,8 +140,7 @@ void loop() {
         chambers::emergencyStopAll();
         if (now - lastStatusMs >= commands::statusReportMs(now)) {
             lastStatusMs = now;
-            for (int i = 0; i < NUM_CHAMBERS; i++)
-                commands::sendStatus(i, chambers::cachedKpa[i]);
+            commands::sendStatusAll();
             commands::sendPumps();   // live pump state (debug: stop-latency hunt)
         }
         return;
@@ -165,10 +165,9 @@ void loop() {
         } else {
             if (now - lastStatusMs >= commands::statusReportMs(now)) {
                 lastStatusMs = now;
-                for (int i = 0; i < NUM_CHAMBERS; i++) {
-                    chambers::cachedKpa[i] = pressure::readKpa(PSENSOR_PINS[i]);
-                    commands::sendStatus(i, chambers::cachedKpa[i]);
-                }
+                for (int i = 0; i < NUM_CHAMBERS; i++)
+                    chambers::cachedKpa[i] = chambers::readKpaMedian(i);   // zeroed
+                commands::sendStatusAll();
                 commands::sendPumps();
             }
             return;
@@ -182,7 +181,7 @@ void loop() {
     if (now - lastPressureMs >= PRESSURE_CHECK_MS) {
         lastPressureMs = now;
         for (int i = 0; i < NUM_CHAMBERS; i++)
-            chambers::cachedKpa[i] = pressure::readKpa(PSENSOR_PINS[i]);
+            chambers::cachedKpa[i] = chambers::readKpaMedian(i);   // ambient-zeroed
     }
 
     // ---- Coupled-fill engines: open the group together → fill to the lowest open
@@ -216,15 +215,19 @@ void loop() {
         // valve toggle. This is what makes vi/vd precise enough to see a brief pulse.
         static uint8_t  prevSig[NUM_CHAMBERS] = {0xFF, 0xFF, 0xFF};
         static uint32_t prevInf = 0xFFFFFFFF, prevDef = 0xFFFFFFFF;
+        bool sigChanged = false;
         for (int i = 0; i < NUM_CHAMBERS; i++) {
             uint8_t sig = (uint8_t)(chambers::state[i].state << 2)
                         | (chambers::valveOpen[i * 2 + 0] ? 2 : 0)
                         | (chambers::valveOpen[i * 2 + 1] ? 1 : 0);
             if (sig != prevSig[i]) {
                 prevSig[i] = sig;
-                commands::sendStatus(i, chambers::cachedKpa[i]);
+                sigChanged = true;
             }
         }
+        // One batched frame the instant ANY chamber's state/valves change (all chambers'
+        // fresh state rides along — harmless, and captures a co-changing group in one go).
+        if (sigChanged) commands::sendStatusAll();
         uint32_t inf = ledcRead(chambers::PUMP1_LEDC_CH);
         uint32_t def = ledcRead(chambers::PUMP2_LEDC_CH);
         if (inf != prevInf || def != prevDef) {
@@ -236,8 +239,7 @@ void loop() {
     // ---- Status broadcast ----
     if (now - lastStatusMs >= commands::statusReportMs(now)) {
         lastStatusMs = now;
-        for (int i = 0; i < NUM_CHAMBERS; i++)
-            commands::sendStatus(i, chambers::cachedKpa[i]);
+        commands::sendStatusAll();
         commands::sendPumps();   // live pump state (debug: stop-latency hunt)
 #ifdef DEBUG_BUILD
         commands::checkDryPumps();   // warn if a pump spins with no open valve

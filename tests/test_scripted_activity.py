@@ -31,10 +31,14 @@ class _FakeCtrl:
         self.halves = None
         self.led_ring = None       # ring of the last set_led
         self.halves_ring = None    # ring of the last set_led_halves
+        self.led_kw = {}           # extra kwargs of the last set_led (color2, ...)
+        self.led_calls = 0         # how many set_led frames were sent
 
     def set_led(self, color, pattern="solid", period_ms=0, ring=None, **kw):
         self.led = (color, pattern)
         self.led_ring = ring
+        self.led_kw = {"period_ms": period_ms, **kw}
+        self.led_calls += 1
         return True
 
     def set_led_halves(self, colors, ring=None, **kw):
@@ -364,7 +368,7 @@ def test_duty_flows_through_beat_and_set_pressure(clock):
     assert (0, None) not in skin.duties[:1]   # the 50 % stroke used its duty
 
 
-def test_fade_cross_fades_between_two_colours(clock):
+def test_fade_emits_one_firmware_fade_frame(clock):
     spec = {"initial": "s", "states": {"s": {"do": [
         {"fade": {"color1": "#000000", "color2": "#ffffff", "period_ms": 2000}},
     ], "transitions": []}}}
@@ -373,16 +377,17 @@ def test_fade_cross_fades_between_two_colours(clock):
     robot = _FakeRobot([skin])
     activity = ScriptedActivity("fade", "", spec)
     _start(activity, robot)
-    # First frame is exactly colour 1 (black).
-    assert ctrl.led[0] == "#000000"
-    seen = {ctrl.led[0]}
-    for _ in range(40):                  # drive ~4 s of frames
+    # The node runs the interpolation now: a single "fade" frame carries both
+    # colours and the period, instead of a per-tick colour stream over ESP-NOW.
+    assert ctrl.led == ("#000000", "fade")
+    assert ctrl.led_kw.get("color2") == "#ffffff"
+    assert ctrl.led_kw.get("period_ms") == 2000
+    # No further frames stream while the fade plays out on the node.
+    calls_after_start = ctrl.led_calls
+    for _ in range(40):                  # drive ~4 s of ticks
         clock.advance(0.1)
         activity._on_tick()
-        seen.add(ctrl.led[0])
-    # It reaches colour 2 (white) and passes through an interpolated midtone.
-    assert "#ffffff" in seen
-    assert any(c not in ("#000000", "#ffffff") for c in seen)
+    assert ctrl.led_calls == calls_after_start
 
 
 # ---------------------------------------------------------------------------

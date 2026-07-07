@@ -1,6 +1,7 @@
 #pragma once
 #include <Arduino.h>
 #include "pins.h"
+#include "pressure.h"   // VACUUM_HOLD_FLOOR_KPA (valve-safe vacuum cap)
 
 // Runtime configuration — populated by boot autodetect, optionally overridden
 // by the gateway's `configure` command.
@@ -21,7 +22,10 @@ constexpr float DEFAULT_CHAMBER_MIN_KPA =   0.0f;
 // actuation watchdog — not by this ceiling. Kept in sync with
 // skin_config.MAX_ALLOWED_KPA. (The shared TANK caps above are unchanged.)
 constexpr float HARD_CHAMBER_MAX_KPA    =  100.0f;
-constexpr float HARD_CHAMBER_MIN_KPA    = -100.0f;
+// Deepest vacuum a chamber may hold — valve-safe, derived from the sensor floor
+// (pressure.h): -100 (inert) with the blind 0..100 gauge, -40 with the -40..40
+// vacuum sensor so the FA0520E always re-opens. Bounds set_min + the manual cutoff.
+constexpr float HARD_CHAMBER_MIN_KPA    = pressure::VACUUM_HOLD_FLOOR_KPA;
 
 struct State {
     bool ready          = false;     // becomes true after autodetect succeeds

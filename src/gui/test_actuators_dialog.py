@@ -53,6 +53,10 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
     # a valve shows open whoever opened it (manual toggle, inflate/deflate, the
     # closed-loop control, or the firmware dead-man closing it). Main thread.
     _valves_received = Signal(int, int, int)       # chamber, inflate_open, deflate_open
+    # Emitted from the gateway read thread with the node's ACTUAL pump outputs, so
+    # a pump greens whoever runs it (manual toggle, an inflate/deflate, the
+    # closed-loop control) — the visible "action" of a fill. Main thread.
+    _pumps_received = Signal(int, int)             # inflate_pwm, deflate_pwm
     # Emitted from the gateway read thread with the node's magnet-sensor stream
     # (per-sensor µT). Connected to _on_magnet_data on the main thread, which
     # lazily builds the sensor tester the first time a node actually streams it.
@@ -193,6 +197,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         self.pump_def_btn.clicked.connect(
             lambda _=False: self._toggle_pump(1, self.pump_def_btn))
         self.stop_all_btn.clicked.connect(self._stop_all)
+        self.vent_btn.clicked.connect(self._toggle_vent)
 
         # Continuous run (bench wiring test): drive one pump + all of its valves
         # wide open INDEFINITELY, ignoring pressure and the firmware dead-man.
@@ -222,11 +227,29 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         self._manual_keepalive.setInterval(1500)
         self._manual_keepalive.timeout.connect(self._send_manual_keepalive)
 
+        # Vent alternator: while venting, flip the open valve side every 2 s so an
+        # inflated chamber bleeds out (deflate) AND a vacuumed one draws air in
+        # (inflate) — this board only allows one side open at a time. No pump, so
+        # nothing is pressurised; the 2 s tick also refreshes the manual dead-man.
+        self._vent_side = 1
+        self._vent_timer = QTimer(self)
+        self._vent_timer.setInterval(2000)
+        self._vent_timer.timeout.connect(self._vent_tick)
+
         self._pressure_received.connect(self._update_pressure)
         self._valves_received.connect(self._update_valves)
+        self._pumps_received.connect(self._update_pumps)
         self._magnet_received.connect(self._on_magnet_data)
         self._gateway.on_message(self._on_gateway_message)
         self.finished.connect(self._on_closed)
+
+        # The LED ring tester is inserted into the left column at runtime (its ring
+        # count is only known from the node config), so the .ui's static height was
+        # sized without it and opens too short — the tester ends up squeezed below
+        # its minimum and its rows overlap. Grow to the real preferred size now, the
+        # same way _on_magnet_data does once the sensor panel arrives (which is why
+        # the squeeze only showed when no magnet sensor was streaming).
+        self._grow_to_fit()
 
     def _build_compensator(self, skin_cfgs: list[dict]):
         """Build the touch compensator for this node's sensors, or ``None``.
@@ -291,15 +314,19 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
             slot_row.addWidget(def_btn)
 
             # Manual valve toggle controls (monospace font for fixed width). The
-            # displayed open/closed state is driven by the node's status (see
-            # _update_valves), not just by clicks; whatsThis explains both.
+            # label flips on click (optimistic), but the GREEN fill is driven only
+            # by the node's reported valve state (see _update_valves), so green
+            # means the hardware really has the valve open; whatsThis explains it.
             valve_help = (
-                "Toggle this valve's manual override. The label and green fill "
-                "follow the node's ACTUAL valve state reported ~2×/s, so it also "
-                "lights up when an inflate/deflate or the closed-loop control "
-                "opens the valve — not only when you click here. While held open "
-                "the dialog re-asserts it so the firmware dead-man doesn't close "
-                "it after ~5 s; closing the dialog or STOP ALL releases it.")
+                "Toggle this valve's manual override. The OPEN/CLOSED label flips "
+                "as soon as you click, but the GREEN fill only appears when the "
+                "node reports the valve ACTUALLY open (~2×/s). So a plain 'OPEN' "
+                "means the command was sent but not yet confirmed (or the firmware "
+                "won't open it); green means the hardware really has it open — "
+                "whoever opened it (a click here, an inflate/deflate, or the "
+                "closed-loop control). While held open the dialog re-asserts it so "
+                "the firmware dead-man doesn't close it after ~5 s; closing the "
+                "dialog or STOP ALL releases it.")
 
             val_inf_btn = QPushButton("Inflate Valve: CLOSED")
             val_inf_btn.setMaximumWidth(180)
@@ -340,6 +367,13 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
             if isinstance(mag, list):
                 self._magnet_received.emit([float(v) for v in mag],
                                            data.get("vec"))
+            return
+        if msg_type == "pumps":
+            # Actual pump PWM outputs (0 = off). Greens the pump buttons whoever
+            # runs them — so an inflate/deflate visibly lights its pump.
+            inf, dfl = data.get("inf"), data.get("def")
+            if isinstance(inf, int) and isinstance(dfl, int):
+                self._pumps_received.emit(inf, dfl)
             return
         if msg_type != "status":
             return
@@ -430,9 +464,10 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
 
     def _grow_to_fit(self) -> None:
         """Grow the dialog to its preferred size (never shrink, never past the
-        screen). Called when a panel is added after construction so the added
-        content isn't squeezed below its minimum. Grows width as well as height
-        because the sensor tester is added as a new right-hand column."""
+        screen). Called on open (the LED tester is inserted after the .ui is laid
+        out) and again when the sensor panel is added, so runtime-inserted content
+        isn't squeezed below its minimum. Grows width as well as height because the
+        sensor tester is added as a new right-hand column."""
         self.layout().activate()   # refresh the size hint after the insert
         hint = self.sizeHint()
         target_w, target_h = hint.width(), hint.height()
@@ -502,12 +537,18 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         self._set_valve_button((chamber, 0), bool(inflate_open))
         self._set_valve_button((chamber, 1), bool(deflate_open))
 
-    def _set_valve_button(self, key: tuple[int, int], is_open: bool) -> None:
-        """Set one valve button's stored display state, label and colour.
+    def _set_valve_button(self, key: tuple[int, int], is_open: bool, *,
+                          confirmed: bool = True) -> None:
+        """Set one valve button's label and colour.
 
-        Display only: stores the open flag in ``_valve_states`` (the actual state,
-        for the readout) and never touches ``_valve_intent`` (the user's hold) or
-        sends a command."""
+        The label flips to OPEN/CLOSED immediately, but the **green fill appears
+        only when ``confirmed``** — i.e. only from the node's reported valve state
+        (:meth:`_update_valves`), never from an optimistic click. So a click shows
+        a plain "OPEN" and the button greens only once the node actually reports
+        the valve open (~2×/s); if the firmware never opens it (or its dead-man
+        closes it), the green never appears, making the real hardware state
+        obvious. Display only: never sends a command, never touches
+        ``_valve_intent`` (the user's hold)."""
         entry = self._valve_states.get(key)
         if entry is None:
             return
@@ -515,13 +556,15 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         self._valve_states[key] = (is_open, btn)
         side_name = "Inflate" if key[1] == 0 else "Deflate"
         btn.setText(f"{side_name} Valve: {'OPEN  ' if is_open else 'CLOSED'}")
-        btn.setStyleSheet(self._VALVE_OPEN_STYLE if is_open else self._VALVE_STYLE)
+        btn.setStyleSheet(self._VALVE_OPEN_STYLE if (is_open and confirmed)
+                          else self._VALVE_STYLE)
 
     def _on_closed(self) -> None:
         self._active = False
         # Stop re-asserting manual overrides; the firmware dead-man then closes any
         # held valve/pump within ~5 s of the last keepalive.
         self._manual_keepalive.stop()
+        self._vent_timer.stop()   # the dead-man closes the last-opened vent valve
         # A continuous run ignores the firmware dead-man, so it would keep going
         # after the dialog closes — always stop it on the way out.
         self._stop_run()
@@ -637,6 +680,10 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
             self._gateway.send(self._mac, "inflate", chamber=slot, delta=100, ms=ms)
         else:
             self._gateway.send(self._mac, "inflate", chamber=slot, delta=100)
+        # Optimistic: inflating opens this chamber's inflate valve. Show it OPEN
+        # right away (even with the node offline); the status greens it if the
+        # node confirms, and closes it when the fill finishes / the node reports.
+        self._set_valve_button((slot, 0), True, confirmed=False)
 
     def _deflate_slot(self, slot: int) -> None:
         # delta=100 deflates toward the chamber's configured min pressure (the
@@ -644,6 +691,9 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         self._arm()
         self._push_limits(slot)
         self._gateway.send(self._mac, "deflate", chamber=slot, delta=100)
+        # Optimistic: deflating opens this chamber's deflate valve (green on
+        # node confirmation, closed when the node reports it done).
+        self._set_valve_button((slot, 1), True, confirmed=False)
 
     def _inflate_slots(self, slots: list[int]) -> None:
         """Inflate several chambers at once.
@@ -684,6 +734,11 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         for slot in slots:
             self._push_limits(slot)
         self._gateway.send(self._mac, command, chamber=-1, delta=100)
+        # Optimistic: show every actuated chamber's valve OPEN immediately (green
+        # once the node confirms). side 0 = inflate, 1 = deflate.
+        side = 0 if command == "inflate" else 1
+        for slot in slots:
+            self._set_valve_button((slot, side), True, confirmed=False)
 
     def _toggle_valve(self, chamber: int, side: int, btn: QPushButton) -> None:
         """Toggle the manual valve override.
@@ -702,21 +757,91 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
             self._arm()
         self._gateway.send(self._mac, "valve_manual", chamber=chamber,
                           side=side, open=1 if want_open else 0)
-        self._set_valve_button(key, want_open)   # optimistic; status confirms
+        # Optimistic label only (no green): the green fill waits for the node to
+        # report the valve actually open (_update_valves).
+        self._set_valve_button(key, want_open, confirmed=False)
         self._refresh_manual_keepalive()
 
-    def _toggle_pump(self, pump: int, btn: QPushButton) -> None:
-        """Toggle pump on/off and update button appearance."""
-        is_on, _ = self._pump_states.get(pump, (False, btn))
-        is_on = not is_on
+    def _toggle_vent(self) -> None:
+        """Start/stop venting the whole skin to atmosphere (no pump).
 
-        # Update state
+        Alternates each chamber's deflate/inflate valve every 2 s so an inflated
+        chamber bleeds OUT and a vacuumed one draws air IN (each manifold's path
+        to atmosphere through its off pump is one-way, and the board allows only
+        one side open at a time). Runs on its own timer, independent of the manual
+        valve holds; STOP ALL / close / a run all stop it."""
+        if self._vent_timer.isActive():
+            self._stop_vent()
+            return
+        if not self._chamber_cfgs:
+            return
+        self._reset_manual_ui()                 # clear manual holds so they don't fight
+        self._arm()
+        self._vent_side = 1                     # start on deflate (bleed inflated)
+        self._vent_tick()
+        self._vent_timer.start()
+        self.vent_btn.setText("Close Vent")
+        self.vent_btn.setStyleSheet(self._VALVE_OPEN_STYLE)
+
+    def _vent_tick(self) -> None:
+        """One vent cycle: open the current side on every chamber, then flip it."""
+        side = self._vent_side
+        for slot in self._chamber_cfgs:
+            self._gateway.send(self._mac, "valve_manual", chamber=slot,
+                               side=side, open=1)
+            self._set_valve_button((slot, side), True, confirmed=False)
+            self._set_valve_button((slot, 1 - side), False)   # board closes it
+        self._vent_side ^= 1
+
+    def _stop_vent(self) -> None:
+        """Stop venting: close both valve sides on every chamber."""
+        was_active = self._vent_timer.isActive()
+        self._vent_timer.stop()
+        if was_active:
+            for slot in self._chamber_cfgs:
+                self._gateway.send(self._mac, "valve_manual", chamber=slot,
+                                   side=0, open=0)
+                self._gateway.send(self._mac, "valve_manual", chamber=slot,
+                                   side=1, open=0)
+                self._set_valve_button((slot, 0), False)
+                self._set_valve_button((slot, 1), False)
+        self.vent_btn.setText("Vent")
+        self.vent_btn.setStyleSheet(self._VALVE_STYLE)
+
+    def _set_pump_button(self, pump: int, is_on: bool, *,
+                         confirmed: bool = True) -> None:
+        """Set one pump button's label and colour, mirroring _set_valve_button.
+
+        The label flips to ON/OFF immediately, but the **green fill appears only
+        when ``confirmed``** — i.e. only from the node's reported pump output
+        (:meth:`_update_pumps`), never from an optimistic click. So green means
+        the pump really is running (whoever started it: a click, an inflate/
+        deflate, the closed-loop control); a plain 'ON' means the command was
+        sent but the node hasn't confirmed the pump running yet."""
+        entry = self._pump_states.get(pump)
+        if entry is None:
+            return
+        _, btn = entry
         self._pump_states[pump] = (is_on, btn)
-
-        # Update button appearance (fixed-width for consistent size)
         pump_name = "Inflate" if pump == 0 else "Deflate"
-        status = "ON " if is_on else "OFF"
-        btn.setText(f"{pump_name} Pump: {status}")
+        btn.setText(f"{pump_name} Pump: {'ON ' if is_on else 'OFF'}")
+        btn.setStyleSheet(self._VALVE_OPEN_STYLE if (is_on and confirmed)
+                          else self._VALVE_STYLE)
+
+    def _update_pumps(self, inflate_pwm: int, deflate_pwm: int) -> None:
+        """Reflect the node's ACTUAL pump outputs (green while running).
+
+        Display only. A pump greens whoever runs it, so clicking a chamber's
+        Inflate/Deflate visibly lights the corresponding pump for the fill."""
+        self._set_pump_button(0, inflate_pwm > 0)
+        self._set_pump_button(1, deflate_pwm > 0)
+
+    def _toggle_pump(self, pump: int, btn: QPushButton) -> None:
+        """Toggle a pump on/off (manual bench override)."""
+        is_on = not self._pump_states.get(pump, (False, btn))[0]
+        # Optimistic label only (no green): the green fill waits for the node to
+        # report the pump actually running (_update_pumps).
+        self._set_pump_button(pump, is_on, confirmed=False)
 
         # Send command to firmware (re-arm first if STOP ALL latched the node)
         if is_on:
@@ -762,6 +887,11 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         self._reset_manual_ui()
         self._run = (direction, chamber)
         self._gateway.send(self._mac, "test_run", dir=direction, chamber=chamber)
+        # Optimistic: a run opens the direction's valve on the run's chamber(s)
+        # (all when chamber == -1). Green once the node confirms.
+        run_slots = list(self._chamber_cfgs) if chamber == -1 else [chamber]
+        for slot in run_slots:
+            self._set_valve_button((slot, direction), True, confirmed=False)
         self._run_keepalive.start()
         self._refresh_run_buttons()
 
@@ -834,10 +964,9 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         self._valve_intent.clear()
         for key in self._valve_states:
             self._set_valve_button(key, False)
-        for pump, (_, btn) in self._pump_states.items():
-            self._pump_states[pump] = (False, btn)
-            pump_name = "Inflate" if pump == 0 else "Deflate"
-            btn.setText(f"{pump_name} Pump: OFF")
+        for pump in list(self._pump_states):
+            self._set_pump_button(pump, False)
+        self._stop_vent()
         self._refresh_manual_keepalive()
 
     def _stop_all(self) -> None:

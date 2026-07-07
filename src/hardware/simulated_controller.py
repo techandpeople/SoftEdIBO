@@ -194,14 +194,17 @@ class SimulatedController(QObject):
     def set_led(self, color: str, pattern: str = "solid",
                 period_ms: int = 0, count: int | None = None,
                 index: int | None = None, ring: int | None = None,
-                fade_ms: int | None = None, angle: float | None = None) -> bool:
+                fade_ms: int | None = None, angle: float | None = None,
+                color2: str | None = None) -> bool:
         """No-op shim — simulation has no LED strip but activities call this on
         enter/exit so we accept and log to keep the code paths symmetric with
-        real hardware. ``index``/``ring``/``fade_ms``/``angle`` mirror the real
-        controller's signature."""
+        real hardware. ``index``/``ring``/``fade_ms``/``angle``/``color2`` mirror
+        the real controller's signature (``color2`` is the "fade" pattern's
+        second colour)."""
         logger.debug("SIM set_led(%s, pattern=%s, period=%dms, count=%s, index=%s, "
-                     "ring=%s, fade=%s, angle=%s)",
-                     color, pattern, period_ms, count, index, ring, fade_ms, angle)
+                     "ring=%s, fade=%s, angle=%s, color2=%s)",
+                     color, pattern, period_ms, count, index, ring, fade_ms, angle,
+                     color2)
         return True
 
     def set_led_halves(self, colors: list[str],

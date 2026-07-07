@@ -554,16 +554,24 @@ class SkinGridView(QWidget):
     @staticmethod
     def _read_sensor_layout(skin: Skin, fallback_cols: int, fallback_rows: int
                             ) -> tuple[int, int, list[list[int]]]:
-        """Sensor placement. For typed skins it comes from the geometry
-        registry's sensor COORDINATES (the constants), not a drawn grid; legacy
-        skins fall back to ``skin.touch.sensor_grid`` / chamber dims."""
+        """Sensor placement. A skin only has touch sensing when it is wired to a
+        touch node (``touch.node_mac`` — the config dialog's Touch-node dropdown);
+        with none configured it has NO sensors regardless of its type, so the
+        grid stays empty (no T-buttons, no sensor highlights). When it IS wired,
+        typed skins take the sensor COORDINATES from the geometry registry (the
+        constants), and legacy skins fall back to ``touch.sensor_grid`` / chamber
+        dims. This keeps the touch node the on/off switch while ``skin_type``
+        decides only WHERE the sensors sit."""
+        touch = skin.touch or {}
+        if not touch.get("node_mac"):
+            return (fallback_cols, fallback_rows,
+                    _normalise_grid([], fallback_rows, fallback_cols))
         geo = getattr(skin, "geometry", None)
         if geo is not None and geo.sensor_count:
             # Size the grid to the actual sensor arrangement (e.g. 2×2 for a
             # quadrant layout) so each sensor's touch highlight fills its whole
             # region instead of a single cell of an oversized 4×4 grid.
             return geo.natural_sensor_grid()
-        touch = skin.touch or {}
         grid_cfg = touch.get("grid") or {}
         cols = max(1, int(grid_cfg.get("cols", fallback_cols)))
         rows = max(1, int(grid_cfg.get("rows", fallback_rows)))

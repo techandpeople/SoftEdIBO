@@ -16,7 +16,7 @@ Layout:
 
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import (
     QButtonGroup,
     QComboBox,
@@ -303,6 +303,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         # ---- Action buttons (defined in the .ui) ----
         self.test_btn.setEnabled(gateway.is_connected)
         self.calib_btn.setEnabled(gateway.is_connected)
+        self.zero_btn.setEnabled(gateway.is_connected)
         self.delete_btn.setVisible(not is_new)
         self.add_chamber_btn.clicked.connect(self._on_add_chamber)
 
@@ -311,6 +312,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
 
         self.test_btn.clicked.connect(self._on_test)
         self.calib_btn.clicked.connect(self._on_calibrate)
+        self.zero_btn.clicked.connect(self._on_zero_sensors)
         self.delete_btn.clicked.connect(self._on_delete)
         self.cancel_btn.clicked.connect(self.reject)
         self.apply_btn.clicked.connect(self._on_apply)
@@ -1061,6 +1063,77 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         from src.gui.fill_calibration_dialog import FillCalibrationDialog
         FillCalibrationDialog(self._settings, self._gateway,
                               parent=self, chambers=chambers).exec()
+
+    def _actuator_chambers(self) -> dict[str, list[int]]:
+        """Map each actuator node MAC in the current rows to its chamber slots."""
+        node_types = {n.get("mac"): n.get("node_type")
+                      for n in self._robot_nodes()}
+        out: dict[str, list[int]] = {}
+        for row in self._rows:
+            mac, slot, _max_p, _min_p, _mode = row.get_values()
+            if mac and node_types.get(mac) in ("node_direct", "node_multiplexed"):
+                out.setdefault(mac, []).append(int(slot))
+        return out
+
+    def _on_zero_sensors(self) -> None:
+        """Zero the pressure sensors at ambient: vent every chamber to atmosphere
+        (no pump — alternating the deflate/inflate valve so both inflated and
+        vacuumed chambers reach ambient), then tell the node to capture that as
+        its per-chamber zero (persisted). Fixes the sensor's few-kPa offset so a
+        vented chamber reads 0 kPa system-wide."""
+        macs = self._actuator_chambers()
+        if not macs:
+            QMessageBox.warning(
+                self, "Zero Sensors",
+                "Add at least one chamber on an actuator node first.")
+            return
+        # Alternate the open side each cycle: DEFLATE (side 1) lets an inflated
+        # chamber bleed OUT (through the off vacuum pump); INFLATE (side 0) lets a
+        # vacuumed one draw air IN (through the off inflate pump). With the pumps
+        # off each manifold's path to atmosphere is one-way, so a single side
+        # can't vent both cases — and this board only allows one side open at once
+        # (opening one closes the other), hence the alternation. No pump runs, so
+        # nothing is pressurised — safe with the actuation watchdog and the 5 s
+        # manual dead-man.
+        side = [1]
+
+        def _vent() -> None:
+            for mac, slots in macs.items():
+                for slot in slots:
+                    self._gateway.send(mac, "valve_manual", chamber=slot,
+                                       side=side[0], open=1)
+            side[0] ^= 1
+
+        _vent()
+        self.zero_btn.setEnabled(False)
+        self.zero_btn.setText("Venting…")
+        # Alternate + refresh every 2 s (well within the 5 s manual dead-man).
+        keepalive = QTimer(self)
+        keepalive.setInterval(2000)
+        keepalive.timeout.connect(_vent)
+        keepalive.start()
+
+        def _capture() -> None:
+            keepalive.stop()
+            for mac, slots in macs.items():
+                self._gateway.send(mac, "tare")
+                for slot in slots:                # close BOTH sides
+                    self._gateway.send(mac, "valve_manual", chamber=slot,
+                                       side=0, open=0)
+                    self._gateway.send(mac, "valve_manual", chamber=slot,
+                                       side=1, open=0)
+            self.zero_btn.setText("Zero Sensors")
+            self.zero_btn.setEnabled(self._gateway.is_connected)
+            QMessageBox.information(
+                self, "Zero Sensors",
+                "Sensors zeroed at atmosphere. Ambient now reads 0 kPa.\n\n"
+                "Targets are now true gauge pressure, so chambers reach a few "
+                "kPa higher for the same setpoint — re-check max pressures if "
+                "needed.")
+
+        # Let the chambers settle at atmosphere (~4 deflate/inflate alternations,
+        # covering both inflated and vacuumed chambers) before capturing the zero.
+        QTimer.singleShot(8000, _capture)
 
     # ------------------------------------------------------------------
     # Save validation helpers

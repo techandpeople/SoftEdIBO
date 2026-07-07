@@ -1,5 +1,6 @@
 #pragma once
 #include <Arduino.h>
+#include <Preferences.h>
 #include "pins.h"
 #include "config.h"
 #include "pca_valves.h"
@@ -54,6 +55,45 @@ struct Chamber {
 inline Chamber state[MAX_CHAMBERS];
 inline float   cachedKpa[MAX_CHAMBERS] = {};
 
+// Per-chamber ambient zero (kPa) — the pressure sensor has no zero calibration,
+// so at atmosphere it reads a few kPa of offset. Subtracting this per chamber
+// makes gauge 0 == atmosphere everywhere. Captured vented by tare(), NVS-backed.
+inline float   zeroKpa[MAX_CHAMBERS] = {};
+
+inline void loadTare() {
+    Preferences p;
+    if (!p.begin("se_tare", true)) return;
+    for (int i = 0; i < MAX_CHAMBERS; i++) {
+        char key[8]; snprintf(key, sizeof key, "z%d", i);
+        zeroKpa[i] = p.getFloat(key, 0.0f);
+    }
+    p.end();
+}
+
+inline void saveTare() {
+    Preferences p;
+    if (!p.begin("se_tare", false)) return;
+    for (int i = 0; i < MAX_CHAMBERS; i++) {
+        char key[8]; snprintf(key, sizeof key, "z%d", i);
+        p.putFloat(key, zeroKpa[i]);
+    }
+    p.end();
+}
+
+// Capture each chamber's current RAW mux reading as its ambient zero and persist
+// it. The caller must have vented every chamber to atmosphere first; the read is
+// raw (bypasses zeroKpa) so re-taring is idempotent.
+inline void tare() {
+    for (int i = 0; i < MAX_CHAMBERS; i++) {
+        int ch = config::state.chamber_mux_ch[i];
+        if (ch < 0) continue;
+        float s = 0.0f;
+        for (int k = 0; k < 8; k++) s += mux::readKpa(ch);
+        zeroKpa[i] = s / 8.0f;
+    }
+    saveTare();
+}
+
 inline void stop(int n) {
     pca_valves::setChamberValve(n, false, false);
     float saved_max = state[n].max_kpa;
@@ -91,7 +131,7 @@ inline float readKpaMedian(int i) {
     float c = mux::readKpa(ch);
     float hi = max(a, max(b, c));
     float lo = min(a, min(b, c));
-    return a + b + c - hi - lo;   // the middle value
+    return (a + b + c - hi - lo) - zeroKpa[i];   // middle value, ambient-zeroed
 }
 
 // ---------------------------------------------------------------------------

@@ -57,6 +57,12 @@ class Gateway:
         # node that is alive NOW from one merely seen since connect (the
         # session setup's online/offline dots scan + read this).
         self._last_seen: dict[str, float] = {}
+        # time.monotonic() captured when scan() last broadcast its ping. A node
+        # is "online" if it answered since then; because scan() moves this
+        # forward, a node that stops responding (powered off) drops offline on
+        # the next scan — unlike known_macs, which only ever grows. None until
+        # the first scan (reachability unknown).
+        self._scan_ref: float | None = None
         # RGBW LED-ring variant self-reported by each node in its ready/pong frame
         # (mac -> bool). Lets the OTA picker auto-select the right firmware bin
         # instead of asking the user. A node absent here hasn't reported it yet
@@ -80,6 +86,27 @@ class Gateway:
         nodes answered THAT scan (i.e. are reachable right now) rather than at
         any point since connect."""
         return self._last_seen.get(mac)
+
+    def is_online(self, mac: str) -> bool:
+        """True if ``mac`` answered the most recent :meth:`scan` — reachable now.
+
+        Unlike :attr:`known_macs` (which only ever grows), this drops back to
+        False for a node that stops responding, because ``scan`` moves the
+        reference forward and a powered-off node no longer refreshes its
+        last-seen time. Callers show the online set by scanning, waiting for the
+        reply window (~2 s), then reading this. False before the first scan."""
+        if self._scan_ref is None:
+            return False
+        ts = self._last_seen.get(mac)
+        return ts is not None and ts >= self._scan_ref
+
+    @property
+    def online_macs(self) -> frozenset[str]:
+        """MACs that answered the most recent :meth:`scan` (reachable now)."""
+        if self._scan_ref is None:
+            return frozenset()
+        ref = self._scan_ref
+        return frozenset(m for m, ts in self._last_seen.items() if ts >= ref)
 
     def node_rgbw(self, mac: str) -> bool | None:
         """RGBW LED-ring variant a node reported (True/False), or None if unknown.
@@ -219,6 +246,8 @@ class Gateway:
             self._serial = None
         self._known_macs.clear()
         self._node_rgbw.clear()
+        self._last_seen.clear()
+        self._scan_ref = None
         logger.info("Disconnected from SoftEdIBO gateway")
 
     def send(self, target_mac: str, command: str, repeat: int = 1,
@@ -295,7 +324,14 @@ class Gateway:
             return False
 
     def scan(self) -> None:
-        """Broadcast a ping to all nodes. Nodes that respond will appear in known_macs."""
+        """Broadcast a ping to all nodes.
+
+        Responders appear in :attr:`known_macs` and refresh their last-seen
+        time. The reference captured here is what makes :meth:`is_online` /
+        :attr:`online_macs` report reachability as of *this* scan, so a node
+        powered off since the previous scan reads offline rather than staying
+        stuck online. Set before the ping so a reply can only land after it."""
+        self._scan_ref = time.monotonic()
         self.send("FF:FF:FF:FF:FF:FF", "ping")
 
     def on_message(self, callback: Callable[[dict[str, Any]], None]) -> None:
@@ -364,6 +400,11 @@ class Gateway:
         source = data.get("source")
         # "thymio" is the 802.15.4/C6 route tag, not an ESP-NOW node — keep it out of the
         # node list so it doesn't show up in Discover Nodes / the Add Node picker.
+        if source == "thymio":
+            # The C6 return path (sensor replies, discovery, link acks) is otherwise
+            # invisible in the log — surface every C6 frame so a missing thymio_sensors
+            # stream is diagnosable from softedibo.log.
+            logger.debug("From C6 (thymio): %s", data)
         if source and source != "thymio":
             self._known_macs.add(source)
             self._last_seen[source] = time.monotonic()

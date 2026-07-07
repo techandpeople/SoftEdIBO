@@ -30,7 +30,8 @@ ambient). So:
   `"kpa_min"` in the boot `*_ready` message and in `pong`, so the runtime knows
   below which pressure a deflate needs a **time budget** instead of the sensor.
   (The planned −40..+40 kPa sensors are just `-DSENSOR_KPA_MIN=-40
-  -DSENSOR_KPA_MAX=40`; the closed loop then works below ambient too.)
+  -DSENSOR_KPA_MAX=40`; the closed loop then works below ambient too — see
+  [Deep-vacuum valve lock](#deep-vacuum-valve-lock--the-40-kpa-sensor-readiness).)
 
 ## Inflate / deflate are both pump-driven
 
@@ -73,7 +74,7 @@ venting, so an unbounded deflate can pull a sealed chamber into vacuum.
 | Per-chamber time budget (sensor-independent, **always armed**) | `capMs` (the PC's `ms`) else `chamber_max_ms` = 5 s cumulative open | same — the real vacuum backstop |
 | Round / sequence caps | `round_max_ms` 6 s (direct) / 8 s (multiplexed); `seq_max_ms` 25 s / 45 s | same |
 | Pressure cutoff (sensor) | engine closes the chamber at its target, clamped to `max_kpa` | closes at its target, clamped to `min_kpa` — useless below the gauge floor |
-| Absolute hard limit | `hard_max_kpa` = `HARD_MAX_KPA` = 100 kPa, single-sample, no debounce | none in the engine (gauge is blind); `HARD_MIN_KPA` = −100 kPa clamps `set_min_pressure` and the manual path |
+| Absolute hard limit | `hard_max_kpa` = `HARD_MAX_KPA` = 100 kPa, single-sample, no debounce | none in the engine (gauge is blind); `HARD_MIN_KPA` = `pressure::VACUUM_HOLD_FLOOR_KPA` clamps `set_min_pressure` + the manual path — −100 kPa (inert) with the blind gauge, −40 kPa (valve-safe) with the vacuum sensor (see below) |
 | Watchdog | `ACTUATION_TIMEOUT_MS` = 10 s | same |
 
 Notes / honest gaps:
@@ -113,3 +114,59 @@ Inflate via the `Skin` path (it attaches the calibrated time budget when the
 chamber has a measured curve); each chamber is bounded by the table above.
 Inflate to the chamber's configured `max_pressure` (firmware-capped, worst-case
 deformation). See [TOUCH_COUPLING.md](TOUCH_COUPLING.md).
+
+## Deep-vacuum valve lock & the −40 kPa sensor readiness
+
+**The failure.** The FA0520E solenoid valves re-open against at most ~47 kPa of
+differential pressure (≈350 mmHg, the part's rating). There is **no vent** in the
+pneumatics: the only path back to atmosphere is *back through an idle pump* while
+a valve of that direction is open (the "passive vent" — both valves open, pumps
+off — that the fill calibration uses). So a chamber, or the shared vacuum
+manifold behind the closed deflate valves, that is left **deeper than ~47 kPa of
+vacuum traps a pressure the next valve cannot open against**: the valve stays
+shut and the pump forces against a seat that will not move. This is the "motor
+forcing for ~1 s, every now and then" symptom — it strikes after a real deflate,
+when the next deflate (or a re-inflate of a vacuum-held chamber) tries to open a
+valve against the trapped vacuum. (The `pump-recalc-1` fix stopped the *manual*
+paths from dead-heading the manifold to that depth — see
+[the memory trail]; it did **not** stop a *normal* deflate from legitimately
+pulling the manifold deep and leaving it there.)
+
+**Why the blind gauge can't fix it.** With the 0..100 kPa sensor the firmware
+cannot see below atmosphere, so a vacuum deflate closes on **time** (`capMs`),
+not pressure. A full-duty vacuum pump run for seconds pulls well past the valve's
+~47 kPa limit and seals that in — the lock is essentially unavoidable while the
+vacuum side is unmeasured and time-bounded.
+
+**The fix the −40..+40 kPa sensors enable.** Once the vacuum side is *measured*,
+the coupled-fill engine closes deflate **closed-loop at the target**, and the
+target is capped at the sensor floor (−40 kPa) — which is **inside** the valve's
+~47 kPa limit. So both the chamber and the manifold come to rest at ≤40 kPa of
+vacuum: the vacuum is **held** (wrinkles stay shrunk) *and* **every valve always
+re-opens**. −40 kPa does triple duty — useful vacuum target, valve-open limit,
+and sensor floor, all at the same value — which is also why the narrower −40..+40
+sensor is the right part over a wider −100..+100 one (same ADC span over 2.5×
+less range = 2.5× finer resolution, and nothing to measure below −40 anyway since
+the valve can't operate there).
+
+**What is prepared now (inert until the flag flips).**
+
+- `pressure::VACUUM_HOLD_FLOOR_KPA` (`firmware/common/pressure.h`) derives the
+  deepest holdable vacuum from the sensor floor `P_MIN`: **−100 kPa** (unchanged,
+  a no-op sentinel) with the blind gauge, **−40 kPa** with the vacuum sensor,
+  clamped to `VALVE_OPEN_LIMIT_KPA` = −42 kPa so it stays valve-safe even for a
+  deeper sensor.
+- `HARD_MIN_KPA` (direct) and `HARD_CHAMBER_MIN_KPA` (multiplexed) now reference
+  it, so the `set_min_pressure` clamp and the manual vacuum cutoff become
+  valve-safe automatically when the sensor changes — **no behaviour change on the
+  current hardware** (both resolve to −100 kPa today).
+- Flip the whole fleet by uncommenting the two `-DSENSOR_KPA_MIN=-40
+  -DSENSOR_KPA_MAX=40` flags in `firmware/node_actuator/platformio.ini` (`[env]`,
+  so every board variant picks them up). Both builds — current gauge and vacuum
+  flag — are verified to compile.
+
+**Deferred to when the sensors are in hand** (needs the bench): tune the
+closed-loop-at-floor behaviour (the round gate can briefly overshoot past −40,
+which the saturated gauge can't see), reflash both boards, bump the `fw` marker,
+then remove the blind-gauge branch (`VACUUM_HOLD_FLOOR_KPA`'s `P_MIN >= 0` arm and
+the `ms`-timed deflate fallback) so no dead single-sensor support is left behind.

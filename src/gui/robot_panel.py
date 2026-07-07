@@ -397,7 +397,7 @@ class RobotPanel(QWidget, Ui_RobotPanel):
             return
         self.scan_btn.setEnabled(True)
         self._refresh_all_trees()
-        n    = len(self._gateway.known_macs)
+        n    = len(self._gateway.online_macs)
         port = self.port_combo.currentData() or self.port_combo.currentText()
         suffix = f" · {n} node{'s' if n != 1 else ''} found" if n else " · no nodes found"
         self.gateway_status_label.setText(f"Connected ({port}){suffix}")
@@ -407,19 +407,23 @@ class RobotPanel(QWidget, Ui_RobotPanel):
     # ------------------------------------------------------------------
 
     def _refresh_all_trees(self) -> None:
-        known      = self._gateway.known_macs if self._gateway.is_connected else frozenset()
+        # "online" here means answered the most recent scan (reachable now), not
+        # merely seen at some point since connect — so a node powered off since
+        # the last scan turns red instead of staying green (known_macs never
+        # shrinks and would keep it online forever).
+        online     = self._gateway.online_macs if self._gateway.is_connected else frozenset()
         robot_data = self._settings.data.get("robots", {})
         self._node_items.clear()
-        self._fill_tree(self.turtles_tree, "turtle", robot_data.get("turtles", []), known)
-        self._fill_tree(self.trees_tree, "tree", robot_data.get("trees", []), known)
-        self._fill_tree(self.thymio_tree, "thymio", robot_data.get("thymios", []), known)
+        self._fill_tree(self.turtles_tree, "turtle", robot_data.get("turtles", []), online)
+        self._fill_tree(self.trees_tree, "tree", robot_data.get("trees", []), online)
+        self._fill_tree(self.thymio_tree, "thymio", robot_data.get("thymios", []), online)
 
     def _fill_tree(
         self,
         tree: QTreeWidget,
         robot_type: str,
         robots_list: list[dict],
-        known: frozenset,
+        online_macs: frozenset,
     ) -> None:
         tree.clear()
         for robot_index, robot_cfg in enumerate(robots_list):
@@ -463,7 +467,7 @@ class RobotPanel(QWidget, Ui_RobotPanel):
                 mac        = node_cfg.get("mac", "")
                 node_type  = node_cfg.get("node_type", "standard")
                 max_slots  = int(node_cfg.get("max_slots", NODE_TYPES.get(node_type, 3)))
-                online     = bool(mac and mac in known)
+                online     = bool(mac and mac in online_macs)
                 dot        = "●" if online else "○"
                 color      = QColor("#2a9d2a") if online else QColor("#cc2222")
 

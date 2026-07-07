@@ -34,8 +34,9 @@ class _FakeNode:
         self.sent.append((cmd, kw))
 
 
-_COUPLING = {"unit": "uT", "sensor_count": 2, "ref_pct": 100.0,
-             "deltas": {"0": [200.0, 0.0]}}
+_COUPLING = {"unit": "uT", "sensor_count": 2, "bin_pct": 10.0,
+             "states": [{"chambers": [0], "levels": {"0": 100.0},
+                         "mag": [200.0, 0.0]}]}
 
 
 # ---------------------------------------------------------------------------

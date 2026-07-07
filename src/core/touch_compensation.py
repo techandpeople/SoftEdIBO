@@ -4,17 +4,21 @@ A magnet sits in the silicone above each MLX90393 touch sensor; inflating a
 chamber deforms the silicone and shifts the magnet, so chamber actuation can
 masquerade as a touch (see :mod:`src.core.touch_coupling` and
 ``docs/TOUCH_COUPLING.md``). The geometry is irregular — one chamber can move
-*two* sensors by different amounts — so the fix is a full ``[chamber x sensor]``
-coupling model, not a 1:1 map.
+*two* sensors by different amounts, and two chambers inflated together deform the
+silicone **non-additively** — so the fix is a full N-dimensional model measured
+over combinations of chambers, not a per-chamber sum.
 
 The model is composed of three collaborators:
 
-* :class:`ChamberCoupling` — one chamber's measured effect on every sensor, as a
-  level→offset curve. A curve with several measured levels is interpolated
-  piecewise-linearly (through the origin); the legacy single-point matrix is a
-  one-point curve, which reproduces the old ``delta x level/ref_pct`` scaling
-  exactly. Points may also carry per-sensor **3-axis** deltas (µT vectors, from
-  the ``MAG_VECTOR`` firmware), enabling vector compensation.
+* :class:`GridCompensation` — the measured actuation offset as an N-dimensional
+  lookup table over chamber levels. The calibration sweep visits every chamber
+  *subset* over a per-member level grid, which is exactly the full Cartesian grid
+  over each chamber's axis ``[0, g1, .., 100]`` (a state with a member at 0 is a
+  lower-order subset). At runtime the expected offset for arbitrary live levels
+  is the **multilinear interpolation** of the surrounding measured corners —
+  correct for co-inflation, and reducing to the old per-chamber curve when only
+  one chamber is up. Corners may carry per-sensor **3-axis** deltas (µT vectors,
+  from the ``MAG_VECTOR`` firmware), enabling vector compensation.
 * :class:`TransitionGuard` — marks a chamber "unsettled" for a window after its
   level moves. The calibration only measures steady state, so during transitions
   (pump running, level readings lagging) the expected offset is unreliable; the
@@ -39,8 +43,9 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from itertools import product
 from math import sqrt
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 # Default activation threshold (uT) used to rederive the active-sensor set from
 # the compensated magnitudes. Matches the firmware default act (act_threshold_ut
@@ -58,6 +63,10 @@ DEFAULT_SUPPRESS_COUPLING_UT = 50.0
 # 800 ms mirrors the calibration's steady-state window (touch_coupling.SETTLE_MS).
 DEFAULT_GUARD_MS = 800.0
 DEFAULT_GUARD_LEVEL_EPS = 3.0
+
+# Level-bin width (%) used to snap a measured state's per-member level to a grid
+# index — must match the sweep/analysis bin (touch_coupling.BIN_PCT).
+DEFAULT_BIN_PCT = 10.0
 
 Vec = list[float]           # one sensor's [dx, dy, dz] in uT
 _ZERO_VEC: Vec = [0.0, 0.0, 0.0]
@@ -88,88 +97,145 @@ def _fit_vecs(vecs: Any, n: int) -> list[Vec] | None:
 
 
 @dataclass(frozen=True)
-class CouplingPoint:
-    """One measured level of a chamber's coupling: per-sensor scalar offsets
-    (uT) and, when calibrated with 3-axis data, per-sensor offset vectors."""
-    level_pct: float
+class CouplingState:
+    """One measured operating point fed to :class:`GridCompensation`: the set of
+    co-inflated chambers, each member's level (%), and the per-sensor offset (uT,
+    already rest-subtracted) it produced — with optional 3-axis vectors."""
+    chambers: frozenset[int]
+    levels: dict[int, float]
     mag: list[float]
     vec: list[Vec] | None = None
 
 
-class ChamberCoupling:
-    """One chamber's level→offset curve over every sensor.
+class GridCompensation:
+    """Measured actuation offset as an N-dimensional multilinear lookup.
 
-    ``points`` are (level %, per-sensor offsets) samples from the calibration
-    sweep. Offsets between points are interpolated linearly, with an implicit
-    origin at level 0; above the top point the curve is extended proportionally
-    (``top x level/top_level``), which for a single point reproduces the legacy
-    ``delta x level/ref_pct`` scaling exactly.
+    Each :class:`CouplingState` is a *corner* of the grid, keyed by its members'
+    (chamber, level-bin). A query at arbitrary live levels brackets each involved
+    chamber between its surrounding grid levels (with an implicit origin at 0)
+    and blends the ``2**k`` surrounding corners by the multilinear weights — the
+    exact interpolation for a regular grid, and a plain per-chamber curve when
+    only one chamber is up. An unmeasured higher-order corner (an incomplete
+    sweep) degrades gracefully to the additive sum of its members' single-chamber
+    corners rather than vanishing.
     """
 
-    def __init__(self, points: list[CouplingPoint], sensor_count: int) -> None:
+    def __init__(self, states: Sequence[Any], sensor_count: int, *,
+                 bin_pct: float = DEFAULT_BIN_PCT) -> None:
         self.sensor_count = max(0, int(sensor_count))
-        by_level: dict[float, CouplingPoint] = {}
-        for p in points:
-            level = float(p.level_pct)
-            if level <= 0.0:
-                continue
-            by_level[level] = CouplingPoint(
-                level, _fit_row(p.mag, self.sensor_count),
-                _fit_vecs(p.vec, self.sensor_count))
-        self._points = [by_level[lv] for lv in sorted(by_level)]
-        self.has_vec = bool(self._points) and all(
-            p.vec is not None for p in self._points)
+        self.bin_pct = float(bin_pct) or DEFAULT_BIN_PCT
+        self.has_vec = bool(states) and all(
+            getattr(st, "vec", None) is not None for st in states)
+        self._corners: dict[frozenset, tuple[list[float], list[Vec] | None]] = {}
+        self._chamber_max: dict[int, list[float]] = {}
+        axes: dict[int, dict[int, list[float]]] = {}   # chamber -> bin -> [sum, n]
+        for st in states:
+            self._ingest(st, axes)
+        # Per-chamber axis: sorted (level, bin), prefixed with the origin.
+        self._axes: dict[int, list[tuple[float, int]]] = {
+            c: sorted([(0.0, 0)] + [(ssum / n, b) for b, (ssum, n) in bins.items()])
+            for c, bins in axes.items()}
 
-    @classmethod
-    def from_row(cls, row: list[float], sensor_count: int,
-                 ref_pct: float = 100.0) -> "ChamberCoupling":
-        """Legacy single-point curve: ``row`` measured at ``ref_pct``."""
-        return cls([CouplingPoint(ref_pct or 100.0, list(row))], sensor_count)
+    def _ingest(self, st: Any, axes: dict[int, dict[int, list[float]]]) -> None:
+        """Fold one measured state into the corner table, per-chamber axes and
+        worst-case per-chamber offsets."""
+        chambers = frozenset(int(c) for c in st.chambers)
+        mag = _fit_row(st.mag, self.sensor_count)
+        vec = _fit_vecs(st.vec, self.sensor_count) if self.has_vec else None
+        self._corners[frozenset(
+            (c, self._bin(st.levels[c])) for c in chambers)] = (mag, vec)
+        for c in chambers:
+            slot = axes.setdefault(c, {}).setdefault(self._bin(st.levels[c]),
+                                                     [0.0, 0.0])
+            slot[0] += float(st.levels[c])
+            slot[1] += 1.0
+            cmax = self._chamber_max.setdefault(c, [0.0] * self.sensor_count)
+            for s in range(self.sensor_count):
+                cmax[s] = max(cmax[s], abs(mag[s]))
 
-    @property
-    def points(self) -> list[CouplingPoint]:
-        return list(self._points)
+    def _bin(self, level: float) -> int:
+        return int(round(float(level) / self.bin_pct))
 
     @property
     def is_zero(self) -> bool:
-        return not any(any(p.mag) for p in self._points)
+        """True when no measured corner has any non-zero offset (a no-op)."""
+        return not any(any(mag) for mag, _ in self._corners.values())
 
-    def max_abs(self, sensor: int) -> float:
-        """Largest |offset| (uT) this chamber was measured to put on ``sensor``
-        at any level — the worst-case error bound used by the transition guard
-        and the suppression fallback."""
-        return max((abs(p.mag[sensor]) for p in self._points), default=0.0)
+    @property
+    def chambers(self) -> list[int]:
+        return sorted(self._axes)
 
-    def offset_at(self, level: float) -> tuple[list[float], list[Vec] | None]:
-        """Expected (scalar offsets, vector offsets) at ``level`` % inflation.
+    def chamber_max_abs(self, chamber: int, sensor: int) -> float:
+        """Largest |offset| (uT) ``chamber`` was measured to put on ``sensor`` at
+        any level — the worst-case bound for the guard and suppression."""
+        row = self._chamber_max.get(int(chamber))
+        return row[sensor] if row and sensor < len(row) else 0.0
 
-        Vector offsets are ``None`` unless every calibration point carries them.
-        """
+    def _corner(self, key: frozenset) -> tuple[list[float], list[Vec] | None]:
+        """Offset at a grid corner, with an additive-over-singles fallback for an
+        unmeasured higher-order corner. A missing *single-member* corner has no
+        lower decomposition, so it degrades to zero (no data) — never recursing
+        on itself, which is what a chamber measured only in combination hits."""
         zeros = [0.0] * self.sensor_count
-        zero_vecs = ([list(_ZERO_VEC) for _ in range(self.sensor_count)]
-                     if self.has_vec else None)
-        if level <= 0.0 or not self._points:
-            return zeros, zero_vecs
+        zvec = ([list(_ZERO_VEC) for _ in range(self.sensor_count)]
+                if self.has_vec else None)
+        hit = self._corners.get(key)
+        if hit is not None:
+            return hit
+        if len(key) <= 1:                        # empty (rest) or missing single
+            return zeros, zvec
+        mag = list(zeros)
+        vec = ([list(_ZERO_VEC) for _ in range(self.sensor_count)]
+               if self.has_vec else None)
+        for member in key:                       # decompose to single-chamber corners
+            cmag, cvec = self._corner(frozenset({member}))
+            for s in range(self.sensor_count):
+                mag[s] += cmag[s]
+                if vec is not None and cvec is not None:
+                    vec[s] = [vec[s][i] + cvec[s][i] for i in range(3)]
+        return mag, vec
 
-        prev_level, prev_mag, prev_vec = 0.0, zeros, zero_vecs
-        for p in self._points:
-            if level <= p.level_pct:
-                t = (level - prev_level) / (p.level_pct - prev_level)
-                mag = [prev_mag[s] + (p.mag[s] - prev_mag[s]) * t
-                       for s in range(self.sensor_count)]
-                vec = None
-                if self.has_vec:
-                    vec = [[prev_vec[s][i] + (p.vec[s][i] - prev_vec[s][i]) * t
-                            for i in range(3)]
-                           for s in range(self.sensor_count)]
-                return mag, vec
-            prev_level, prev_mag, prev_vec = p.level_pct, p.mag, p.vec
+    @staticmethod
+    def _bracket(pts: list[tuple[float, int]], q: float) -> list[tuple[int, float]]:
+        """The one or two grid bins surrounding level ``q`` with their weights."""
+        if q >= pts[-1][0]:
+            return [(pts[-1][1], 1.0)]
+        for i in range(len(pts) - 1):
+            lo_l, lo_b = pts[i]
+            hi_l, hi_b = pts[i + 1]
+            if lo_l <= q <= hi_l:
+                span = hi_l - lo_l
+                t = 0.0 if span <= 0.0 else (q - lo_l) / span
+                return [(lo_b, 1.0 - t), (hi_b, t)]
+        return [(pts[-1][1], 1.0)]
 
-        top = self._points[-1]
-        scale = level / top.level_pct
-        mag = [v * scale for v in top.mag]
-        vec = ([[c * scale for c in top.vec[s]]
-                for s in range(self.sensor_count)] if self.has_vec else None)
+    def offset_at(self, levels: Mapping[int, float]
+                  ) -> tuple[list[float], list[Vec] | None]:
+        """Per-sensor expected (scalar, vector) offset at the given live levels."""
+        mag = [0.0] * self.sensor_count
+        vec = ([list(_ZERO_VEC) for _ in range(self.sensor_count)]
+               if self.has_vec else None)
+        brackets = []
+        for c, pts in self._axes.items():
+            q = max(0.0, float(levels.get(c, 0.0)))
+            if q > 0.0:
+                brackets.append((c, self._bracket(pts, q)))
+        if not brackets:
+            return mag, vec
+        for choice in product(*[opts for _, opts in brackets]):
+            weight = 1.0
+            members = []
+            for (c, _opts), (b, frac) in zip(brackets, choice):
+                weight *= frac
+                if b != 0:
+                    members.append((c, b))
+            if weight <= 0.0:
+                continue
+            cmag, cvec = self._corner(frozenset(members))
+            for s in range(self.sensor_count):
+                mag[s] += weight * cmag[s]
+                if vec is not None and cvec is not None:
+                    vec[s] = [vec[s][i] + weight * cvec[s][i] for i in range(3)]
         return mag, vec
 
 
@@ -208,10 +274,8 @@ class TransitionGuard:
 class TouchCompensator:
     """Removes the expected per-sensor actuation offset from a magnet reading.
 
-    ``couplings`` maps a chamber id (the node slot, matching the chamber level
-    keys fed to :meth:`compensate`) to its :class:`ChamberCoupling` curve — or,
-    for the legacy config, to a plain per-sensor offset row measured at
-    ``ref_pct``. Missing sensors/chambers count as 0.
+    ``grid`` is the measured :class:`GridCompensation` whose chamber ids match the
+    level keys fed to :meth:`compensate`. Missing sensors/chambers count as 0.
 
     ``margin_frac`` raises a sensor's activation threshold by that fraction of
     the correction applied to it, so large corrections (where calibration error
@@ -222,54 +286,34 @@ class TouchCompensator:
 
     def __init__(
         self,
-        couplings: Mapping[int, "ChamberCoupling | list[float]"],
+        grid: GridCompensation,
         *,
-        sensor_count: int,
-        ref_pct: float = 100.0,
+        sensor_count: int | None = None,
         threshold_ut: float = DEFAULT_THRESHOLD_UT,
         margin_frac: float = 0.0,
         guard: TransitionGuard | None = None,
         suppress_pct: float | None = None,
         suppress_coupling_ut: float = DEFAULT_SUPPRESS_COUPLING_UT,
     ) -> None:
-        self.sensor_count = max(0, int(sensor_count))
-        self._couplings: dict[int, ChamberCoupling] = {}
-        for chamber, cup in couplings.items():
-            if not isinstance(cup, ChamberCoupling):
-                cup = ChamberCoupling.from_row(
-                    cup, self.sensor_count, ref_pct=ref_pct)
-            self._couplings[int(chamber)] = cup
+        self._grid = grid
+        self.sensor_count = (grid.sensor_count if sensor_count is None
+                             else max(0, int(sensor_count)))
         self.threshold_ut = float(threshold_ut)
         self.margin_frac = max(0.0, float(margin_frac))
         self.guard = guard
         self.suppress_pct = None if suppress_pct is None else float(suppress_pct)
         self.suppress_coupling_ut = float(suppress_coupling_ut)
-        self.has_vector = bool(self._couplings) and all(
-            c.has_vec for c in self._couplings.values())
+        self.has_vector = grid.has_vec
 
     @property
     def is_empty(self) -> bool:
         """True when there is no measured coupling (compensation is a no-op)."""
-        return all(c.is_zero for c in self._couplings.values())
+        return self._grid.is_zero
 
     def _expected(self, levels: Mapping[int, float]
                   ) -> tuple[list[float], list[Vec] | None]:
         """Per-sensor expected (scalar, vector) offsets for the given levels."""
-        mag = [0.0] * self.sensor_count
-        vec = ([[0.0, 0.0, 0.0] for _ in range(self.sensor_count)]
-               if self.has_vector else None)
-        for chamber, cup in self._couplings.items():
-            level = max(0.0, float(levels.get(chamber, 0.0)))
-            if level <= 0.0:
-                continue
-            c_mag, c_vec = cup.offset_at(level)
-            for s in range(self.sensor_count):
-                mag[s] += c_mag[s]
-                if vec is not None and c_vec is not None:
-                    vec[s][0] += c_vec[s][0]
-                    vec[s][1] += c_vec[s][1]
-                    vec[s][2] += c_vec[s][2]
-        return mag, vec
+        return self._grid.offset_at(levels)
 
     def expected_offset(self, levels: Mapping[int, float]) -> list[float]:
         """Per-sensor expected scalar offset (uT) for the given ``levels`` (%)."""
@@ -281,11 +325,11 @@ class TouchCompensator:
         if self.suppress_pct is None:
             return set()
         out: set[int] = set()
-        for chamber, cup in self._couplings.items():
+        for chamber in self._grid.chambers:
             if float(levels.get(chamber, 0.0)) < self.suppress_pct:
                 continue
             for s in range(self.sensor_count):
-                if cup.max_abs(s) >= self.suppress_coupling_ut:
+                if self._grid.chamber_max_abs(chamber, s) >= self.suppress_coupling_ut:
                     out.add(s)
         return out
 
@@ -296,11 +340,8 @@ class TouchCompensator:
         if self.guard is None:
             return boost
         for chamber in self.guard.update(levels, now_ms):
-            cup = self._couplings.get(chamber)
-            if cup is None:
-                continue
             for s in range(self.sensor_count):
-                boost[s] += cup.max_abs(s)
+                boost[s] += self._grid.chamber_max_abs(chamber, s)
         return boost
 
     def compensate(self, mag: list[float], levels: Mapping[int, float], *,
@@ -378,75 +419,54 @@ class TouchCompensator:
 # Config (de)serialisation — the stored ``touch.coupling`` / ``touch.compensation``
 # ---------------------------------------------------------------------------
 
-def coupling_to_config(deltas: Mapping[int, list[float]], sensor_count: int,
-                       ref_pct: float = 100.0,
-                       curves: Mapping[int, list[dict[str, Any]]] | None = None,
+def coupling_to_config(model: Any, *, bin_pct: float = DEFAULT_BIN_PCT
                        ) -> dict[str, Any]:
-    """Build the stored ``touch.coupling`` dict from a measured coupling.
+    """Build the stored ``touch.coupling`` dict from a measured coupling model.
 
-    ``deltas`` is the per-chamber offset row at ``ref_pct`` — kept so configs
-    stay readable by older code. ``curves`` optionally adds the full multi-level
-    measurement: per chamber, a list of ``{"pct", "mag", ["vec"]}`` points.
-    Slots are stored as strings (JSON/YAML object keys); magnitudes rounded."""
+    ``model`` is a :class:`src.core.touch_coupling.CouplingModel`. The config
+    stores each measured state (single chamber or combination) as
+    ``{chambers, levels, mag, [vec]}`` plus the rest ``baseline`` and the grid
+    ``bin_pct`` the runtime snaps levels to. Chambers/level keys are ints/strings
+    for YAML/JSON friendliness; magnitudes are rounded."""
     cfg: dict[str, Any] = {
         "unit": "uT",
-        "sensor_count": int(sensor_count),
-        "ref_pct": round(float(ref_pct), 1),
-        "deltas": {str(int(c)): [round(float(v), 2) for v in row]
-                   for c, row in deltas.items()},
+        "sensor_count": int(model.sensor_count),
+        "bin_pct": round(float(bin_pct), 1),
+        "baseline": [round(float(v), 2) for v in model.baseline],
+        "states": model.states_for_config(),
     }
-    if curves:
-        out_curves: dict[str, list[dict[str, Any]]] = {}
-        for chamber, points in curves.items():
-            rows = []
-            for p in points:
-                row: dict[str, Any] = {
-                    "pct": round(float(p["pct"]), 1),
-                    "mag": [round(float(v), 2) for v in p["mag"]],
-                }
-                if p.get("vec") is not None:
-                    row["vec"] = [[round(float(c), 1) for c in v]
-                                  for v in p["vec"]]
-                rows.append(row)
-            out_curves[str(int(chamber))] = rows
-        cfg["curves"] = out_curves
+    if model.baseline_vec is not None:
+        cfg["baseline_vec"] = [[round(float(c), 1) for c in v]
+                               for v in model.baseline_vec]
     return cfg
 
 
-def _coupling_from_config(coupling: Mapping[str, Any],
-                          sensor_count: int) -> dict[int, ChamberCoupling]:
-    """Parse stored coupling into per-chamber curves (multi-level ``curves``
-    preferred, legacy single-point ``deltas`` otherwise)."""
-    ref_pct = float(coupling.get("ref_pct", 100.0))
-    out: dict[int, ChamberCoupling] = {}
-    for slot, rows in (coupling.get("curves") or {}).items():
+def _grid_from_config(coupling: Mapping[str, Any],
+                      sensor_count: int) -> GridCompensation:
+    """Parse stored coupling states into a :class:`GridCompensation`."""
+    states: list[CouplingState] = []
+    for st in coupling.get("states") or []:
         try:
-            points = [CouplingPoint(float(r["pct"]),
-                                    [float(v) for v in r["mag"]],
-                                    r.get("vec"))
-                      for r in rows]
-            out[int(slot)] = ChamberCoupling(points, sensor_count)
+            chambers = frozenset(int(c) for c in st["chambers"])
+            levels = {int(k): float(v) for k, v in (st.get("levels") or {}).items()}
+            mag = [float(v) for v in st["mag"]]
+            states.append(CouplingState(chambers, levels, mag, st.get("vec")))
         except (TypeError, ValueError, KeyError):
             continue
-    for slot, row in (coupling.get("deltas") or {}).items():
-        try:
-            if int(slot) not in out:
-                out[int(slot)] = ChamberCoupling.from_row(
-                    [float(v) for v in row], sensor_count, ref_pct=ref_pct)
-        except (TypeError, ValueError):
-            continue
-    return out
+    return GridCompensation(
+        states, sensor_count,
+        bin_pct=float(coupling.get("bin_pct", DEFAULT_BIN_PCT)))
 
 
 def compensator_from_config(touch: Mapping[str, Any] | None) -> TouchCompensator | None:
     """Build a :class:`TouchCompensator` from a skin's ``touch`` config, or
     ``None`` when compensation is absent or disabled.
 
-    Reads ``touch.coupling`` (the matrix/curves) and the optional
+    Reads ``touch.coupling`` (the measured grid states) and the optional
     ``touch.compensation`` tuning block (``enabled``, ``threshold_ut``,
     ``margin_frac``, ``guard_ms``, ``guard_level_eps``, ``suppress_pct``).
     Absent tuning keys default to the pre-upgrade behaviour (no margin, no
-    guard), so stored configs keep working unchanged.
+    guard).
 
     The activation threshold resolves ``compensation.threshold_ut`` →
     ``touch.act_threshold_ut`` (the sensitivity pushed to the node, e.g. the
@@ -459,11 +479,10 @@ def compensator_from_config(touch: Mapping[str, Any] | None) -> TouchCompensator
         return None
     sensor_count = int(coupling.get("sensor_count")
                        or touch.get("sensor_count", 0)
-                       or max((len(r) for r in
-                               (coupling.get("deltas") or {}).values()),
-                              default=0))
-    couplings = _coupling_from_config(coupling, sensor_count)
-    if not couplings:
+                       or max((len(st.get("mag") or []) for st in
+                               (coupling.get("states") or [])), default=0))
+    grid = _grid_from_config(coupling, sensor_count)
+    if not grid.chambers:
         return None
     guard_ms = float(tuning.get("guard_ms", 0.0) or 0.0)
     guard = TransitionGuard(
@@ -472,7 +491,7 @@ def compensator_from_config(touch: Mapping[str, Any] | None) -> TouchCompensator
     ) if guard_ms > 0.0 else None
     suppress = tuning.get("suppress_pct")
     return TouchCompensator(
-        couplings,
+        grid,
         sensor_count=sensor_count,
         threshold_ut=float(tuning.get(
             "threshold_ut",
