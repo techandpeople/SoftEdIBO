@@ -33,8 +33,9 @@ def _skin(enabled: bool):
     touch = {
         "node_mac": "AA:01",
         "sensor_count": 2,
-        "coupling": {"unit": "uT", "sensor_count": 2, "ref_pct": 100.0,
-                     "deltas": {"0": [200.0, 0.0]}},
+        "coupling": {"unit": "uT", "sensor_count": 2, "bin_pct": 10.0,
+                     "states": [{"chambers": [0], "levels": {"0": 100.0},
+                                 "mag": [200.0, 0.0]}]},
         "compensation": {"enabled": enabled, "threshold_ut": 100.0},
     }
     inp = {"controller": node, "node_slot": 0, "max_pressure": 8.0}

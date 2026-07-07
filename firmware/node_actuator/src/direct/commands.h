@@ -40,6 +40,39 @@ inline void sendStatus(int ch, float kpa) {
     esp_now_send(gatewayMac, reinterpret_cast<uint8_t*>(buf), len);
 }
 
+// Batched status: every chamber in ONE frame (parallel arrays), instead of one
+// esp_now_send per chamber. Cuts status frame count NUM_CHAMBERS× — the biggest win
+// during a status_rate fast window — freeing ESP-NOW airtime that the Thymio's
+// co-channel 802.15.4 shares. The "pressure" percentage is intentionally omitted: it is
+// redundant, the PC recomputes it from "kpa" against the configured range (kpa is
+// authoritative — see air_chamber.py), and dropping it keeps even a full 12-chamber
+// frame (~200 B) under the 250 B ESP-NOW limit, so it is ALWAYS a single frame (no
+// splitting). kpa at 0.1 kPa — finer than the sensor noise. Compatible both ways: an old
+// PC ignores it (no "chamber" field); an old node still sends the scalar frame the new PC
+// also parses. Keep sendStatus() (scalar) for any single-chamber callers.
+inline void sendStatusAll() {
+    if (!gatewayKnown) return;
+    char buf[224];
+    int len = snprintf(buf, sizeof(buf), "{\"type\":\"status\",\"kpa\":[");
+    for (int i = 0; i < NUM_CHAMBERS; i++)
+        len += snprintf(buf + len, sizeof(buf) - len, "%s%.1f", i ? "," : "",
+                        chambers::cachedKpa[i]);
+    len += snprintf(buf + len, sizeof(buf) - len, "],\"st\":[");
+    for (int i = 0; i < NUM_CHAMBERS; i++)
+        len += snprintf(buf + len, sizeof(buf) - len, "%s%d", i ? "," : "",
+                        (int)chambers::state[i].state);
+    len += snprintf(buf + len, sizeof(buf) - len, "],\"vi\":[");
+    for (int i = 0; i < NUM_CHAMBERS; i++)
+        len += snprintf(buf + len, sizeof(buf) - len, "%s%d", i ? "," : "",
+                        chambers::valveOpen[i * 2 + 0] ? 1 : 0);
+    len += snprintf(buf + len, sizeof(buf) - len, "],\"vd\":[");
+    for (int i = 0; i < NUM_CHAMBERS; i++)
+        len += snprintf(buf + len, sizeof(buf) - len, "%s%d", i ? "," : "",
+                        chambers::valveOpen[i * 2 + 1] ? 1 : 0);
+    len += snprintf(buf + len, sizeof(buf) - len, "]}");
+    esp_now_send(gatewayMac, reinterpret_cast<uint8_t*>(buf), len);
+}
+
 inline void sendPong() {
     if (!gatewayKnown) return;
     // "kpa_min" mirrors the ready message: the gauge floor, so the PC can learn
@@ -325,6 +358,10 @@ inline void process(const cmd_queue::Cmd& c) {
         sendAck("status_rate"); return;
     }
 
+    // Zero the pressure sensors at the current (vented) reading. Non-actuating,
+    // so honoured even while latched stopped; the PC vents to ambient first.
+    if (c.type == CMD_TARE) { chambers::tare(); sendAck("tare"); return; }
+
     // While latched stopped, drop every actuation command so nothing re-actuates.
     if (chambers::stopped) return;
 
@@ -396,6 +433,7 @@ inline void parseAndQueue(const uint8_t* data, int len) {
     else if (strcmp(cmd, "test_run") == 0)          { c.type = CMD_TEST_RUN;     c.chamber = doc["chamber"] | -1; c.param = doc["dir"] | 0; c.duty = doc["duty"] | 0; }  // 0=inflate, 1=deflate; chamber -1 = all; duty 0 = full
     else if (strcmp(cmd, "test_stop") == 0)         { c.type = CMD_TEST_STOP;    c.chamber = -1; }
     else if (strcmp(cmd, "status_rate") == 0)       { c.type = CMD_STATUS_RATE;  c.chamber = -1; c.param = doc["ms"] | 0; c.fill_ms = doc["ttl"] | 0; }  // ms<=0/ttl<=0 = revert to default
+    else if (strcmp(cmd, "tare") == 0)              { c.type = CMD_TARE;         c.chamber = -1; }
     else if (strcmp(cmd, "valve_manual") == 0) {
         c.type = CMD_VALVE_MANUAL;
         c.chamber = doc["chamber"] | -1;
@@ -413,7 +451,9 @@ inline void parseAndQueue(const uint8_t* data, int len) {
     else if (strcmp(cmd, "set_led") == 0) {
         // Handled inline (not queued): just stores the target LED state, which
         // loop()'s leds::update() renders. {"cmd":"set_led","color":"#RRGGBB",
-        // "pattern":"off|solid|blink|pulse|comet","period_ms":N,"count":N,"fade_ms":N}
+        // "pattern":"off|solid|blink|pulse|comet|fade","period_ms":N,"count":N,
+        // "fade_ms":N}  "fade" adds "color2":"#RRGGBB" and cross-fades c1<->c2 on
+        // the node (the PC used to stream that colour sweep frame by frame).
         const char* col = doc["color"]   | "#000000";
         const char* pat = doc["pattern"]  | "solid";
         uint32_t period = doc["period_ms"] | 0;
@@ -424,8 +464,15 @@ inline void parseAndQueue(const uint8_t* data, int len) {
         leds::parseHexColor(col, r, g, b);
         if (strcmp(pat, "off") == 0) { r = g = b = 0; }   // "off" = dark, any colour
         int idx = doc["index"] | -1;
-        if (idx >= 0) leds::setPixel(idx, r, g, b, fade);   // single pixel (test panel)
-        else          leds::setAll(r, g, b, leds::patternFromStr(pat), period, count, fade, offset);
+        if (idx >= 0) {
+            leds::setPixel(idx, r, g, b, fade);   // single pixel (test panel)
+        } else if (strcmp(pat, "fade") == 0) {
+            uint8_t r2, g2, b2;                   // second colour of the cross-fade
+            leds::parseHexColor(doc["color2"] | "#000000", r2, g2, b2);
+            leds::setFade(r, g, b, r2, g2, b2, period, count, fade, offset);
+        } else {
+            leds::setAll(r, g, b, leds::patternFromStr(pat), period, count, fade, offset);
+        }
         return;
     }
     else if (strcmp(cmd, "set_led_halves") == 0) {

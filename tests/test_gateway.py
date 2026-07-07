@@ -68,6 +68,51 @@ def test_node_rgbw_captured_from_reported_frames():
     assert gateway.node_rgbw("AA:BB:CC:DD:EE:01") is True
 
 
+# --- online = answered the most recent scan, not merely ever-seen -----------
+
+def test_is_online_judged_against_last_scan_reference():
+    """``is_online``/``online_macs`` reflect the most recent scan, so a node
+    powered off between scans drops offline even though ``known_macs`` (which
+    only grows) still remembers it — the "offline node still shows online" bug.
+    """
+    gateway = Gateway("/dev/ttyUSB0")
+    mac = "AA:BB:CC:DD:EE:01"
+
+    # Before any scan, reachability is unknown.
+    assert not gateway.is_online(mac)
+    assert gateway.online_macs == frozenset()
+
+    # Seen once, then a scan is taken later with no fresh reply from it.
+    gateway._known_macs.add(mac)
+    gateway._last_seen[mac] = 100.0
+    gateway._scan_ref = 200.0
+    assert not gateway.is_online(mac)        # offline as of this scan...
+    assert mac not in gateway.online_macs
+    assert mac in gateway.known_macs         # ...but still remembered
+
+    # It answers a later scan -> back online.
+    gateway._scan_ref = 300.0
+    gateway._last_seen[mac] = 305.0
+    assert gateway.is_online(mac)
+    assert mac in gateway.online_macs
+
+
+def test_scan_reply_marks_online_via_real_path():
+    """End-to-end: a reply landing after ``scan`` counts as online; a following
+    scan with no reply drops it while leaving ``known_macs`` intact."""
+    gateway = Gateway("/dev/ttyUSB0")
+    mac = "AA:BB:CC:DD:EE:01"
+
+    gateway.scan()   # not connected: send() no-ops, but the reference is set
+    gateway._dispatch_line(b'{"source":"AA:BB:CC:DD:EE:01","type":"pong"}')
+    assert gateway.is_online(mac)
+    assert mac in gateway.known_macs
+
+    gateway.scan()   # node powered off: no reply this time
+    assert not gateway.is_online(mac)
+    assert mac in gateway.known_macs
+
+
 def test_non_gateway_lines_are_rejected():
     gateway = Gateway("/dev/ttyUSB0")
     rejected = [

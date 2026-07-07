@@ -11,11 +11,14 @@
 #   firmware/node_actuator/firmware-multiplexed-rgbw-debug.bin
 #   firmware/node_magnet_sensor/firmware-release.bin
 #   firmware/thymio_rcp/firmware.bin           (XIAO ESP32-C6 RCP — APP image, WiFi-OTA)
+#   firmware/thymio_rcp/firmware-c6.bin        (XIAO ESP32-C6 RCP — MERGED image, first USB flash)
 #
-# All are MERGED images (bootloader + partitions + app) EXCEPT the Thymio RCP, which is
-# the bare app image (it is WiFi-OTA'd into an app partition, not cable-flashed at 0x0).
-# The wizard flashes each merged .bin at offset 0x0. An app-only firmware.bin flashed at
-# 0x0 bricks the node with an `invalid header` boot loop.
+# Every board's main .bin is a MERGED image (bootloader + partitions + app) that the setup
+# wizard flashes at offset 0x0. The Thymio RCP (C6) ships BOTH: firmware.bin is the bare
+# app-only image the WiFi-OTA path needs (it is written into an app partition, never at
+# 0x0), and firmware-c6.bin is the merged image for the C6's FIRST flash over USB (the
+# wizard writes it at 0x0 like any other board). An app-only bin flashed at 0x0 bricks the
+# node with an `invalid header` boot loop.
 #
 # Mirrors the steps in .github/workflows/build.yml so the local dev bundle
 # matches what nightly/stable releases ship.
@@ -50,6 +53,33 @@ fi
 
 PIO=(python -m platformio)
 
+# ensure_pioarduino_core <env> — call from inside a project dir right before `pio run`.
+# The pioarduino projects (gateway/thymio_rcp) and the stock-espressif32 node projects
+# both install a package literally named `framework-arduinoespressif32`, but need
+# incompatible arduino-esp32 cores (pioarduino 3.3.9 vs stock 3.0.17). PlatformIO keeps
+# only ONE folder by that name in the shared package pool, so a full build (this script's
+# order — and CI's — builds the stock nodes before the pioarduino RCP) leaves the stock
+# core in place. The stock resolver quietly reinstalls its own core; the pioarduino one
+# instead CRASHES with `FRAMEWORK_DIR None`.
+#
+# The stock core cannot simply be left for pio to fix: both `pio run` and `pio pkg install`
+# treat the wrong-version core as "satisfying" the requirement and skip it (the framework
+# is `optional: true` in the platform). So we must EVICT it, then FORCE a reinstall with an
+# explicit `pkg install` (a bare `pio run` won't re-fetch the evicted optional framework once
+# a stock build has touched the pool — verified). Disk-neutral (no duplicate pools; ~76 MB
+# re-fetch), version-agnostic (pioarduino core installs from a release URL → .piopm spec.uri
+# set; the stock core from the registry → spec.uri null), and a no-op for stock node builds.
+ensure_pioarduino_core() {
+    grep -q 'pioarduino/platform-espressif32' platformio.ini 2>/dev/null || return 0
+    local core_dir="${PLATFORMIO_CORE_DIR:-$HOME/.platformio}"
+    local piopm="$core_dir/packages/framework-arduinoespressif32/.piopm"
+    if [[ -f "$piopm" ]] && grep -q '"uri": *null' "$piopm"; then
+        echo "Evicting stock arduino core so the pioarduino build re-fetches its own (framework-arduinoespressif32)"
+        rm -rf "$core_dir/packages/framework-arduinoespressif32"
+        "${PIO[@]}" pkg install -e "$1"
+    fi
+}
+
 # merge_node <dir> <env> <out> [chip] [bootloader_offset] [flash_freq]
 # Builds <dir>/<env> and merges into <dir>/<out>. Defaults target the ESP32
 # nodes (chip esp32, bootloader @ 0x1000, 40m).
@@ -76,6 +106,7 @@ merge_node() {
 
     (
         cd "$dir"
+        ensure_pioarduino_core "$env"
         "${PIO[@]}" run -e "$env"
         python -m esptool --chip "$chip" merge-bin \
             --flash-mode dio --flash-freq "$freq" --flash-size 4MB \
@@ -106,7 +137,7 @@ build_app() {
         return
     fi
 
-    ( cd "$dir"; "${PIO[@]}" run -e "$env"; cp ".pio/build/${env}/firmware.bin" "$out" )
+    ( cd "$dir"; ensure_pioarduino_core "$env"; "${PIO[@]}" run -e "$env"; cp ".pio/build/${env}/firmware.bin" "$out" )
 }
 
 # Gateway — XIAO ESP32-S3 (plain ESP-NOW + a SoftAP build, -DGATEWAY_AP).
@@ -133,10 +164,15 @@ if want magnet; then
     merge_node firmware/node_magnet_sensor release firmware-release.bin
 fi
 
-# Thymio RCP (XIAO ESP32-C6) — app image for WiFi-OTA (Tools -> Update Nodes -> C6 row,
-# or scripts/ota_c6_wifi.py). First-ever flash of a bare C6 is over USB (pio -t upload).
+# Thymio RCP (XIAO ESP32-C6) — TWO images from the one `rcp_c6` build:
+#   firmware.bin     app-only, for WiFi-OTA (Tools -> Update Nodes -> C6 row / ota_c6_wifi.py)
+#   firmware-c6.bin  merged bundle, for the C6's FIRST flash over USB via the setup wizard
+# The merge params match the C6 bootloader exactly (esp32c6, boot @ 0x0, 80m/dio/4MB), so
+# the wizard can write it at 0x0 like any node bin. A merged image is required here — an
+# app-only bin at 0x0 bricks the C6 (`invalid header`).
 if want thymio; then
-    build_app firmware/thymio_rcp rcp_c6 firmware.bin
+    build_app  firmware/thymio_rcp rcp_c6 firmware.bin
+    merge_node firmware/thymio_rcp rcp_c6 firmware-c6.bin esp32c6 0x0 80m
 fi
 
 echo
@@ -144,4 +180,4 @@ echo "Firmware binaries built:"
 if want gateway;  then ls -1 firmware/gateway/firmware-s3.bin; fi
 if want actuator; then ls -1 firmware/node_actuator/firmware-*.bin; fi
 if want magnet;   then ls -1 firmware/node_magnet_sensor/firmware-release.bin; fi
-if want thymio;   then ls -1 firmware/thymio_rcp/firmware.bin; fi
+if want thymio;   then ls -1 firmware/thymio_rcp/firmware.bin firmware/thymio_rcp/firmware-c6.bin; fi

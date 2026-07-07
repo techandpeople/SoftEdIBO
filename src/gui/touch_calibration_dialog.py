@@ -23,6 +23,7 @@ from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import QMessageBox, QWidget
 
 from src.gui.base_dialog import BaseDialog
+from src.gui.calibration_indicator import CalibrationLedIndicator
 from src.gui.ui_touch_calibration_dialog import Ui_TouchCalibrationDialog
 from src.hardware.fast_telemetry import FastTelemetry
 from src.hardware.touch_calibration import (
@@ -36,6 +37,12 @@ from src.hardware.touch_calibration import (
 from src.hardware.units import kpa_to_pct
 
 _TICK_MS = 100
+# Ignore the first part of each state's dwell (pumps still moving) before judging
+# whether a chamber that should be vented actually vented.
+_SETTLE_MARGIN_MS = 1500
+# A non-target chamber reading above this % during a measurement is "not vented"
+# — it contaminates the state (and would fake a co-inflation combination).
+_VENT_MAX = 15.0
 
 
 class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
@@ -53,6 +60,9 @@ class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
         self._settings = settings
         self._gateway = gateway
         self._active = True
+        # Softly pulses every actuator ring while the sweep runs so the rig
+        # visibly reads as "busy calibrating". Driven from _set_running.
+        self._led = CalibrationLedIndicator(settings, gateway)
 
         self._skins = iter_touch_skins(settings.data)
         for s in self._skins:
@@ -68,6 +78,15 @@ class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
         self._step_idx = 0
         self._elapsed = 0
         self._telemetry: FastTelemetry | None = None
+        # Per-state target chambers, and the worst level a *non-target* chamber
+        # held while measuring (a chamber that will not vent — see _finish).
+        self._targets: set[int] = set()
+        self._measuring = False
+        self._contam: dict[int, float] = {}
+        # Per-chamber atmospheric tare (running min kPa): the pressure sensor
+        # reads a nonzero offset at true ambient (no zero calibration), so a
+        # vented chamber would otherwise look inflated. See _track_level.
+        self._tare: dict[int, float] = {}
 
         has_targets = bool(self._skins) and gateway is not None
         self.run_btn.setEnabled(has_targets)
@@ -81,7 +100,10 @@ class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
         self.apply_btn.clicked.connect(self._on_apply)
         self.save_btn.clicked.connect(self._on_save)
         self.suppress_check.toggled.connect(self.suppress_spin.setEnabled)
+        self.step_spin.valueChanged.connect(self._update_estimate)
+        self.skin_combo.currentIndexChanged.connect(self._update_estimate)
         self._set_save_enabled(False)
+        self._update_estimate()
 
         self._tick = QTimer(self)
         self._tick.setInterval(_TICK_MS)
@@ -99,18 +121,33 @@ class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
     def _current_skin(self) -> dict | None:
         return self.skin_combo.currentData()
 
+    def _update_estimate(self) -> None:
+        """Show how many states and roughly how long the sweep will take for the
+        current skin and grid step (all combinations, up to the chamber count)."""
+        skin = self._current_skin()
+        if skin is None or not skin.get("slots"):
+            self.est_label.setText("")
+            return
+        prog = SweepProgram(skin["slots"], step_pct=self.step_spin.value())
+        secs = prog.est_seconds
+        span = f"{secs:.0f} s" if secs < 90 else f"~{secs / 60:.0f} min"
+        self.est_label.setText(f"≈ {prog.n_states} states, {span}")
+
     def _run(self) -> None:
         skin = self._current_skin()
         if self._program is not None or skin is None or not skin["slots"]:
             return
         self._samples.clear()
         self._pressures.clear()
+        self._contam.clear()
+        self._tare.clear()
         self._result = None
         self._set_save_enabled(False)
         self.preview.clear()
         self._skin = skin
-        self._program = SweepProgram(
-            skin["slots"], SweepProgram.levels_for(self.levels_spin.value()))
+        # All chamber combinations (up to the chamber count) over the chosen
+        # per-member grid step; max_order left unbounded.
+        self._program = SweepProgram(skin["slots"], step_pct=self.step_spin.value())
         self._step_idx = -1
         self._set_running(True)
         # Dense pressure telemetry on the chamber node, so level bins track the
@@ -124,24 +161,41 @@ class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
         self._advance()
         self._tick.start()
 
-    def _deflate_all(self, skin: dict) -> None:
+    def _rest_all(self, skin: dict) -> None:
+        """Passively vent every chamber to ambient by opening the **DEFLATE**
+        valve (side 1), no pump — the natural release path, so even a still-
+        inflated chamber bleeds down to atmosphere (the inflate side pushes air
+        back into the dead-ended pressure manifold and wouldn't vent). One frame
+        per chamber; it holds for the manual dead-man (5 s), longer than a rest
+        dwell, so no keepalive is needed."""
         for slot in skin["slots"]:
-            self._gateway.send(skin["chamber_mac"], "deflate", chamber=slot,
-                               delta=100)
+            self._gateway.send(skin["chamber_mac"], "valve_manual",
+                               chamber=slot, side=1, open=1)
 
     def _execute(self, step) -> None:
-        """Send one SweepProgram step to the hardware and show its label."""
+        """Send one SweepProgram step to the hardware and show its label.
+
+        A ``rest`` step passively vents every chamber to ambient (no pump); a
+        ``state`` step first releases the vent's manual valves (so the engine owns
+        them cleanly), then drives its target chambers to their levels and *holds*
+        (closes, pumps off) the others."""
         skin = self._skin
+        mac = skin["chamber_mac"]
         self.progress.setValue(step.progress)
         self.status_label.setText(step.label)
-        if step.action == "deflate_all":
-            self._deflate_all(skin)
-        elif step.action == "set_pressure":
-            self._gateway.send(skin["chamber_mac"], "set_pressure",
-                               chamber=step.slot, value=step.level)
-        elif step.action == "deflate":
-            self._gateway.send(skin["chamber_mac"], "deflate",
-                               chamber=step.slot, delta=100)
+        self._targets = set(step.levels)
+        self._measuring = step.action == "state"
+        if step.action == "rest":
+            self._rest_all(skin)
+            return
+        for slot in skin["slots"]:
+            self._gateway.send(mac, "valve_manual", chamber=slot, side=1, open=0)
+        for slot in skin["slots"]:
+            if slot in step.levels:
+                self._gateway.send(mac, "set_pressure",
+                                   chamber=slot, value=step.levels[slot])
+            else:
+                self._gateway.send(mac, "hold", chamber=slot)
 
     def _advance(self) -> None:
         """Move the cursor to the next program step (or finish)."""
@@ -158,29 +212,52 @@ class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
         if self._telemetry is not None:
             self._telemetry.keepalive()
         self._elapsed += _TICK_MS
+        self._check_vented()
         if self._elapsed >= self._program.steps[self._step_idx].wait_ms:
             self._advance()
+
+    def _check_vented(self) -> None:
+        """While measuring a state (past the pump-settle margin), record the
+        worst level of any chamber that should be vented but is not — a chamber
+        whose valve/deflate is stuck, which would fake a co-inflation."""
+        if not self._measuring or self._elapsed < _SETTLE_MARGIN_MS:
+            return
+        for slot, level in self._pressures.items():
+            if slot not in self._targets and level > _VENT_MAX:
+                self._contam[slot] = max(self._contam.get(slot, 0.0), level)
 
     def _finish(self) -> None:
         skin, self._skin = self._skin, None
         self._end_sweep()
         if skin is None:
             return
-        self._deflate_all(skin)
+        self._rest_all(skin)
         self.progress.setValue(100)
-        cfg, matrix = coupling_config_from_samples(
+        cfg, model = coupling_config_from_samples(
             list(self._samples), skin["sensor_count"])
         self._result = cfg
-        preview = self._format_matrix(matrix, skin)
-        if not matrix.curves:
-            # Nothing classified as an inflated chamber — say why, so the
-            # operator can fix the setup instead of guessing.
-            preview += "\n\n" + sweep_diagnostics(self._samples, skin["slots"])
+        preview = self._format_matrix(model, skin)
+        # Diagnose whenever a *swept* slot is missing from the model — not only
+        # the fully-empty case — so a single dropped chamber says why instead of
+        # silently reporting fewer chambers than were swept.
+        if len(model.chambers) < len(skin["slots"]):
+            preview += "\n\n" + sweep_diagnostics(
+                self._samples, skin["slots"], model.chambers)
+        if self._contam:
+            stuck = ", ".join(f"chamber {c} (up to {lvl:.0f}%)"
+                              for c, lvl in sorted(self._contam.items()))
+            preview = (f"⚠ Did not vent while other chambers were measured: "
+                       f"{stuck}. Its valve/deflate is likely stuck, so those "
+                       f"states are contaminated (spurious combinations). Fix "
+                       f"venting, then re-run.\n\n") + preview
         self.preview.setPlainText(preview)
-        vec_note = " 3-axis data captured." if matrix.has_vec else ""
+        vec_note = " 3-axis data captured." if model.has_vec else ""
+        combos = len(model.combos())
+        combo_note = f" {combos} combination(s)." if combos else ""
         self.status_label.setText(
             f"Done — {len(self._samples)} samples over "
-            f"{len(matrix.chambers)} chamber(s).{vec_note} Review, then Save.")
+            f"{len(model.chambers)} chamber(s).{combo_note}{vec_note} "
+            "Review, then Save.")
         self._set_save_enabled(True)
 
     def _end_sweep(self) -> None:
@@ -198,24 +275,37 @@ class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
         self.save_btn.setEnabled(on)
 
     @staticmethod
-    def _format_matrix(matrix: Any, skin: dict) -> str:
+    def _format_matrix(model: Any, skin: dict) -> str:
         n = skin["sensor_count"]
         lines = ["Coupling (µT shift per sensor at the strongest level):",
                  "chamber │ " + "  ".join(f"S{s}" for s in range(n))]
-        deltas = matrix.deltas
-        if not deltas:
+        singles = model.singles()
+        deltas = model.deltas()
+        if not singles:
             lines.append("(no coupling measured — sensors may be away from "
                          "the chambers, or the sweep collected no samples)")
-        for chamber in matrix.chambers:
+        for chamber in sorted(singles):
             row = deltas.get(chamber, [])
-            cells = "  ".join(f"{(row[s] if s < len(row) else 0.0):4.0f}"
-                              for s in range(n))
-            points = matrix.curves.get(chamber, [])
-            levels = "/".join(f"{p.level_pct:.0f}" for p in points)
-            lines.append(f"slot {chamber:<3}│ {cells}   levels: {levels}%")
+            cells = TouchCalibrationDialog._cells(row, n)
+            lines.append(f"slot {chamber:<3}│ {cells}   @{singles[chamber].levels[chamber]:.0f}%")
+        combos = model.combos()
+        if combos:
+            lines.append("")
+            lines.append("Combinations (µT shift, non-additive):")
+            for st in combos:
+                who = "+".join(f"{c}@{st.levels[c]:.0f}%" for c in sorted(st.chambers))
+                lines.append(f"{who:<14}│ {TouchCalibrationDialog._cells(st.mag, n)}")
         return "\n".join(lines)
 
+    @staticmethod
+    def _cells(row: Any, n: int) -> str:
+        row = list(row or [])
+        return "  ".join(f"{(row[s] if s < len(row) else 0.0):4.0f}"
+                         for s in range(n))
+
     def _set_running(self, running: bool) -> None:
+        # Pulse every ring while the sweep runs, fade off when it ends/aborts.
+        self._led.on() if running else self._led.off()
         self.run_btn.setEnabled(not running and bool(self._skins))
         self.skin_combo.setEnabled(not running)
         self.stop_btn.setEnabled(running)
@@ -247,10 +337,12 @@ class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
                            skin["skin_id"], self._result)
         suppress = (float(self.suppress_spin.value())
                     if self.suppress_check.isChecked() else None)
+        # Threshold is set from the sensor tester (act_threshold_ut) — the single
+        # source; clear any stale compensation.threshold_ut so it falls back there.
         set_compensation(
             self._settings.data, skin["robot_id"], skin["skin_id"],
             enabled=self.enable_check.isChecked(),
-            threshold_ut=float(self.threshold_spin.value()),
+            clear_threshold=True,
             margin_frac=self.margin_spin.value() / 100.0,
             guard_ms=float(self.guard_spin.value()),
             suppress_pct=suppress)
@@ -294,18 +386,29 @@ class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
     def _track_level(self, skin: dict, data: dict) -> None:
         """Fold one chamber ``status`` into the live per-slot levels (%).
 
-        Prefers the measured ``kpa`` recomputed against the *configured* range:
-        the firmware ``pressure`` % is computed against the limits the node
-        currently holds, which lag the PC config (8 kPa boot default, a dropped
-        set_max) — same policy as AirChamber."""
+        Recomputes % from the measured ``kpa`` against the *configured* range
+        (the firmware ``pressure`` % lags the limits the node holds), minus a
+        per-chamber **atmospheric tare**. The XGZP6847A has no zero calibration,
+        so at true ambient it reads a few kPa of offset — without taring, a
+        *vented* chamber would read ~20 % and be misclassified as inflated (the
+        false 'residual' that faked co-inflation combinations). The running
+        minimum kPa is that chamber's ambient floor; because the magnet baseline
+        is captured at the same floor, its constant contribution cancels."""
         ch = data.get("chamber")
         if not isinstance(ch, int):
             return
         kpa = data.get("kpa")
         pct = data.get("pressure")
         if isinstance(kpa, (int, float)):
-            lo, hi = skin["limits"].get(ch, (0.0, 0.0))
-            self._pressures[ch] = float(kpa_to_pct(float(kpa), lo, hi))
+            kpa = float(kpa)
+            self._tare[ch] = min(self._tare.get(ch, kpa), kpa)
+            # Reference ATMOSPHERE (0 kPa) as 0 %, NOT the chamber's configured
+            # min: a vacuum-capable chamber has min < 0 (e.g. -5), so against it a
+            # *vented* chamber at atmosphere reads ~20-25 % and would look inflated
+            # — turning every state into a spurious triple and firing a false
+            # "did not vent" warning. Coupling cares about inflation above ambient.
+            _lo, hi = skin["limits"].get(ch, (0.0, 8.0))
+            self._pressures[ch] = float(kpa_to_pct(kpa - self._tare[ch], 0.0, hi))
         elif isinstance(pct, (int, float)):
             self._pressures[ch] = float(pct)
 

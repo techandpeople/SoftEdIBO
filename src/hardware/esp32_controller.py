@@ -233,12 +233,17 @@ class ESP32Controller:
     def set_led(self, color: str, pattern: str = "solid",
                 period_ms: int = 0, count: int | None = None,
                 index: int | None = None, ring: int | None = None,
-                fade_ms: int | None = None, angle: float | None = None) -> bool:
+                fade_ms: int | None = None, angle: float | None = None,
+                color2: str | None = None) -> bool:
         """Drive the node's LED ring(s).
 
         color:   "#RRGGBB". pattern: "off" | "solid" | "blink" | "pulse" |
-                 "comet" (a single bright head with a fading tail sweeping the ring).
-        period_ms/count: animation timing — pulse/blink cycle or comet revolution.
+                 "comet" (a single bright head with a fading tail sweeping the ring) |
+                 "fade" (cross-fade back and forth between color and color2).
+        color2:  second colour for the "fade" pattern; ignored by the others. The
+                 node runs the interpolation, so a continuous fade is one frame per
+                 cycle instead of a per-step colour stream over ESP-NOW.
+        period_ms/count: animation timing — pulse/blink/fade cycle or comet revolution.
         index:   when given, set just that pixel (solid); otherwise the whole
                  ring. Per-pixel is used by the LED test panel.
         ring:    multi-ring nodes (node_multiplexed: 4 rings) only — selects ring
@@ -258,6 +263,8 @@ class ESP32Controller:
             kwargs["ring"] = int(ring)
         if fade_ms is not None:
             kwargs["fade_ms"] = int(fade_ms)
+        if color2 is not None:
+            kwargs["color2"] = color2
         eff_angle = self._effective_angle(ring, angle)
         if eff_angle is not None:
             kwargs["angle"] = eff_angle
@@ -375,6 +382,33 @@ class ESP32Controller:
         raw_value = data.get("value", 0)
         self._call_callbacks(self._touch_callbacks, sensor_id, raw_value)
 
+    def _dispatch_status_batch(self, data: dict[str, Any]) -> None:
+        """Expand a batched status frame into per-chamber dispatches.
+
+        New actuator firmware sends every chamber in ONE ESP-NOW frame as parallel
+        arrays — ``{"type":"status","kpa":[..],"st":[..],"vi":[..],"vd":[..]}`` — to cut
+        the per-chamber frame count (less ESP-NOW airtime, which the Thymio's co-channel
+        802.15.4 shares). The per-chamber ``pressure`` % is not sent: it's redundant, so
+        we pass 0 and the consumer recomputes it from the authoritative ``kpa`` (see
+        :meth:`_dispatch_chamber_pressure`). Older nodes still send one scalar frame per
+        chamber, handled there directly — both wire forms stay supported.
+        """
+        kpa = data.get("kpa") or []
+        st = data.get("st") or []
+        vi = data.get("vi") or []
+        vd = data.get("vd") or []
+        for i, k in enumerate(kpa):
+            per = {
+                "type": "status", "source": data.get("source"), "chamber": i,
+                "pressure": 0,   # recomputed from kpa downstream (kpa is authoritative)
+                "kpa": k,
+                "st": st[i] if i < len(st) else None,
+                "vi": vi[i] if i < len(vi) else None,
+                "vd": vd[i] if i < len(vd) else None,
+            }
+            self._last_status.update(per)
+            self._dispatch_chamber_pressure(per)
+
     def _dispatch_chamber_pressure(self, data: dict[str, Any]) -> None:
         chamber_id = int(data["chamber"])
         pressure = int(data["pressure"])
@@ -428,7 +462,13 @@ class ESP32Controller:
             elif data.get("type") == "touch":
                 self._dispatch_touch(data)
 
+            elif data.get("type") == "status" and isinstance(data.get("kpa"), list):
+                # Batched status: new firmware sends every chamber in one frame
+                # (parallel arrays). Expand to the per-chamber form below.
+                self._dispatch_status_batch(data)
+
             elif data.get("type") == "status" and "chamber" in data and "pressure" in data:
+                # Scalar status: one frame per chamber (older firmware).
                 self._dispatch_chamber_pressure(data)
 
             elif touch_profiles.is_message_type(data.get("type")):

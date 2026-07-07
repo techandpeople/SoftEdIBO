@@ -16,7 +16,7 @@
    <item>
     <widget class="QLabel" name="intro_label">
      <property name="wordWrap"><bool>true</bool></property>
-     <property name="text"><string>Inflating a chamber shifts the magnet over each touch sensor, which can fake a touch. This sweep inflates each chamber alone through a staircase of levels, reads how much it moves every sensor (in µT) at each level, and stores that as per-chamber compensation curves that are subtracted from the live reading. Run it once per skin, without touching the skin. Keep hands clear.</string></property>
+     <property name="text"><string>Inflating chambers shifts the magnet over each touch sensor, which can fake a touch — and two chambers together deform the silicone non-additively. This sweep drives every chamber combination through a grid of pressure levels, measures how much each moves every sensor (µT), and stores it so the live reading can be corrected. Run once per skin, without touching it, and keep hands clear. A finer grid step and a higher max combo are more accurate but take longer — watch the estimate.</string></property>
     </widget>
    </item>
    <item>
@@ -28,6 +28,7 @@
      </item>
      <item>
       <widget class="QComboBox" name="skin_combo">
+       <property name="toolTip"><string>Which skin to calibrate (only magnet-capable touch nodes are listed).</string></property>
        <property name="whatsThis"><string>Which skin to calibrate. Only skins whose touch node can stream magnet data are listed.</string></property>
       </widget>
      </item>
@@ -53,7 +54,8 @@
    <item>
     <widget class="QPlainTextEdit" name="preview">
      <property name="readOnly"><bool>true</bool></property>
-     <property name="whatsThis"><string>Measured coupling matrix: per chamber, the µT shift it causes on each sensor. Larger numbers mean stronger contamination.</string></property>
+     <property name="toolTip"><string>Measured coupling: per chamber (and per combination), the µT shift on each sensor. Bigger = stronger contamination.</string></property>
+     <property name="whatsThis"><string>Measured coupling: for each chamber, and for each measured combination of chambers, the µT shift it causes on every sensor. Larger numbers mean stronger contamination. If a swept chamber is missing, a diagnostic explains why (e.g. a neighbour that would not vent).</string></property>
     </widget>
    </item>
    <item>
@@ -62,7 +64,8 @@
       <widget class="QCheckBox" name="enable_check">
        <property name="text"><string>Enable compensation after saving</string></property>
        <property name="checked"><bool>true</bool></property>
-       <property name="whatsThis"><string>Subtract the measured matrix from the live touch readings during sessions. Turn off to store the matrix without applying it yet.</string></property>
+       <property name="toolTip"><string>Subtract the measured coupling from live touch readings during sessions. Off = store without applying yet.</string></property>
+       <property name="whatsThis"><string>Subtract the measured coupling from the live touch readings during sessions. Turn off to store it without applying it yet.</string></property>
       </widget>
      </item>
      <item>
@@ -71,43 +74,42 @@
        <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
       </spacer>
      </item>
+    </layout>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="grid_row">
      <item>
-      <widget class="QLabel" name="threshold_label">
-       <property name="text"><string>Touch threshold (µT):</string></property>
+      <widget class="QLabel" name="step_label">
+       <property name="text"><string>Grid step:</string></property>
       </widget>
      </item>
      <item>
-      <widget class="QSpinBox" name="threshold_spin">
+      <widget class="QSpinBox" name="step_spin">
        <property name="minimum"><number>10</number></property>
-       <property name="maximum"><number>5000</number></property>
-       <property name="singleStep"><number>10</number></property>
-       <property name="value"><number>300</number></property>
-       <property name="whatsThis"><string>After compensation, a sensor counts as touched when its residual reaches this many µT. Lower = more sensitive.</string></property>
+       <property name="maximum"><number>50</number></property>
+       <property name="singleStep"><number>5</number></property>
+       <property name="value"><number>20</number></property>
+       <property name="suffix"><string> %</string></property>
+       <property name="toolTip"><string>Pressure grid spacing each chamber is held at (e.g. 20 % → 20/40/60/80/100 %). Smaller = finer = more accurate, but a much longer sweep.</string></property>
+       <property name="whatsThis"><string>How far apart the pressure levels are that each chamber is held at during the sweep — e.g. 20 % measures 20/40/60/80/100 %. A finer step captures the nonlinear silicone response more precisely, so compensation is accurate at partial inflation too, but multiplies the number of states (and the time) sharply. Levels below the inflated threshold are skipped; the rest point (0 %) is always included.</string></property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="grid_spacer1">
+       <property name="orientation"><enum>Qt::Horizontal</enum></property>
+       <property name="sizeHint" stdset="0"><size><width>20</width><height>20</height></size></property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="QLabel" name="est_label">
+       <property name="text"><string/></property>
+       <property name="toolTip"><string>Estimated states and wall-clock time for the current grid step and max combo. Adjust them to trade accuracy for time.</string></property>
       </widget>
      </item>
     </layout>
    </item>
    <item>
     <layout class="QHBoxLayout" name="advanced_row">
-     <item>
-      <widget class="QLabel" name="levels_label">
-       <property name="text"><string>Levels per chamber:</string></property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QSpinBox" name="levels_spin">
-       <property name="minimum"><number>1</number></property>
-       <property name="maximum"><number>5</number></property>
-       <property name="value"><number>4</number></property>
-       <property name="whatsThis"><string>How many inflation levels to hold per chamber during the sweep (evenly spaced up to 100 %). More levels capture the nonlinear silicone response as a curve, so compensation is accurate at partial inflation too; 1 reproduces the old full-inflation-only matrix. 4 ≈ 25/50/75/100 %.</string></property>
-      </widget>
-     </item>
-     <item>
-      <spacer name="advanced_spacer1">
-       <property name="orientation"><enum>Qt::Horizontal</enum></property>
-       <property name="sizeHint" stdset="0"><size><width>20</width><height>20</height></size></property>
-      </spacer>
-     </item>
      <item>
       <widget class="QLabel" name="margin_label">
        <property name="text"><string>Margin:</string></property>
@@ -120,7 +122,8 @@
        <property name="singleStep"><number>5</number></property>
        <property name="value"><number>25</number></property>
        <property name="suffix"><string> %</string></property>
-       <property name="whatsThis"><string>Safety margin: raise a sensor's touch threshold by this fraction of the correction applied to it. Big corrections carry proportionally bigger calibration error, so this stops them flipping a sensor active on their own. 0 disables the margin (old behaviour).</string></property>
+       <property name="toolTip"><string>Raise a sensor's touch threshold by this fraction of the correction applied to it, so a big (less certain) correction can't fake a touch on its own. 0 disables it.</string></property>
+       <property name="whatsThis"><string>Safety margin: raise a sensor's touch threshold by this fraction of the correction applied to it. Big corrections carry proportionally bigger calibration error, so this stops them flipping a sensor active on their own. 0 disables the margin.</string></property>
       </widget>
      </item>
      <item>
@@ -142,6 +145,7 @@
        <property name="value"><number>800</number></property>
        <property name="suffix"><string> ms</string></property>
        <property name="specialValueText"><string>off</string></property>
+       <property name="toolTip"><string>After a chamber's level changes, harden the coupled sensors' thresholds for this long — the moment ghost touches are most likely. 0 turns it off.</string></property>
        <property name="whatsThis"><string>For this long after a chamber's level changes, harden the threshold of the sensors coupled to it (by that chamber's strongest measured offset). The calibration only measures steady state, so during transitions — pump running, pressure readings lagging — the compensation is least reliable and ghost touches are most likely. 0 turns the guard off.</string></property>
       </widget>
      </item>
@@ -158,6 +162,7 @@
      <item>
       <widget class="QCheckBox" name="suppress_check">
        <property name="text"><string>Ignore a sensor while its chamber is at/above</string></property>
+       <property name="toolTip"><string>Last resort: blank a sensor entirely while a strongly-coupled chamber is at/above this level, instead of compensating.</string></property>
        <property name="whatsThis"><string>Last-resort fallback: instead of compensating, blank a sensor entirely while a strongly-coupled chamber is this inflated (or this deep in vacuum). Use only if compensation alone is not enough.</string></property>
       </widget>
      </item>

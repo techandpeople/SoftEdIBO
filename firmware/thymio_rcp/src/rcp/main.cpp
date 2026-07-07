@@ -40,6 +40,8 @@
 #include "esp_ieee802154.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
+#include "freertos/task.h"
 
 static constexpr int      LINK_TX   = 16;      // D6 on the XIAO ESP32-C6
 static constexpr int      LINK_RX   = 17;      // D7
@@ -168,7 +170,31 @@ static constexpr uint32_t OTA_PARK_MAGIC = 0x4F544150;   // "OTAP"
 
 // Set by the driver when a transmit (incl. its ACK wait) completes — lets thTx() pace
 // back-to-back frames instead of bursting them into a busy radio (which drops them).
+// The semaphore mirrors the flag so the pacing wait can BLOCK (yield the single core
+// to the UART writer task) instead of busy-spinning up to 15 ms per frame.
 static volatile bool s_txDone = true;
+static SemaphoreHandle_t s_txDoneSem = nullptr;
+
+// Call immediately before esp_ieee802154_transmit: re-arm the done latch and drain a
+// stale semaphore give left by a prior transmit that completed after its txWait.
+static inline void txBegin() {
+    s_txDone = false;
+    if (s_txDoneSem) xSemaphoreTake(s_txDoneSem, 0);
+}
+
+// Pace: wait (blocking, yields) until the transmit + its ACK are done, capped at `ms`.
+static volatile uint32_t s_txTimeouts = 0;   // TXs whose ACK never came in `ms` — climbs
+                                             // if the Thymio stops ACKing (radio degrading)
+static void txWait(uint32_t ms) {
+    if (s_txDoneSem) {
+        if (!s_txDone && xSemaphoreTake(s_txDoneSem, pdMS_TO_TICKS(ms)) != pdTRUE)
+            s_txTimeouts = s_txTimeouts + 1;     // timed out: no tx-done/ACK within ms
+        return;
+    }
+    uint32_t t0 = millis();                      // pre-setup fallback: original busy-wait
+    while (!s_txDone && millis() - t0 < ms) delayMicroseconds(100);
+    if (!s_txDone) s_txTimeouts = s_txTimeouts + 1;
+}
 
 // Driver ISR callback: copy the frame out and hand it to loop() via the queue.
 void IRAM_ATTR esp_ieee802154_receive_done(uint8_t* frame,
@@ -184,10 +210,20 @@ void IRAM_ATTR esp_ieee802154_receive_done(uint8_t* frame,
     if (hp) portYIELD_FROM_ISR();
 }
 
-// TX-done / TX-failed driver callbacks: just release the pacing wait in thTx().
+// TX-done / TX-failed driver callbacks: release the pacing wait in txWait().
 void esp_ieee802154_transmit_done(const uint8_t* frame, const uint8_t* ack,
-                                  esp_ieee802154_frame_info_t* ack_frame_info) { s_txDone = true; }
-void esp_ieee802154_transmit_failed(const uint8_t* frame, esp_ieee802154_tx_error_t error) { s_txDone = true; }
+                                  esp_ieee802154_frame_info_t* ack_frame_info) {
+    s_txDone = true;
+    BaseType_t hp = pdFALSE;
+    if (s_txDoneSem) xSemaphoreGiveFromISR(s_txDoneSem, &hp);
+    if (hp) portYIELD_FROM_ISR();
+}
+void esp_ieee802154_transmit_failed(const uint8_t* frame, esp_ieee802154_tx_error_t error) {
+    s_txDone = true;
+    BaseType_t hp = pdFALSE;
+    if (s_txDoneSem) xSemaphoreGiveFromISR(s_txDoneSem, &hp);
+    if (hp) portYIELD_FROM_ISR();
+}
 
 static void sniffTune(uint8_t channel) {
     esp_ieee802154_set_channel(channel);
@@ -313,11 +349,15 @@ static const uint16_t TH_HOST_ADDR     = 0x3237;   // our spoofed host short add
 //   prox.ground.delta @0x54,0x55  → value[0..1]   (table reflection; ~0 when lifted)
 //   acc               @0x62..0x64 → value[14..16] (impact = deviation from rest 0,0,20)
 //   mic.intensity     @0x79       → value[37]      (ambient loudness)
-static const uint16_t TH_SENSE_START   = 0x0054;   // start at prox.ground.delta (@84)
-static const uint8_t  TH_SENSE_COUNT   = 38;        // through mic.intensity (@121), one frame
+static const uint16_t TH_SENSE_START   = 0x0054;   // prox.ground.delta @0x54
+static const uint8_t  TH_SENSE_COUNT   = 17;        // 0x54..0x64: ground.delta + acc (no mic)
+static const uint32_t TH_SENSE_EVERY   = 3;         // sensor GET only every Nth poll (~3 Hz). PROVEN:
+                                                    // a GET at the full 10 Hz overruns the Thymio's
+                                                    // CPU and the MOTORS lag — regardless of reply
+                                                    // size (even a 3-value GET at 10 Hz lagged). So
+                                                    // motors win; sensors get ~3 Hz (best when idle).
 static const uint8_t  TH_OFF_GROUND    = 0;         // value index of prox.ground.delta[0]
-static const uint8_t  TH_OFF_ACC       = 14;        // value index of acc x
-static const uint8_t  TH_OFF_MIC       = 37;        // value index of mic.intensity
+static const uint8_t  TH_OFF_ACC       = 14;        // value index of acc x (0x62 - 0x54)
 static const uint32_t TH_POLL_MS = 100;           // ~10 Hz per Thymio — holds the RX window
                                                   // open (dongle-like; cooler + LED blinks)
 #define TH_MAX 4                                   // up to 4 Thymios on this one C6
@@ -339,6 +379,11 @@ static bool       s_thLink = false;
 static uint8_t    s_thCh   = 25;
 static uint8_t    s_thSeq  = 0;
 static uint32_t   s_thLastPoll = 0;
+static uint32_t   s_thPollCount = 0;   // polls actually run — rcp_health reports the real
+                                       // poll Hz (the Thymio's RF-LED blink rate, in numbers)
+static uint32_t   s_thRxCount   = 0;   // full sensor replies parsed — rcp_health's rx_hz. If
+                                       // it falls below the ~3 Hz we ask for, the THYMIO isn't
+                                       // keeping up (its CPU is the bottleneck, not ours)
 static bool       s_thRxDebug = false;   // stream raw RX frames (link bring-up only)
 static bool       s_thDiscover = false;  // active discovery: broadcast LIST_NODES, report replies
 static uint8_t    s_thDiscCh   = 25;
@@ -364,11 +409,10 @@ static void thSend(uint16_t addr, uint16_t msgType,
     *p++ = dstH; *p++ = dstL;                       // Aseba dest node = addr big-endian
     for (uint8_t i = 0; i < npayload; i++) { *p++ = payload[i] & 0xFF; *p++ = (payload[i] >> 8) & 0xFF; }
     f[0] = (uint8_t)((p - &f[1]) + 2);             // PHR = PSDU + FCS
-    s_txDone = false;
+    txBegin();
     esp_ieee802154_transmit(f, false);
-    uint32_t t0 = millis();                        // pace: wait TX (+ACK) done before the
-    while (!s_txDone && millis() - t0 < 15) delayMicroseconds(100);   // next frame
-}
+    txWait(15);                                    // pace: TX (+ACK) done before the next
+}                                                  // frame — blocking wait, yields the core
 
 // SET/GET_VARIABLES & SET_BYTECODE: body = [startAddr, values…].
 static void thTx(uint16_t addr, uint16_t msgType, uint16_t startAddr,
@@ -401,10 +445,9 @@ static void thDiscoverBroadcast() {
     *p++ = 0x82; *p++ = 0x00; *p++ = 0x32; *p++ = 0x37; *p++ = 0x11;   // broadcast wrapper
     *p++ = 0xA0; *p++ = 0x01; *p++ = 0x00; *p++ = 0x05; *p++ = 0x00;   // LIST_NODES(proto 5)
     f[0] = (uint8_t)((p - &f[1]) + 2);             // PHR = PSDU + FCS
-    s_txDone = false;
+    txBegin();
     esp_ieee802154_transmit(f, false);
-    uint32_t t0 = millis();                        // pace: wait TX done before re-arming RX
-    while (!s_txDone && millis() - t0 < 15) delayMicroseconds(100);
+    txWait(15);                                    // pace: TX done before re-arming RX
 }
 
 // Sound: load a tiny Aseba program that calls a sound native function, then run it.
@@ -443,6 +486,57 @@ static bool thPlayTrack(uint16_t addr, int16_t track) {
     return true;
 }
 
+// Line-assembly buffer for the S3→C6 command UART (Serial1), at file scope so the Thymio
+// poll can drain + dispatch a mid-poll command through the same buffer that loop() uses
+// (a line split across the poll boundary still assembles correctly). See pumpThymioUart.
+static char   s_uartBuf[256];
+static size_t s_uartLen = 0;
+static void   pumpThymioUart();   // defined just before loop(), after pump()/handleLine
+
+// ---- Outbound line queue + writer task ----------------------------------------------
+// High-rate telemetry (sensor frames, health reports) is NEVER written to the UART from
+// the radio hot path. loop() enqueues complete JSON lines here; a small higher-priority
+// writer task dequeues and does the (possibly blocking) serial writes. If the S3 stalls
+// draining (PC backpressure), the WRITER blocks — and the scheduler hands the core back
+// to loop(), so the 10 Hz Thymio poll stays rock-solid. This kills the failure mode
+// where a blocking println in thymioRxPump froze the poll (Thymio RF LED at ~2 Hz,
+// motors lagging ~10 s). Queue full → drop the OLDEST line (freshest sensor data wins);
+// drops + worst write stall are reported in the periodic rcp_health frame.
+struct OutLine { uint16_t len; char text[184]; };
+static QueueHandle_t s_outQ = nullptr;
+static volatile uint32_t s_outDrops       = 0;   // lines dropped because the queue was full
+static volatile uint32_t s_uartBlockMaxMs = 0;   // worst single serial-write stall seen
+
+static void qLine(const char* line) {
+    if (!s_outQ) { Serial1.println(line); Serial.println(line); return; }   // pre-setup only
+    OutLine ol;
+    size_t n = strnlen(line, sizeof(ol.text) - 1);
+    memcpy(ol.text, line, n);
+    ol.text[n] = '\n';
+    ol.len = (uint16_t)(n + 1);
+    if (xQueueSend(s_outQ, &ol, 0) != pdTRUE) {
+        OutLine junk;
+        xQueueReceive(s_outQ, &junk, 0);           // drop the oldest…
+        s_outDrops = s_outDrops + 1;
+        xQueueSend(s_outQ, &ol, 0);                // …keep the newest
+    }
+}
+
+static void outWriterTask(void*) {
+    OutLine ol;
+    for (;;) {
+        if (xQueueReceive(s_outQ, &ol, portMAX_DELAY) != pdTRUE) continue;
+        uint32_t t0 = millis();
+        // Single write per line (newline included) so a concurrent command reply from
+        // loop() can't interleave mid-line. Serial1 may block on a full TX ring — only
+        // this task waits. USB Serial has tx-timeout 0 (drops when no host, never blocks).
+        Serial1.write(reinterpret_cast<const uint8_t*>(ol.text), ol.len);
+        Serial.write(reinterpret_cast<const uint8_t*>(ol.text), ol.len);
+        uint32_t dt = millis() - t0;
+        if (dt > s_uartBlockMaxMs) s_uartBlockMaxMs = dt;
+    }
+}
+
 static void thymioLinkPump() {
     // The sniffer owns the radio while scanning (promiscuous / other channels):
     // polling through it would corrupt both. sniffStart zeroed our motors first.
@@ -450,19 +544,59 @@ static void thymioLinkPump() {
     uint32_t now = millis();
     if (now - s_thLastPoll < TH_POLL_MS) return;
     s_thLastPoll = now;
+    s_thPollCount++;
     for (int i = 0; i < TH_MAX; i++) {             // poll + assert every active Thymio
         ThymioSlot& t = s_th[i];
         if (!t.active) continue;
-        // Poll a small window (acc x/y/z through mic.intensity) instead of the whole
-        // variable space: it still holds the RX window open (keep-alive) AND its
-        // VARIABLES reply fits one 802.15.4 frame, so thymioRxPump can parse it.
-        int16_t cnt = TH_SENSE_COUNT;
-        thTx(t.addr, TH_GET_VARIABLES, TH_SENSE_START, &cnt, 1);  // keep hot + read sensors
-        thTx(t.addr, TH_SET_VARIABLES, 0x0056, &t.left, 1);  // motor.left.target
-        thTx(t.addr, TH_SET_VARIABLES, 0x0057, &t.right, 1); // motor.right.target
+        // ORDER MATTERS on this half-duplex radio. Motors go FIRST — control is priority
+        // and gets the lowest latency — and the sensor GET goes LAST, so the Thymio's
+        // reply lands in the clean RX window right after the poll (esp_ieee802154_receive
+        // below, then ~90 ms idle-RX until the next poll). The old order (GET first) had
+        // the reply arrive WHILE the C6 was transmitting the motor frames — half-duplex,
+        // so it couldn't hear it: that lost most sensor frames AND made the motors contend
+        // with the reply. cd045bf (fast, no sensor read) is the reference this restores.
+        int16_t lr[2] = {t.left, t.right};                   // motor.left+right in ONE frame,
+        thTx(t.addr, TH_SET_VARIABLES, 0x0056, lr, 2);       // every poll (holds the RX window)
         if (t.ledsResend) { t.ledsResend--; thTx(t.addr, TH_SET_VARIABLES, 0x0065, t.leds, 3); }
+        // Service a drive/LED command that landed on the UART. A command that flips the
+        // radio (sniff / link-off / reboot) trips the guard → bail before the GET.
+        pumpThymioUart();
+        if (!s_thLink || s_sniffing) { esp_ieee802154_receive(); return; }
+        // Sensor GET only every TH_SENSE_EVERY-th poll (~3 Hz): a GET at the full 10 Hz
+        // overruns the Thymio's CPU and lags the motors (proven, any reply size). Motors
+        // are the priority; sensors get ~3 Hz (reliable when idle, patchy under hard drive).
+        if ((s_thPollCount % TH_SENSE_EVERY) == 0) {
+            int16_t cnt = TH_SENSE_COUNT;
+            thTx(t.addr, TH_GET_VARIABLES, TH_SENSE_START, &cnt, 1);
+        }
     }
-    esp_ieee802154_receive();                      // stay armed for the ACKs + reply
+    esp_ieee802154_receive();                      // clean RX window for the sensor reply + ACKs
+}
+
+// Push one slot's held motor targets to its Thymio right now, off the poll cadence.
+// An arriving thymio_drive would otherwise only reach the wheels at the next ~10 Hz
+// poll — up to TH_POLL_MS of lag, worse if that single frame drops (weak antenna) and
+// waits another poll to re-assert. Sending on the command edge makes a button press
+// feel instant; the poll still re-asserts, so a dropped edge frame self-heals. No-op
+// unless the link owns the radio (up + tuned to the Thymio's channel) and we're not
+// mid-sniff — same guard as the poll, so we never TX on a down/retuned radio.
+static void thymioAssertMotors(int idx) {
+    if (!s_thLink || s_sniffing || idx < 0 || idx >= TH_MAX) return;
+    ThymioSlot& t = s_th[idx];
+    if (!t.active) return;
+    int16_t lr[2] = {t.left, t.right};                    // both motors in ONE frame
+    thTx(t.addr, TH_SET_VARIABLES, 0x0056, lr, 2);
+    esp_ieee802154_receive();                             // re-arm RX after the burst
+}
+
+// Same immediate-assert for leds.top (the poll only re-sends while ledsResend > 0, and
+// even the first send would otherwise wait for the next poll).
+static void thymioAssertLeds(int idx) {
+    if (!s_thLink || s_sniffing || idx < 0 || idx >= TH_MAX) return;
+    ThymioSlot& t = s_th[idx];
+    if (!t.active) return;
+    thTx(t.addr, TH_SET_VARIABLES, 0x0065, t.leds, 3);    // leds.top
+    esp_ieee802154_receive();
 }
 
 // Which slot a reply's Thymio short address (its MAC src) belongs to, else 0.
@@ -516,18 +650,21 @@ static void thymioRxPump() {
         if (start != TH_SENSE_START) continue;            // not our sensor poll reply
         int base = p + 4;                                 // first value word
         if (base + 2 * TH_SENSE_COUNT > f.len) continue;  // reply truncated
+        s_thRxCount++;                                    // a full sensor reply arrived (rx_hz)
         auto rd = [&](int w) -> int16_t {
             return (int16_t)(f.data[base + 2 * w] | (f.data[base + 2 * w + 1] << 8));
         };
         char line[160];
         snprintf(line, sizeof(line),
                  "{\"type\":\"thymio_sensors\",\"idx\":%d,\"acc\":[%d,%d,%d],"
-                 "\"mic\":%d,\"ground\":[%d,%d]}",
+                 "\"mic\":0,\"ground\":[%d,%d]}",   // mic dropped (window trimmed); ground kept
                  thSlotForAddr(src),
                  rd(TH_OFF_ACC), rd(TH_OFF_ACC + 1), rd(TH_OFF_ACC + 2),
-                 rd(TH_OFF_MIC), rd(TH_OFF_GROUND), rd(TH_OFF_GROUND + 1));
-        Serial1.println(line);
-        Serial.println(line);
+                 rd(TH_OFF_GROUND), rd(TH_OFF_GROUND + 1));
+        // Hand the line to the writer task — NEVER write serial from the radio hot path
+        // (a blocking println here is what collapsed the 10 Hz poll to ~2 Hz and made
+        // the motors lag by seconds). See the outbound-queue block above.
+        qLine(line);
     }
 }
 
@@ -601,6 +738,10 @@ static void handleLine(char* line, Print& io) {
             bool wasLink = s_thLink;
             thymioStopForSniff();
             s_thLink = false;
+            // Let the writer task drain any queued sensor lines first, so the OTA
+            // progress lines below don't interleave with them on the UART.
+            for (int i = 0; i < 20 && s_outQ && uxQueueMessagesWaiting(s_outQ); i++)
+                delay(10);
             sniffStop(io);          // free the shared radio for WiFi before updating
             radioDown();            // ...also if a tx (not a sniff) had brought it up
             if (s_radioUsed) {
@@ -723,6 +864,16 @@ static void handleLine(char* line, Print& io) {
             if (idx >= 0 && idx < TH_MAX) {
                 s_th[idx].left  = (int16_t)(int)(doc["left"]  | 0);
                 s_th[idx].right = (int16_t)(int)(doc["right"] | 0);
+                thymioAssertMotors(idx);   // react now, don't wait for the next poll
+                // Echo the moment the C6 RECEIVED this drive, so the PC log can compare it
+                // to the "Sent to thymio: thymio_drive" timestamp: if the ack lags the send,
+                // the command path (PC→S3→C6) is slow; if it's instant but the robot still
+                // lags, the delay is C6↔Thymio (the robot). Splits the two decisively.
+                char ack[64];
+                snprintf(ack, sizeof(ack),
+                         "{\"type\":\"drive_ack\",\"src\":\"c6\",\"idx\":%d,\"l\":%d,\"r\":%d}",
+                         idx, s_th[idx].left, s_th[idx].right);
+                qLine(ack);
             }
         } else if (strcmp(cmd, "thymio_leds") == 0) {
             // {"cmd":"thymio_leds"[,"idx":0],"r":32,"g":0,"b":0} — leds.top (burst-resent)
@@ -732,6 +883,7 @@ static void handleLine(char* line, Print& io) {
                 s_th[idx].leds[1] = (int16_t)(int)(doc["g"] | 0);
                 s_th[idx].leds[2] = (int16_t)(int)(doc["b"] | 0);
                 s_th[idx].ledsResend = 8;
+                thymioAssertLeds(idx);     // show the colour now, not at the next poll
             }
         } else if (strcmp(cmd, "thymio_sound") == 0) {
             // {"cmd":"thymio_sound"[,"idx":0],"sys":2}   → system sound 0..7 (-1 stops)
@@ -776,7 +928,20 @@ static void pump(Stream &io, char *buf, size_t &len, size_t cap) {
 void setup() {
     Serial.begin(115200);
     Serial.setTxTimeoutMs(0);                    // never block without a USB host
+    // Bigger UART TX ring so a burst of sensor frames is buffered (and availableForWrite
+    // in thymioRxPump is meaningful) rather than stalling the poll; bigger RX ring for
+    // command bursts. Both must be set before begin().
+    Serial1.setRxBufferSize(1024);
+    Serial1.setTxBufferSize(2048);
     Serial1.begin(LINK_BAUD, SERIAL_8N1, LINK_RX, LINK_TX);
+    // Radio-pacing semaphore (txWait blocks instead of busy-spinning) and the outbound
+    // line queue + writer task: telemetry writes happen OFF the radio hot path, so a
+    // stalled S3/PC can never freeze the 10 Hz Thymio poll. Priority 2 — above the
+    // Arduino loop task (1): the writer wakes only when a line is queued, writes into
+    // the serial TX ring, and blocks again (or blocks on a full ring, yielding to loop).
+    s_txDoneSem = xSemaphoreCreateBinary();
+    s_outQ = xQueueCreate(24, sizeof(OutLine));
+    xTaskCreate(outWriterTask, "uart_out", 3072, nullptr, 2, nullptr);
     WiFi.mode(WIFI_OFF);                          // radio off until an ota_wifi asks for it
     // This Arduino build enables app rollback, so a freshly flashed / OTA'd app boots
     // in PENDING_VERIFY. Until it is confirmed, the NEXT esp_ota_set_boot_partition is
@@ -800,19 +965,59 @@ void setup() {
     // Multi-send it: a single frame lost to the reboot glitch would otherwise hang the
     // updater at ~99% ("rebooting…") until it times out — same fix as the nodes' ota_done.
     for (int i = 0; i < 4; i++) {
-        Serial.println("{\"type\":\"rcp_ready\",\"src\":\"c6\"}");
-        Serial1.println("{\"type\":\"rcp_ready\",\"src\":\"c6\"}");
+        Serial.println("{\"type\":\"rcp_ready\",\"src\":\"c6\",\"fw\":\"thymio-fast-motors\"}");
+        Serial1.println("{\"type\":\"rcp_ready\",\"src\":\"c6\",\"fw\":\"thymio-fast-motors\"}");
         delay(150);
     }
 }
 
+// Drain + dispatch complete command lines from the S3→C6 UART (Serial1). Shared with the
+// Thymio poll (thymioLinkPump calls this between its paced TXs) through the file-scope
+// s_uartBuf, so a drive/LED command that lands mid-poll is acted on immediately instead
+// of waiting for the poll to finish its TX burst.
+static void pumpThymioUart() { pump(Serial1, s_uartBuf, s_uartLen, sizeof(s_uartBuf)); }
+
 void loop() {
-    static char usb_buf[256];  static size_t usb_len  = 0;
-    static char uart_buf[256]; static size_t uart_len = 0;
-    pump(Serial,  usb_buf,  usb_len,  sizeof(usb_buf));
-    pump(Serial1, uart_buf, uart_len, sizeof(uart_buf));
+    static char usb_buf[256]; static size_t usb_len = 0;
+    pump(Serial, usb_buf, usb_len, sizeof(usb_buf));   // C6's own USB (unused for data)
+    pumpThymioUart();  // S3→C6 command link (same buffer the poll drains mid-burst)
     sniffPump();       // stream any 802.15.4 frames while sniffing (no-op otherwise)
     thymioLinkPump();  // keep the Thymio link hot + assert motor/LED targets (no-op if off)
     thymioRxPump();    // parse the Thymio's VARIABLES reply → thymio_sensors (no-op if off)
     thymioDiscoverPump();  // broadcast LIST_NODES + report replies while discovering (no-op if off)
+
+    // ---- Link health report: measurement instead of guesswork -----------------------
+    // Every 5 s while the link runs, emit the REAL poll rate (the Thymio's RF-LED blink
+    // rate in numbers — 10.0 = healthy, ~2 = the poll is being stalled), the worst
+    // single serial-write stall the writer task saw, and how many telemetry lines were
+    // dropped to protect the poll. Lands in softedibo.log as {"type":"rcp_health",...}.
+    static uint32_t s_lastHealthMs = 0, s_lastPolls = 0, s_lastTxTo = 0, s_lastRx = 0;
+    uint32_t nowH = millis();
+    if (!s_thLink) {
+        s_lastHealthMs = 0;                      // restart the window on the next link-on
+    } else if (s_lastHealthMs == 0) {
+        s_lastHealthMs = nowH; s_lastPolls = s_thPollCount; s_lastTxTo = s_txTimeouts;
+        s_lastRx = s_thRxCount; s_uartBlockMaxMs = 0;
+    } else if (nowH - s_lastHealthMs >= 5000) {
+        uint32_t dt = nowH - s_lastHealthMs;
+        uint32_t hzX10   = (s_thPollCount - s_lastPolls) * 10000UL / dt;
+        // rx_hz = full sensor replies/s the Thymio actually returned. We ask for ~3.3 Hz;
+        // if rx_hz sags below that (while poll_hz stays 10 and tx_to is 0), the THYMIO's
+        // own CPU can't keep up — the bottleneck is in the robot, not our side.
+        uint32_t rxHzX10 = (s_thRxCount - s_lastRx) * 10000UL / dt;
+        // tx_to = TXs this window whose ACK never arrived (radio degrading).
+        char h[184];
+        snprintf(h, sizeof(h),
+                 "{\"type\":\"rcp_health\",\"src\":\"c6\",\"poll_hz\":%u.%u,\"rx_hz\":%u.%u,"
+                 "\"tx_to\":%u,\"uart_block_max_ms\":%u,\"dropped_lines\":%u,\"outq\":%u,\"heap\":%u}",
+                 (unsigned)(hzX10 / 10), (unsigned)(hzX10 % 10),
+                 (unsigned)(rxHzX10 / 10), (unsigned)(rxHzX10 % 10),
+                 (unsigned)(s_txTimeouts - s_lastTxTo),
+                 (unsigned)s_uartBlockMaxMs, (unsigned)s_outDrops,
+                 (unsigned)(s_outQ ? uxQueueMessagesWaiting(s_outQ) : 0),
+                 (unsigned)esp_get_free_heap_size());
+        qLine(h);
+        s_lastHealthMs = nowH; s_lastPolls = s_thPollCount; s_lastTxTo = s_txTimeouts;
+        s_lastRx = s_thRxCount; s_uartBlockMaxMs = 0;
+    }
 }

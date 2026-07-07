@@ -33,6 +33,23 @@ constexpr float P_MAX = SENSOR_KPA_MAX;   // kPa — sensor full-scale
 // attach a time budget to a deflate.
 constexpr float FLOOR_KPA = P_MIN;
 
+// The deepest vacuum a chamber may be driven to and still recover. The FA0520E
+// valves re-open against at most ~47 kPa of differential pressure; a chamber —
+// or the shared manifold behind it — left deeper than that traps a vacuum the
+// next valve can't overcome, so the pump forces against a seat that won't move
+// (the "vacuum-lock" the motor-forcing symptom traces to). The held vacuum must
+// therefore stay inside BOTH the valve's limit AND what the sensor can see:
+//   * blind 0..100 kPa gauge (P_MIN == 0): can't read below ambient, so there
+//     is no pressure cutoff to place here — time + the dead-man bound a vacuum
+//     deflate; keep the historical wide floor (an inert no-op sentinel).
+//   * -40..40 kPa vacuum sensor (P_MIN == -40): cap at the sensor floor, which
+//     is already inside the valve's ~47 kPa limit, so every valve always re-opens.
+// The VALVE_OPEN_LIMIT clamp keeps it valve-safe even for a deeper sensor.
+constexpr float VALVE_OPEN_LIMIT_KPA = -42.0f;   // FA0520E ~47 kPa ΔP, ~5 kPa margin
+constexpr float VACUUM_HOLD_FLOOR_KPA =
+    (P_MIN >= 0.0f) ? -100.0f
+    : (P_MIN > VALVE_OPEN_LIMIT_KPA ? P_MIN : VALVE_OPEN_LIMIT_KPA);
+
 constexpr int   ADC_RESOLUTION = 4095;   // 12-bit ESP32 ADC
 constexpr int   ADC_SAMPLES    = 4;      // multi-sample averaging
 

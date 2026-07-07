@@ -644,23 +644,21 @@ class ScriptedActivity(BaseActivity):
     def _run_fade(self, unit: _Unit, params: dict) -> Generator:
         """One smooth colour1 → colour2 → colour1 cross-fade across a ring
         (``ring`` selects one of the four, default all). Authors wrap this in
-        'repeat forever' for a continuous fade."""
-        c1 = self._parse_rgb(params.get("color1", "#000000"))
-        c2 = self._parse_rgb(params.get("color2", "#ffffff"))
+        'repeat forever' for a continuous fade.
+
+        The node runs the interpolation itself (the ``fade`` LED pattern), so
+        this emits a single ``set_led`` frame per cycle instead of streaming a
+        colour every tick. That is far less ESP-NOW traffic — the per-frame
+        stream was heavy enough to drop/corrupt frames and flip the odd pixel to
+        a stray colour. ``count=1`` runs exactly one cycle and rests on colour1,
+        preserving the one-shot-unless-repeated semantics."""
+        c1 = str(params.get("color1", "#000000"))
+        c2 = str(params.get("color2", "#ffffff"))
         period = max(200, int(params.get("period_ms", 2000)))
         ring = self._parse_ring(params)
-        half = period // 2
-        # The scheduler ticks every _TICK_MS, so a frame can't be finer than
-        # that; pick the frame count that fits whole ticks into each half.
-        frames = max(2, half // _TICK_MS)
-        step_ms = max(_TICK_MS, half // frames)
-        for target in (c2, c1):           # fade towards c2, then back to c1
-            start = c1 if target is c2 else c2
-            for i in range(frames):
-                t = i / (frames - 1) if frames > 1 else 1.0
-                self._set_led(unit, self._lerp_hex(start, target, t),
-                              "solid", 0, ring=ring)
-                yield ("ms", step_ms)
+        self._set_led(unit, c1, "fade", period, ring=ring,
+                      fade_ms=self._fade_ms(params), color2=c2, count=1)
+        yield ("ms", period)
 
     def _run_thymio_drive(self, unit: _Unit, params: dict) -> Generator:
         """Set the Thymio's wheel targets; with ``ms`` set, drive that long
@@ -764,14 +762,6 @@ class ScriptedActivity(BaseActivity):
             return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
         except (ValueError, IndexError):
             return 0, 0, 0
-
-    @staticmethod
-    def _lerp_hex(a: tuple[int, int, int], b: tuple[int, int, int],
-                  t: float) -> str:
-        r = round(a[0] + (b[0] - a[0]) * t)
-        g = round(a[1] + (b[1] - a[1]) * t)
-        bl = round(a[2] + (b[2] - a[2]) * t)
-        return f"#{r:02x}{g:02x}{bl:02x}"
 
     # ------------------------------------------------------------------
     # Instantaneous actions
@@ -927,13 +917,14 @@ class ScriptedActivity(BaseActivity):
 
     def _set_led(self, unit: _Unit, color: str, pattern: str,
                  period_ms: int, ring: int | None = None,
-                 fade_ms: int | None = None, angle: float | None = None) -> None:
+                 fade_ms: int | None = None, angle: float | None = None,
+                 color2: str | None = None, count: int | None = None) -> None:
         set_led = getattr(unit.ctrl, "set_led", None)
         if set_led is None:
             return
         try:
             set_led(color, pattern=pattern, period_ms=period_ms, ring=ring,
-                    fade_ms=fade_ms, angle=angle)
+                    fade_ms=fade_ms, angle=angle, color2=color2, count=count)
         except Exception:   # noqa: BLE001
             logger.exception("set_led failed on %s", unit.unit_id)
 

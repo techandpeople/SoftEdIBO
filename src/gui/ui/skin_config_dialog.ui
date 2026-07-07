@@ -119,6 +119,13 @@
       </widget>
      </item>
      <item>
+      <widget class="QPushButton" name="zero_btn">
+       <property name="toolTip"><string>Vent this skin's chambers to atmosphere, then zero their pressure sensors so ambient reads 0 kPa (persisted on the node).</string></property>
+       <property name="whatsThis"><string>The pressure sensor has no factory zero, so at true atmosphere it reads a few kPa of offset — which makes a vented chamber look inflated. This vents every chamber to ambient (valves open, pumps off) and tells the node to capture that reading as its per-chamber zero, stored in flash. Run it once (with the skin idle, nothing pressing) after wiring or swapping a sensor. Note: afterwards pressure targets are true gauge, so chambers reach a few kPa higher for the same setpoint.</string></property>
+       <property name="text"><string>Zero Sensors</string></property>
+      </widget>
+     </item>
+     <item>
       <widget class="QPushButton" name="delete_btn">
        <property name="whatsThis"><string>Remove this skin from the configuration. Does not touch the node hardware; other skins on the same node are unaffected.</string></property>
        <property name="text"><string>Delete Skin</string></property>

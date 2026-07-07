@@ -1,5 +1,6 @@
 #pragma once
 #include <Arduino.h>
+#include <Preferences.h>
 #include "pins.h"
 #include "pressure.h"
 #include "dbg.h"
@@ -25,7 +26,10 @@ constexpr float DEFAULT_MIN_KPA = 0.0f;
 // is bounded by TIME — the engine's chamber_max_ms, the manual dead-man, and the
 // actuation watchdog — not by this ceiling. Kept in sync with skin_config.
 constexpr float HARD_MAX_KPA    =  100.0f;
-constexpr float HARD_MIN_KPA    = -100.0f;   // limit for vacuum-fed chambers
+// Deepest vacuum a chamber may hold — valve-safe, derived from the sensor floor
+// (pressure.h): -100 (inert) with the blind 0..100 gauge, -40 with the -40..40
+// vacuum sensor so the FA0520E always re-opens. Bounds set_min + the manual cutoff.
+constexpr float HARD_MIN_KPA    = pressure::VACUUM_HOLD_FLOOR_KPA;
 constexpr uint8_t  DEFAULT_INFLATE_DUTY = 255;
 constexpr uint8_t  DEFAULT_DEFLATE_DUTY = 255;
 
@@ -55,6 +59,44 @@ struct Chamber {
 
 inline Chamber state[NUM_CHAMBERS];
 inline float   cachedKpa[NUM_CHAMBERS] = {};
+
+// Per-chamber ambient zero (kPa). The XGZP6847A has no zero calibration, so at
+// true atmosphere it reads a few kPa of offset; subtracting this per chamber
+// makes gauge 0 == atmosphere everywhere (telemetry, control, the touch-coupling
+// classification). Captured by tare() at a vented baseline and persisted to NVS.
+inline float   zeroKpa[NUM_CHAMBERS] = {};
+
+inline void loadTare() {
+    Preferences p;
+    if (!p.begin("se_tare", true)) return;
+    for (int i = 0; i < NUM_CHAMBERS; i++) {
+        char key[8]; snprintf(key, sizeof key, "z%d", i);
+        zeroKpa[i] = p.getFloat(key, 0.0f);
+    }
+    p.end();
+}
+
+inline void saveTare() {
+    Preferences p;
+    if (!p.begin("se_tare", false)) return;
+    for (int i = 0; i < NUM_CHAMBERS; i++) {
+        char key[8]; snprintf(key, sizeof key, "z%d", i);
+        p.putFloat(key, zeroKpa[i]);
+    }
+    p.end();
+}
+
+// Capture each chamber's current RAW reading as its ambient zero and persist it.
+// The caller must have vented every chamber to atmosphere first (valves open, no
+// pump) — the reading is taken raw (bypassing zeroKpa) so re-taring is idempotent.
+inline void tare() {
+    for (int i = 0; i < NUM_CHAMBERS; i++) {
+        float s = 0.0f;
+        for (int k = 0; k < 8; k++) s += pressure::readKpa(PSENSOR_PINS[i]);
+        zeroKpa[i] = s / 8.0f;
+    }
+    saveTare();
+}
 
 // ---------------------------------------------------------------------------
 // Hardware helpers
@@ -119,7 +161,7 @@ inline float readKpaMedian(int ch) {
     float c = pressure::readKpa(PSENSOR_PINS[ch]);
     float hi = max(a, max(b, c));
     float lo = min(a, min(b, c));
-    return a + b + c - hi - lo;   // the middle value
+    return (a + b + c - hi - lo) - zeroKpa[ch];   // middle value, ambient-zeroed
 }
 
 // ---------------------------------------------------------------------------

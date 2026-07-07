@@ -254,11 +254,14 @@ class OTAUpdateDialog(BaseDialog, Ui_OTAUpdateDialog):
         self.table.setItem(row, _COL_STATUS, QTableWidgetItem(""))
 
     def _refresh_online(self) -> None:
-        known = self._gateway.known_macs if self._gateway.is_connected else frozenset()
+        # online = answered the most recent scan (see Gateway.online_macs); a
+        # node powered off since then reads "offline" rather than staying stuck
+        # "online" the way the ever-growing known_macs set would show it.
+        online = self._gateway.online_macs if self._gateway.is_connected else frozenset()
         for mac, row in self._row_by_mac.items():
-            self._refresh_row(mac, row, known)
+            self._refresh_row(mac, row, online)
 
-    def _refresh_row(self, mac: str, row: int, known) -> None:
+    def _refresh_row(self, mac: str, row: int, online) -> None:
         item = self.table.item(row, _COL_ONLINE)
         led = self.table.item(row, _COL_LED)
         if mac == _C6_KEY:
@@ -269,7 +272,7 @@ class OTAUpdateDialog(BaseDialog, Ui_OTAUpdateDialog):
                 led.setText("—")
             return
         if item is not None:
-            item.setText("online" if mac in known else "offline")
+            item.setText("online" if mac in online else "offline")
         if led is not None:
             led.setText(self._led_text(mac, self.table.item(row, _COL_TYPE).text()))
 
@@ -313,12 +316,12 @@ class OTAUpdateDialog(BaseDialog, Ui_OTAUpdateDialog):
             w.setVisible(wifi)
 
     def _on_select_online(self) -> None:
-        known = self._gateway.known_macs if self._gateway.is_connected else frozenset()
+        online = self._gateway.online_macs if self._gateway.is_connected else frozenset()
         for mac, row in self._row_by_mac.items():
             item = self.table.item(row, _COL_SEL)
             if item is not None:
                 item.setCheckState(
-                    Qt.CheckState.Checked if mac in known else Qt.CheckState.Unchecked
+                    Qt.CheckState.Checked if mac in online else Qt.CheckState.Unchecked
                 )
 
     def _selected_jobs(self) -> list[tuple[str, Path]]:
@@ -385,6 +388,13 @@ class OTAUpdateDialog(BaseDialog, Ui_OTAUpdateDialog):
         self._worker.progress.connect(self._on_progress)
         self._worker.status.connect(self._on_status)
         self._worker.done.connect(self._on_done)
+        # Release the QThread only once it has *actually* stopped. ``done`` is
+        # emitted from inside run() while the thread is still winding down, so
+        # dropping the reference there would delete the QThread with
+        # isRunning() still true → "QThread: Destroyed while thread is still
+        # running" → hard abort. ``finished`` fires after run() returns and the
+        # thread has stopped, so releasing it then is safe.
+        self._worker.finished.connect(self._on_worker_finished)
         self._worker.start()
 
     def _set_running(self, running: bool) -> None:
@@ -411,15 +421,35 @@ class OTAUpdateDialog(BaseDialog, Ui_OTAUpdateDialog):
             self.table.item(row, _COL_STATUS).setText(msg)
 
     def _on_done(self) -> None:
+        # Emitted from inside the worker's run(): the thread is still running
+        # here, so only refresh the UI. The worker is released in
+        # _on_worker_finished, wired to the QThread's finished signal.
         self._set_running(False)
+
+    def _on_worker_finished(self) -> None:
+        """Release the worker once its thread has truly stopped.
+
+        ``finished`` is delivered after run() returns, so isRunning() is already
+        false and dropping the last reference here cannot trip Qt's "destroyed
+        while running" guard; wait() only joins the already-exiting OS thread.
+        """
+        worker = self._worker
         self._worker = None
+        if worker is not None:
+            worker.wait()
 
     # ------------------------------------------------------------------
     # Qt overrides
     # ------------------------------------------------------------------
 
     def reject(self) -> None:
-        if self._worker is not None and self._worker.isRunning():
-            self._worker.cancel()
-            self._worker.wait(3000)
+        # Never tear the dialog down while the worker thread is still running:
+        # once exec() returns, the dialog wrapper (and its _worker attribute)
+        # can be garbage-collected, and deleting a running QThread aborts the
+        # process. The updaters honour cancel within ~0.2 s, so this wait
+        # returns promptly rather than freezing the GUI.
+        worker = self._worker
+        if worker is not None and worker.isRunning():
+            worker.cancel()
+            worker.wait()
         super().reject()
