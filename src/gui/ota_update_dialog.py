@@ -127,6 +127,13 @@ class OTAUpdateDialog(BaseDialog, Ui_OTAUpdateDialog):
         self._worker: _OTAWorker | None = None
         self._row_by_mac: dict[str, int] = {}
 
+        # The WiFi-only widgets keep their space while hidden so switching
+        # transport doesn't resize the dialog (not expressible in the .ui).
+        for w in self._wifi_only_widgets():
+            policy = w.sizePolicy()
+            policy.setRetainSizeWhenHidden(True)
+            w.setSizePolicy(policy)
+
         # Table tweaks not expressible in the .ui.
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -307,12 +314,15 @@ class OTAUpdateDialog(BaseDialog, Ui_OTAUpdateDialog):
     # Actions
     # ------------------------------------------------------------------
 
+    def _wifi_only_widgets(self) -> tuple:
+        return (self.ap_ssid_label, self.ap_ssid_edit,
+                self.ap_pass_label, self.ap_pass_edit,
+                self.save_ap_btn, self.wifi_hint_label)
+
     def _on_transport_changed(self, index: int) -> None:
         """Show the AP editor + hint only for the WiFi transport."""
         wifi = index == _TRANSPORT_WIFI
-        for w in (self.ap_ssid_label, self.ap_ssid_edit,
-                  self.ap_pass_label, self.ap_pass_edit,
-                  self.save_ap_btn, self.wifi_hint_label):
+        for w in self._wifi_only_widgets():
             w.setVisible(wifi)
 
     def _on_select_online(self) -> None:
