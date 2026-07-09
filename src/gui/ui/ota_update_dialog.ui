@@ -44,6 +44,7 @@
      <item>
       <widget class="QComboBox" name="transport_combo">
        <property name="whatsThis"><string>How the firmware reaches the node. ESP-NOW is slow but works anywhere the gateway can reach the node. WiFi is far faster (seconds instead of minutes): the PC streams the image to the gateway over USB and the gateway serves it to the node over its WiFi access point. Needs the S3 access-point build; the PC stays on the cable.</string></property>
+       <property name="currentIndex"><number>1</number></property>
        <item><property name="text"><string>ESP-NOW (reliable, slow)</string></property></item>
        <item><property name="text"><string>WiFi (fast, needs gateway AP)</string></property></item>
       </widget>
