@@ -1,17 +1,12 @@
 """Main entry point for the SoftEdIBO application."""
 
 import faulthandler
+import io
 import logging
 import os
 import sys
 import traceback
 from pathlib import Path
-
-# Dump every thread's Python stack to stderr on a native crash (SIGSEGV etc.).
-# Our crash_handler only catches Python exceptions; a segfault in Qt/Chromium
-# kills the process without one, so this is the only trace we get for those.
-# It is dormant until a fatal signal fires, so there is no runtime cost.
-faulthandler.enable()
 
 os.environ.setdefault("QT_LOGGING_RULES", "qt.qpa.wayland.textinput=false")
 
@@ -32,6 +27,21 @@ os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
 # Add project root to path
 project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
+
+# A windowed frozen build has no console: sys.stdout/sys.stderr are None and any
+# write to them is fatal. Must run before faulthandler/logging touch stderr.
+from src.std_streams import ensure_std_streams
+
+_stderr = ensure_std_streams()
+
+# Dump every thread's Python stack to stderr on a native crash (SIGSEGV etc.).
+# Our crash_handler only catches Python exceptions; a segfault in Qt/Chromium
+# kills the process without one, so this is the only trace we get for those.
+# It is dormant until a fatal signal fires, so there is no runtime cost.
+try:
+    faulthandler.enable(_stderr)
+except (RuntimeError, ValueError, AttributeError, io.UnsupportedOperation):
+    pass    # no dumpable stream — Python-level crash handling still works
 
 from src.log import setup as setup_logging
 from src.crash_handler import install_exception_hooks
