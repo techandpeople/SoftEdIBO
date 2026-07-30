@@ -150,14 +150,24 @@ robots:
 ### Python application
 
 ```bash
+# Qt platform libs (Debian/Ubuntu). Without libxcb-cursor0 the app aborts with
+# "Could not load the Qt platform plugin xcb" — the app forces xcb (see run.py).
+sudo apt-get install -y libgl1 libegl1 libglib2.0-0 libdbus-1-3 \
+  libxcb1 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+  libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 \
+  libxcb-xkb1 libxkbcommon-x11-0 libfontconfig1
+
 git clone https://github.com/techandpeople/SoftEdIBO.git
 cd SoftEdIBO
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+./scripts/compile_ui.sh     # generates src/gui/ui_*.py — not in git
 python scripts/run.py
 ```
 
-Requires Python 3.12+.
+Requires Python 3.12+. Re-run `./scripts/compile_ui.sh` after editing any
+`src/gui/ui/*.ui` file, or the app fails with
+`ModuleNotFoundError: No module named 'src.gui.ui_...'`.
 
 **Debug mode** — shows all log levels on the console (DEBUG+):
 
@@ -166,7 +176,9 @@ python scripts/run.py --debug
 ```
 
 Without `--debug`, only warnings and errors are shown on the console. All log
-levels are always written to `data/softedibo.log` (rotating, 2 MB x 3 backups).
+levels are always written to `softedibo.log` in the per-user state directory
+(`~/.local/state/SoftEdIBO/` on Linux, `%LOCALAPPDATA%\SoftEdIBO\` on Windows;
+rotating, 2 MB x 3 backups).
 
 ### Firmware
 

@@ -9,7 +9,6 @@ Installs process-wide hooks that:
 from __future__ import annotations
 
 import logging
-import os
 import sys
 import threading
 import traceback
@@ -19,27 +18,15 @@ from typing import Any
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 
+from src.app_paths import app_state_dir
+
 logger = logging.getLogger(__name__)
-
-
-def _app_state_dir(app_name: str = "SoftEdIBO") -> Path:
-    """Return a writable per-user directory for logs/state."""
-    if os.name == "nt":
-        base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData/Local"))
-        return base / app_name
-    if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / app_name
-
-    xdg_state = os.environ.get("XDG_STATE_HOME")
-    if xdg_state:
-        return Path(xdg_state) / app_name
-    return Path.home() / ".local" / "state" / app_name
 
 
 def _persist_trace(trace_text: str, app_name: str) -> Path | None:
     """Write traceback to disk and return the output path."""
     try:
-        state_dir = _app_state_dir(app_name)
+        state_dir = app_state_dir(app_name)
         state_dir.mkdir(parents=True, exist_ok=True)
         trace_path = state_dir / f"crash-{datetime.now().strftime('%Y%m%d-%H%M%S')}.log"
         trace_path.write_text(trace_text, encoding="utf-8")
@@ -51,9 +38,9 @@ def _persist_trace(trace_text: str, app_name: str) -> Path | None:
 
 def _show_crash_dialog(trace_text: str, trace_path: Path | None) -> None:
     """Display a fatal error dialog with optional detailed traceback."""
-    message = "A aplicacao terminou com um erro inesperado."
+    message = "The application stopped with an unexpected error."
     if trace_path:
-        message += f"\n\nTrace guardado em:\n{trace_path}"
+        message += f"\n\nTrace saved to:\n{trace_path}"
 
     app = QApplication.instance()
     if app is None:
