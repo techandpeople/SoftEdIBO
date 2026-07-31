@@ -66,3 +66,13 @@ src/gui/blockly/media/
 cap*.jsonl
 capture_*.jsonl
 *.pcap
+
+# KiCad throwaways (hardware/PCB/). The auto-backup zips alone were 89 MB and
+# every save adds another, so they must never be committed — the .kicad_* source
+# files are the record. fp-info-cache is regenerated on demand.
+*-backups/
+_autosave-*
+*.kicad_*-bak
+*.kicad_prl
+fp-info-cache
+~*.lck
