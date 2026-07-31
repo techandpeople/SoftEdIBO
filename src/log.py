@@ -10,7 +10,6 @@ Logs go to:
 import logging
 import sys
 from logging.handlers import RotatingFileHandler
-from pathlib import Path
 
 from src.app_paths import app_state_dir
 
