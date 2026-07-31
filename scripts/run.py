@@ -22,7 +22,13 @@ os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", "--disable-gpu")
 # flash the "busy" spinner cursor (the app never actually blocks; verified with
 # the loop watchdog). Under XWayland that cost disappears. Override by exporting
 # QT_QPA_PLATFORM=wayland to go back to native Wayland.
-os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
+#
+# Linux only: xcb does not exist on Windows (whose plugins are direct2d/windows)
+# or macOS (cocoa), and naming a missing platform plugin is fatal — Qt aborts
+# with "no Qt platform plugin could be initialized" before any window appears.
+# Leaving QT_QPA_PLATFORM unset lets Qt pick the right one per platform.
+if sys.platform.startswith("linux"):
+    os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
 
 # Add project root to path
 project_root = Path(__file__).resolve().parent.parent
