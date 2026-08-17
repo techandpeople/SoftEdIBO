@@ -2,12 +2,12 @@
 #include <Arduino.h>
 
 // kPa <-> percentage over a per-chamber [min_kpa, max_kpa] range.
-//   0%   → min_kpa
-//   100% → max_kpa
+//   0%   -> min_kpa
+//   100% -> max_kpa
 //
 // With min_kpa = 0 (default), this matches the previous semantics
-// (0% → 0 kPa, 100% → max_kpa). When a chamber is fed by a vacuum reservoir,
-// min_kpa can be negative — 0% then represents the deepest vacuum point.
+// (0% -> 0 kPa, 100% -> max_kpa). When a chamber is fed by a vacuum reservoir,
+// min_kpa can be negative - 0% then represents the deepest vacuum point.
 
 namespace units {
 

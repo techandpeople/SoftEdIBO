@@ -49,7 +49,7 @@ struct Cmd {
 };
 
 // Cmd::seq sentinel: this command carries no confirm request, so the node must
-// NOT ACK it (backward compatible — a limit sent by old PC code omits `seq`).
+// NOT ACK it (backward compatible - a limit sent by old PC code omits `seq`).
 // The PC's per-node sequence wraps within [0, 0xFFFE] so it never uses this.
 constexpr uint16_t NO_SEQ = 0xFFFF;
 

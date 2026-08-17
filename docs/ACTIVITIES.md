@@ -1,6 +1,6 @@
 # Activities & Behaviors
 
-Living document — describes the **current** Activity system (what's shipped),
+Living document - describes the **current** Activity system (what's shipped),
 plus the original phased plan for the behavior framework (kept for design
 rationale; several parts were later superseded).
 
@@ -9,11 +9,11 @@ The framework was delivered in phases:
 | Phase | Goal | Status |
 |-------|------|--------|
 | 1a    | Documentation + design alignment | **done** |
-| 1b    | DB-backed activity presets + tunable params + auto-generated GUI | **done**, later removed — behaviours replaced presets (see below) |
-| 1c    | Organ Swap activity skeleton (mocked hardware) | **done**, later removed — see below |
+| 1b    | DB-backed activity presets + tunable params + auto-generated GUI | **done**, later removed - behaviours replaced presets (see below) |
+| 1c    | Organ Swap activity skeleton (mocked hardware) | **done**, later removed - see below |
 | 1d    | Firmware extensions: organ ADC + LED + Python wrappers | **done** (`organ.h` on both nodes, `set_led`, `on_organ`) |
-| 1e    | Wire organ sensing to activities end-to-end | **done** — as the declarative `organs` condition (not as `OrganSwapActivity`) |
-| 2     | Declarative activities authored from the GUI (state-machine in DB) | **done** — see "Behaviour engine" below |
+| 1e    | Wire organ sensing to activities end-to-end | **done** - as the declarative `organs` condition (not as `OrganSwapActivity`) |
+| 2     | Declarative activities authored from the GUI (state-machine in DB) | **done** - see "Behaviour engine" below |
 
 ---
 
@@ -21,7 +21,7 @@ The framework was delivered in phases:
 
 ### `BaseActivity`
 
-`src/activities/base_activity.py` — every activity inherits from this:
+`src/activities/base_activity.py` - every activity inherits from this:
 
 ```python
 class BaseActivity:
@@ -49,7 +49,7 @@ editor and stored in the DB (`declarative_activities` table), run by
 dropdown is populated by `available_activities(db)` / resolved by
 `get_activity(name, db)`.
 
-Simulation is a per-activity boolean — every activity gets it for free via
+Simulation is a per-activity boolean - every activity gets it for free via
 `BaseActivity.simulation_mode` (the checkbox in the SessionSetupDialog).
 
 ### Where activities show up
@@ -63,7 +63,7 @@ Simulation is a per-activity boolean — every activity gets it for free via
 
 ---
 
-## Behaviour engine (shipped) — declarative specs + block editor
+## Behaviour engine (shipped) - declarative specs + block editor
 
 The declarative behaviour engine from Phase 2 is implemented and runs the
 hospital study's behaviours. Two layers:
@@ -72,7 +72,7 @@ hospital study's behaviours. Two layers:
   interprets a behaviour *spec* (plain JSON data) as a per-skin state machine
   with a cooperative sequence scheduler (`wait` / `wait_for_touch` suspend a
   running sequence). The verb set lives in
-  [`catalog.py`](../src/activities/catalog.py) — actions (`set_led`,
+  [`catalog.py`](../src/activities/catalog.py) - actions (`set_led`,
   `set_led_halves`, `fade`, `beat`, `inflate`/`deflate`/`set_pressure`,
   `stop`, `log`, and the Thymio wheel/LED/sound verbs `thymio_drive` /
   `thymio_leds` / `thymio_sound`), control flow (`sequence`, `repeat`,
@@ -80,7 +80,7 @@ hospital study's behaviours. Two layers:
   (`elapsed_ms`, `touch_count`, `on_impact`, `on_lifted`, `organs`,
   `robot_is`, `any`/`all`/`not`, `always`). The catalogue is the single source
   of truth and also drives the editor blocks. Specs are validated by
-  `validate_spec` (`wrinkle` is deprecated — accepted in saved specs as an
+  `validate_spec` (`wrinkle` is deprecated - accepted in saved specs as an
   alias of `deflate`).
 
   `inflate`/`set_pressure`/`beat` also take an optional `duty` (1-255): the pump
@@ -99,8 +99,8 @@ hospital study's behaviours. Two layers:
   bad counts via their operators (e.g. `good >= 3 and bad <= 0` to cure).
 
   A spec may declare a **target**: new-style targets carry a **skin
-  condition** — `{"skin": "natural" | "wrinkles" | "organs"}` (see
-  [`skin_condition.py`](../src/activities/skin_condition.py)) — meaning the
+  condition** - `{"skin": "natural" | "wrinkles" | "organs"}` (see
+  [`skin_condition.py`](../src/activities/skin_condition.py)) - meaning the
   behaviour is written for that silicone set and runs on **any** robot;
   robot-specific parts are gated inside the spec with `if_robot` blocks (or
   `robot_is` transition conditions). The session setup pre-selects the
@@ -109,7 +109,7 @@ hospital study's behaviours. Two layers:
   (see [`activity_kind.py`](../src/activities/activity_kind.py)) still narrow
   the behaviour to one robot topology.
 
-- **Authoring:** **Tools → Activity Editor…**
+- **Authoring:** **Tools -> Activity Editor...**
   ([`activity_editor_dialog.py`](../src/gui/activity_editor_dialog.py)) is a
   thin frame around the editor panel
   ([`behavior_editor_panel.py`](../src/gui/behavior_editor_panel.py)), a
@@ -119,15 +119,15 @@ hospital study's behaviours. Two layers:
   round-trip editing. A spec **without** `_blockly` (hand-authored, or imported
   from a `.json` file like those in `config/examples/behaviours/`) is rebuilt
   into blocks from the spec itself, so it opens editable and re-saveable rather
-  than blank. **Blockly / QtWebEngine load only inside the editor** —
+  than blank. **Blockly / QtWebEngine load only inside the editor** -
   never during a session. Blockly is loaded from a vendored copy
   (`scripts/fetch_blockly.sh`) or the CDN as a fallback. (The former
-  **Presets** tab is gone — behaviours authored here *are* the activities, so
+  **Presets** tab is gone - behaviours authored here *are* the activities, so
   there is no separate per-activity preset surface any more.)
 
 Saved behaviours appear in the session activity dropdown via
 [`available_activities(db)` / `get_activity(name, db)`](../src/activities/__init__.py).
-The study's three seed conditions (Heartbeat / Movement / Texture — behaviours
+The study's three seed conditions (Heartbeat / Movement / Texture - behaviours
 1-3 / 4-6 / 7-9, each a 3-phase timeline advancing on time **or** enough
 touches) are **no longer auto-registered**: they are kept as reference specs
 in [`seed_behaviors.py`](../src/activities/seed_behaviors.py) (also test
@@ -152,29 +152,36 @@ open-loop). Editor and runtime are both exercisable in simulation.
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | Behavior format | **Hybrid: Python plugin + DB preset** | Python class hard-codes the state machine; the preset holds only tunable params (colors, timings, thresholds). Lets engineers add new activities by writing code, while educators tune existing ones in the GUI. |
-| Organ sensing | Extension of `node_direct` and `node_multiplexed` | Reuses spare ADCs on existing boards — no new firmware target. |
+| Organ sensing | Extension of `node_direct` and `node_multiplexed` | Reuses spare ADCs on existing boards - no new firmware target. |
 | LED hardware (WS2818) | Same nodes (`node_direct` / `node_multiplexed`) | Same boards drive valves + lights + organ sensors. |
-| Scope rollout | Incremental phases (1a → 1e) | Each phase ships standalone value. |
+| Scope rollout | Incremental phases (1a -> 1e) | Each phase ships standalone value. |
 
 ### State-machine pattern (per activity)
 
 Each activity defines, in code, a **finite state machine**:
 
-```
-   ┌──────┐  all_organs_match  ┌───────┐
-   │ sick │ ─────────────────► │ cured │
-   └──────┘                    └───────┘
-      │  on_periodic                │  on_periodic
-      │  ─ pulse red LED            │  ─ breathe (slow inflate/deflate)
-      │  ─ react to touch           │  ─ steady green LED
-      └─────────────────────────────┘
+```mermaid
+stateDiagram-v2
+    sick --> cured: all_organs_match
+
+    note left of sick
+        on_periodic:
+        - pulse red LED
+        - react to touch
+    end note
+
+    note right of cured
+        on_periodic:
+        - breathe (slow inflate/deflate)
+        - steady green LED
+    end note
 ```
 
 Each state has up to three lifecycle hooks:
 
-- `on_enter(activity)` — runs once when the state becomes active.
-- `on_periodic(activity, dt_ms)` — runs at the activity's tick rate.
-- `on_exit(activity)` — runs once before transitioning out.
+- `on_enter(activity)` - runs once when the state becomes active.
+- `on_periodic(activity, dt_ms)` - runs at the activity's tick rate.
+- `on_exit(activity)` - runs once before transitioning out.
 
 Transitions are guarded by **conditions** evaluated each tick (or in
 response to an event):
@@ -223,14 +230,14 @@ activity_presets
 - 1 silicone organ skin per robot, with 1 or 3 organ "slots". A pluggable
   organ is a silicone block with an internal resistor of a known value.
 - All organ slots of the robot are wired **in parallel into ONE ADC pin**
-  (we have limited GPIOs — one reading per robot/node, not per slot).
+  (we have limited GPIOs - one reading per robot/node, not per slot).
 - The firmware measures the total resistance (via voltage divider) and
   broadcasts a single value per node. The PC decomposes that value via
-  `1/Rtot = Σ 1/Ri` against a known organ catalogue to figure out which
+  `1/Rtot = sum 1/Ri` against a known organ catalogue to figure out which
   organs are currently plugged in.
 - Whether the per-organ identity is reported, or only an aggregate "all
   organs are good" flag, is a configuration choice on the PC side (see
-  `organ_readout_mode` below) — both modes work off the same firmware
+  `organ_readout_mode` below) - both modes work off the same firmware
   payload, so we don't have to commit to one shape today.
 
 **Activity flow**:
@@ -239,7 +246,7 @@ activity_presets
    - LED: red, pulses at `sick_pulse_ms`.
    - Robot reacts to touch: each press inflates the corresponding chamber
      briefly.
-2. Transition condition: `all_organs_match` — every organ slot reads the
+2. Transition condition: `all_organs_match` - every organ slot reads the
    resistance configured for the "good" organ in `organ_resistance_map`.
 3. State `cured`:
    - LED: solid green.
@@ -250,7 +257,7 @@ All values above are editable in the GUI via the preset form.
 
 ---
 
-## Firmware extensions (Phase 1d — shipped)
+## Firmware extensions (Phase 1d - shipped)
 
 See [firmware/PROTOCOL.md](../firmware/PROTOCOL.md) for the wire format as
 implemented (`organ.h` on both nodes; the multiplexed node adds a per-slot
@@ -264,8 +271,8 @@ on that robot are wired in parallel into this pin.
 
 The firmware:
 
-- Samples the pin periodically (≥ 10 Hz; cheap relative to chamber sampling).
-- Converts ADC reading → resistance via voltage-divider math:
+- Samples the pin periodically (>= 10 Hz; cheap relative to chamber sampling).
+- Converts ADC reading -> resistance via voltage-divider math:
   `R_total = R_known * V_out / (V_in - V_out)`.
 - Broadcasts `{"type":"organ", "resistance_ohm":R}` whenever the value
   changes by more than a hysteresis threshold (no spam on noise; no
@@ -277,7 +284,7 @@ the PC enumerates plausible combinations and picks the one whose
 parallel-equivalent resistance matches within tolerance.
 
 Optionally the activity can ignore the decomposition entirely and just
-check the total resistance against a "cured" target — useful when we only
+check the total resistance against a "cured" target - useful when we only
 need to know *all good* vs *not all good*, not which organ is missing.
 The choice is exposed as a preset parameter (`organ_readout_mode`:
 `per_organ` or `aggregate`).
@@ -290,7 +297,7 @@ Both firmwares accept new ESP-NOW commands:
 |-------|--------|-------|
 | `set_led` | `color` (`"#RRGGBB"`), `pattern` (`solid`/`pulse`/`breathe`/`rainbow`/`off`), `period_ms`, `count` (LEDs to light, default all) | Drives the WS2818 strip attached to the node. |
 
-The pattern animations run inside the firmware loop — the PC just sets
+The pattern animations run inside the firmware loop - the PC just sets
 intent. Saves ESP-NOW bandwidth and keeps animations smooth even if WiFi is
 flaky.
 
@@ -307,7 +314,7 @@ resistance lives on the PC side (`OrganResolver` / the organ catalogue).
 
 ---
 
-## GUI extensions (Phase 1b — shipped)
+## GUI extensions (Phase 1b - shipped)
 
 ### Simulation mode is a per-activity checkbox
 
@@ -315,7 +322,7 @@ The activity dropdown in `SessionSetupDialog` no longer lists "Simulation"
 as a separate activity. Instead, a `QCheckBox` labelled
 **"Run in simulation mode (no real hardware)"** sits right below it. When
 ticked, the chosen activity runs against `SimulatedRobot` instances backed
-by `SimulatedController` — same monitor widgets, same flows, no ESP-NOW
+by `SimulatedController` - same monitor widgets, same flows, no ESP-NOW
 traffic. Reads via `SessionSetupDialog.simulation_mode`; written to
 `activity.simulation_mode` by `SessionPanel` before `prepare_robots` runs.
 
@@ -335,33 +342,33 @@ editor renders them at the top of every activity's form. Subclasses just
 add their own activity-specific `PARAMS`; simulation knobs come for free.
 
 The values flow:
-`activity.param_values → wrap_robots_in_simulation(sim_params) → SimulatedRobot → SimulatedController`,
+`activity.param_values -> wrap_robots_in_simulation(sim_params) -> SimulatedRobot -> SimulatedController`,
 where the controller converts the `%/s` values to per-tick step sizes on
 its 100-ms internal timer.
 
 ### Preset editor (removed)
 
 > **Removed.** The Presets tab / preset editor GUI was dropped when the
-> hardcoded activities went away — block-authored behaviours replaced presets
+> hardcoded activities went away - block-authored behaviours replaced presets
 > as "the thing you tune". The DB table + CRUD below still exist (unused by
 > the GUI). Historical description follows.
 
 Layout:
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│ Activity:    [Group Touch ▾]                            │
-│ Preset:      [Easy [AP001] ▾]  [+ New] [Delete]         │
-│ Name:        [Easy______________________]               │
-│ Description: [____________________________________]     │
-│ ──────── Parameters ────────                            │
-│ Sim inflate speed (%/s): [33__]                         │
-│ Sim deflate speed (%/s): [33__]                         │
-│ Sim touch release (ms):  [300_]                         │
-│ (activity-specific params follow…)                      │
-│                                                         │
-│                                    [Save] [Close]       │
-└─────────────────────────────────────────────────────────┘
++---------------------------------------------------------+
+| Activity:    [Group Touch v]                            |
+| Preset:      [Easy [AP001] v]  [+ New] [Delete]         |
+| Name:        [Easy______________________]               |
+| Description: [____________________________________]     |
+| -------- Parameters --------                            |
+| Sim inflate speed (%/s): [33__]                         |
+| Sim deflate speed (%/s): [33__]                         |
+| Sim touch release (ms):  [300_]                         |
+| (activity-specific params follow...)                    |
+|                                                         |
+|                                    [Save] [Close]       |
++---------------------------------------------------------+
 ```
 
 Auto-generated form based on `activity.all_params()`:
@@ -371,28 +378,28 @@ Auto-generated form based on `activity.all_params()`:
 | `int`      | `QSpinBox` (respects `min` / `max`) |
 | `float`    | `QDoubleSpinBox` (respects `min` / `max`) |
 | `bool`     | `QCheckBox` |
-| `color`    | Coloured button → `QColorDialog` on click |
+| `color`    | Coloured button -> `QColorDialog` on click |
 | `enum`     | `QComboBox` populated from `Param.choices` |
 | `json`     | `QPlainTextEdit` with JSON validation on save |
 | `str`      | `QLineEdit` |
 
 Flow:
 
-- Pick an activity → form is rebuilt for that activity's params; preset
+- Pick an activity -> form is rebuilt for that activity's params; preset
   dropdown reloads.
-- Pick a preset → form fills with that preset's values.
-- **+ New** → resets to defaults so the operator can author a fresh preset
+- Pick a preset -> form fills with that preset's values.
+- **+ New** -> resets to defaults so the operator can author a fresh preset
   without losing the saved ones.
-- **Save** — upserts the current form into the DB. Empty `Name` is
+- **Save** - upserts the current form into the DB. Empty `Name` is
   rejected; invalid JSON in a `json` param is flagged.
-- **Delete** — confirms then drops the row from the DB.
+- **Delete** - confirms then drops the row from the DB.
 
 ### Persistence schema (DB)
 
 ```
 activity_presets
-  preset_id      TEXT PK   -- "AP001", "AP002", …
-  activity_name  TEXT      -- "Group Touch", "Organ Swap", …
+  preset_id      TEXT PK   -- "AP001", "AP002", ...
+  activity_name  TEXT      -- "Group Touch", "Organ Swap", ...
   name           TEXT      -- "Easy", "Therapy v3"
   description    TEXT
   params         TEXT      -- JSON-encoded {param_name: value}
@@ -435,8 +442,8 @@ participant IDs).
 > - the firmware doesn't need to announce geometry (it doesn't), and the
 >   unreliable per-skin `sensor_grid` drawing is superseded;
 > - the skin dialog offers only the **current robot's** skin types and draws
->   the real shape/aspect — `rect` (square 125 vs rectangle 75×125), `round`
->   (Ø99), `triangle` (Turtle corner) and `thymio` (a 'D' rotated −90°);
+>   the real shape/aspect - `rect` (square 125 vs rectangle 75x125), `round`
+>   (dia 99), `triangle` (Turtle corner) and `thymio` (a 'D' rotated -90 deg);
 > - the same shape masks + aspect ratio are shared by the editor and the
 >   activity-time `SkinGridView` via
 >   [`src/gui/skin_shapes.py`](../src/gui/skin_shapes.py);
@@ -446,7 +453,7 @@ participant IDs).
 > skins:
 >   - skin_id: shell
 >     name: Shell
->     skin_type: turtle_square    # → registry shape + sensor coordinates
+>     skin_type: turtle_square    # -> registry shape + sensor coordinates
 >     chambers:
 >       - {mac: "AA:BB:CC:DD:EE:01", slot: 0, max_pressure: 8.0}
 > ```
@@ -460,17 +467,17 @@ participant IDs).
 Each such skin declares two things that govern how the grid editor and the
 activity-time `SkinGridView` render it:
 
-- **`shape`** — `"rect"` (default) or `"round"`. Round masks off cells
+- **`shape`** - `"rect"` (default) or `"round"`. Round masks off cells
   whose centroid falls outside the inscribed circle so the user sees the
   physical boundary of the skin without having to paint a custom outline.
-- **Per-layer grid dimensions** — the chamber grid and the sensor grid
+- **Per-layer grid dimensions** - the chamber grid and the sensor grid
   can have *different* resolutions. `grid: {cols, rows}` at the top of
   the skin entry is the chamber grid; `touch.grid: {cols, rows}` is the
-  sensor grid (optional — defaults to `grid` for legacy skins). Both
+  sensor grid (optional - defaults to `grid` for legacy skins). Both
   layers occupy the same widget pixel area; the renderer just slices it
   at different densities.
 
-Example: organ skin with 3 chambers on a 3×3 layout but 8×4 sensors for
+Example: organ skin with 3 chambers on a 3x3 layout but 8x4 sensors for
 fine touch resolution:
 
 ```yaml
@@ -503,7 +510,7 @@ over the same area.
 
 ---
 
-## Sensor → Chamber mapping
+## Sensor -> Chamber mapping
 
 A skin's `touch:` block in `settings.yaml` can carry a
 `sensor_to_chamber` dict that wires individual sensors to chambers:
@@ -516,16 +523,16 @@ skins:
       node_mac: AA:BB:CC:DD:EE:FF
       sensor_count: 4
       sensor_grid: [[...]]
-      sensor_to_chamber: {"0": 0, "1": 0, "2": 1, "3": 1}   # sensor → chamber
+      sensor_to_chamber: {"0": 0, "1": 0, "2": 1, "3": 1}   # sensor -> chamber
 ```
 
-- Edited in the **SkinConfigDialog** via a "Sensor → Chamber mapping"
+- Edited in the **SkinConfigDialog** via a "Sensor -> Chamber mapping"
   table that auto-rebuilds when the user changes sensor count or chamber
   count.
 - Activities subscribe to `controller.on_magnet(...)` and read the mapping
   to decide which chamber to drive when a sensor fires.
 - In simulation, clicking a sensor's **T-button** on `SkinGridView` also
-  pulses the mapped chamber in blue — visual confirmation without an
+  pulses the mapped chamber in blue - visual confirmation without an
   activity wired in.
 
 JSON keys are stored as strings; consumers should normalise to `int`
@@ -533,14 +540,14 @@ before lookup.
 
 ---
 
-## Phase 2 — Declarative activities from the GUI (shipped)
+## Phase 2 - Declarative activities from the GUI (shipped)
 
-> **Shipped** — see the "Behaviour engine" section above for what actually
+> **Shipped** - see the "Behaviour engine" section above for what actually
 > exists. This section is the original design; the shipped spec shape differs
 > in detail (states carry `do` / `on_touch` / `transitions`, single-key step
-> and condition dicts — [`catalog.py`](../src/activities/catalog.py) is the
+> and condition dicts - [`catalog.py`](../src/activities/catalog.py) is the
 > source of truth), and the editor is the Blockly block editor under
-> **Tools → Activity Editor…**, not the tree editor sketched here.
+> **Tools -> Activity Editor...**, not the tree editor sketched here.
 
 This layer lets educators and researchers **author new activities without
 writing Python**. The activity definition becomes data (a JSON state machine
@@ -548,7 +555,7 @@ stored in the DB), interpreted by a generic `ScriptedActivity`.
 
 ### Why declarative, not "paste Python"
 
-Python is too powerful (and too dangerous) to allow inside the app —
+Python is too powerful (and too dangerous) to allow inside the app -
 any imported code can crash the GUI, leak memory, or open files. A
 declarative spec, by contrast, is **always safe to load**: the
 interpreter only knows how to run actions and check conditions from a
@@ -559,7 +566,7 @@ become available to every existing spec automatically.
 
 ```
 declarative_activities
-  id           TEXT PK     -- "DA001", "DA002", …
+  id           TEXT PK     -- "DA001", "DA002", ...
   name         TEXT        -- "My Behaviour"
   description  TEXT
   spec         TEXT        -- JSON, see below
@@ -609,10 +616,10 @@ declarative_activities
 | `action` | Params | Effect |
 |----------|--------|--------|
 | `set_led` | `color`, `pattern` (`solid`/`pulse`/`breathe`/`rainbow`/`off`), `period_ms` | Drive the WS2818 strip |
-| `set_pressure` | `chamber`, `value` (0–100 %) | Set chamber target |
-| `inflate` / `deflate` | `chamber`, `delta` (0–100 %) | Step the chamber |
-| `breathe` | `period_ms`, `depth` (0–100 %) | Start breathing animation |
-| `stop_breathing` | — | Stop the breathing animation |
+| `set_pressure` | `chamber`, `value` (0-100 %) | Set chamber target |
+| `inflate` / `deflate` | `chamber`, `delta` (0-100 %) | Step the chamber |
+| `breathe` | `period_ms`, `depth` (0-100 %) | Start breathing animation |
+| `stop_breathing` | - | Stop the breathing animation |
 | `log` | `message` | Append to the activity log (debugging) |
 
 ### Condition catalogue (initial, extensible)
@@ -635,10 +642,10 @@ A `BaseActivity` subclass that:
   matching action handlers.
 - Re-evaluates `transitions` after each event / on every periodic tick.
 
-Action & condition dispatch is a registry — adding a new verb is just
+Action & condition dispatch is a registry - adding a new verb is just
 registering a function. Spec authors gain it automatically.
 
-### Editor UI (shipped as Tools → Activity Editor…)
+### Editor UI (shipped as Tools -> Activity Editor...)
 
 - List existing declarative activities (rename / duplicate / delete).
 - Visual state-machine editor: a tree of states; each state has
@@ -650,9 +657,9 @@ registering a function. Spec authors gain it automatically.
 ### Where this fits with Phase 1
 
 - Python plugin activities (Phase 1c, e.g. `OrganSwapActivity`) were meant to
-  remain the path for performance-sensitive or hardware-specific behaviours —
+  remain the path for performance-sensitive or hardware-specific behaviours -
   in the end they were removed; the declarative engine covers everything.
-- Declarative activities are for the long tail — researcher-authored
+- Declarative activities are for the long tail - researcher-authored
   variations, school-specific tweaks, exploratory designs.
 - Both share the `ACTIVITIES` registry and the SessionPanel flow; the
   user picks an activity, optionally an `ActivityPreset`, and hits Go.
@@ -664,26 +671,26 @@ registering a function. Spec authors gain it automatically.
 The behaviour framework builds on top of work already shipped this session:
 
 - **Skin templates** ([src/data/database.py](../src/data/database.py)
-  → `skin_templates` table, [src/gui/skin_config_dialog.py](../src/gui/skin_config_dialog.py)
-  → dropdown + Apply + Save). Reuse layouts across skins; same pattern
+  -> `skin_templates` table, [src/gui/skin_config_dialog.py](../src/gui/skin_config_dialog.py)
+  -> dropdown + Apply + Save). Reuse layouts across skins; same pattern
   is now used for activity presets.
-- **Activity presets** (this phase) — DB-backed bundles of tunable
+- **Activity presets** (this phase) - DB-backed bundles of tunable
   values. (The preset-editing GUI was later removed; the DB CRUD remains.)
-- **`simulation_mode` per activity** (this phase) — replaces the standalone
+- **`simulation_mode` per activity** (this phase) - replaces the standalone
   `SimulationActivity` with a checkbox; baseline `SIM_PARAMS` give every
   activity tunable inflate/deflate speeds for free.
-- **Sensor → Chamber mapping** (this phase) — declarative wiring from
+- **Sensor -> Chamber mapping** (this phase) - declarative wiring from
   magnet sensor sensor index to chamber index, stored per skin in YAML.
-- **Skin geometry config** (this phase) — `shape: rect | round` +
+- **Skin geometry config** (this phase) - `shape: rect | round` +
   per-layer grid dimensions (chambers vs sensors can have different
   resolutions on the same skin). Editor and `SkinGridView` both honour
   the shape mask.
 - **`SkinGridView`** ([src/gui/monitor/skin_grid_view.py](../src/gui/monitor/skin_grid_view.py))
-  — spatial render of the skin during activities, with per-chamber
+  - spatial render of the skin during activities, with per-chamber
   pressure fill and a touch-pulse overlay tied to `controller.on_magnet`.
 - **`node_magnet_sensor` plumbing** ([src/hardware/esp32_controller.py](../src/hardware/esp32_controller.py)
-  → `on_magnet`, [src/gui/node_config_dialog.py](../src/gui/node_config_dialog.py)
-  → 4-sensor type). `on_organ` follows the exact same pattern.
+  -> `on_magnet`, [src/gui/node_config_dialog.py](../src/gui/node_config_dialog.py)
+  -> 4-sensor type). `on_organ` follows the exact same pattern.
 - **Unified Serial output** (`LOG` always, `DBG_PRINT` only in debug
   builds) and **boot broadcast** of `{"status":"node_*_ready"}` across
   all firmwares. The new `node_organ` extensions inherit the same.

@@ -2,7 +2,7 @@
 #include <Arduino.h>
 
 // ---------------------------------------------------------------------------
-// XGZP6847A pressure sensor — voltage-to-kPa conversion
+// XGZP6847A pressure sensor - voltage-to-kPa conversion
 // Datasheet transfer function (ratiometric, 3.3 V supply):
 //   V_out = V_supply * (0.05 + 0.9 * (P - P_min) / (P_max - P_min))
 // Solving for P:
@@ -15,7 +15,7 @@ constexpr float V_SUPPLY = 3.3f;
 
 // Sensor range (kPa, gauge). Overridable per build so swapping the 0..100 kPa
 // XGZP6847A for the upcoming -40..+40 kPa vacuum-capable variant is just a
-// platformio.ini flag (-DSENSOR_KPA_MIN=-40 -DSENSOR_KPA_MAX=40) — everything
+// platformio.ini flag (-DSENSOR_KPA_MIN=-40 -DSENSOR_KPA_MAX=40) - everything
 // downstream (deflate closed loop below ambient, the PC floor decision) keys off
 // these, so no code changes are needed when the new sensors arrive.
 #ifndef SENSOR_KPA_MIN
@@ -24,8 +24,8 @@ constexpr float V_SUPPLY = 3.3f;
 #ifndef SENSOR_KPA_MAX
 #define SENSOR_KPA_MAX 100.0f
 #endif
-constexpr float P_MIN = SENSOR_KPA_MIN;   // kPa — sensor low end (gauge floor)
-constexpr float P_MAX = SENSOR_KPA_MAX;   // kPa — sensor full-scale
+constexpr float P_MIN = SENSOR_KPA_MIN;   // kPa - sensor low end (gauge floor)
+constexpr float P_MAX = SENSOR_KPA_MAX;   // kPa - sensor full-scale
 
 // The lowest pressure this sensor can SEE. Anything at/below it reads as the
 // floor, so a target below it can only be closed by time, never by pressure.
@@ -34,18 +34,18 @@ constexpr float P_MAX = SENSOR_KPA_MAX;   // kPa — sensor full-scale
 constexpr float FLOOR_KPA = P_MIN;
 
 // The deepest vacuum a chamber may be driven to and still recover. The FA0520E
-// valves re-open against at most ~47 kPa of differential pressure; a chamber —
-// or the shared manifold behind it — left deeper than that traps a vacuum the
+// valves re-open against at most ~47 kPa of differential pressure; a chamber -
+// or the shared manifold behind it - left deeper than that traps a vacuum the
 // next valve can't overcome, so the pump forces against a seat that won't move
 // (the "vacuum-lock" the motor-forcing symptom traces to). The held vacuum must
 // therefore stay inside BOTH the valve's limit AND what the sensor can see:
 //   * blind 0..100 kPa gauge (P_MIN == 0): can't read below ambient, so there
-//     is no pressure cutoff to place here — time + the dead-man bound a vacuum
+//     is no pressure cutoff to place here - time + the dead-man bound a vacuum
 //     deflate; keep the historical wide floor (an inert no-op sentinel).
 //   * -40..40 kPa vacuum sensor (P_MIN == -40): cap at the sensor floor, which
 //     is already inside the valve's ~47 kPa limit, so every valve always re-opens.
 // The VALVE_OPEN_LIMIT clamp keeps it valve-safe even for a deeper sensor.
-constexpr float VALVE_OPEN_LIMIT_KPA = -42.0f;   // FA0520E ~47 kPa ΔP, ~5 kPa margin
+constexpr float VALVE_OPEN_LIMIT_KPA = -42.0f;   // FA0520E ~47 kPa deltaP, ~5 kPa margin
 constexpr float VACUUM_HOLD_FLOOR_KPA =
     (P_MIN >= 0.0f) ? -100.0f
     : (P_MIN > VALVE_OPEN_LIMIT_KPA ? P_MIN : VALVE_OPEN_LIMIT_KPA);
@@ -65,7 +65,7 @@ inline float adcToVoltage(int adc) {
 
 inline float voltageToPressure(float voltage) {
     float p = ((voltage / V_SUPPLY) - 0.05f) * (P_MAX - P_MIN) / 0.9f + P_MIN;
-    // Clamp to the sensor's PHYSICAL range — never to zero: a vacuum-capable
+    // Clamp to the sensor's PHYSICAL range - never to zero: a vacuum-capable
     // sensor legitimately reads negative gauge pressure.
     if (p < P_MIN) return P_MIN;
     if (p > P_MAX) return P_MAX;

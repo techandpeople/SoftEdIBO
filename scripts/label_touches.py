@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Offline touch-gesture labeller (CLI) — recording + live tags → labels CSV.
+"""Offline touch-gesture labeller (CLI) - recording + live tags -> labels CSV.
 
 A thin command-line front-end over ``src/ml/labeling.py`` (the same logic the
-in-app **Tools → Touch Gestures…** dialog uses). Aligns the live
+in-app **Tools -> Touch Gestures...** dialog uses). Aligns the live
 ``gesture_label`` events tapped during a session with the touch segments in its
 recording; ``--review`` confirms/corrects each before writing the CSV.
 
@@ -45,7 +45,7 @@ def main() -> int:
     if args.review:
         for r in rows:
             ans = input(
-                f"[{r.source}] {r.duration_ms:.0f} ms → suggested: "
+                f"[{r.source}] {r.duration_ms:.0f} ms -> suggested: "
                 f"{r.label or '?'}\n  label (Enter=keep, name to set, s=skip): "
             ).strip()
             if ans.lower() == "s":
@@ -55,7 +55,7 @@ def main() -> int:
 
     out_path = args.out or args.recording.with_suffix(".labels.csv")
     n = labeling.write_csv(rows, out_path)
-    print(f"Wrote {n} labelled segments → {out_path}")
+    print(f"Wrote {n} labelled segments -> {out_path}")
     return 0
 
 

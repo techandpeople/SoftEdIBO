@@ -1,4 +1,4 @@
-"""Thymio robot — wheeled tdm-client robot with optional ESP-NOW skin nodes."""
+"""Thymio robot - wheeled tdm-client robot with optional ESP-NOW skin nodes."""
 
 import logging
 from typing import Any
@@ -17,7 +17,7 @@ class ThymioRobot(EspRobot):
 
     The ESP-NOW node side (air chambers) is identical to other robots and lives in
     EspRobot. Thymio adds the wheeled base: motors and LEDs driven through an injected
-    link — either a :class:`ThymioLink` (RF dongle via thymiodirect) or a
+    link - either a :class:`ThymioLink` (RF dongle via thymiodirect) or a
     :class:`~src.robots.thymio.thymio_gateway_link.ThymioGatewayLink` (the gateway's C6
     over 802.15.4, no dongle). Both share the same duck-typed interface. When no link is
     given the movement commands are no-ops and ``connect`` still succeeds, so the sim /

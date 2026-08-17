@@ -4,9 +4,9 @@ A brand-new Thymio isn't on our 802.15.4 network yet, so wireless
 :func:`~src.robots.thymio.thymio_discovery.discover_thymios` can't see it. But
 plugging it into the PC with its micro-USB cable exposes it as a serial port
 speaking Aseba (via ``thymiodirect``), and its **Aseba node id** is the same two
-bytes as its **802.15.4 short address**, byte-swapped — so a cable read gives the
+bytes as its **802.15.4 short address**, byte-swapped - so a cable read gives the
 exact ``address`` the Gateway-C6 transport wants, with no dongle and no Thymio
-Suite. Confirmed live: node id ``0x256a`` ⇒ address ``6a25``.
+Suite. Confirmed live: node id ``0x256a`` => address ``6a25``.
 
 Domain-only (no Qt): the GUI runs :func:`read_cabled_thymio_address` off-thread
 and drops the result into the address field.
@@ -50,7 +50,7 @@ class ThymioCableError(Exception):
 def address_from_node_id(node_id: int) -> str:
     """The 802.15.4 short address (hex, e.g. ``"6a25"``) for an Aseba ``node_id``.
 
-    The address is the node id's two bytes swapped: ``0x256a`` ⇒ ``0x6a25``.
+    The address is the node id's two bytes swapped: ``0x256a`` => ``0x6a25``.
     """
     swapped = ((node_id & 0xFF) << 8) | ((node_id >> 8) & 0xFF)
     return f"{swapped:04x}"
@@ -87,7 +87,7 @@ def _shutdown(thymio) -> None:
     for method in ("shutdown", "close"):
         try:
             getattr(conn, method)()
-        except Exception:  # noqa: BLE001 — teardown must not raise
+        except Exception:  # noqa: BLE001 - teardown must not raise
             logger.debug("thymiodirect %s() failed", method, exc_info=True)
     # Clear the mute after the teardown settles (late reader/refresh errors too),
     # off a timer so we don't block the caller.
@@ -109,13 +109,13 @@ def read_cabled_thymio_address(port: str | None = None,
     port = port or find_cabled_thymio_port()
     if port is None:
         raise ThymioCableError(
-            "No Thymio found on USB — connect it with its micro-USB cable "
+            "No Thymio found on USB - connect it with its micro-USB cable "
             "(and make sure Thymio Suite isn't holding the port).")
 
     from thymiodirect import Thymio
 
     # thymiodirect's Thymio() constructor calls asyncio.get_event_loop(), which on
-    # Python 3.12 raises in any thread without one — and the GUI runs this on a Qt
+    # Python 3.12 raises in any thread without one - and the GUI runs this on a Qt
     # worker thread (run_async), not the main thread. Ensure this thread has a loop
     # set first so that call succeeds. Intentionally probing for a loop, so mute the
     # get_event_loop() deprecation noise that Python emits when it auto-creates one.
@@ -135,7 +135,7 @@ def read_cabled_thymio_address(port: str | None = None,
     node_ids: list[int] = []
     thymio = Thymio(serial_port=port, on_connect=node_ids.append)
     # ``Thymio.connect()`` blocks until a node answers, so a silent/wrong device
-    # would hang forever — run it on a daemon thread and bound the wait ourselves.
+    # would hang forever - run it on a daemon thread and bound the wait ourselves.
     threading.Thread(target=thymio.connect, daemon=True).start()
     deadline = time.monotonic() + timeout
     while not node_ids and time.monotonic() < deadline:
@@ -147,7 +147,7 @@ def read_cabled_thymio_address(port: str | None = None,
                 f"{timeout:.0f}s. Power-cycle it and try again.")
         node_id = node_ids[0]
         addr = address_from_node_id(node_id)
-        logger.info("Cabled Thymio on %s: node id 0x%04x → address %s",
+        logger.info("Cabled Thymio on %s: node id 0x%04x -> address %s",
                     port, node_id, addr)
         return addr
     finally:

@@ -1,4 +1,4 @@
-"""Tests for the Tree robot — one skin (branch) per child, with sharing."""
+"""Tests for the Tree robot - one skin (branch) per child, with sharing."""
 
 from unittest.mock import MagicMock, PropertyMock
 

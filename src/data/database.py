@@ -85,7 +85,7 @@ _session_assignments = Table(
     Column("unit_ids", String, nullable=False, default="[]"),  # JSON list of skin/branch IDs
 )
 
-# Trash — sessions moved here (soft-delete) before a permanent purge. The whole
+# Trash - sessions moved here (soft-delete) before a permanent purge. The whole
 # session (record + events + assignments + participant links) is preserved as a
 # JSON ``bundle`` so a restore reinstates it exactly; ``activity_name`` /
 # ``start_time`` / ``end_time`` are mirrored as columns for cheap listing.
@@ -105,7 +105,7 @@ _counters = Table(
     Column("value", Integer, nullable=False, default=0),
 )
 
-# Activity presets — named bundles of tunable parameters for an Activity.
+# Activity presets - named bundles of tunable parameters for an Activity.
 # ``params`` is JSON-encoded. Multiple presets per activity are supported.
 _activity_presets = Table(
     "activity_presets", _metadata,
@@ -118,7 +118,7 @@ _activity_presets = Table(
     Column("updated_at",    String, nullable=False),
 )
 
-# Declarative activities — behaviour specs authored as data (block editor /
+# Declarative activities - behaviour specs authored as data (block editor /
 # by hand) and run by ScriptedActivity. ``spec`` is JSON-encoded.
 _declarative_activities = Table(
     "declarative_activities", _metadata,
@@ -130,7 +130,7 @@ _declarative_activities = Table(
     Column("updated_at",   String, nullable=False),
 )
 
-# Skin templates — reusable layouts shared across skins. ``grid``,
+# Skin templates - reusable layouts shared across skins. ``grid``,
 # ``chamber_grid`` and ``sensor_grid`` are JSON-encoded.
 _skin_templates = Table(
     "skin_templates", _metadata,
@@ -162,7 +162,7 @@ class Database:
     @property
     def _db_engine(self) -> Engine:
         if self._engine is None:
-            raise RuntimeError("Database not connected — call connect() first")
+            raise RuntimeError("Database not connected - call connect() first")
         return self._engine
 
     @staticmethod
@@ -223,7 +223,7 @@ class Database:
 
     def close(self) -> None:
         """Flush pending events, then dispose the engine."""
-        self._event_queue.put(None)  # sentinel — tells the worker to stop
+        self._event_queue.put(None)  # sentinel - tells the worker to stop
         if self._event_thread is not None:
             self._event_thread.join(timeout=5)
             self._event_thread = None
@@ -481,7 +481,7 @@ class Database:
         ]
 
     def next_session_id(self) -> str:
-        """Return the next auto-generated session ID (S001, S002, …)."""
+        """Return the next auto-generated session ID (S001, S002, ...)."""
         with self._db_engine.connect() as conn:
             n = conn.execute(
                 select(_counters.c.value).where(_counters.c.name == "session")
@@ -563,7 +563,7 @@ class Database:
         ]
 
     def next_participant_id(self) -> str:
-        """Return the next auto-generated participant ID (P001, P002, …)."""
+        """Return the next auto-generated participant ID (P001, P002, ...)."""
         with self._db_engine.connect() as conn:
             n = conn.execute(
                 select(_counters.c.value).where(_counters.c.name == "participant")
@@ -579,7 +579,7 @@ class Database:
             )
 
     # ------------------------------------------------------------------
-    # Session ↔ Participant links
+    # Session <-> Participant links
     # ------------------------------------------------------------------
 
     def link_participant_to_session(self, session_id: str, participant_id: str) -> None:
@@ -638,7 +638,7 @@ class Database:
         The start event records the exact robots and simulation flag the
         session ran with, as a JSON object (``{"robot_ids": [...],
         "simulation_mode": bool}``). This is the durable, per-session source
-        of truth used to rebuild a session on resume — unlike the global
+        of truth used to rebuild a session on resume - unlike the global
         ``last_assignments.json`` cache, which only ever holds the most recent
         session and so restores wrong/stale robots for any other session.
 
@@ -800,7 +800,7 @@ class Database:
             )
 
     def next_skin_template_id(self) -> str:
-        """Return the next auto-generated template ID (T001, T002, …)."""
+        """Return the next auto-generated template ID (T001, T002, ...)."""
         with self._db_engine.connect() as conn:
             n = conn.execute(
                 select(_counters.c.value)
@@ -863,7 +863,7 @@ class Database:
             )
 
     def next_activity_preset_id(self) -> str:
-        """Return the next auto-generated preset ID (AP001, AP002, …)."""
+        """Return the next auto-generated preset ID (AP001, AP002, ...)."""
         with self._db_engine.connect() as conn:
             n = conn.execute(
                 select(_counters.c.value)
@@ -937,7 +937,7 @@ class Database:
             )
 
     def next_declarative_activity_id(self) -> str:
-        """Return the next auto-generated id (DA001, DA002, …)."""
+        """Return the next auto-generated id (DA001, DA002, ...)."""
         with self._db_engine.connect() as conn:
             n = conn.execute(
                 select(_counters.c.value)

@@ -15,11 +15,11 @@ concurrency:
 
 jobs:
   # -----------------------------------------------------------------------
-  # Firmware — built ONCE here (Linux) and reused by both app jobs (ESP .bin
+  # Firmware - built ONCE here (Linux) and reused by both app jobs (ESP .bin
   # files are identical regardless of the host OS, and the ESP-IDF gateway
   # build does not work on Windows runners). Each board's bins are cached
   # under a key hashed from just that board's sources, so touching one board
-  # rebuilds only that board — and a push that touches no firmware builds
+  # rebuilds only that board - and a push that touches no firmware builds
   # nothing at all.
   # -----------------------------------------------------------------------
   firmware:
@@ -86,12 +86,12 @@ jobs:
 
       # Cache only the DOWNLOAD cache (~/.platformio/.cache), never the extracted
       # install tree (~/.platformio/packages, platforms). Caching the whole tree
-      # let a mismatched pioarduino framework be restored — framework-arduinoespressif32
+      # let a mismatched pioarduino framework be restored - framework-arduinoespressif32
       # present-but-invalid (or only its -libs), which resolves to None and fails
       # the C6 build with `FRAMEWORK_DIR None`. Caching just the tarballs means the
       # install is always re-extracted fresh from content-addressed downloads, so a
       # broken install can never be cached, and restore-keys is safe (a stale download
-      # can't corrupt an install — worst case it is re-fetched).
+      # can't corrupt an install - worst case it is re-fetched).
       - name: Cache PlatformIO downloads
         if: steps.fwplan.outputs.components != ''
         uses: actions/cache@v4
@@ -149,7 +149,7 @@ jobs:
           retention-days: 30
 
   # -----------------------------------------------------------------------
-  # Linux build — runs the test suite (which gates the AppImage and, via
+  # Linux build - runs the test suite (which gates the AppImage and, via
   # `needs`, the nightly/stable releases) and produces the AppImage.
   # -----------------------------------------------------------------------
   build:
@@ -204,7 +204,7 @@ jobs:
 
       # Unit tests gate the build: a red suite must not produce an AppImage,
       # a Windows zip release, or a nightly (nightly/release `needs` this
-      # job). Headless (offscreen QPA) — pytest/pytest-qt come from
+      # job). Headless (offscreen QPA) - pytest/pytest-qt come from
       # requirements.txt.
       - name: Run tests
         run: QT_QPA_PLATFORM=offscreen python -m pytest -q
@@ -224,7 +224,7 @@ jobs:
         run: pyinstaller softedibo.spec
 
       # ----------------------------------------------------------------
-      # AppImage — single file, double-click to open
+      # AppImage - single file, double-click to open
       # ----------------------------------------------------------------
 
       - name: Download appimagetool
@@ -285,7 +285,7 @@ jobs:
           retention-days: 30
 
   # -----------------------------------------------------------------------
-  # Windows build — produces a portable zip. Needs only the firmware job
+  # Windows build - produces a portable zip. Needs only the firmware job
   # (never rebuilds firmware), so it runs in parallel with the Linux build;
   # nightly/stable releases still require the tested Linux build.
   # -----------------------------------------------------------------------
@@ -401,9 +401,9 @@ jobs:
             **Linux:** `chmod +x SoftEdIBO-x86_64.AppImage && ./SoftEdIBO-x86_64.AppImage`
             **Windows:** extract `SoftEdIBO-windows-x64.zip` and run `SoftEdIBO.exe`
 
-            **Firmware** (`firmware.zip`): the S3 gateway, release/debug × RGB/RGBW builds for both actuator node types, the magnet sensor node, and the Thymio RCP (both a merged image and a WiFi-OTA app image).
-            Flash merged bins at 0x0 — gateway: `esptool.py --chip esp32s3 write_flash 0x0 gateway-s3.bin`; nodes: `esptool.py --chip esp32 write_flash 0x0 <bin>`; gateway C6 first flash: `esptool.py --chip esp32c6 write_flash 0x0 thymio_rcp-c6-merged.bin`.
-            `thymio_rcp-c6-app.bin` is a WiFi-OTA app image only — do **not** flash it at 0x0 (use `thymio_rcp-c6-merged.bin` for the first USB flash).
+            **Firmware** (`firmware.zip`): the S3 gateway, release/debug x RGB/RGBW builds for both actuator node types, the magnet sensor node, and the Thymio RCP (both a merged image and a WiFi-OTA app image).
+            Flash merged bins at 0x0 - gateway: `esptool.py --chip esp32s3 write_flash 0x0 gateway-s3.bin`; nodes: `esptool.py --chip esp32 write_flash 0x0 <bin>`; gateway C6 first flash: `esptool.py --chip esp32c6 write_flash 0x0 thymio_rcp-c6-merged.bin`.
+            `thymio_rcp-c6-app.bin` is a WiFi-OTA app image only - do **not** flash it at 0x0 (use `thymio_rcp-c6-merged.bin` for the first USB flash).
 
   # -----------------------------------------------------------------------
   # Tags v*: creates a stable GitHub release (available via OTA).
@@ -451,7 +451,7 @@ jobs:
                ```bash
                chmod +x SoftEdIBO-x86_64.AppImage
                ```
-            3. **Double-click** — the setup wizard opens automatically.
+            3. **Double-click** - the setup wizard opens automatically.
 
             > **Serial port (USB):** if this is your first time, run:
             > `sudo usermod -aG dialout $USER`  and log out/in.
@@ -461,7 +461,7 @@ jobs:
             ## Windows (x64)
 
             1. Download and extract **`SoftEdIBO-windows-x64.zip`**
-            2. Run **`SoftEdIBO.exe`** — the setup wizard opens automatically.
+            2. Run **`SoftEdIBO.exe`** - the setup wizard opens automatically.
 
             > **Serial port (USB):** install the CH340 or CP210x driver if your device isn't detected.
 
@@ -469,7 +469,7 @@ jobs:
 
             ## Firmware (`firmware.zip`)
 
-            The desktop app already includes these binaries — use `Tools => Flash Firmware…`
+            The desktop app already includes these binaries - use `Tools => Flash Firmware...`
             to flash. Manual flashing is also possible (all merged bins go at `0x0`;
             the gateway uses `--chip esp32s3`, the nodes `--chip esp32`):
             ```bash
@@ -478,7 +478,7 @@ jobs:
 
             | File | Node type | Description |
             |------|-----------|-------------|
-            | `gateway-s3.bin` | Gateway | USB–ESP-NOW bridge + SoftAP + Thymio UART link, **Seeed XIAO ESP32-S3** (ESP-IDF) |
+            | `gateway-s3.bin` | Gateway | USB-ESP-NOW bridge + SoftAP + Thymio UART link, **Seeed XIAO ESP32-S3** (ESP-IDF) |
             | `node_direct-release.bin` | `node_direct` | 3 chambers, direct sensors/valves, onboard pumps |
             | `node_direct-debug.bin` | `node_direct` | Same as above with Serial logs (`DEBUG_BUILD`) |
             | `node_direct-rgbw-release.bin` | `node_direct` | RGBW LED-ring build (SK6812 NeoPixels) |
@@ -487,6 +487,6 @@ jobs:
             | `node_multiplexed-debug.bin` | `node_multiplexed` | Same as above with Serial logs (`DEBUG_BUILD`) |
             | `node_multiplexed-rgbw-release.bin` | `node_multiplexed` | RGBW LED-ring build (SK6812 NeoPixels) |
             | `node_multiplexed-rgbw-debug.bin` | `node_multiplexed` | RGBW build with Serial logs |
-            | `node_magnet_sensor.bin` | `node_magnet_sensor` | 4× MLX90393 magnetic touch board (node_magnet_sensor protocol) |
-            | `thymio_rcp-c6-merged.bin` | Thymio RCP | XIAO ESP32-C6 802.15.4 co-processor — **merged image for the first USB flash** (`Tools => Flash Firmware…` gateway step, or `esptool.py --chip esp32c6 write_flash 0x0 thymio_rcp-c6-merged.bin`) |
-            | `thymio_rcp-c6-app.bin` | Thymio RCP | Same firmware, **WiFi-OTA app image, never flash at 0x0** — used for over-the-air updates after the first flash |
+            | `node_magnet_sensor.bin` | `node_magnet_sensor` | 4x MLX90393 magnetic touch board (node_magnet_sensor protocol) |
+            | `thymio_rcp-c6-merged.bin` | Thymio RCP | XIAO ESP32-C6 802.15.4 co-processor - **merged image for the first USB flash** (`Tools => Flash Firmware...` gateway step, or `esptool.py --chip esp32c6 write_flash 0x0 thymio_rcp-c6-merged.bin`) |
+            | `thymio_rcp-c6-app.bin` | Thymio RCP | Same firmware, **WiFi-OTA app image, never flash at 0x0** - used for over-the-air updates after the first flash |

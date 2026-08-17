@@ -1,4 +1,4 @@
-"""Tests for TouchEventRouter — sensor press/release edge detection + mapping."""
+"""Tests for TouchEventRouter - sensor press/release edge detection + mapping."""
 
 from src.hardware.touch_event_router import TouchEventRouter
 
@@ -43,7 +43,7 @@ def test_no_event_when_set_unchanged():
     events = _collect(router)
 
     router.handle_magnet({"act": [1]})
-    router.handle_magnet({"act": [1]})      # same set → no new event
+    router.handle_magnet({"act": [1]})      # same set -> no new event
 
     assert events == [(1, "press")]
 
@@ -63,7 +63,7 @@ def test_unmapped_sensor_falls_back_to_sensor_index():
         {"sensor_to_chamber": {"0": 5}}, chamber_count=8)
     events = _collect(router)
 
-    router.handle_magnet({"act": [3]})      # 3 not in mapping → raw index
+    router.handle_magnet({"act": [3]})      # 3 not in mapping -> raw index
 
     assert events == [(3, "press")]
 
@@ -83,7 +83,7 @@ def test_attach_consumes_controller_events():
 def test_attach_tolerates_missing_controller():
     router = TouchEventRouter.from_touch_config(None, chamber_count=0)
     router.attach(None)            # must not raise
-    router.attach(object())        # no on_magnet → no-op
+    router.attach(object())        # no on_magnet -> no-op
 
 
 def test_non_list_act_is_ignored():

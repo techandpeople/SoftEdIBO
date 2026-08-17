@@ -1,4 +1,4 @@
-"""Tests for touch-coupling calibration settings helpers + sample→config core."""
+"""Tests for touch-coupling calibration settings helpers + sample->config core."""
 
 from src.hardware.touch_calibration import (
     SweepProgram,
@@ -21,7 +21,7 @@ def _settings():
             {"skin_id": "belly",
              "chambers": [{"mac": "AA:01", "slot": 0}, {"mac": "AA:01", "slot": 1}],
              "touch": {"node_mac": "AA:01", "sensor_count": 4}},
-            {"skin_id": "leg",   # multiplexed node has no magnet bus → excluded
+            {"skin_id": "leg",   # multiplexed node has no magnet bus -> excluded
              "chambers": [{"mac": "CC:03", "slot": 0}],
              "touch": {"node_mac": "CC:03", "sensor_count": 4}},
         ],
@@ -88,7 +88,7 @@ def test_coupling_config_from_samples():
     cfg, model = coupling_config_from_samples(samples, sensor_count=2)
     assert cfg["unit"] == "uT"
     assert cfg["sensor_count"] == 2
-    # chamber 0 delta on sensor 0 ≈ 200, sensor 1 ≈ 2
+    # chamber 0 delta on sensor 0 ~= 200, sensor 1 ~= 2
     row = model.deltas()[0]
     assert abs(row[0] - 200.0) < 1.0
     assert abs(row[1] - 2.0) < 1.0
@@ -101,7 +101,7 @@ def test_coupling_config_from_samples():
 
 
 def test_grid_levels():
-    # 10 % steps, floored at ACTIVE_MIN (20 %): 20, 30, …, 100.
+    # 10 % steps, floored at ACTIVE_MIN (20 %): 20, 30, ..., 100.
     assert SweepProgram.grid_levels(10.0) == (
         20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0)
     assert SweepProgram.grid_levels(50.0) == (50.0, 100.0)
@@ -188,7 +188,7 @@ def test_sweep_diagnostics_levels_never_active():
 
 
 def test_sweep_diagnostics_names_coinflated_neighbor():
-    # slot 2 inflated to 40 % but slot 1 was co-inflated → dropped from matrix.
+    # slot 2 inflated to 40 % but slot 1 was co-inflated -> dropped from matrix.
     samples = [
         (0.0, {0: 3.0, 1: 30.0, 2: 40.0}, [1.0]),
         (100.0, {0: 3.0, 1: 30.0, 2: 35.0}, [1.0]),

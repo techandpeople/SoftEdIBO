@@ -23,7 +23,7 @@ from src.robots.esp_robot import EspRobot
 from src.robots.thymio.thymio_robot import ThymioRobot
 
 _TEST_ACTUATORS = "Test Actuators"
-_TEST_THYMIO = "Test Thymio…"
+_TEST_THYMIO = "Test Thymio..."
 
 
 class RobotConfigDialog(BaseDialog, Ui_RobotConfigDialog):
@@ -56,7 +56,7 @@ class RobotConfigDialog(BaseDialog, Ui_RobotConfigDialog):
         self._thymio_entries: list[dict] = []
 
         self.setWindowTitle(f"Configure: {robot.name}")
-        self.intro_label.setText(f"<b>{type(robot).__name__}</b> — {robot.name}")
+        self.intro_label.setText(f"<b>{type(robot).__name__}</b> - {robot.name}")
 
         # The static frame (intro, scroll area, button box) lives in the .ui;
         # the per-robot config groups are built here into ``content_layout``.
@@ -95,7 +95,7 @@ class RobotConfigDialog(BaseDialog, Ui_RobotConfigDialog):
             return
 
         btn.setEnabled(False)
-        btn.setText("Testing…")
+        btn.setText("Testing...")
         idx = [0]
 
         def _inflate() -> None:

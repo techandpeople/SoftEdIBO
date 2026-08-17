@@ -1,4 +1,4 @@
-"""CompensatedMagnetSource — a magnet stream with pressure-informed compensation.
+"""CompensatedMagnetSource - a magnet stream with pressure-informed compensation.
 
 Wraps a node's raw magnet controller and re-emits each ``type:"magnet"`` message
 with the actuation offset removed (see :class:`src.core.touch_compensation.
@@ -7,7 +7,7 @@ TouchCompensator`). The Skin exposes this as ``skin.touch_source`` so the live
 TouchEventRouter) see compensated data, while the raw controller stays available
 for the stream recorder, the live monitor, and coupling calibration.
 
-It only implements ``on_magnet`` — the one method detection consumers use; for
+It only implements ``on_magnet`` - the one method detection consumers use; for
 everything else (rebaseline, geometry, organ events) callers keep using the real
 controller via ``skin.touch_controller``.
 """
@@ -66,11 +66,11 @@ class CompensatedMagnetSource:
             self._ctrl.on_magnet(self._handle)
 
     def set_threshold_ut(self, value: float) -> None:
-        """Retune the compensator's activation threshold (µT) at runtime.
+        """Retune the compensator's activation threshold (uT) at runtime.
 
         The compensated stream rederives ``act`` from the residual magnitudes at
         its own threshold, so when a new sensitivity is pushed to the node the
-        compensator must follow — otherwise the node and the compensated stream
+        compensator must follow - otherwise the node and the compensated stream
         would disagree about what counts as a touch."""
         self._comp.threshold_ut = float(value)
 
@@ -78,16 +78,16 @@ class CompensatedMagnetSource:
         try:
             out = self._comp.apply(data, self._levels(),
                                    now_ms=time.monotonic() * 1000.0)
-        except Exception:   # noqa: BLE001 — never let one bad reading kill the stream
+        except Exception:   # noqa: BLE001 - never let one bad reading kill the stream
             logger.exception("touch compensation failed; passing raw")
             out = data
         dead: list[int] = []
         for i, cb in enumerate(self._subs):
             try:
                 cb(out)
-            except RuntimeError:        # Qt signal source deleted — prune it
+            except RuntimeError:        # Qt signal source deleted - prune it
                 dead.append(i)
-            except Exception:           # noqa: BLE001 — a bad subscriber must not break others
+            except Exception:           # noqa: BLE001 - a bad subscriber must not break others
                 logger.exception("compensated magnet callback failed")
         for i in reversed(dead):
             self._subs.pop(i)

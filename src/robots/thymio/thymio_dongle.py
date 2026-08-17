@@ -1,4 +1,4 @@
-"""ThymioDongle — one thymiodirect connection to the RF dongle, shared by all Thymios.
+"""ThymioDongle - one thymiodirect connection to the RF dongle, shared by all Thymios.
 
 The wireless Aseba network carries several Thymios over a single dongle/radio: each
 robot is one *node id* on the same channel + network id, and thymiodirect discovers
@@ -6,8 +6,8 @@ them all through one serial connection. This class owns that single connection a
 relays reads/writes to a chosen node, so several per-robot :class:`ThymioLink` objects
 can share one dongle instead of each trying (and failing) to open the same port.
 
-Nothing here imports thymiodirect until :meth:`connect` runs, so building a dongle — and
-therefore a ThymioLink / ThymioRobot — never needs the package or the hardware; the sim
+Nothing here imports thymiodirect until :meth:`connect` runs, so building a dongle - and
+therefore a ThymioLink / ThymioRobot - never needs the package or the hardware; the sim
 / no-hardware path is untouched.
 
 thymiodirect has no public ``disconnect``: ``Thymio.connect()`` spawns a *non-daemon*
@@ -28,7 +28,7 @@ class ThymioDongle:
     """Owns one thymiodirect connection to the RF dongle; relays to Thymios by node id."""
 
     def __init__(self, serial_port: str | None = None):
-        # None → auto-detect the dongle by its Mobsya USB id on connect.
+        # None -> auto-detect the dongle by its Mobsya USB id on connect.
         self._serial_port = serial_port or None
         self._th: Any = None            # thymiodirect.Thymio
         self._lock = threading.Lock()   # guards connect + shared writes across robots
@@ -74,7 +74,7 @@ class ThymioDongle:
             try:
                 from thymiodirect import Thymio
             except ImportError:
-                logger.error("thymiodirect not installed — run: pip install thymiodirect")
+                logger.error("thymiodirect not installed - run: pip install thymiodirect")
                 return False
 
             port = self._serial_port or self.find_dongle()
@@ -103,7 +103,7 @@ class ThymioDongle:
             threading.Thread(target=_do_connect, name="thymio-dongle-connect",
                              daemon=True).start()
             if not ready.wait(timeout):
-                logger.error("Thymio dongle: no Thymio discovered on %s within %.0fs — is "
+                logger.error("Thymio dongle: no Thymio discovered on %s within %.0fs - is "
                              "any Thymio powered ON and paired with this dongle?",
                              port, timeout)
                 self._stop_thymio(th)
@@ -125,7 +125,7 @@ class ThymioDongle:
         """Best-effort clean shutdown of a thymiodirect Thymio (it has no ``disconnect``).
 
         Stops the serial-reader thread and the asyncio loop so the non-daemon thread
-        that ``Thymio.connect()`` spawned actually exits — otherwise the app hangs on
+        that ``Thymio.connect()`` spawned actually exits - otherwise the app hangs on
         exit. All private-attribute access is defensive: thymiodirect may change.
         """
         proxy = getattr(th, "thymio_proxy", None)
@@ -160,7 +160,7 @@ class ThymioDongle:
         if th is None:
             return []
         try:
-            return sorted(th.nodes())          # a set → stable order for display / pick
+            return sorted(th.nodes())          # a set -> stable order for display / pick
         except TypeError:
             return list(th.nodes())            # unsortable ids: keep whatever order
         except Exception:

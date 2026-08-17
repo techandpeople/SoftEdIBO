@@ -15,14 +15,14 @@
 // valves. So while two or more valves of the same direction are open the chambers
 // equalise and every (mux-read) gauge reads the shared line, not its own chamber.
 // The fill targeting therefore runs in the board-agnostic coupled_fill::Engine
-// (open the group together → fill to the lowest open target → close → settle →
-// measure each isolated → repeat), exactly like node_direct but with looser
+// (open the group together -> fill to the lowest open target -> close -> settle ->
+// measure each isolated -> repeat), exactly like node_direct but with looser
 // timings (I2C PCA9685 valve writes + a per-read mux settle are far slower than
 // the direct board's GPIO + dedicated ADC).
 //
 // Pump scaling is the key multiplexed difference: with the manifold shared, only
 // the NUMBER of pumps running matters, so recalcPumps() spins ceil(open/3) pumps
-// of a direction — enough to keep the per-chamber fill speed roughly constant as
+// of a direction - enough to keep the per-chamber fill speed roughly constant as
 // more valves open, and never more than the open valves can vent (so a spare pump
 // can't dead-head the manifold: the "running dry / forcing" failure).
 
@@ -55,7 +55,7 @@ struct Chamber {
 inline Chamber state[MAX_CHAMBERS];
 inline float   cachedKpa[MAX_CHAMBERS] = {};
 
-// Per-chamber ambient zero (kPa) — the pressure sensor has no zero calibration,
+// Per-chamber ambient zero (kPa) - the pressure sensor has no zero calibration,
 // so at atmosphere it reads a few kPa of offset. Subtracting this per chamber
 // makes gauge 0 == atmosphere everywhere. Captured vented by tare(), NVS-backed.
 inline float   zeroKpa[MAX_CHAMBERS] = {};
@@ -104,7 +104,7 @@ inline void stop(int n) {
 }
 
 // Drive the shared pumps from the ACTUAL open valves (the pca_valves mirror),
-// never from chamber state — so a pump can only run while it has an open flow
+// never from chamber state - so a pump can only run while it has an open flow
 // path. Count-scaled for the common manifold: ceil(open_valves/VALVES_PER_PUMP)
 // pumps of each direction, capped at how many pumps that role has. Suspended
 // while a manual override drives the pumps directly (see main.cpp).
@@ -145,7 +145,7 @@ inline constexpr coupled_fill::Tuning TUNE_INFLATE {
     /* min_round_ms        */ 350,    // bigger manifold + I2C: longer pump-start spike to ride out
     /* settle_ms           */ 300,    // mux scan + larger manifold needs longer to settle isolated
     /* round_max_ms        */ 8000,
-    /* seq_max_ms          */ 45000,  // up to 9 chambers with different targets → several rounds
+    /* seq_max_ms          */ 45000,  // up to 9 chambers with different targets -> several rounds
     /* chamber_max_ms      */ 5000,
     /* cutoff_debounce     */ 2,      // each control tick spans more real time than direct
     /* tol_frac            */ 0.10f,
@@ -179,7 +179,7 @@ inline void engOpen(int i, uint8_t dir) {
 // ---------------------------------------------------------------------------
 
 // ``cap_ms`` (optional) is the per-chamber open-time budget forwarded to the
-// engine — the closing authority for a target the gauge can't see (a deflate
+// engine - the closing authority for a target the gauge can't see (a deflate
 // below the sensor floor, timed by the PC's calibrated deflate curve).
 
 inline void requestInflate(int n, float target, uint8_t duty, uint32_t cap_ms = 0) {
@@ -242,7 +242,7 @@ inline void abortSequences() {
 }
 
 // Force-stop any chamber actuating past ACTUATION_TIMEOUT_MS (sensor failure
-// safety net — see constant above). Call periodically from loop().
+// safety net - see constant above). Call periodically from loop().
 inline void actuationWatchdog(uint32_t now) {
     for (int i = 0; i < MAX_CHAMBERS; i++) {
         if (state[i].state == IDLE) continue;

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Update the Thymio radio co-processor (XIAO ESP32-C6) over WiFi — one command.
+"""Update the Thymio radio co-processor (XIAO ESP32-C6) over WiFi - one command.
 
 Fully automatic, no manual JSON, no USB to the C6, no buttons: connects to the
 gateway, stages the C6 image on the S3 (buffered in PSRAM), tells the C6 to join the
 S3's SoftAP and pull it from /fw, and waits for the C6 to reboot on the new firmware.
 
-Requires the S3 flashed with the gateway build (`seeed_xiao_esp32s3` — SoftAP + Thymio
+Requires the S3 flashed with the gateway build (`seeed_xiao_esp32s3` - SoftAP + Thymio
 route are always on) and the C6 already running the WiFi-OTA `rcp_c6` build.
 See docs/THYMIO_WIRELESS_CONTROL.md.
 
@@ -25,7 +25,7 @@ from src.config.settings import Settings                       # noqa: E402
 from src.hardware.gateway import Gateway          # noqa: E402
 from src.hardware.wifi_ota_updater import C6WifiOTAUpdater     # noqa: E402
 
-# The bare APP image (goes at 0x10000), NOT firmware.factory.bin — the merged image
+# The bare APP image (goes at 0x10000), NOT firmware.factory.bin - the merged image
 # starts with the bootloader, whose magic byte is also 0xE9, so extract_app_image
 # would serve the whole merged blob and the node's esp_image_verify rejects it
 # (ESP_ERR_OTA_VALIDATE_FAILED). WiFi-OTA flashes an app partition, so serve the app.
@@ -37,7 +37,7 @@ def main() -> int:
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--port", help="gateway serial port (default: from settings.yaml)")
     p.add_argument("--ssid", default="",
-                   help="override the S3 SoftAP SSID (normally omitted — the gateway "
+                   help="override the S3 SoftAP SSID (normally omitted - the gateway "
                         "injects its own stored credentials while forwarding)")
     p.add_argument("--pass", dest="password", default="",
                    help="override the S3 SoftAP password (goes with --ssid)")
@@ -68,10 +68,10 @@ def main() -> int:
             on_log=lambda s: print(f"  {s}"),
             on_progress=lambda pct: print(f"  staging {pct}%", end="\r", flush=True),
         )
-        print(f"Updating the C6 over WiFi via '{args.ssid}' — this takes ~30-60 s…")
+        print(f"Updating the C6 over WiFi via '{args.ssid}' - this takes ~30-60 s...")
         ok, msg = updater.run()
         print()
-        print(("✓ " if ok else "✗ ") + msg)
+        print(("ok " if ok else "FAIL ") + msg)
         return 0 if ok else 1
     finally:
         gateway.disconnect()

@@ -1,8 +1,8 @@
-"""TouchSegmenter — turns a magnet stream into discrete touch segments.
+"""TouchSegmenter - turns a magnet stream into discrete touch segments.
 
 A touch *segment* is the window from the first sensor becoming active until all
-sensors go inactive again — the same press→release edge convention the live
-``TouchEventRouter.handle_magnet`` uses (``act`` set going non-empty → empty).
+sensors go inactive again - the same press->release edge convention the live
+``TouchEventRouter.handle_magnet`` uses (``act`` set going non-empty -> empty).
 Each segment keeps the per-sample ``mag`` vectors, the ``act`` sets and the
 timestamps, so feature extraction (``touch_features``) can work offline from a
 recording or live.
@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 
 @dataclass
 class TouchSegment:
-    """One press→release touch.
+    """One press->release touch.
 
     Attributes:
         start_ms / end_ms: segment bounds (ms, from the message timestamps).
@@ -27,9 +27,9 @@ class TouchSegment:
         times_ms: timestamp of each sample (ms).
         vecs: per-sample per-sensor 3-axis deltas (the message's ``vec`` rows),
             ``None`` for samples that carried no vector data.
-        n_pulses: how many press→release touches this segment represents. 1 for a
+        n_pulses: how many press->release touches this segment represents. 1 for a
             plain segment; >1 when several touches were merged into one logical
-            gesture (e.g. a double/triple tap — see :func:`merge_segments`).
+            gesture (e.g. a double/triple tap - see :func:`merge_segments`).
     """
     start_ms: float
     end_ms: float
@@ -54,7 +54,7 @@ def merge_segments(segments) -> TouchSegment | None:
     Samples are concatenated in start-time order; ``n_pulses`` accumulates so the
     feature pipeline can tell a triple-tap from a single long touch. The inactive
     gaps between the merged touches are not materialised as samples (the
-    segmenter only records while active) — ``n_pulses`` carries that information
+    segmenter only records while active) - ``n_pulses`` carries that information
     instead. Returns ``None`` if ``segments`` is empty."""
     segs = sorted((s for s in segments if s is not None),
                   key=lambda s: s.start_ms)
@@ -156,7 +156,7 @@ class PulseMerger:
     is held back for ``gap_ms``; touches starting within the gap accumulate,
     and the merged gesture (``n_pulses`` = pulse count) is released once the
     skin stays untouched past the gap. Without this, a live double-tap would be
-    classified as two single taps — training merges multi-taps, so inference
+    classified as two single taps - training merges multi-taps, so inference
     must too. Costs ``gap_ms`` of latency per gesture; the flush is driven by
     the continuous magnet stream, so no timer is needed.
     """
@@ -171,7 +171,7 @@ class PulseMerger:
         once no follow-up pulse can arrive, else None."""
         if seg is not None:
             self._buffer.append(seg)
-            return None                     # hold — a follow-up pulse may come
+            return None                     # hold - a follow-up pulse may come
         if (self._buffer and not touch_active
                 and now_ms - self._buffer[-1].end_ms >= self.gap_ms):
             merged = merge_segments(self._buffer)

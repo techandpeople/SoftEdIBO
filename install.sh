@@ -29,7 +29,7 @@ ARCH="$(uname -m)"   # x86_64 | aarch64 | ...
 NIGHTLY=false
 LOCAL_FILE=""
 
-# ── Parse arguments ────────────────────────────────────────────────────────
+# -- Parse arguments ---------------------------------------
 for arg in "$@"; do
     case "$arg" in
         --uninstall)
@@ -93,7 +93,7 @@ if $SYSTEM_INSTALL; then
     APPIMAGE_DEST="$INSTALL_DIR/SoftEdIBO.AppImage"
 fi
 
-# ── Locate or download AppImage ────────────────────────────────────────────
+# -- Locate or download AppImage ---------------------------
 if [[ -n "$LOCAL_FILE" ]]; then
     [[ -f "$LOCAL_FILE" ]] || { echo "File not found: $LOCAL_FILE" >&2; exit 1; }
     SRC="$LOCAL_FILE"
@@ -122,7 +122,7 @@ fi
 
 echo "Installing from: $SRC"
 
-# ── Copy AppImage ──────────────────────────────────────────────────────────
+# -- Copy AppImage -----------------------------------------
 if $SYSTEM_INSTALL; then
     sudo mkdir -p "$INSTALL_DIR"
     sudo cp "$SRC" "$APPIMAGE_DEST"
@@ -135,7 +135,7 @@ else
 fi
 echo "  => $APPIMAGE_DEST"
 
-# ── Wrapper script (no FUSE needed) ───────────────────────────────────────
+# -- Wrapper script (no FUSE needed) -----------------------
 mkdir -p "$(dirname "$BIN_LINK")"
 if $SYSTEM_INSTALL; then
     sudo tee "$BIN_LINK" > /dev/null << EOF
@@ -172,7 +172,7 @@ EOF
 fi
 echo "  => launcher: $BIN_LINK"
 
-# ── Download icon ──────────────────────────────────────────────────────────
+# -- Download icon -----------------------------------------
 trap 'rm -f "${TMP_APPIMAGE:-}"' EXIT
 ICON_URL="https://raw.githubusercontent.com/$REPO/master/softedibo.png"
 mkdir -p "$(dirname "$ICON_FILE")"
@@ -185,7 +185,7 @@ else
 fi
 [[ "$ICON" == "softedibo" ]] && echo "  => icon: $ICON_FILE"
 
-# ── Desktop entry ──────────────────────────────────────────────────────────
+# -- Desktop entry -----------------------------------------
 mkdir -p "$(dirname "$DESKTOP_FILE")"
 cat > "$DESKTOP_FILE" << EOF
 [Desktop Entry]
@@ -201,7 +201,7 @@ echo "  => desktop entry: $DESKTOP_FILE"
 command -v update-desktop-database &>/dev/null && \
     update-desktop-database "$(dirname "$DESKTOP_FILE")" 2>/dev/null || true
 
-# ── Serial port permissions ────────────────────────────────────────────────
+# -- Serial port permissions -------------------------------
 if ! id -nG "$USER" | grep -qw dialout; then
     echo ""
     echo "  => Adding $USER to 'dialout' for serial port access..."

@@ -22,13 +22,13 @@ def test_classify_ambiguous_two_high():
 
 
 def test_classify_transition_one_mid():
-    # chamber 0 up AND chamber 1 also inflated (>= active_min) → ambiguous/skip
+    # chamber 0 up AND chamber 1 also inflated (>= active_min) -> ambiguous/skip
     assert tc.classify_active({0: 80.0, 1: 20.0}) is None
 
 
 def test_classify_offrest_neighbor_does_not_block():
     # A neighbour off-rest but below active_min (a leaky/narrow-range residual)
-    # must not drop the clearly-inflated chamber — it just gets attributed.
+    # must not drop the clearly-inflated chamber - it just gets attributed.
     assert tc.classify_active({0: 80.0, 1: 15.0}) == 0
 
 
@@ -44,7 +44,7 @@ def _sweep_samples():
     """Rest, then chamber 0 inflated (moves sensor 0), with a lagged transition.
 
     During the settle window after inflation starts, the mag is already spiking
-    (pressure-sensor lag) — those samples must be excluded from the means.
+    (pressure-sensor lag) - those samples must be excluded from the means.
     """
     samples = []
     # rest 0..2000 ms: baseline mag = 1.0 everywhere
@@ -161,7 +161,7 @@ def test_staircase_builds_multi_level_states():
 
 
 def test_level_step_restarts_settle_guard():
-    # Samples right after the 50→100 step must not leak into either bin: the
+    # Samples right after the 50->100 step must not leak into either bin: the
     # 100 % plateau only starts counting settle_ms after the level change.
     samples = _staircase_samples()
     # Corrupt the first 800 ms of the 100 % plateau; means must be unaffected.

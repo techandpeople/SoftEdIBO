@@ -1,4 +1,4 @@
-"""Basic GUI smoke tests — verify panels and dialogs load correctly."""
+"""Basic GUI smoke tests - verify panels and dialogs load correctly."""
 
 from datetime import datetime
 from unittest.mock import MagicMock
@@ -60,7 +60,7 @@ def _mock_settings() -> MagicMock:
 def _seed_behaviour(db, name: str = "Example Behaviour") -> str:
     """Insert one declarative behaviour so the session dropdown has an entry.
 
-    No code-defined activities ship anymore — all behaviours come from the DB
+    No code-defined activities ship anymore - all behaviours come from the DB
     (block editor / imported JSON), so the dialog tests must seed their own."""
     da = DeclarativeActivity(
         activity_id=db.next_declarative_activity_id(),
@@ -81,9 +81,9 @@ class TestSessionPanel:
     def test_initial_labels(self, qtbot, db):
         panel = SessionPanel(db)
         qtbot.addWidget(panel)
-        assert panel.session_id_label.text() == "—"
-        assert panel.activity_label.text() == "—"
-        assert panel.robots_label.text() == "—"
+        assert panel.session_id_label.text() == "-"
+        assert panel.activity_label.text() == "-"
+        assert panel.robots_label.text() == "-"
 
     def test_buttons_initial_state(self, qtbot, db):
         panel = SessionPanel(db)
@@ -137,7 +137,7 @@ class TestSessionSetupDialog:
 
     def test_all_robots_shown_for_scripted_activity(self, qtbot, db):
         # A scripted behaviour's robot_type is BaseRobot, so every robot kind
-        # is compatible — no type filtering trims the list.
+        # is compatible - no type filtering trims the list.
         _seed_behaviour(db)
         from src.robots.thymio.thymio_robot import ThymioRobot
         thymio = MagicMock(spec=ThymioRobot)
@@ -228,7 +228,7 @@ class TestDataPanel:
     def test_trash_button_present(self, qtbot, db):
         panel = DataPanel(db)
         qtbot.addWidget(panel)
-        assert panel.trash_btn.text() == "Trash…"
+        assert panel.trash_btn.text() == "Trash..."
 
     def test_delete_moves_selected_session_to_trash(self, qtbot, db, monkeypatch):
         from PySide6.QtWidgets import QMessageBox
@@ -332,7 +332,7 @@ class TestObserverPanel:
 
 
 # ---------------------------------------------------------------------------
-# TestActuatorsDialog — one-shot inflate/deflate respects configured limits
+# TestActuatorsDialog - one-shot inflate/deflate respects configured limits
 # ---------------------------------------------------------------------------
 
 class _RecordingGateway:
@@ -437,9 +437,9 @@ class TestActuatorsDialogSensors:
         assert tester is not None
         tester.threshold_spin.setValue(100.0)
         tester.update_values([10.0, 200.0, 0.0, 0.0])
-        # Only S1 (200 µT) clears the 100 µT threshold.
+        # Only S1 (200 uT) clears the 100 uT threshold.
         assert tester._active_shown == [False, True, False, False]
-        # Dropping the threshold below S0 lights it too; the two 0 µT sensors stay off.
+        # Dropping the threshold below S0 lights it too; the two 0 uT sensors stay off.
         tester.threshold_spin.setValue(5.0)
         assert tester._active_shown == [True, True, False, False]
 
@@ -462,6 +462,6 @@ class TestActuatorsDialogSensors:
         tester.push_btn.click()
         cfg = [kw for c, kw in gw.sent if c == "configure"]
         assert len(cfg) == 1
-        # The µT threshold goes straight to the node — it flips a sensor active at
-        # exactly 120 µT (no fullscale/fraction gymnastics).
+        # The uT threshold goes straight to the node - it flips a sensor active at
+        # exactly 120 uT (no fullscale/fraction gymnastics).
         assert cfg[0]["act_threshold_ut"] == pytest.approx(120.0)

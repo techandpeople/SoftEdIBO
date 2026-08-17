@@ -1,4 +1,4 @@
-"""Activity registry — single source of truth for all available activities.
+"""Activity registry - single source of truth for all available activities.
 
 All activities are **declarative** behaviours authored in the block editor and
 stored in the database (``declarative_activities`` table). They are loaded on
@@ -10,7 +10,7 @@ session time.
 There are no longer any code-defined activities (``ACTIVITIES`` is empty): the
 old hardcoded game activities (Group Touch / Organ Swap), the standalone
 ``SimulationActivity``, and the seed behaviour conditions have all been
-removed — example behaviours ship as importable JSON instead. Every behaviour
+removed - example behaviours ship as importable JSON instead. Every behaviour
 runs on the ``ScriptedActivity`` engine; simulation is a per-activity flag
 (``simulation_mode``) exposed as a checkbox in the SessionSetupDialog.
 """
@@ -44,7 +44,7 @@ def load_declarative_activities(db: "Database") -> list[ScriptedActivity]:
         try:
             activities.append(
                 ScriptedActivity(record.name, record.description, record.spec))
-        except Exception:   # noqa: BLE001 — a bad saved spec must not crash startup
+        except Exception:   # noqa: BLE001 - a bad saved spec must not crash startup
             logger.exception("Skipping invalid declarative activity %s (%s)",
                              record.activity_id, record.name)
     return activities
@@ -62,7 +62,7 @@ def available_activities(db: "Database | None" = None) -> list[BaseActivity]:
 def get_activity(name: str, db: "Database | None" = None) -> BaseActivity | None:
     """Return the activity instance with the given name, or None.
 
-    Tolerates the simulation display suffix (``"… (Simulation)"``) so a session
+    Tolerates the simulation display suffix (``"... (Simulation)"``) so a session
     persisted in simulation mode still resolves back to its activity. Searches
     the DB-authored behaviours too when a ``Database`` is supplied."""
     base = name.removesuffix(BaseActivity.SIM_SUFFIX)

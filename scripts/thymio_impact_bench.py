@@ -3,14 +3,14 @@
 
 The PC-side impact detection is fundamentally sampling-limited: a knock is a
 ~10-50 ms transient, the C6 stream shows the acc at 10 Hz and the Thymio itself
-only refreshes it at ~16 Hz (smoothed) — most knock peaks are simply never seen.
+only refreshes it at ~16 Hz (smoothed) - most knock peaks are simply never seen.
 This program moves the detection ON the Thymio:
 
-  * ``onevent tap``  — the accelerometer's HARDWARE knock detector (~120 Hz
+  * ``onevent tap``  - the accelerometer's HARDWARE knock detector (~120 Hz
     internal), catches sharp hits no software sampling can; counts monotonically.
-  * ``onevent acc``  — 16 Hz peak-hold of the summed |delta| per axis, so the
+  * ``onevent acc``  - 16 Hz peak-hold of the summed |delta| per axis, so the
     strongest jolt between two emits is never lost (magnitude for levels).
-  * ``onevent timer0`` (10 Hz) — emits the usual sensor events plus a new
+  * ``onevent timer0`` (10 Hz) - emits the usual sensor events plus a new
     ``[peak, taps]`` event, then resets the peak.
 
 Run this on a USB-cabled Thymio (data cable, close Thymio Suite) to
@@ -20,7 +20,7 @@ words to bake into the C6 firmware:
     python3 scripts/thymio_impact_bench.py [--secs 30] [/dev/ttyACMx]
 
 While it watches, KNOCK the robot (gentle / medium / hard) and also turn it
-over and leave it — peak should spike on knocks, settle to ~0 in any pose, and
+over and leave it - peak should spike on knocks, settle to ~0 in any pose, and
 ``taps`` should increment on sharp hits only.
 """
 import argparse
@@ -117,7 +117,7 @@ def main():
 
     port = args.port or find_port()
     if not port:
-        print("No Thymio (Mobsya VID 0617) on USB — connect it with a DATA cable.")
+        print("No Thymio (Mobsya VID 0617) on USB - connect it with a DATA cable.")
         return 1
     print(f"Using port {port}")
 
@@ -157,7 +157,7 @@ def main():
     print(f"local events: {rn.local_events}")
     for ev in ("timer0", "acc", "tap"):
         if ev not in rn.local_events:
-            print(f"FATAL: local event '{ev}' not in the node description — adjust the asm.")
+            print(f"FATAL: local event '{ev}' not in the node description - adjust the asm.")
             return 1
     print(f"_userdata (scratch base) = {rn.var_total_size}")
 
@@ -181,11 +181,11 @@ def main():
 
     conn.on_user_event = on_ev
 
-    print("\nLoading program (SET_BYTECODE + RUN — init sets its own timer)…")
+    print("\nLoading program (SET_BYTECODE + RUN - init sets its own timer)...")
     conn.set_bytecode(nid, bytecode)
     conn.run(nid)
 
-    print(f"Watching for {args.secs} s — KNOCK the robot (gentle/medium/hard), "
+    print(f"Watching for {args.secs} s - KNOCK the robot (gentle/medium/hard), "
           f"then flip it over and leave it:\n")
     last = dict(counts)
     for s in range(args.secs):
@@ -197,11 +197,11 @@ def main():
 
     print("\n=== VERDICT ===")
     ok_stream = counts[EV_ACC] >= args.secs * 5
-    print(f"sensor emits: {counts[EV_ACC]} ({'OK — sustained' if ok_stream else 'LOW — check'})")
+    print(f"sensor emits: {counts[EV_ACC]} ({'OK - sustained' if ok_stream else 'LOW - check'})")
     print(f"impact emits: {counts[EV_IMPACT]}, max peak seen: {state['max_peak']}, "
           f"hardware taps: {state['taps']}")
     print("Expected: peak spikes when knocked, ~0 when still in ANY pose; taps increments on")
-    print("sharp hits. If so, the program is good — bake the C array above into the C6.")
+    print("sharp hits. If so, the program is good - bake the C array above into the C6.")
     try:
         # Not part of thymiodirect's public API on every version; the except
         # already swallows the AttributeError when it is missing.

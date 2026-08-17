@@ -1,14 +1,14 @@
-"""ChamberWidget — visualises a single AirChamber as a vertical pressure bar.
+"""ChamberWidget - visualises a single AirChamber as a vertical pressure bar.
 
 Reads pressure and state directly from the AirChamber object.
 Inflate/deflate commands go through the parent Skin (hardware logic lives there).
 
 Layout (top to bottom):
-  ┌──────┐
-  │ bar  │    Custom painted PressureBar (promoted widget):
-  │      │      filled bar   = current pressure  (blue-green)
-  │ ─────│      red line  ── = target pressure
-  └──────┘
+  +------+
+  | bar  |    Custom painted PressureBar (promoted widget):
+  |      |      filled bar   = current pressure  (blue-green)
+  | -----|      red line  -- = target pressure
+  +------+
   Slot N
   75/90
   INFLATING
@@ -40,7 +40,7 @@ class ChamberWidget(QWidget, Ui_ChamberWidget):
     """Widget for a single AirChamber."""
 
     # Kept for future hardware chamber-touch sources so the SkinGridView
-    # blue-pulse path stays wired up. No longer emitted from this widget —
+    # blue-pulse path stays wired up. No longer emitted from this widget -
     # sensor T-buttons on the grid simulate touches now.
     touch_event = Signal(str, int, str)  # (skin_id, chamber_id, action)
 

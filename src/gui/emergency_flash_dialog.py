@@ -1,19 +1,19 @@
-"""Tools => Emergency Flash… — cable-flash a node whose own USB is dead.
+"""Tools => Emergency Flash... - cable-flash a node whose own USB is dead.
 
 When a node's USB-serial path stops working, OTA (over ESP-NOW) is the normal
-recovery route — but that only works while the node still runs OTA-capable
+recovery route - but that only works while the node still runs OTA-capable
 firmware. If it is bricked (bad flash, wrong partition table), you must write a
 known-good image over the wires. This dialog does that through a *second* ESP32
 held in reset as a transparent USB-to-serial bridge to the target's UART0.
 
 The bridge can't drive the target's EN/IO0 lines, so:
-  * esptool runs with ``no_reset=True`` (no auto reset/boot toggling) — the user
+  * esptool runs with ``no_reset=True`` (no auto reset/boot toggling) - the user
     puts the target into download mode by hand (hold BOOT, tap EN, release);
   * the default baud is conservative (hand-wired bridges are noisy).
 
 Firmware images and the esptool invocation are shared with the setup wizard
 (``NODE_FIRMWARES`` / ``_esptool_cmd``), so dev uses the local ``firmware/`` bins
-and a frozen nightly/release uses the CI-built bundle — both via
+and a frozen nightly/release uses the CI-built bundle - both via
 ``Settings.BUNDLE``. Flashing itself reuses the wizard's QProcess approach.
 """
 
@@ -104,9 +104,9 @@ class EmergencyFlashDialog(BaseDialog, Ui_EmergencyFlashDialog):
         self.log.clear()
         self.log.appendPlainText(
             "Put the target in download mode now: hold BOOT, tap EN/RST, "
-            "release BOOT — keep doing it while it says “Connecting…”.\n"
+            'release BOOT - keep doing it while it says "Connecting...".\n'
         )
-        self.log.appendPlainText(f"Flashing {firmware.name} to {port}…\n")
+        self.log.appendPlainText(f"Flashing {firmware.name} to {port}...\n")
 
         prog, args = _esptool_cmd(
             port, firmware, baud=self.baud_combo.currentText(), no_reset=True,
@@ -140,11 +140,11 @@ class EmergencyFlashDialog(BaseDialog, Ui_EmergencyFlashDialog):
             self.progress.setValue(100)
             self.log.appendPlainText(
                 "\nFlash completed. Remove the IO0/BOOT jumper and reset the "
-                "target — it now runs OTA-capable firmware.")
+                "target - it now runs OTA-capable firmware.")
         else:
             self.log.appendPlainText(
                 f"\nFlash failed (exit code {exit_code}). Check the wiring "
-                "(TX→TX, RX→RX, common GND), redo the download-mode buttons, "
+                "(TX->TX, RX->RX, common GND), redo the download-mode buttons, "
                 "or lower the baud rate.")
         self.flash_btn.setEnabled(True)
         self._proc = None

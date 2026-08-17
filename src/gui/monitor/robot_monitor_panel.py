@@ -1,4 +1,4 @@
-"""RobotMonitorPanel — scrollable container for all robot monitor widgets.
+"""RobotMonitorPanel - scrollable container for all robot monitor widgets.
 
 Holds one RobotMonitorWidget per robot and auto-refreshes every 300 ms
 by reading directly from the model objects (no polling via get_status()).
@@ -30,7 +30,7 @@ class _WheelFilter(QObject):
 
 
 class RobotMonitorPanel(QWidget):
-    """Scrollable panel — one RobotMonitorWidget per robot, auto-refreshed."""
+    """Scrollable panel - one RobotMonitorWidget per robot, auto-refreshed."""
 
     touch_event = Signal(str, int, str)  # (skin_id, chamber_id, action)
 

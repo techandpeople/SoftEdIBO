@@ -1,4 +1,4 @@
-"""Skin-configuration domain logic — pure, Qt-free, testable.
+"""Skin-configuration domain logic - pure, Qt-free, testable.
 
 Extracted from ``src/gui/skin_config_dialog.py`` so the rules that read/write a
 skin entry in the settings tree (node lookup, validation, entry building,
@@ -20,7 +20,7 @@ YAML_KEY: dict[str, str] = {
 DEFAULT_MAX_KPA = 8.0
 # Upper/lower bound for the per-chamber Max/Min the config dialog accepts. These
 # are intentionally generous (effectively uncapped for these low-pressure air
-# chambers) — the pressure gauge is unreliable, so over-pressure is held off by
+# chambers) - the pressure gauge is unreliable, so over-pressure is held off by
 # TIME-based backstops (firmware MAX_FILL_MS, the manual dead-man, and the
 # actuation watchdog), not by an artificial pressure ceiling. Kept in sync with
 # the firmware HARD_*_KPA constants.
@@ -32,9 +32,9 @@ CONFIRM_DELTA = 2.0
 MAX_CHAMBERS = 3
 
 # How a chamber decides when to stop inflating:
-#   "time"     — open the inflate valve for a calibrated time window (fill_profile);
+#   "time"     - open the inflate valve for a calibrated time window (fill_profile);
 #                the firmware never closes the loop on the laggy pressure sensor.
-#   "pressure" — classic closed loop: inflate until the gauge sensor hits target.
+#   "pressure" - classic closed loop: inflate until the gauge sensor hits target.
 # Deflate is always pressure-based above atmosphere (and time-bounded below, since
 # the gauge sensor is blind to vacuum), so this only governs inflation.
 FILL_MODE_TIME = "time"
@@ -55,7 +55,7 @@ ACTUATOR_NODE_TYPES = ("node_direct", "node_multiplexed")
 # touch node is the actuator's own MAC). ``node_multiplexed`` has no magnet bus.
 MAGNET_NODE_TYPES = ("node_magnet_sensor", "node_direct")
 
-# LED ring layout per node type — the LED count of each independently
+# LED ring layout per node type - the LED count of each independently
 # addressable ring, mirroring the firmware's RING_LEDS. node_direct drives a
 # single ring; node_multiplexed drives four (one 24-LED + three 16-LED), each
 # selected via set_led's "ring" field. The Test Actuators dialog builds one ring
@@ -92,7 +92,7 @@ def node_max_slots(data: dict, robot_type: str, robot_index: int) -> dict[str, i
 
 
 def magnet_macs(data: dict, robot_type: str, robot_index: int) -> list[str]:
-    """MACs of nodes that can serve as a skin's touch node — the dedicated
+    """MACs of nodes that can serve as a skin's touch node - the dedicated
     ``node_magnet_sensor`` boards plus any ``node_direct`` (which folds the
     magnet sensing into its own firmware, so its actuator MAC is also its
     touch MAC)."""

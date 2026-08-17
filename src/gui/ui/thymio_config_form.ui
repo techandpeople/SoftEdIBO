@@ -34,8 +34,8 @@
    <item row="3" column="1">
     <widget class="QComboBox" name="via_combo">
      <property name="whatsThis"><string>How the app reaches the Thymio's wheels:
-• RF dongle — thymiodirect straight to the wireless dongle's serial port (no Thymio Suite needed; one dongle relays to several Thymios by node id).
-• Gateway C6 — the gateway's own C6 drives the Thymios over 802.15.4, NO dongle: the C6 impersonates the dongle and holds the link itself. Up to 4 Thymios per C6, told apart by the address below.</string></property>
+- RF dongle - thymiodirect straight to the wireless dongle's serial port (no Thymio Suite needed; one dongle relays to several Thymios by node id).
+- Gateway C6 - the gateway's own C6 drives the Thymios over 802.15.4, NO dongle: the C6 impersonates the dongle and holds the link itself. Up to 4 Thymios per C6, told apart by the address below.</string></property>
     </widget>
    </item>
    <item row="4" column="0">
@@ -48,7 +48,7 @@
      <property name="minimum"><number>0</number></property>
      <property name="maximum"><number>65535</number></property>
      <property name="specialValueText"><string>auto (first)</string></property>
-     <property name="whatsThis"><string>Which Thymio on the shared RF dongle this robot is (dongle transport only). One dongle relays to several Thymios at once, each with its own wireless node id — give each robot a distinct id (list them with `scripts/thymio_jog.py --list`). 0 = auto: bind to the first Thymio the dongle reports (fine when only one is paired).</string></property>
+     <property name="whatsThis"><string>Which Thymio on the shared RF dongle this robot is (dongle transport only). One dongle relays to several Thymios at once, each with its own wireless node id - give each robot a distinct id (list them with `scripts/thymio_jog.py --list`). 0 = auto: bind to the first Thymio the dongle reports (fine when only one is paired).</string></property>
     </widget>
    </item>
    <item row="5" column="0">
@@ -74,19 +74,19 @@
      <item>
       <widget class="QLineEdit" name="addr_edit">
        <property name="placeholderText"><string>auto / e.g. 6a25</string></property>
-       <property name="whatsThis"><string>This Thymio's 802.15.4 short address in hex (e.g. 6a25) — how the C6 tells the robots apart (Gateway C6 transport). Leave blank for the first robot (uses the C6's built-in default). Use Discover to read the addresses off the air.</string></property>
+       <property name="whatsThis"><string>This Thymio's 802.15.4 short address in hex (e.g. 6a25) - how the C6 tells the robots apart (Gateway C6 transport). Leave blank for the first robot (uses the C6's built-in default). Use Discover to read the addresses off the air.</string></property>
       </widget>
      </item>
      <item>
       <widget class="QPushButton" name="discover_btn">
-       <property name="text"><string>Discover…</string></property>
-       <property name="whatsThis"><string>Find this robot's address over the air — no dongle. Opens a guided scan: the gateway asks the network who is there and every powered robot answers with its address; pick this robot's from the live list. Only finds robots already paired to this network. Needs the gateway connected.</string></property>
+       <property name="text"><string>Discover...</string></property>
+       <property name="whatsThis"><string>Find this robot's address over the air - no dongle. Opens a guided scan: the gateway asks the network who is there and every powered robot answers with its address; pick this robot's from the live list. Only finds robots already paired to this network. Needs the gateway connected.</string></property>
       </widget>
      </item>
      <item>
       <widget class="QPushButton" name="cable_btn">
-       <property name="text"><string>From cable…</string></property>
-       <property name="whatsThis"><string>Read this robot's address straight off its USB cable — no dongle, no network. Plug the Thymio into the PC with its micro-USB cable and press this: it reads the robot's id over USB and fills the address. Use it for a brand-new robot that isn't on this network yet (wireless Discover can't see those). Close Thymio Suite first so it doesn't hold the port.</string></property>
+       <property name="text"><string>From cable...</string></property>
+       <property name="whatsThis"><string>Read this robot's address straight off its USB cable - no dongle, no network. Plug the Thymio into the PC with its micro-USB cable and press this: it reads the robot's id over USB and fills the address. Use it for a brand-new robot that isn't on this network yet (wireless Discover can't see those). Close Thymio Suite first so it doesn't hold the port.</string></property>
       </widget>
      </item>
     </layout>

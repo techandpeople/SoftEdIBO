@@ -1,0 +1,320 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>PositionBenchDialog</class>
+ <widget class="QDialog" name="PositionBenchDialog">
+  <property name="geometry">
+   <rect><x>0</x><y>0</y><width>700</width><height>600</height></rect>
+  </property>
+  <property name="windowTitle"><string>Touch position bench</string></property>
+  <layout class="QVBoxLayout" name="root_layout">
+   <item>
+    <widget class="QLabel" name="source_label">
+     <property name="toolTip"><string>Locks onto the first touch node that streams data. Touch the skin once to connect it.</string></property>
+     <property name="whatsThis"><string>Shows which touch node this bench is reading. It locks onto the first node that streams magnet data - touch the skin once to connect it.</string></property>
+     <property name="text"><string>Waiting for a touch node... (touch the skin once)</string></property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QStackedWidget" name="stack">
+     <widget class="QWidget" name="page_setup">
+      <layout class="QVBoxLayout" name="setup_layout">
+       <item>
+        <widget class="QLabel" name="setup_intro">
+         <property name="wordWrap"><bool>true</bool></property>
+         <property name="text"><string>Measures how precisely THIS skin can locate a touch - beyond the 4 quadrants. Mark a grid on the skin (tape or a printed overlay), then press each cell when prompted. The report at the end says which grid size the data supports. Capture on a resting skin (no inflation).</string></property>
+        </widget>
+       </item>
+       <item>
+        <layout class="QFormLayout" name="setup_form">
+         <item row="0" column="0">
+          <widget class="QLabel" name="type_label"><property name="text"><string>Skin type:</string></property></widget>
+         </item>
+         <item row="0" column="1">
+          <widget class="QComboBox" name="type_combo">
+           <property name="toolTip"><string>Which skin type this dataset belongs to (position models are per type).</string></property>
+           <property name="whatsThis"><string>The skin type being benched. Position resolution is a property of the build, so datasets and future position models are kept per skin type.</string></property>
+          </widget>
+         </item>
+         <item row="1" column="0">
+          <widget class="QLabel" name="variant_label"><property name="text"><string>Silicone variant:</string></property></widget>
+         </item>
+         <item row="1" column="1">
+          <widget class="QComboBox" name="variant_combo">
+           <property name="editable"><bool>true</bool></property>
+           <property name="toolTip"><string>Optional silicone format of this skin. Leave blank if unsure.</string></property>
+           <property name="whatsThis"><string>Optional silicone variant of the benched skin, stored with the dataset so builds can be compared.</string></property>
+          </widget>
+         </item>
+         <item row="2" column="0">
+          <widget class="QLabel" name="grid_label"><property name="text"><string>Grid (rows x cols):</string></property></widget>
+         </item>
+         <item row="2" column="1">
+          <layout class="QHBoxLayout" name="grid_row_layout">
+           <item>
+            <widget class="QSpinBox" name="rows_spin">
+             <property name="minimum"><number>1</number></property>
+             <property name="maximum"><number>8</number></property>
+             <property name="value"><number>4</number></property>
+             <property name="toolTip"><string>Rows of the press grid marked on the skin.</string></property>
+             <property name="whatsThis"><string>How many rows the press grid on the skin has. Start with 4x4; the report also shows the merged 2x2 accuracy.</string></property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QLabel" name="grid_x_label"><property name="text"><string>x</string></property></widget>
+           </item>
+           <item>
+            <widget class="QSpinBox" name="cols_spin">
+             <property name="minimum"><number>1</number></property>
+             <property name="maximum"><number>8</number></property>
+             <property name="value"><number>4</number></property>
+             <property name="toolTip"><string>Columns of the press grid marked on the skin.</string></property>
+             <property name="whatsThis"><string>How many columns the press grid on the skin has.</string></property>
+            </widget>
+           </item>
+           <item>
+            <spacer name="grid_spacer">
+             <property name="orientation"><enum>Qt::Horizontal</enum></property>
+             <property name="sizeHint" stdset="0"><size><width>10</width><height>10</height></size></property>
+            </spacer>
+           </item>
+          </layout>
+         </item>
+         <item row="3" column="0">
+          <widget class="QLabel" name="reps_label"><property name="text"><string>Presses per cell:</string></property></widget>
+         </item>
+         <item row="3" column="1">
+          <widget class="QSpinBox" name="reps_spin">
+           <property name="minimum"><number>3</number></property>
+           <property name="maximum"><number>50</number></property>
+           <property name="value"><number>10</number></property>
+           <property name="toolTip"><string>How many presses to capture per grid cell (or per pattern).</string></property>
+           <property name="whatsThis"><string>Repetitions per target. 10 gives a usable cross-validation; fewer speeds the run up at the cost of a noisier report.</string></property>
+          </widget>
+         </item>
+         <item row="4" column="0">
+          <widget class="QLabel" name="cell_label"><property name="text"><string>Cell size (mm):</string></property></widget>
+         </item>
+         <item row="4" column="1">
+          <widget class="QDoubleSpinBox" name="cell_spin">
+           <property name="minimum"><double>0.0</double></property>
+           <property name="maximum"><double>200.0</double></property>
+           <property name="value"><double>0.0</double></property>
+           <property name="specialValueText"><string>not set</string></property>
+           <property name="toolTip"><string>Pitch of the grid cells on the skin, in mm - lets the report state position error in mm too.</string></property>
+           <property name="whatsThis"><string>Optional physical size of one grid cell. When set, the continuous-position error is reported in millimetres as well as in cells.</string></property>
+          </widget>
+         </item>
+         <item row="5" column="0">
+          <widget class="QLabel" name="patterns_label"><property name="text"><string>Patterns instead:</string></property></widget>
+         </item>
+         <item row="5" column="1">
+          <widget class="QLineEdit" name="patterns_edit">
+           <property name="placeholderText"><string>e.g. two_fingers, both_hands, squeeze (leave empty for the grid)</string></property>
+           <property name="toolTip"><string>Comma-separated pattern names to capture INSTEAD of the grid - for multi-touch and squeeze candidates.</string></property>
+           <property name="whatsThis"><string>Free-form capture mode: name the touch patterns to perform (two fingers, both hands flat, a squeeze...) and the bench measures how well they separate from each other, instead of running the position grid.</string></property>
+          </widget>
+         </item>
+        </layout>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="advanced_box">
+         <property name="title"><string>Detection tuning</string></property>
+         <layout class="QFormLayout" name="advanced_form">
+          <item row="0" column="0">
+           <widget class="QLabel" name="enter_label"><property name="text"><string>Press threshold (uT):</string></property></widget>
+          </item>
+          <item row="0" column="1">
+           <widget class="QDoubleSpinBox" name="enter_spin">
+            <property name="minimum"><double>10.0</double></property>
+            <property name="maximum"><double>2000.0</double></property>
+            <property name="value"><double>60.0</double></property>
+            <property name="toolTip"><string>Total field change (sum of all sensors) that starts a press. Lower = catches weaker presses far from the sensors.</string></property>
+            <property name="whatsThis"><string>Press-start threshold on the summed per-sensor field change. It is deliberately much lower than the firmware touch threshold, because a press far from every sensor must still be captured.</string></property>
+           </widget>
+          </item>
+          <item row="1" column="0">
+           <widget class="QLabel" name="exit_label"><property name="text"><string>Release threshold (uT):</string></property></widget>
+          </item>
+          <item row="1" column="1">
+           <widget class="QDoubleSpinBox" name="exit_spin">
+            <property name="minimum"><double>5.0</double></property>
+            <property name="maximum"><double>2000.0</double></property>
+            <property name="value"><double>35.0</double></property>
+            <property name="toolTip"><string>Total field change below which the press is considered released (hysteresis).</string></property>
+            <property name="whatsThis"><string>Press-end threshold; kept below the press threshold so sensor noise cannot chop one press into several.</string></property>
+           </widget>
+          </item>
+          <item row="2" column="0">
+           <widget class="QLabel" name="rebase_label"><property name="text"><string>Re-zero every N targets:</string></property></widget>
+          </item>
+          <item row="2" column="1">
+           <widget class="QSpinBox" name="rebase_spin">
+            <property name="minimum"><number>0</number></property>
+            <property name="maximum"><number>32</number></property>
+            <property name="value"><number>4</number></property>
+            <property name="specialValueText"><string>never</string></property>
+            <property name="toolTip"><string>Automatically re-zero the sensors after every N targets, to absorb baseline drift.</string></property>
+            <property name="whatsThis"><string>Silicone settles during a long capture and drifts the sensor baselines; a periodic re-zero (a few seconds, hands off the skin) keeps the signatures honest.</string></property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <spacer name="setup_spacer">
+         <property name="orientation"><enum>Qt::Vertical</enum></property>
+         <property name="sizeHint" stdset="0"><size><width>20</width><height>20</height></size></property>
+        </spacer>
+       </item>
+       <item>
+        <layout class="QHBoxLayout" name="setup_buttons">
+         <item>
+          <widget class="QPushButton" name="open_btn">
+           <property name="text"><string>Analyze existing dataset...</string></property>
+           <property name="toolTip"><string>Re-run the report on previously captured bench files - no hardware needed.</string></property>
+           <property name="whatsThis"><string>Opens one or more saved bench datasets (.jsonl) and rebuilds the feasibility report from them, without touching the hardware.</string></property>
+          </widget>
+         </item>
+         <item>
+          <spacer name="setup_btn_spacer">
+           <property name="orientation"><enum>Qt::Horizontal</enum></property>
+           <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+          </spacer>
+         </item>
+         <item>
+          <widget class="QPushButton" name="start_btn">
+           <property name="enabled"><bool>false</bool></property>
+           <property name="text"><string>Start</string></property>
+           <property name="toolTip"><string>Re-zeros the sensors, then starts prompting cell by cell.</string></property>
+           <property name="whatsThis"><string>Starts the guided capture: the sensors are re-zeroed (hands off), then the app prompts each grid cell or pattern in turn.</string></property>
+          </widget>
+         </item>
+        </layout>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="page_capture">
+      <layout class="QVBoxLayout" name="capture_layout">
+       <item>
+        <widget class="QLabel" name="prompt_label">
+         <property name="alignment"><set>Qt::AlignCenter</set></property>
+         <property name="styleSheet"><string>font-size: 22pt; font-weight: bold;</string></property>
+         <property name="text"><string>-</string></property>
+        </widget>
+       </item>
+       <item>
+        <layout class="QHBoxLayout" name="grid_row"/>
+       </item>
+       <item>
+        <widget class="QLabel" name="count_label">
+         <property name="alignment"><set>Qt::AlignCenter</set></property>
+         <property name="styleSheet"><string>font-size: 14pt;</string></property>
+         <property name="text"><string>0 / 0</string></property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QLabel" name="last_label">
+         <property name="alignment"><set>Qt::AlignCenter</set></property>
+         <property name="text"><string/></property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QProgressBar" name="progress_bar">
+         <property name="toolTip"><string>Overall progress across every target.</string></property>
+         <property name="whatsThis"><string>Total presses captured so far, out of everything planned for this run.</string></property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QLabel" name="eta_label">
+         <property name="alignment"><set>Qt::AlignCenter</set></property>
+         <property name="toolTip"><string>Time remaining, estimated from your own capture pace.</string></property>
+         <property name="whatsThis"><string>Estimated time to finish the capture, computed from the median time between your recent presses - it adapts to your pace.</string></property>
+         <property name="text"><string>ETA --:--</string></property>
+        </widget>
+       </item>
+       <item>
+        <layout class="QHBoxLayout" name="capture_buttons">
+         <item>
+          <widget class="QPushButton" name="redo_btn">
+           <property name="text"><string>Redo target</string></property>
+           <property name="toolTip"><string>Discards the presses captured for the current target and starts it over.</string></property>
+           <property name="whatsThis"><string>Throws away every press captured for the target being prompted (after a mistake) and prompts it again from zero.</string></property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="skip_btn">
+           <property name="text"><string>Skip target</string></property>
+           <property name="toolTip"><string>Moves on without finishing this target.</string></property>
+           <property name="whatsThis"><string>Advances to the next target, keeping whatever presses this one already has.</string></property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="rezero_btn">
+           <property name="text"><string>Re-zero</string></property>
+           <property name="toolTip"><string>Re-zeros the sensors now (a few seconds, hands off the skin).</string></property>
+           <property name="whatsThis"><string>Manually re-zeros the sensor baselines. Use it if resting values drift; keep hands off the skin while it settles.</string></property>
+          </widget>
+         </item>
+         <item>
+          <spacer name="capture_btn_spacer">
+           <property name="orientation"><enum>Qt::Horizontal</enum></property>
+           <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+          </spacer>
+         </item>
+         <item>
+          <widget class="QPushButton" name="finish_btn">
+           <property name="text"><string>Finish now</string></property>
+           <property name="toolTip"><string>Stops early, saves what was captured, and builds the report.</string></property>
+           <property name="whatsThis"><string>Ends the capture immediately; everything captured so far is saved and analyzed.</string></property>
+          </widget>
+         </item>
+        </layout>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="page_results">
+      <layout class="QVBoxLayout" name="results_layout">
+       <item>
+        <widget class="QLabel" name="result_label">
+         <property name="styleSheet"><string>font-size: 14pt; font-weight: bold;</string></property>
+         <property name="text"><string>Analyzing...</string></property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPlainTextEdit" name="report_text">
+         <property name="readOnly"><bool>true</bool></property>
+         <property name="toolTip"><string>The feasibility report: accuracy per grid size, baselines, per-cell recall.</string></property>
+         <property name="whatsThis"><string>The full bench report. The key lines: the vec 3-axis accuracy on the full grid (what the skin can resolve), the merged 2x2 accuracy (today's quadrants) and the dominant-sensor baseline (what the current non-ML logic achieves).</string></property>
+        </widget>
+       </item>
+       <item>
+        <layout class="QHBoxLayout" name="results_buttons">
+         <item>
+          <widget class="QPushButton" name="again_btn">
+           <property name="text"><string>New capture</string></property>
+           <property name="toolTip"><string>Back to the setup page for another run.</string></property>
+           <property name="whatsThis"><string>Returns to the setup page to bench another grid, pattern set, or skin.</string></property>
+          </widget>
+         </item>
+         <item>
+          <spacer name="results_btn_spacer">
+           <property name="orientation"><enum>Qt::Horizontal</enum></property>
+           <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+          </spacer>
+         </item>
+         <item>
+          <widget class="QPushButton" name="close_btn">
+           <property name="text"><string>Close</string></property>
+          </widget>
+         </item>
+        </layout>
+       </item>
+      </layout>
+     </widget>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

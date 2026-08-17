@@ -4,7 +4,7 @@ Sends a ``ping`` to a node and times the ``pong`` the gateway forwards back
 (tagged with the node's ``source`` MAC). The latest round-trip time per MAC is
 kept and reported through callbacks registered with :meth:`on_update`.
 
-Qt-free by design — the ``hardware`` layer stays GUI-agnostic. Callbacks fire on
+Qt-free by design - the ``hardware`` layer stays GUI-agnostic. Callbacks fire on
 the gateway's serial read thread, so GUI consumers must marshal to the GUI thread
 (e.g. via a Qt signal), exactly like the ESP32 sensor callbacks.
 """
@@ -47,7 +47,7 @@ class LatencyMonitor:
         """Send a timed ping to one node; its ``pong`` reply updates the latency.
 
         If a ping to this MAC is already outstanding, its send time is kept so the
-        timeout still fires — pings are spaced far wider than a healthy RTT, so a
+        timeout still fires - pings are spaced far wider than a healthy RTT, so a
         single outstanding ping per node is the normal case.
         """
         if not mac or not self._gateway.is_connected:

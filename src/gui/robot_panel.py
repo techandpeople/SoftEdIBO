@@ -33,9 +33,9 @@ _YAML_KEY = {"turtle": "turtles", "tree": "trees", "thymio": "thymios"}
 # Human-friendly label per robot type (used in dialog titles / default IDs).
 _ROBOT_LABEL = {"turtle": "Turtle", "tree": "Tree", "thymio": "Thymio"}
 
-_TEST_THYMIO = "Test Thymio…"
+_TEST_THYMIO = "Test Thymio..."
 
-# Known node types and their default slot counts (fallback only — each node
+# Known node types and their default slot counts (fallback only - each node
 # stores its own ``max_slots`` in settings.yaml).
 NODE_TYPES: dict[str, int] = {
     "node_direct":      3,
@@ -48,9 +48,9 @@ class RobotPanel(QWidget, Ui_RobotPanel):
     """Panel for managing robots and their ESP32 nodes.
 
     Tree structure per robot:
-      • top-level item   = robot
-        ├── [N] ● MAC  (node_type, used/max slots)   — double-click to edit node
-        └── [S] Skin name  (chamber summary)          — double-click to edit skin
+      - top-level item   = robot
+        +-- [N] * MAC  (node_type, used/max slots)   - double-click to edit node
+        +-- [S] Skin name  (chamber summary)          - double-click to edit skin
 
     Signals:
         robot_configured: Emitted after any config change.
@@ -208,7 +208,7 @@ class RobotPanel(QWidget, Ui_RobotPanel):
         )
         node_item.setToolTip(
             1, "Round-trip latency to this node over ESP-NOW "
-               "(ping/pong, refreshed every few seconds). “—” means no reply."
+               "(ping/pong, refreshed every few seconds). "-" means no reply."
         )
         if mac:
             self._node_items.setdefault(mac, []).append(node_item)
@@ -224,7 +224,7 @@ class RobotPanel(QWidget, Ui_RobotPanel):
     def _latency_text(rtt_ms: float | None) -> tuple[str, QColor]:
         """Map a round-trip time to its cell text and colour."""
         if rtt_ms is None:
-            return "—", QColor("#888888")
+            return "-", QColor("#888888")
         if rtt_ms < 100:
             return f"{rtt_ms:.0f} ms", QColor("#2a9d2a")
         if rtt_ms < 300:
@@ -258,7 +258,7 @@ class RobotPanel(QWidget, Ui_RobotPanel):
         else:
             for p in esp_ports:
                 desc  = p.description or ""
-                label = f"{p.device} — {desc}" if desc and desc != "n/a" else p.device
+                label = f"{p.device} - {desc}" if desc and desc != "n/a" else p.device
                 self.port_combo.addItem(label, p.device)
             devices = [self.port_combo.itemData(i) for i in range(self.port_combo.count())]
             if current and current not in devices:
@@ -274,7 +274,7 @@ class RobotPanel(QWidget, Ui_RobotPanel):
         Shared by the explicit Disconnect button and the unexpected-loss handler
         (gateway unplugged/reset), so both leave the UI in the same state. Resets
         the scan button too: a scan may be mid-flight (button still reading
-        "Scanning…"), and leaving it that way looks like a hang.
+        "Scanning..."), and leaving it that way looks like a hang.
         """
         self.gateway_status_label.setText("Disconnected")
         self.connect_btn.setText("Connect")
@@ -288,7 +288,7 @@ class RobotPanel(QWidget, Ui_RobotPanel):
         """GUI-thread handler for an unexpected gateway disconnect.
 
         The serial read thread already tore the link down, so there's nothing to
-        close — just reflect it. Without this the panel would keep showing
+        close - just reflect it. Without this the panel would keep showing
         "Connected" after the gateway is unplugged or reset (e.g. after a flash).
         """
         if self._gateway.is_connected:
@@ -307,7 +307,7 @@ class RobotPanel(QWidget, Ui_RobotPanel):
             # Opening the serial port blocks while the driver/USB enumerates, so
             # do it off the GUI thread to keep the window responsive.
             self.connect_btn.setEnabled(False)
-            self.gateway_status_label.setText(f"Connecting ({port})…")
+            self.gateway_status_label.setText(f"Connecting ({port})...")
             run_async(
                 self._gateway.connect,
                 on_done=lambda ok, p=port, b=baud: self._on_connect_result(ok, p, b),
@@ -342,7 +342,7 @@ class RobotPanel(QWidget, Ui_RobotPanel):
             self._on_scan()
 
     def start_scan(self, on_done=None) -> None:
-        """Broadcast a node scan and refresh after ~2 s — non-blocking.
+        """Broadcast a node scan and refresh after ~2 s - non-blocking.
 
         ``on_done`` (optional) is invoked once the scan window closes, so callers
         (e.g. the add-node flow) can act on a fresh ``known_macs`` without
@@ -362,7 +362,7 @@ class RobotPanel(QWidget, Ui_RobotPanel):
 
     def _on_scan(self) -> None:
         self.scan_btn.setEnabled(False)
-        self.scan_btn.setText("Scanning…")
+        self.scan_btn.setText("Scanning...")
         self.start_scan()
 
     def _on_serial_monitor(self) -> None:
@@ -399,7 +399,7 @@ class RobotPanel(QWidget, Ui_RobotPanel):
         self._refresh_all_trees()
         n    = len(self._gateway.online_macs)
         port = self.port_combo.currentData() or self.port_combo.currentText()
-        suffix = f" · {n} node{'s' if n != 1 else ''} found" if n else " · no nodes found"
+        suffix = f" | {n} node{'s' if n != 1 else ''} found" if n else " | no nodes found"
         self.gateway_status_label.setText(f"Connected ({port}){suffix}")
 
     # ------------------------------------------------------------------
@@ -408,7 +408,7 @@ class RobotPanel(QWidget, Ui_RobotPanel):
 
     def _refresh_all_trees(self) -> None:
         # "online" here means answered the most recent scan (reachable now), not
-        # merely seen at some point since connect — so a node powered off since
+        # merely seen at some point since connect - so a node powered off since
         # the last scan turns red instead of staying green (known_macs never
         # shrinks and would keep it online forever).
         online     = self._gateway.online_macs if self._gateway.is_connected else frozenset()
@@ -468,7 +468,7 @@ class RobotPanel(QWidget, Ui_RobotPanel):
                 node_type  = node_cfg.get("node_type", "standard")
                 max_slots  = int(node_cfg.get("max_slots", NODE_TYPES.get(node_type, 3)))
                 online     = bool(mac and mac in online_macs)
-                dot        = "●" if online else "○"
+                dot        = "*" if online else "o"
                 color      = QColor("#2a9d2a") if online else QColor("#cc2222")
 
                 used = sum(
@@ -525,8 +525,8 @@ class RobotPanel(QWidget, Ui_RobotPanel):
 
         if item_type == "robot":
             robot_index = data["robot_index"]
-            configure_action = menu.addAction("Configure…") if robot_type == "thymio" else None
-            rename_action    = menu.addAction("Rename…")    if robot_type != "thymio" else None
+            configure_action = menu.addAction("Configure...") if robot_type == "thymio" else None
+            rename_action    = menu.addAction("Rename...")    if robot_type != "thymio" else None
             delete_action    = menu.addAction("Delete Robot")
             action = menu.exec(tree.viewport().mapToGlobal(pos))
             if configure_action and action == configure_action:
@@ -614,13 +614,13 @@ class RobotPanel(QWidget, Ui_RobotPanel):
             }
             unassigned = sorted(known - all_assigned)
             if unassigned:
-                items  = unassigned + ["Enter manually…"]
+                items  = unassigned + ["Enter manually..."]
                 choice, ok = QInputDialog.getItem(
                     self, "Add Node", "Select a discovered node:", items, 0, False
                 )
                 if not ok:
                     return
-                if choice != "Enter manually…":
+                if choice != "Enter manually...":
                     prefill_mac = choice
         self._open_node_dialog(robot_type, robot_index, -1, prefill_mac)
 
@@ -716,7 +716,7 @@ class RobotPanel(QWidget, Ui_RobotPanel):
         btn_box.rejected.connect(dlg.reject)
 
         # Interactive test panel against the LIVE robot (needs the app to have
-        # loaded this Thymio — i.e. an already-saved entry).
+        # loaded this Thymio - i.e. an already-saved entry).
         test_btn = QPushButton(_TEST_THYMIO)
         test_btn.setWhatsThis(
             "Open the Test Thymio panel: jog the wheels, colour the top LED, play "

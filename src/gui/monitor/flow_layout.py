@@ -1,4 +1,4 @@
-"""FlowLayout — arranges widgets left-to-right, wrapping to the next row."""
+"""FlowLayout - arranges widgets left-to-right, wrapping to the next row."""
 
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ class FlowLayout(QLayout):
         return self.minimumSize()
 
     def minimumSize(self) -> QSize:  # noqa: N802
-        # Width 0: let the parent (QScrollArea) constrain us — we wrap, never scroll horizontally.
+        # Width 0: let the parent (QScrollArea) constrain us - we wrap, never scroll horizontally.
         # Height: tallest single item so nothing gets clipped vertically.
         m = self.contentsMargins()
         max_h = max((item.minimumSize().height() for item in self._items), default=0)

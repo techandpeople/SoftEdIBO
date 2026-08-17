@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Measure a gateway's RF signal quality to a Thymio — for comparing gateways/antennas.
+"""Measure a gateway's RF signal quality to a Thymio - for comparing gateways/antennas.
 
 Runs the C6's active discovery (LIST_NODES broadcast at 10 Hz; every powered Thymio
 replies with NODE_PRESENT) with `thymio_rx_debug` on, so each reply frame arrives as a
 `thymio_rx` line carrying the C6-measured **RSSI**. Two numbers come out per robot:
 
-  * reply rate — replies/s vs the 10/s broadcast cadence. A reply needs our broadcast to
+  * reply rate - replies/s vs the 10/s broadcast cadence. A reply needs our broadcast to
     REACH the robot and its answer to reach us, so this is round-trip link reliability.
-  * RSSI stats — signal strength (dBm) of the robot's frames at the gateway's antenna.
+  * RSSI stats - signal strength (dBm) of the robot's frames at the gateway's antenna.
 
 Run once per gateway (plug one at a time), then compare:
 
@@ -15,7 +15,7 @@ Run once per gateway (plug one at a time), then compare:
     # swap gateways...
     python scripts/thymio_signal_test.py --secs 20 --json /tmp/gw_b.json
 
-The C6 is rebooted first (its 15.4 RX dies cumulatively across link/discover sessions —
+The C6 is rebooted first (its 15.4 RX dies cumulatively across link/discover sessions -
 see thymio_discovery.reboot_c6), so every run starts from a clean radio. Works both via
 the S3 gateway (relays the C6's lines) and on a solo-flashed C6.
 """
@@ -34,7 +34,7 @@ DISCOVER_HZ = 10.0          # the C6 broadcasts LIST_NODES every 100 ms
 
 
 def find_gateway(explicit: str | None) -> tuple[str | None, str | None]:
-    """(port, usb_serial) of the gateway — usb_serial uniquely identifies the board."""
+    """(port, usb_serial) of the gateway - usb_serial uniquely identifies the board."""
     from serial.tools import list_ports
     for p in list_ports.comports():
         desc = f"{p.description or ''} {p.manufacturer or ''}".lower()
@@ -97,14 +97,14 @@ def main() -> int:
 
     # The port-open resets the board; wait until the thymio target answers a ping.
     time.sleep(0.5)
-    print(f"[{label}] port {port} — waiting for the C6...")
+    print(f"[{label}] port {port} - waiting for the C6...")
     deadline = time.monotonic() + 8.0
     alive = False
     while time.monotonic() < deadline and not alive:
         send({"cmd": "ping"})
         alive = wait_for({"pong", "rcp_ready"}, 1.0) is not None
     if not alive:
-        print("C6 never answered a ping — is this a gateway/rcp_c6 board?")
+        print("C6 never answered a ping - is this a gateway/rcp_c6 board?")
         ser.close()
         return 1
 
@@ -112,7 +112,7 @@ def main() -> int:
     # restores it (same reason discover_thymios reboots first).
     send({"cmd": "reboot"})
     if wait_for({"rcp_ready"}, 6.0) is None:
-        print("no rcp_ready after reboot — measuring anyway (RX may be deaf)")
+        print("no rcp_ready after reboot - measuring anyway (RX may be deaf)")
     ser.reset_input_buffer()
 
     send({"cmd": "thymio_rx_debug", "on": True})
@@ -157,7 +157,7 @@ def main() -> int:
     result = {"label": label, "port": port, "usb_serial": usb_serial,
               "channel": args.ch, "secs": args.secs, "robots": {}}
     if not replies and not rssi:
-        print(f"\n[{label}] NO Thymio heard at all — powered on? paired on PAN 0x4481? "
+        print(f"\n[{label}] NO Thymio heard at all - powered on? paired on PAN 0x4481? "
               f"right channel (--ch)?")
     for addr in sorted(set(replies) | set(rssi)):
         n = replies.get(addr, 0)

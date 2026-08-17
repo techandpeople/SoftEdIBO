@@ -1,14 +1,14 @@
-"""Chamber fill-time calibration — GUI-free core + settings helpers.
+"""Chamber fill-time calibration - GUI-free core + settings helpers.
 
 The multiplexed pressure sensors are too slow/laggy to close the loop on the
 pump in real time, so chambers are inflated for a **pre-measured time** instead.
 Because a chamber does not fill linearly (pressure rises fast, then creeps toward
-the max), one number isn't enough: we measure the whole **time→pressure curve**.
+the max), one number isn't enough: we measure the whole **time->pressure curve**.
 
 :class:`FillProfileCalibrator` builds that curve with a discrete-step sweep,
 starting from the ambient (empty) state: open the inflate valve for a fixed
 ``step_ms``, let the laggy sensor settle, read the pressure (% of the chamber
-max), record a curve point, and repeat — accumulating time — until the chamber
+max), record a curve point, and repeat - accumulating time - until the chamber
 reaches the target or a total-time ceiling (asymptotic creep that never gets
 there). Re-running with a smaller ``step_ms`` yields a finer curve.
 
@@ -19,7 +19,7 @@ and the firmware's own ``HARD_MAX`` pressure cutoff stay as safety nets.
 
 The calibrator is deliberately Qt-free and feeds on plain pressure readings, so
 it's unit-tested; the Qt dialog (``src/gui/fill_calibration_dialog.py``) drives
-the hardware (deflate → step inflate → settle → read) and feeds it.
+the hardware (deflate -> step inflate -> settle -> read) and feeds it.
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ DEFAULT_STEP_MS: float = 400.0
 DEFAULT_TARGET_PCT: float = 98.0
 DEFAULT_TIMEOUT_MS: float = 8000.0
 
-# Step granularity offered in the dialog (coarse → fine), for the refine passes.
+# Step granularity offered in the dialog (coarse -> fine), for the refine passes.
 STEP_CHOICES_MS: tuple[float, ...] = (600.0, 400.0, 250.0, 150.0)
 
 
@@ -81,7 +81,7 @@ class FillProfileCalibrator:
         return len(self._points) - 1
 
     def record(self, pressure_pct: float) -> bool:
-        """Feed the settled pressure reading (0–100 %) taken after one step.
+        """Feed the settled pressure reading (0-100 %) taken after one step.
 
         Advances cumulative time by ``step_ms``, appends the curve point, and
         returns ``True`` once the sweep is finished (target reached or timed
@@ -109,10 +109,10 @@ class ContinuousFillCalibrator:
 
     Unlike :class:`FillProfileCalibrator` (discrete step + settle), this feeds on a
     stream of ``(elapsed_ms, pressure_pct)`` readings taken while the inflate valve
-    is held continuously open — the firmware's fast ``status_rate`` telemetry during
+    is held continuously open - the firmware's fast ``status_rate`` telemetry during
     a bench ``test_run``. The sensor is fast enough that no per-step settle is
     needed, so a dense curve is captured in a single valve-open pass (from ambient
-    up toward the target), instead of the open→settle→read→repeat cycle.
+    up toward the target), instead of the open->settle->read->repeat cycle.
 
     Driven by the caller (the dialog), which holds the valve open and pumps the
     fast readings in::
@@ -145,7 +145,7 @@ class ContinuousFillCalibrator:
 
     @property
     def top_pct(self) -> float:
-        """Highest pressure recorded so far — cheap live-progress readout (the
+        """Highest pressure recorded so far - cheap live-progress readout (the
         :attr:`profile` property builds a whole FillProfile per call, far too
         heavy for a per-telemetry-message progress bar)."""
         return self._top_pct
@@ -159,14 +159,14 @@ class ContinuousFillCalibrator:
         """Feed one ``(elapsed_ms, pressure_pct)`` reading from the open-valve sweep.
 
         ``elapsed_ms`` is measured from when the valve opened; ``pressure_pct`` is
-        0–100 % of the chamber max. Returns ``True`` once the sweep is finished
+        0-100 % of the chamber max. Returns ``True`` once the sweep is finished
         (target reached or timed out), else ``False``. Out-of-order/duplicate
         timestamps are ignored."""
         if self.done:
             return True
         t = float(elapsed_ms)
         if t <= self._elapsed:
-            return False                 # non-monotone sample — ignore
+            return False                 # non-monotone sample - ignore
         pct = max(0.0, min(100.0, float(pressure_pct)))
         self._points.append((t, pct))
         self._elapsed = t
@@ -185,7 +185,7 @@ class ContinuousFillCalibrator:
 
 
 class PlateauDetector:
-    """Detects when a falling reading has stopped dropping — reached its floor.
+    """Detects when a falling reading has stopped dropping - reached its floor.
 
     Ambient does not read 0 on these gauges (and the floor moves again when the
     -40 kPa sensors arrive), so "empty" is never a fixed threshold: it is the
@@ -194,7 +194,7 @@ class PlateauDetector:
     once no such drop happens for ``settle_ms`` (and at least ``min_ms`` has
     passed, so the pull can start), the floor is declared.
 
-    Pure and clock-free — feed it ``(elapsed_ms, value)`` samples. Used by the
+    Pure and clock-free - feed it ``(elapsed_ms, value)`` samples. Used by the
     calibration dialog's vent phase and by :class:`ContinuousDeflateCalibrator`.
     """
 
@@ -230,7 +230,7 @@ class ContinuousDeflateCalibrator:
     fills the chamber, then holds the deflate valve open (bench ``test_run``
     dir=1) while feeding timestamped ``(elapsed_ms, pct)`` readings from the fast
     telemetry. The sweep finishes when the falling reading **plateaus** at the
-    gauge's floor (measured, never assumed — see :class:`PlateauDetector`) or on
+    gauge's floor (measured, never assumed - see :class:`PlateauDetector`) or on
     the time ceiling. The resulting curve times deflates the gauge cannot
     supervise (targets at/below the sensor floor).
     """
@@ -290,7 +290,7 @@ class MultiChamberFillCalibrator:
     settles, and feeds every pending slot its reading via :meth:`record`. A slot
     finishes when its own calibrator reaches target/timeout; once finished its
     valve is no longer opened, so the remaining chambers continue under the now
-    **lighter** load — exactly as at runtime, where a chamber stops when it
+    **lighter** load - exactly as at runtime, where a chamber stops when it
     reaches its target while the others keep filling. The run is :attr:`done`
     when every slot has finished.
 
@@ -314,7 +314,7 @@ class MultiChamberFillCalibrator:
         return self._cals[int(slot)]
 
     def pending_slots(self) -> list[int]:
-        """Slots not yet finished — the valves to open on the next step."""
+        """Slots not yet finished - the valves to open on the next step."""
         return sorted(s for s, c in self._cals.items() if not c.done)
 
     @property
@@ -324,7 +324,7 @@ class MultiChamberFillCalibrator:
     def record(self, readings: dict[int, float]) -> bool:
         """Advance one step: feed each *pending* slot its settled reading.
 
-        ``readings`` maps slot → pressure %% (0–100); a pending slot missing from
+        ``readings`` maps slot -> pressure %% (0-100); a pending slot missing from
         the dict reuses its last recorded value. Returns ``True`` once every slot
         has finished."""
         for slot, cal in self._cals.items():
@@ -355,7 +355,7 @@ def combo_key(slots: Any) -> str:
 
 
 def parse_combo_key(key: str) -> frozenset[int]:
-    """Inverse of :func:`combo_key` — the slot set a stored combo was measured at."""
+    """Inverse of :func:`combo_key` - the slot set a stored combo was measured at."""
     return frozenset(int(p) for p in str(key).split(",") if p != "")
 
 
@@ -469,7 +469,7 @@ def set_fill_profiles(settings_data: dict, mac: str, slot: int,
 
 def set_deflate_profile(settings_data: dict, mac: str, slot: int,
                         profile: list[list[float]] | None) -> int:
-    """Write ``deflate_profile`` (the falling time→pressure curve) onto every
+    """Write ``deflate_profile`` (the falling time->pressure curve) onto every
     chamber entry matching ``mac``+``slot``. Times deflates the gauge cannot
     supervise (targets at/below the sensor floor). ``None`` clears it. Returns
     the number of chamber entries updated."""
@@ -488,7 +488,7 @@ def set_deflate_profile(settings_data: dict, mac: str, slot: int,
 
 def set_duty_curve(settings_data: dict, mac: str, slot: int,
                    curve: list[list[float]] | None) -> int:
-    """Write the pump-duty→fill-speed sweep (``duty_curve``) onto matching chamber(s).
+    """Write the pump-duty->fill-speed sweep (``duty_curve``) onto matching chamber(s).
 
     ``curve`` is ``[[duty, full_time_ms], ...]`` measured at several PWM duties (each
     swept from empty); it feeds :class:`~src.hardware.fill_scaling.DutyModel` at
@@ -511,7 +511,7 @@ def set_duty_curve(settings_data: dict, mac: str, slot: int,
 # Per-skin-type fill-curve templates
 # ---------------------------------------------------------------------------
 # A chamber's fill curve depends mostly on the silicone it inflates, which is
-# fixed by the skin's (skin_type, skin_variant) — so a curve measured once for a
+# fixed by the skin's (skin_type, skin_variant) - so a curve measured once for a
 # type seeds every physical instance of it, keyed additionally by the slot
 # position within the skin (a skin may hold differently sized chambers). Stored
 # under the global ``fill_profiles_by_type`` map; a chamber's own ``fill_profile``
@@ -596,8 +596,8 @@ def set_type_deflate_profile(settings_data: dict, skin_type: Any,
 # Per-skin-type minimum pump duty (the "power level 1" floor)
 # ---------------------------------------------------------------------------
 # The activity editor drives pumps on a 1-5 power scale (see
-# :func:`~src.hardware.fill_scaling.duty_for_power`). Level 1 maps to this floor —
-# the lowest PWM that still moves air — which depends on the silicone stiffness
+# :func:`~src.hardware.fill_scaling.duty_for_power`). Level 1 maps to this floor -
+# the lowest PWM that still moves air - which depends on the silicone stiffness
 # and so is stored once per (skin_type, skin_variant), edited alongside the fill
 # curves in the Calibrate Fill dialog. Absent = the global :data:`MIN_PUMP_DUTY`.
 
@@ -645,7 +645,7 @@ def resolve_fill_profiles(settings_data: dict,
 
     A chamber's own curve (a manual override) wins; otherwise the chamber
     inherits its skin's (skin_type, skin_variant, slot) type template. Produces
-    shallow copies so the persisted settings dict is never mutated — the template
+    shallow copies so the persisted settings dict is never mutated - the template
     stays the single source; a save must not bake the resolved curve onto every
     chamber. Chambers with neither keep no curve (pressure/uncalibrated)."""
     out: list[dict] = []
@@ -672,7 +672,7 @@ def _resolve_chamber(settings_data: dict, skin_type: Any, skin_variant: Any,
 
 
 def chambers_missing_calibration(settings_data: dict) -> list[dict]:
-    """Configured actuator chambers that still need a fill curve — used by the
+    """Configured actuator chambers that still need a fill curve - used by the
     pre-activity guard to offer calibration.
 
     Chambers set to ``pressure`` fill mode inflate closed-loop on the gauge

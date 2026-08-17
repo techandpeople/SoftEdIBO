@@ -29,7 +29,7 @@ inline void sendStatus(int ch, float kpa) {
     // inferring it from pressure-vs-target (which never settles with pumps off).
     // "vi"/"vd" are the ACTUAL inflate/deflate valve outputs (chambers::valveOpen,
     // the mirror every valve write goes through), so the PC shows a valve as open
-    // whoever opened it — a manual toggle, an inflate/deflate, the closed-loop
+    // whoever opened it - a manual toggle, an inflate/deflate, the closed-loop
     // control, or the firmware's own dead-man closing it again.
     char buf[96];
     int  len = snprintf(buf, sizeof(buf),
@@ -41,13 +41,13 @@ inline void sendStatus(int ch, float kpa) {
 }
 
 // Batched status: every chamber in ONE frame (parallel arrays), instead of one
-// esp_now_send per chamber. Cuts status frame count NUM_CHAMBERS× — the biggest win
-// during a status_rate fast window — freeing ESP-NOW airtime that the Thymio's
+// esp_now_send per chamber. Cuts status frame count NUM_CHAMBERSx - the biggest win
+// during a status_rate fast window - freeing ESP-NOW airtime that the Thymio's
 // co-channel 802.15.4 shares. The "pressure" percentage is intentionally omitted: it is
 // redundant, the PC recomputes it from "kpa" against the configured range (kpa is
-// authoritative — see air_chamber.py), and dropping it keeps even a full 12-chamber
+// authoritative - see air_chamber.py), and dropping it keeps even a full 12-chamber
 // frame (~200 B) under the 250 B ESP-NOW limit, so it is ALWAYS a single frame (no
-// splitting). kpa at 0.1 kPa — finer than the sensor noise. Compatible both ways: an old
+// splitting). kpa at 0.1 kPa - finer than the sensor noise. Compatible both ways: an old
 // PC ignores it (no "chamber" field); an old node still sends the scalar frame the new PC
 // also parses. Keep sendStatus() (scalar) for any single-chamber callers.
 inline void sendStatusAll() {
@@ -101,7 +101,7 @@ inline void sendAck(const char* cmd) {
 // consumer (fill calibration, live pressure gauges, touch-coupling sweep) sees
 // dense pressure instead of the coarse 500 ms heartbeat. It reverts to the default
 // once the window (ttl) lapses, so fast telemetry can never be left on by a lost
-// "off" — the same dead-man idea as the bench-test keepalive.
+// "off" - the same dead-man idea as the bench-test keepalive.
 constexpr uint32_t DEFAULT_STATUS_MS = 500;
 constexpr uint32_t MIN_STATUS_MS     = 20;    // floor: don't flood the radio
 inline uint32_t statusIntervalMs  = DEFAULT_STATUS_MS;
@@ -150,7 +150,7 @@ inline void sendSeq() {
 }
 
 #ifdef DEBUG_BUILD
-// Which valves are open the moment an actuation command arrives — the info the
+// Which valves are open the moment an actuation command arrives - the info the
 // user explicitly wants kept (e.g. "a new inflate landed while these were still
 // open"). Streamed over ESP-NOW so it lands in the PC log without a cable.
 inline void sendRxOpen(const char* cmd, int chamber) {
@@ -178,7 +178,7 @@ inline void sendEngEvent(uint8_t ev, uint16_t mask, uint8_t dir) {
 
 // A pump must never spin without an open valve of its direction (the "running
 // dry / forcing" failure). recalcPumps() makes that impossible by construction,
-// so this only fires on a regression — report it loudly over ESP-NOW.
+// so this only fires on a regression - report it loudly over ESP-NOW.
 inline void checkDryPumps() {
     if (!gatewayKnown) return;
     bool anyInf = false, anyDef = false;
@@ -199,7 +199,7 @@ inline void installDebugHook() { chambers::dbgHook = &sendEngEvent; }
 #endif
 
 // Report the live pump PWM duties (read straight from the LEDC registers, so it
-// reflects whatever last drove them — recalcPumps, manual, or emergencyStopAll).
+// reflects whatever last drove them - recalcPumps, manual, or emergencyStopAll).
 // Lets the PC see whether/when the firmware actually cut the pumps.
 inline void sendPumps() {
     if (!gatewayKnown) return;
@@ -234,7 +234,7 @@ inline void sendDebug() {
 #endif
 
 // Actuation commands that a ``chamber == -1`` target fans out to every chamber in
-// parallel (one frame, not one per chamber). Inflate and Deflate are NOT here —
+// parallel (one frame, not one per chamber). Inflate and Deflate are NOT here -
 // "Inflate/Deflate All" run the two-phase chambers::inflateAll / deflateAll (coarse
 // parallel + isolated finish when 2+ chambers actuate) because the in-line gauges
 // read the shared line, not each chamber, while several valves are open. Only
@@ -387,7 +387,7 @@ inline void process(const cmd_queue::Cmd& c) {
 
     // chamber == -1 actuates EVERY chamber. Inflate/Deflate-All request every
     // chamber that still needs to move; the engine batches them into one coupled
-    // round (open together → fill to lowest target → close → measure isolated).
+    // round (open together -> fill to lowest target -> close -> measure isolated).
     int n = c.chamber;
     if (n == -1 && c.type == CMD_INFLATE) {
         chambers::inflateAll(c.param);
@@ -477,7 +477,7 @@ inline void parseAndQueue(const uint8_t* data, int len) {
     }
     else if (strcmp(cmd, "set_led_halves") == 0) {
         // Split the ring into len(colors) equal arcs (the purple/yellow look) in
-        // ONE frame. Replaces the PC's old per-pixel burst — 24 set_led frames
+        // ONE frame. Replaces the PC's old per-pixel burst - 24 set_led frames
         // that reset the node by calling strip.show() once per pixel in the recv
         // task. {"cmd":"set_led_halves","colors":["#RRGGBB",...],"pattern":...,
         // "fade_ms":N}  pattern "comet" paints one comet per colour.

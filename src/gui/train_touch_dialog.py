@@ -1,14 +1,14 @@
-"""Touch Gestures dialog — label recordings and train models, all in the app.
+"""Touch Gestures dialog - label recordings and train models, all in the app.
 
 End-to-end, no command line:
 
-1. **Add recording** — pick a session JSONL. Its skin type is read from the
+1. **Add recording** - pick a session JSONL. Its skin type is read from the
    recording header and selected automatically (no manual tagging); segments are
    pre-filled with the live labels tapped during the session.
 2. **Edit** the gesture label of each touch segment in the table (a dropdown of
    gesture classes). Group several touches into one gesture (e.g. a triple tap).
    Import / Export CSV to hand-edit or share datasets.
-3. **Train** — fits one model per ``skin_type`` across every loaded recording,
+3. **Train** - fits one model per ``skin_type`` across every loaded recording,
    so loading recordings of several types trains all their models in one pass.
 
 The heavy lifting lives in ``src/ml/labeling.py`` (segment + align + CSV) and
@@ -52,10 +52,10 @@ class TrainTouchDialog(BaseDialog, Ui_TrainTouchDialog):
         super().__init__(parent)
         self.setupUi(self)
         self._gateway = gateway
-        # Configured skins — handed to the guided capture so it can read a
+        # Configured skins - handed to the guided capture so it can read a
         # skin's pressure-compensated stream (capture during inflation).
         self._skins = list(skins or [])
-        # recording path → list[LabelRow] (insertion order matches the list widget)
+        # recording path -> list[LabelRow] (insertion order matches the list widget)
         self._recordings: dict[str, list[labeling.LabelRow]] = {}
 
         self.splitter.setSizes([240, 600])
@@ -104,7 +104,7 @@ class TrainTouchDialog(BaseDialog, Ui_TrainTouchDialog):
         p = Path(path)
         # Parsing the .jsonl plus the optional DB lookup can stall on big
         # recordings, so load off the GUI thread and populate when it's ready.
-        self.log.appendPlainText(f"Loading {p.name}…")
+        self.log.appendPlainText(f"Loading {p.name}...")
         run_async(
             lambda: self._load_recording(p),
             on_done=lambda result, pp=path: self._on_recording_loaded(pp, *result),
@@ -120,7 +120,7 @@ class TrainTouchDialog(BaseDialog, Ui_TrainTouchDialog):
         source_variants = labeling.skin_variants_of(p)
         try:
             events = labeling.gesture_events_from_db(labeling.session_id_of(p))
-        except Exception:   # noqa: BLE001 — DB optional; just no auto-labels
+        except Exception:   # noqa: BLE001 - DB optional; just no auto-labels
             events = []
         rows = labeling.label_rows_for(p, gesture_events=events,
                                        source_types=source_types,
@@ -132,7 +132,7 @@ class TrainTouchDialog(BaseDialog, Ui_TrainTouchDialog):
             return  # already added (e.g. a double trigger)
         p = Path(path)
         # Populate the dict and the list together so _current_path()'s
-        # row→insertion-order mapping stays consistent.
+        # row->insertion-order mapping stays consistent.
         self._recordings[path] = rows
         types = sorted(set(source_types.values()))
         self.rec_list.addItem(
@@ -143,7 +143,7 @@ class TrainTouchDialog(BaseDialog, Ui_TrainTouchDialog):
             f"Loaded {p.name}: {len(rows)} segments, {n_auto} auto-labelled "
             "from live tags"
             + (f"; skin type: {', '.join(types)}." if types
-               else " (no skin type in header — pick one above)."))
+               else " (no skin type in header - pick one above)."))
 
     def _current_path(self) -> str | None:
         row = self.rec_list.currentRow()
@@ -170,7 +170,7 @@ class TrainTouchDialog(BaseDialog, Ui_TrainTouchDialog):
         self.type_combo.blockSignals(False)
 
     def _on_type_changed(self) -> None:
-        """User picked a type — tag every row of the current recording with it.
+        """User picked a type - tag every row of the current recording with it.
 
         Auto-detected recordings already carry their type, so this is the manual
         fallback (e.g. an old recording with no skin type in its header)."""
@@ -255,7 +255,7 @@ class TrainTouchDialog(BaseDialog, Ui_TrainTouchDialog):
         self._show_selected(self.rec_list.currentRow())
         self.log.appendPlainText(
             f"Grouped {len(sel)} touches as gesture #{gid}"
-            + (f" ('{label}')." if label else " — pick a label for the group."))
+            + (f" ('{label}')." if label else " - pick a label for the group."))
 
     def _ungroup_selected(self) -> None:
         path = self._current_path()
@@ -301,7 +301,7 @@ class TrainTouchDialog(BaseDialog, Ui_TrainTouchDialog):
         if not csv_path:
             return
         n = labeling.write_csv(self._recordings[path], Path(csv_path))
-        self.log.appendPlainText(f"Exported {n} labelled segments → {csv_path}")
+        self.log.appendPlainText(f"Exported {n} labelled segments -> {csv_path}")
 
     # ------------------------------------------------------------------
     # Trained-model import / export
@@ -327,7 +327,7 @@ class TrainTouchDialog(BaseDialog, Ui_TrainTouchDialog):
             return
         import shutil
         shutil.copyfile(src, dst)
-        self.log.appendPlainText(f"Exported model ({skin_type}) → {dst}")
+        self.log.appendPlainText(f"Exported model ({skin_type}) -> {dst}")
 
     def _import_model(self) -> None:
         """Copy a chosen .joblib into the selected skin type's model slot."""
@@ -351,7 +351,7 @@ class TrainTouchDialog(BaseDialog, Ui_TrainTouchDialog):
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src, dst)
         self.log.appendPlainText(
-            f"Imported model for {skin_type} ← {Path(src).name}")
+            f"Imported model for {skin_type} <- {Path(src).name}")
 
     # ------------------------------------------------------------------
     # Guided live capture
@@ -378,7 +378,7 @@ class TrainTouchDialog(BaseDialog, Ui_TrainTouchDialog):
                 self, "Train", "Label at least some segments first.")
             return
         from src.ml.training import train_models
-        self.log.appendPlainText("\nTraining…")
+        self.log.appendPlainText("\nTraining...")
         self.train_btn.setEnabled(False)
         # Training (scikit-learn cross-validation) takes seconds; run it on a
         # worker thread so the dialog stays responsive. ``on_log`` fires on that

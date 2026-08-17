@@ -1,7 +1,7 @@
 """Tests for the touch-gesture ML pipeline (dependency-free parts).
 
 Covers segmentation, coordinate-free features (independent of sensor count),
-the rule baseline, and the inert classifier (no model / no sklearn → unknown).
+the rule baseline, and the inert classifier (no model / no sklearn -> unknown).
 These run without numpy/scikit-learn installed.
 """
 
@@ -58,19 +58,19 @@ def _stroke_stream(n_sensors=4):
 def test_segmenter_emits_one_segment_per_touch():
     segs = TouchSegmenter().segment_stream(_tap_stream())
     assert len(segs) == 1
-    assert segs[0].duration_ms == 100.0          # 50 → 100 ms while active
+    assert segs[0].duration_ms == 100.0          # 50 -> 100 ms while active
     assert segs[0].sensor_count == 4
 
 
 def test_segmenter_flushes_open_touch_at_end():
-    # Stream that never releases — should still yield a segment.
+    # Stream that never releases - should still yield a segment.
     hot = _msg([5.0, 0, 0, 0], [0])
     segs = TouchSegmenter().segment_stream([(hot, 0.0), (hot, 50.0)])
     assert len(segs) == 1
 
 
 # ---------------------------------------------------------------------------
-# Features — fixed schema, layout-independent
+# Features - fixed schema, layout-independent
 # ---------------------------------------------------------------------------
 
 def test_feature_vector_has_stable_length_across_sensor_counts():
@@ -91,7 +91,7 @@ def test_full_feature_vector_appends_one_hot_variant():
     # exactly one variant bit set, and it's the "wrinkles" slot
     assert sum(full[len(base):]) == 1.0
     assert full[len(base) + SKIN_VARIANTS.index("wrinkles")] == 1.0
-    # unknown / unset variant → all-zero one-hot block
+    # unknown / unset variant -> all-zero one-hot block
     assert sum(full_feature_vector(seg, "")[len(base):]) == 0.0
 
 
@@ -158,7 +158,7 @@ def test_rule_baseline_labels_compressions_bout():
 
 
 # ---------------------------------------------------------------------------
-# Classifier — inert without a model, never imports sklearn
+# Classifier - inert without a model, never imports sklearn
 # ---------------------------------------------------------------------------
 
 def test_classifier_inert_without_model_returns_unknown():
@@ -196,7 +196,7 @@ def test_skin_geometry_registry_and_filtering():
 
 
 # ---------------------------------------------------------------------------
-# PulseMerger — live multi-tap grouping
+# PulseMerger - live multi-tap grouping
 # ---------------------------------------------------------------------------
 
 def _seg(start, end, n_sensors=4):
@@ -213,9 +213,9 @@ def test_pulse_merger_groups_quick_taps():
     from src.ml.touch_segmenter import PulseMerger
     m = PulseMerger(gap_ms=400.0)
     assert m.feed(_seg(0, 100), 100.0) is None          # first tap held back
-    assert m.feed(None, 200.0) is None                  # within gap — waiting
+    assert m.feed(None, 200.0) is None                  # within gap - waiting
     assert m.feed(_seg(300, 380), 380.0) is None        # second tap joins
-    merged = m.feed(None, 800.0)                        # gap elapsed → flush
+    merged = m.feed(None, 800.0)                        # gap elapsed -> flush
     assert merged is not None and merged.n_pulses == 2
     assert merged.start_ms == 0 and merged.end_ms == 380
 
@@ -224,7 +224,7 @@ def test_pulse_merger_separates_slow_taps():
     from src.ml.touch_segmenter import PulseMerger
     m = PulseMerger(gap_ms=400.0)
     m.feed(_seg(0, 100), 100.0)
-    first = m.feed(None, 600.0)                         # gap elapsed → single
+    first = m.feed(None, 600.0)                         # gap elapsed -> single
     assert first is not None and first.n_pulses == 1
     m.feed(_seg(700, 800), 800.0)
     second = m.feed(None, 1300.0)
@@ -235,7 +235,7 @@ def test_pulse_merger_waits_while_touch_active():
     from src.ml.touch_segmenter import PulseMerger
     m = PulseMerger(gap_ms=400.0)
     m.feed(_seg(0, 100), 100.0)
-    # Gap elapsed but a follow-up touch is in progress — must not flush.
+    # Gap elapsed but a follow-up touch is in progress - must not flush.
     assert m.feed(None, 600.0, touch_active=True) is None
     m.feed(_seg(650, 700), 700.0)
     merged = m.feed(None, 1200.0)
@@ -289,7 +289,7 @@ def test_feature_vector_includes_vec_block():
 
 
 # ---------------------------------------------------------------------------
-# Train/serve parity — compensated stream preferred for training,
+# Train/serve parity - compensated stream preferred for training,
 # excluded from coupling calibration
 # ---------------------------------------------------------------------------
 

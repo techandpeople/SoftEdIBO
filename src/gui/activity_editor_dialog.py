@@ -1,9 +1,9 @@
-"""ActivityEditorDialog — the Activity Editor (Tools => Activity Editor…).
+"""ActivityEditorDialog - the Activity Editor (Tools => Activity Editor...).
 
 A thin frame around :class:`~src.gui.behavior_editor_panel.BehaviorEditorPanel`,
 the Scratch-like block editor that compiles to declarative behaviour specs run
 by ScriptedActivity. Behaviours authored here are the activities the session
-list offers — there is no separate per-activity preset surface any more.
+list offers - there is no separate per-activity preset surface any more.
 
 The panel is dropped into the layout authored in ``ui/activity_editor_dialog.ui``;
 the dialog only adds the Close button and, when robots are connected, lets the

@@ -2,8 +2,8 @@
 Quadrant Detection System for SoftEdIBO Touch Sensing
 
 Adapted from the thesis QuadrantPredictor (tools/quadrant_live_plot.py) to work
-with the SoftEdIBO ESP-NOW pipeline.  Uses raw magnitude values (μT) directly —
-no normalisation against a fullscale constant — so the detector is independent of
+with the SoftEdIBO ESP-NOW pipeline.  Uses raw magnitude values (uT) directly -
+no normalisation against a fullscale constant - so the detector is independent of
 firmware configuration and behaves like the proven thesis implementation.
 
 Quadrant layout:
@@ -72,14 +72,14 @@ _QUADRANT_NAMES = ["Q1", "Q2", "Q3", "Q4"]
 
 class QuadrantDetector:
     """
-    Detects active quadrant(s) from 4 raw magnitude readings (μT).
+    Detects active quadrant(s) from 4 raw magnitude readings (uT).
 
-    Ported from the thesis QuadrantPredictor — uses absolute thresholds in the
-    same units as the input (μT), applies optional EMA smoothing, and implements
+    Ported from the thesis QuadrantPredictor - uses absolute thresholds in the
+    same units as the input (uT), applies optional EMA smoothing, and implements
     Schmitt-trigger hysteresis so touched quadrants stay active until the signal
-    falls below (threshold − hysteresis).
+    falls below (threshold - hysteresis).
 
-    Default thresholds (100 μT) are conservative; tune via the Touch Tuning panel
+    Default thresholds (100 uT) are conservative; tune via the Touch Tuning panel
     after a Re-zero so resting values settle below the threshold.
     """
 
@@ -110,7 +110,7 @@ class QuadrantDetector:
 
     def update(self, raw_values: List[float]) -> Tuple[List[bool], List[float]]:
         """
-        Update detector state from raw per-sensor magnitudes (μT).
+        Update detector state from raw per-sensor magnitudes (uT).
 
         Returns:
             (active_quadrants, smoothed_values)
@@ -160,7 +160,7 @@ class QuadrantDetector:
         return [_QUADRANT_NAMES[i] for i, a in enumerate(self.active_state) if a]
 
     def get_dominant_quadrant(self) -> Tuple[str, float]:
-        """Return (quadrant_name, signal_strength_μT) for the strongest active sensor."""
+        """Return (quadrant_name, signal_strength_uT) for the strongest active sensor."""
         active_idx = [i for i, a in enumerate(self.active_state) if a]
         if not active_idx:
             return ("NONE", 0.0)
@@ -168,7 +168,7 @@ class QuadrantDetector:
         return (_QUADRANT_NAMES[best], self.sensor_values[best])
 
     def get_confidence(self) -> float:
-        """Confidence = (primary − second) / primary (thesis formula)."""
+        """Confidence = (primary - second) / primary (thesis formula)."""
         active_idx = [i for i, a in enumerate(self.active_state) if a]
         if not active_idx:
             return 0.0

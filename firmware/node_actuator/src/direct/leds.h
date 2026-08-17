@@ -10,8 +10,8 @@
 // the recv callback only updates the per-pixel target buffer plus the animation
 // state, and loop()'s update() is the ONLY place strip.show() runs. That matters
 // because show() bit-bangs the strip with interrupts disabled (~0.7 ms for a
-// 24-LED RGBW ring); driving it from the ESP-NOW receive task — once per pixel for
-// a split-ring repaint — starved the radio and reset the node. One show() per loop,
+// 24-LED RGBW ring); driving it from the ESP-NOW receive task - once per pixel for
+// a split-ring repaint - starved the radio and reset the node. One show() per loop,
 // off the receive task, keeps the link up.
 //
 // Render is a 3-stage pipeline evaluated every frame (render_()):
@@ -34,7 +34,7 @@ constexpr uint32_t DEFAULT_FADE_MS = 250;
 
 // Pixel type is chosen at flash time. RGB rings (e.g. Adafruit 1586) send 3
 // bytes/pixel; RGBW rings (e.g. Adafruit 2862, SK6812) send 4. Build the matching
-// env (-DLED_RGBW) for the ring that's actually wired — the byte count differs, so
+// env (-DLED_RGBW) for the ring that's actually wired - the byte count differs, so
 // an RGB build drives an RGBW ring with shifted colours and vice versa. The colour
 // code below is unchanged: Color()/setPixelColor leave W at 0.
 #ifdef LED_RGBW
@@ -168,7 +168,7 @@ inline void computeAnimated_(uint8_t* oR, uint8_t* oG, uint8_t* oB, uint32_t now
         uint32_t t = (now - start_) % period_;
         if (pattern_ == BLINK) {
             scale = (t < period_ / 2) ? 1.0f : 0.0f;
-        } else {                               // PULSE — triangle ramp 0 -> 1 -> 0
+        } else {                               // PULSE - triangle ramp 0 -> 1 -> 0
             float frac = (float)t / period_;
             scale = frac < 0.5f ? frac * 2.0f : (1.0f - frac) * 2.0f;
         }
@@ -187,7 +187,7 @@ inline float fadeProgress_(uint32_t now) {
 }
 
 // Stages 1-3: animate, cross-fade from the snapshot, remember the output, gamma+show.
-// The only caller of strip.show() outside hardware_init — always reached from loop().
+// The only caller of strip.show() outside hardware_init - always reached from loop().
 inline void render_(uint32_t now) {
     uint8_t aR[NUM_LEDS], aG[NUM_LEDS], aB[NUM_LEDS];
     computeAnimated_(aR, aG, aB, now);
@@ -205,7 +205,7 @@ inline void render_(uint32_t now) {
 inline void hardware_init() {
     strip.begin();
     strip.setBrightness(255);
-    render_(millis());   // setup() context — the one show() outside loop()/update()
+    render_(millis());   // setup() context - the one show() outside loop()/update()
     dirty_ = false;
 }
 
@@ -237,7 +237,7 @@ inline void setAll(uint8_t r, uint8_t g, uint8_t b,
 // Whole ring cross-fading between two colours: base (c1) <-> fadeTo (c2) as a
 // triangle 0->1->0 over `period` (one c1->c2->c1 cycle). count<=0 = run forever;
 // a bounded fade rests on c1 when done (see update()). Moves the PC's old
-// per-frame colour stream onto the node — one frame instead of ~20/cycle.
+// per-frame colour stream onto the node - one frame instead of ~20/cycle.
 inline void setFade(uint8_t r, uint8_t g, uint8_t b,
                     uint8_t r2, uint8_t g2, uint8_t b2,
                     uint32_t period, int32_t count,

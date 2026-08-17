@@ -1,4 +1,4 @@
-"""OrganPanel — compact organ-status display shown beside the skin grid.
+"""OrganPanel - compact organ-status display shown beside the skin grid.
 
 Replaces drawing organs on the grid: each organ is just a numbered round dot
 (green = good, red = bad, empty outline = absent) plus a single LED dot that
@@ -6,13 +6,13 @@ mirrors the hardware 'background light' for the current state::
 
     Organs
     1   2   3
-    ●   ●   ○
+    *   *   o
     State:
-      ●        (LED colour)
+      *        (LED colour)
 
-The activity pushes updates via :meth:`update_state` (thread-safe — it fires
+The activity pushes updates via :meth:`update_state` (thread-safe - it fires
 from the gateway thread). In simulation each organ dot is clickable to cycle
-none → good → bad, feeding the matching parallel resistance into the simulated
+none -> good -> bad, feeding the matching parallel resistance into the simulated
 organ circuit so the display + activity react exactly as on hardware.
 """
 
@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
 from src.activities.organ_matching import OrganMatcher
 from src.hardware.skin import Skin
 
-# Organ status colours — constant by design.
+# Organ status colours - constant by design.
 _GOOD = "#2ecc71"
 _BAD = "#e74c3c"
 _ABSENT_BG = "transparent"      # absent: no fill, black outline only
@@ -99,7 +99,7 @@ class OrganPanel(QGroupBox):
         # In simulation we ARE the physical organs, so the dots show the
         # ground-truth states we clicked (see _render_sim_dots). The activity's
         # verdicts come from decoding a single parallel resistance, which is
-        # ambiguous when organs share resistances — letting it recolour the dots
+        # ambiguous when organs share resistances - letting it recolour the dots
         # would make clicking one organ light up another. Only the LED/state,
         # which legitimately follows the cure decision, is driven from here.
         if not self._sim_states:
@@ -133,7 +133,7 @@ class OrganPanel(QGroupBox):
         self._push_sim()
 
     def _render_sim_dots(self) -> None:
-        """Colour each dot from its own clicked state — ground truth in sim,
+        """Colour each dot from its own clicked state - ground truth in sim,
         so a button only ever toggles its own organ."""
         for i in range(len(self._organs)):
             state = self._sim_states.get(i, "none")

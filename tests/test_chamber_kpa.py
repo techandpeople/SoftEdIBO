@@ -1,5 +1,5 @@
 """Live percentage is recomputed from measured kPa against the *configured*
-range — not trusted from the firmware ``pressure`` field.
+range - not trusted from the firmware ``pressure`` field.
 
 The firmware computes its ``pressure`` % against the limits the node currently
 holds, which lag the PC config (a dropped ``set_max_pressure``, or the 8 kPa
@@ -15,7 +15,7 @@ from src.hardware.units import kpa_to_pct, pct_to_kpa
 
 
 # ---------------------------------------------------------------------------
-# units.kpa_to_pct — mirror of firmware units::kpaToPct
+# units.kpa_to_pct - mirror of firmware units::kpaToPct
 # ---------------------------------------------------------------------------
 
 def test_kpa_to_pct_basic_range():
@@ -50,7 +50,7 @@ def test_pct_to_kpa_inverse():
 
 
 # ---------------------------------------------------------------------------
-# AirChamber.update_pressure — kPa is authoritative when present
+# AirChamber.update_pressure - kPa is authoritative when present
 # ---------------------------------------------------------------------------
 
 def _chamber(max_p: float = 20.0, min_p: float = 0.0) -> AirChamber:
@@ -60,7 +60,7 @@ def _chamber(max_p: float = 20.0, min_p: float = 0.0) -> AirChamber:
 
 def test_kpa_recomputed_against_config_not_firmware_pct():
     """Firmware sent pressure=81 (its stale 8 kPa boot range) but the real kPa
-    against the configured 20 kPa max is 32 % — the configured value wins."""
+    against the configured 20 kPa max is 32 % - the configured value wins."""
     ch = _chamber(max_p=20.0)
     ch.update_pressure(81, ChamberState.IDLE, kpa=6.49)
     assert ch.pressure == 32
@@ -68,7 +68,7 @@ def test_kpa_recomputed_against_config_not_firmware_pct():
 
 
 def test_no_kpa_falls_back_to_firmware_pct():
-    """Simulator / pre-kPa firmware send no kPa (NaN) → the firmware % is used."""
+    """Simulator / pre-kPa firmware send no kPa (NaN) -> the firmware % is used."""
     ch = _chamber()
     ch.update_pressure(46)
     assert ch.pressure == 46

@@ -18,7 +18,7 @@
       </item>
       <item row="0" column="1">
        <widget class="QLabel" name="session_id_label">
-        <property name="text"><string>—</string></property>
+        <property name="text"><string>-</string></property>
        </widget>
       </item>
       <item row="1" column="0">
@@ -28,7 +28,7 @@
       </item>
       <item row="1" column="1">
        <widget class="QLabel" name="activity_label">
-        <property name="text"><string>—</string></property>
+        <property name="text"><string>-</string></property>
        </widget>
       </item>
       <item row="2" column="0">
@@ -38,7 +38,7 @@
       </item>
       <item row="2" column="1">
        <widget class="QLabel" name="robots_label">
-        <property name="text"><string>—</string></property>
+        <property name="text"><string>-</string></property>
        </widget>
       </item>
       <item row="3" column="0">
@@ -48,7 +48,7 @@
       </item>
       <item row="3" column="1">
        <widget class="QLabel" name="participants_label">
-        <property name="text"><string>—</string></property>
+        <property name="text"><string>-</string></property>
        </widget>
       </item>
      </layout>
@@ -71,14 +71,14 @@
      </item>
      <item>
       <widget class="QPushButton" name="prev_phase_btn">
-       <property name="whatsThis"><string>Rewind the running behaviour to its previous phase (e.g. phase 2 → phase 1). Only available for scripted study behaviours that have phases; disabled while on the first phase.</string></property>
+       <property name="whatsThis"><string>Rewind the running behaviour to its previous phase (e.g. phase 2 -> phase 1). Only available for scripted study behaviours that have phases; disabled while on the first phase.</string></property>
        <property name="text"><string>Previous Phase</string></property>
        <property name="enabled"><bool>false</bool></property>
       </widget>
      </item>
      <item>
       <widget class="QPushButton" name="next_phase_btn">
-       <property name="whatsThis"><string>Skip the timer and move the running behaviour straight to its next phase now (e.g. phase 1 → phase 2). Only available for scripted study behaviours that have phases; disabled once the last phase is reached.</string></property>
+       <property name="whatsThis"><string>Skip the timer and move the running behaviour straight to its next phase now (e.g. phase 1 -> phase 2). Only available for scripted study behaviours that have phases; disabled once the last phase is reached.</string></property>
        <property name="text"><string>Next Phase</string></property>
        <property name="enabled"><bool>false</bool></property>
       </widget>

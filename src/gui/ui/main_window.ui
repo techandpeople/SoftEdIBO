@@ -13,7 +13,7 @@
    <layout class="QVBoxLayout" name="verticalLayout">
     <item>
      <widget class="QTabWidget" name="tabs">
-      <property name="whatsThis"><string>Main sections of the app: Home (overview), Participants, Session (run activities), Robots (hardware setup) and Data (recordings). Toggle the “?” button any time to see what a control does.</string></property>
+      <property name="whatsThis"><string>Main sections of the app: Home (overview), Participants, Session (run activities), Robots (hardware setup) and Data (recordings). Toggle the "?" button any time to see what a control does.</string></property>
      </widget>
     </item>
    </layout>
@@ -40,16 +40,16 @@
    <addaction name="menuHelp"/>
   </widget>
   <action name="actionSettings">
-   <property name="text"><string>Settings…</string></property>
+   <property name="text"><string>Settings...</string></property>
   </action>
   <action name="actionFlashFirmware">
-   <property name="text"><string>Flash Firmware…</string></property>
+   <property name="text"><string>Flash Firmware...</string></property>
   </action>
   <action name="actionCheckForUpdates">
-   <property name="text"><string>Check for Updates…</string></property>
+   <property name="text"><string>Check for Updates...</string></property>
   </action>
   <action name="actionAbout">
-   <property name="text"><string>About SoftEdIBO…</string></property>
+   <property name="text"><string>About SoftEdIBO...</string></property>
   </action>
  </widget>
  <resources/>

@@ -1,7 +1,7 @@
 """Filesystem locations the app writes to.
 
 Single source of truth so logging, crash traces and the std-stream fallback all
-land in the same place — and never inside a read-only frozen bundle
+land in the same place - and never inside a read-only frozen bundle
 (PyInstaller ``_MEIPASS`` / AppImage mount).
 """
 

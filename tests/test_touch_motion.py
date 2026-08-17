@@ -1,6 +1,6 @@
-"""Tests for touch_motion — centroid, direction and the capture summary line.
+"""Tests for touch_motion - centroid, direction and the capture summary line.
 
-Pure geometry, no Qt/sklearn. Uses the Thymio 'D' sensor positions (2×2:
+Pure geometry, no Qt/sklearn. Uses the Thymio 'D' sensor positions (2x2:
 S3 top-left, S0 top-right, S1 bottom-left, S2 bottom-right in screen coords).
 """
 
@@ -50,9 +50,9 @@ def test_centroid_is_none_when_quiet():
 
 
 def test_centroid_weights_by_magnitude():
-    # All weight on one sensor → its exact position.
+    # All weight on one sensor -> its exact position.
     assert weighted_centroid([100.0, 0.0], [(0.0, 0.0), (10.0, 0.0)]) == (0.0, 0.0)
-    # Equal weights → midpoint; floor drops the quiet sensor.
+    # Equal weights -> midpoint; floor drops the quiet sensor.
     assert weighted_centroid([50.0, 50.0], [(0.0, 0.0), (10.0, 0.0)]) == (5.0, 0.0)
     centroid = weighted_centroid([50.0, 5.0], [(0.0, 0.0), (10.0, 0.0)], floor=10.0)
     assert centroid is not None
@@ -61,15 +61,15 @@ def test_centroid_weights_by_magnitude():
 
 
 # ---------------------------------------------------------------------------
-# cardinal — screen coords (y down)
+# cardinal - screen coords (y down)
 # ---------------------------------------------------------------------------
 
 def test_cardinal_screen_coords():
-    assert cardinal(1.0, 0.0) == ("→", "right")
-    assert cardinal(-1.0, 0.0) == ("←", "left")
-    assert cardinal(0.0, 1.0) == ("↓", "down")       # y down = towards viewer's down
-    assert cardinal(0.0, -1.0) == ("↑", "up")
-    assert cardinal(1.0, -1.0) == ("↗", "up-right")
+    assert cardinal(1.0, 0.0) == ("->", "right")
+    assert cardinal(-1.0, 0.0) == ("<-", "left")
+    assert cardinal(0.0, 1.0) == ("v", "down")       # y down = towards viewer's down
+    assert cardinal(0.0, -1.0) == ("^", "up")
+    assert cardinal(1.0, -1.0) == ("^>", "up-right")
 
 
 # ---------------------------------------------------------------------------
@@ -82,26 +82,26 @@ def test_static_tap_has_no_direction():
 
 
 def test_stroke_direction_left_to_right():
-    # S1 (bottom-left, x=40) → S2 (bottom-right, x=105): rightward slide.
+    # S1 (bottom-left, x=40) -> S2 (bottom-right, x=105): rightward slide.
     seg = _segment([([0, 300.0, 0, 0], [1]),
                     ([0, 150.0, 150.0, 0], [1, 2]),
                     ([0, 0, 300.0, 0], [2])])
     d = segment_direction(seg, _POS)
     assert d is not None
-    assert d["arrow"] == "→" and d["name"] == "right"
+    assert d["arrow"] == "->" and d["name"] == "right"
     assert d["from_sensors"] == [1] and d["to_sensors"] == [2]
-    assert d["dist_mm"] > 60                       # 40 → 105 mm
+    assert d["dist_mm"] > 60                       # 40 -> 105 mm
 
 
 def test_min_travel_gate():
     seg = _segment([([0, 300.0, 0, 0], [1]), ([0, 0, 300.0, 0], [2])])
     assert segment_direction(seg, _POS, min_travel_mm=1000.0) is None
-    assert segment_direction(seg, []) is None      # no positions → no direction
+    assert segment_direction(seg, []) is None      # no positions -> no direction
 
 
 def test_merged_taps_on_different_sensors_are_not_a_slide():
-    # Tap S1 then tap S2 (released in between → merged as n_pulses=2): travel
-    # exists but the contact broke — must NOT read as a slide.
+    # Tap S1 then tap S2 (released in between -> merged as n_pulses=2): travel
+    # exists but the contact broke - must NOT read as a slide.
     from src.ml.touch_segmenter import merge_segments
     a = _segment([([0, 300.0, 0, 0], [1])])
     b = _segment([([0, 0, 300.0, 0], [2])])
@@ -123,7 +123,7 @@ def _vec_segment(samples):
 
 
 def test_vertical_push_with_travel_is_not_a_slide():
-    # Act migrates S1→S2 within one pulse, but the 3-axis deltas are straight
+    # Act migrates S1->S2 within one pulse, but the 3-axis deltas are straight
     # down (pure z): two vertical presses, not a finger travelling.
     down = [[0, 0, 300]] * 4
     seg = _vec_segment([([0, 300.0, 0, 0], [1], down),
@@ -141,7 +141,7 @@ def test_lateral_shear_with_travel_is_a_slide():
 
 
 def test_slide_thresholds_live_in_the_taxonomy():
-    # Single common home for the tunables (gesture_taxonomy) — touch_motion
+    # Single common home for the tunables (gesture_taxonomy) - touch_motion
     # only aliases them, so retuning one place retunes every consumer.
     from src.ml import gesture_taxonomy as tax
     from src.ml import touch_motion
@@ -152,31 +152,31 @@ def test_slide_thresholds_live_in_the_taxonomy():
 def test_path_straightness():
     assert path_straightness([(0, 0), (10, 0)]) == 1.0            # straight
     assert path_straightness([(0, 0), (5, 0), (10, 0)]) == 1.0    # colinear
-    # There and back → net 0, path 20 → 0.
+    # There and back -> net 0, path 20 -> 0.
     assert path_straightness([(0, 0), (10, 0), (0, 0)]) == 0.0
-    # L-shape: net = sqrt(200) ≈ 14.14, path = 20 → ~0.707.
+    # L-shape: net = sqrt(200) ~= 14.14, path = 20 -> ~0.707.
     assert abs(path_straightness([(0, 0), (10, 0), (10, 10)]) - 0.7071) < 1e-3
     assert path_straightness([(0, 0)]) == 0.0                     # degenerate
 
 
 def test_wandering_touch_is_not_a_slide():
-    # Centroid oscillates S1↔S2 without releasing (an inflating chamber shifting
-    # the magnet): net travel one hop, path three hops → not straight → None,
+    # Centroid oscillates S1<->S2 without releasing (an inflating chamber shifting
+    # the magnet): net travel one hop, path three hops -> not straight -> None,
     # even though the endpoints are displaced.
     seg = _segment([([0, 300.0, 0, 0], [1]), ([0, 0, 300.0, 0], [2]),
                     ([0, 300.0, 0, 0], [1]), ([0, 0, 300.0, 0], [2])])
-    assert seg.n_pulses == 1                     # never released → one segment
+    assert seg.n_pulses == 1                     # never released -> one segment
     assert segment_direction(seg, _POS) is None
 
 
 def test_frame_z_frac_reads_the_dominant_sensor():
     from src.ml.touch_motion import frame_z_frac
-    # Dominant sensor is index 1; its delta is pure z → 1.0.
+    # Dominant sensor is index 1; its delta is pure z -> 1.0.
     assert frame_z_frac([0.0, 300.0], [[300, 0, 0], [0, 0, 300]]) == 1.0
-    # Lateral drag on the dominant sensor → low z-fraction.
+    # Lateral drag on the dominant sensor -> low z-fraction.
     z = frame_z_frac([300.0, 0.0], [[300, 0, 0], [0, 0, 300]])
     assert z == 0.0
-    # No usable vector data → None.
+    # No usable vector data -> None.
     assert frame_z_frac([300.0], None) is None
     assert frame_z_frac([], [[0, 0, 300]]) is None
     assert frame_z_frac([300.0], [[0, 0]]) is None
@@ -191,16 +191,16 @@ def test_summary_for_a_stroke_carries_direction(slides_on):
     text = segment_summary(seg, "stroke", _POS)
     assert text.startswith("stroke")
     assert "ms" in text and "peak 300" in text
-    assert "S1→S2" in text and "right" in text
+    assert "S1->S2" in text and "right" in text
 
 
 def test_summary_omits_direction_when_slides_disabled():
-    # Master switch off (the default) → summary keeps duration/peak/sensors but
+    # Master switch off (the default) -> summary keeps duration/peak/sensors but
     # never shows a travel direction, even for a clear stroke.
     seg = _segment([([0, 300.0, 0, 0], [1]), ([0, 0, 300.0, 0], [2])])
     text = segment_summary(seg, "stroke", _POS)
     assert text.startswith("stroke") and "peak 300" in text
-    assert "→" not in text and "right" not in text
+    assert "->" not in text and "right" not in text
     assert "S1" in text                          # falls back to the sensor list
 
 
@@ -208,4 +208,4 @@ def test_summary_for_a_tap_lists_sensors_instead():
     seg = _segment([([250.0, 0, 0, 0], [0])])
     text = segment_summary(seg, "tap", _POS)
     assert text.startswith("tap")
-    assert "S0" in text and "→ right" not in text
+    assert "S0" in text and "-> right" not in text

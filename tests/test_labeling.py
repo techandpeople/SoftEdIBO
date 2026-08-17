@@ -42,7 +42,7 @@ def test_label_rows_one_per_segment(tmp_path):
 def test_auto_fill_from_live_events(tmp_path):
     rec = tmp_path / "S1.jsonl"
     base = _write_recording(rec)
-    # A live "tap" tag during the first segment (≈75 ms in).
+    # A live "tap" tag during the first segment (~=75 ms in).
     t_ms = (base + timedelta(milliseconds=75)).timestamp() * 1000.0
     rows = labeling.label_rows_for(rec, "thymio", [(t_ms, "tap")])
     assert rows[0].label == "tap"

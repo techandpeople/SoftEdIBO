@@ -1,4 +1,4 @@
-"""Session trash — soft-delete domain logic, Qt-free and testable.
+"""Session trash - soft-delete domain logic, Qt-free and testable.
 
 Wraps the database's trash tables together with the on-disk sensor recordings so
 a deleted session (DB record + events + assignments + participant links + its

@@ -3,7 +3,7 @@
 The firmware reports whether a chamber is actually being driven (INFLATING /
 DEFLATING) or not (IDLE). Before this, the PC inferred the state purely from
 measured-pressure-vs-target, so a chamber whose pressure never reached its
-target — e.g. with the pumps off — showed a perpetual INFLATING/DEFLATING.
+target - e.g. with the pumps off - showed a perpetual INFLATING/DEFLATING.
 These tests pin the firmware-authoritative behaviour and the legacy fallback.
 """
 
@@ -17,11 +17,11 @@ def _chamber() -> AirChamber:
 
 
 # ---------------------------------------------------------------------------
-# AirChamber.update_pressure — firmware state is authoritative
+# AirChamber.update_pressure - firmware state is authoritative
 # ---------------------------------------------------------------------------
 
 def test_firmware_idle_holding_pressure_is_inflated():
-    """The reported bug: held above a stale target with pumps off → INFLATED,
+    """The reported bug: held above a stale target with pumps off -> INFLATED,
     not a perpetual DEFLATING."""
     ch = _chamber()
     ch.target_pressure = 80
@@ -30,7 +30,7 @@ def test_firmware_idle_holding_pressure_is_inflated():
 
 
 def test_firmware_idle_empty_is_idle():
-    """Never filled, pumps off (pressure below a stale target) → IDLE, not a
+    """Never filled, pumps off (pressure below a stale target) -> IDLE, not a
     perpetual INFLATING."""
     ch = _chamber()
     ch.target_pressure = 80
@@ -40,8 +40,8 @@ def test_firmware_idle_empty_is_idle():
 
 def test_firmware_inflating_overrides_pressure_target():
     ch = _chamber()
-    ch.target_pressure = 50            # already past target by measurement…
-    ch.update_pressure(90, ChamberState.INFLATING)   # …but firmware still drives it
+    ch.target_pressure = 50            # already past target by measurement...
+    ch.update_pressure(90, ChamberState.INFLATING)   # ...but firmware still drives it
     assert ch.state is ChamberState.INFLATING
 
 
@@ -52,7 +52,7 @@ def test_firmware_deflating_reported_directly():
 
 
 # ---------------------------------------------------------------------------
-# Legacy fallback — no firmware state (old firmware / simulator)
+# Legacy fallback - no firmware state (old firmware / simulator)
 # ---------------------------------------------------------------------------
 
 def test_legacy_inference_without_firmware_state():
@@ -65,7 +65,7 @@ def test_legacy_inference_without_firmware_state():
 
 
 # ---------------------------------------------------------------------------
-# Skin._on_pressure — maps the firmware ``st`` int through to the chamber
+# Skin._on_pressure - maps the firmware ``st`` int through to the chamber
 # ---------------------------------------------------------------------------
 
 class _FakeNode:
@@ -103,5 +103,5 @@ def test_skin_without_state_falls_back_to_inference():
     skin = _skin()
     chamber = skin._chambers[0]
     chamber.target_pressure = 80
-    skin._on_pressure(0, 0)                # no st → pressure-vs-target inference
+    skin._on_pressure(0, 0)                # no st -> pressure-vs-target inference
     assert chamber.state is ChamberState.INFLATING

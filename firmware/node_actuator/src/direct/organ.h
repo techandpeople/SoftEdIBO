@@ -11,15 +11,15 @@
 //
 // One ADC line measures both the organ identity and the cover state:
 //
-//   3V3 ── R_KNOWN ──●── organ resistor network ── cover contact ── GND
-//                    │
+//   3V3 -- R_KNOWN --*-- organ resistor network -- cover contact -- GND
+//                    |
 //               ORGAN_SENSE_PIN
 //
 // Each pluggable organ is a silicone block with a known internal resistor;
 // all organ slots are wired in parallel (one reading per node). The silicone
 // cover rests on the contact pads by gravity and closes the return path:
-//   cover off → open circuit → ADC at the 3V3 rail → {"open":true}
-//   cover on  → R_total = R_KNOWN * raw / (ADC_MAX - raw)
+//   cover off -> open circuit -> ADC at the 3V3 rail -> {"open":true}
+//   cover on  -> R_total = R_KNOWN * raw / (ADC_MAX - raw)
 //
 // A gravity contact can bounce while children handle the cover, so an
 // open/closed flip is only reported after DEBOUNCE_SAMPLES consistent
@@ -39,7 +39,7 @@ constexpr float    HYST_OHM         = 25.0f;  // resistance delta worth re-sendi
 constexpr uint32_t HEARTBEAT_MS     = 2000;
 
 inline bool     open           = true;    // debounced, reported state
-inline float    resistance     = -1.0f;   // last measured R (Ω), -1 when open
+inline float    resistance     = -1.0f;   // last measured R (ohm), -1 when open
 inline int      flipCount      = 0;       // consecutive samples disagreeing with `open`
 inline float    lastSentOhm    = -1.0f;
 inline bool     lastSentOpen   = true;
@@ -51,7 +51,7 @@ inline void hardware_init() {
     analogSetPinAttenuation(ORGAN_SENSE_PIN, ADC_11db);
 }
 
-// Average a few reads, classify open/short, convert to Ω via the divider.
+// Average a few reads, classify open/short, convert to ohm via the divider.
 inline float sample(bool& isOpen) {
     uint32_t acc = 0;
     for (int i = 0; i < 8; i++) acc += analogRead(ORGAN_SENSE_PIN);

@@ -14,7 +14,7 @@ def _data() -> dict:
                     {"mac": "AA", "node_type": "node_direct", "max_slots": 3},
                     {"mac": "BB", "node_type": "node_multiplexed", "max_slots": 12},
                     {"mac": "MM", "node_type": "node_magnet_sensor"},
-                    {"node_type": "node_direct"},  # no mac → ignored
+                    {"node_type": "node_direct"},  # no mac -> ignored
                 ],
                 "skins": [
                     {"skin_id": "belly-1",

@@ -4,8 +4,8 @@ Adds or edits a single ESP32 node entry under a robot.
 A node has three attributes: MAC address, node_type, and max_slots.
 
 Node types and their default slot counts:
-    node_direct       — 3   (fixed: 3 chambers, GPIO valves, onboard pumps)
-    node_multiplexed  — 12  (default; up to 16 chambers)
+    node_direct       - 3   (fixed: 3 chambers, GPIO valves, onboard pumps)
+    node_multiplexed  - 12  (default; up to 16 chambers)
 """
 
 from PySide6.QtWidgets import QMessageBox, QWidget

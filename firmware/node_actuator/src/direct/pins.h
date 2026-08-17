@@ -1,7 +1,7 @@
 #pragma once
 
 // ---------------------------------------------------------------------------
-// SoftEdIBO node_direct — Pin definitions
+// SoftEdIBO node_direct - Pin definitions
 //
 // 3 inflatable air chambers, each with its own inflate/deflate solenoid valve.
 // Valves are driven through a ULN2803A Darlington array (logic-level inputs,
@@ -22,8 +22,8 @@ constexpr int PSENSOR_PINS[3] = {39, 34, 35};
 constexpr int PUMP_PINS[2] = {32, 33};
 //                           PUMP1=IO32 (J2_7), PUMP2=IO33 (J2_8)
 
-// 8 valves wired through ULN2803A (U5). Only 6 are used (3 chambers × 2 valves).
-// Mapping: chamber i → inflate=VALVE_PINS[i*2], deflate=VALVE_PINS[i*2+1]
+// 8 valves wired through ULN2803A (U5). Only 6 are used (3 chambers x 2 valves).
+// Mapping: chamber i -> inflate=VALVE_PINS[i*2], deflate=VALVE_PINS[i*2+1]
 constexpr int VALVE_PINS[6] = {25, 4, 16, 17, 18, 19};
 //                             VALVE1=IO25 (ch0 inf, J2_9)
 //                             VALVE2=IO4  (ch0 def, J3_13)
@@ -40,7 +40,7 @@ constexpr int LED_PIN  = 23;
 constexpr int NUM_LEDS = 24;
 
 // Organ + cover sensing ADC input (see organ.h). IO36 (SENSOR_VP) is the
-// only free ADC1 input — IO34/35/39 are the pressure sensors, IO32/33 the
+// only free ADC1 input - IO34/35/39 are the pressure sensors, IO32/33 the
 // pumps. TODO: verify IO36 is routed to a header/test pad on the PCB.
 constexpr int ORGAN_SENSE_PIN = 36;
 

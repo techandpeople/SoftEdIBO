@@ -12,11 +12,11 @@ class Settings:
     """Loads and persists application configuration from settings.yaml.
 
     Always:
-    - ROOT   = ~/.local/share/SoftEdIBO  — writable user data (DB, config, robots)
+    - ROOT   = ~/.local/share/SoftEdIBO  - writable user data (DB, config, robots)
     In a frozen (AppImage / PyInstaller) bundle:
-    - BUNDLE = sys._MEIPASS  — read-only bundled assets (firmware, default config)
+    - BUNDLE = sys._MEIPASS  - read-only bundled assets (firmware, default config)
     In development:
-    - BUNDLE = project root  — read-only assets from the repo
+    - BUNDLE = project root  - read-only assets from the repo
     """
 
     BUNDLE: Path = (
@@ -106,13 +106,13 @@ class Settings:
         return p if p.is_absolute() else self.ROOT / p
 
     def set_recordings_dir(self, path: str) -> None:
-        """Persist the recordings folder (stored as given — absolute or relative)."""
+        """Persist the recordings folder (stored as given - absolute or relative)."""
         self._data.setdefault("data", {})["recordings_dir"] = str(path)
 
     def touch_threshold_ut(self, skin_type: str) -> float | None:
-        """Saved magnet-sensor activation threshold (µT) for a skin type, or None.
+        """Saved magnet-sensor activation threshold (uT) for a skin type, or None.
 
-        The general default a node uses to flip a sensor active — calibrated once
+        The general default a node uses to flip a sensor active - calibrated once
         per skin type (e.g. in the guided gesture capture) and reused everywhere
         that skin type is driven. Stored under ``touch.act_threshold_ut.<type>``."""
         by_type = self._data.get("touch", {}).get("act_threshold_ut", {})
@@ -120,7 +120,7 @@ class Settings:
         return float(v) if isinstance(v, (int, float)) else None
 
     def set_touch_threshold_ut(self, skin_type: str, value: float) -> None:
-        """Persist a skin type's magnet-sensor activation threshold (µT) and save."""
+        """Persist a skin type's magnet-sensor activation threshold (uT) and save."""
         if not skin_type:
             return
         touch = self._data.setdefault("touch", {})

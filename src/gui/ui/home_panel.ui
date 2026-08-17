@@ -39,7 +39,7 @@
 
    <item>
     <widget class="QLabel" name="description_label">
-     <property name="text"><string>Robot Hospital Activity - Where children play “doctors” and “treat” soft silicone robots
+     <property name="text"><string>Robot Hospital Activity - Where children play "doctors" and "treat" soft silicone robots
 by synchronising touch, rhythm and collaboration</string></property>
      <property name="alignment"><set>Qt::AlignCenter</set></property>
      <property name="wordWrap"><bool>true</bool></property>

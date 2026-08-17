@@ -6,7 +6,7 @@ Supports two environments:
   that extracts it after the app exits, then restarts ``SoftEdIBO.exe``.
 
 Only active when running as a frozen binary and ``GITHUB_REPO`` is configured.
-Uses ``QNetworkAccessManager`` for fully async HTTP — no threads, no blocking.
+Uses ``QNetworkAccessManager`` for fully async HTTP - no threads, no blocking.
 
 Typical flow
 ------------
@@ -104,7 +104,7 @@ class AppUpdater(QObject):
     # ------------------------------------------------------------------
 
     def check(self) -> None:
-        """Async version check. Safe to call at startup — returns immediately.
+        """Async version check. Safe to call at startup - returns immediately.
 
         - nightly => checks the ``nightly`` release, compares build timestamps.
         - stable  => checks the latest stable release, compares semver.
@@ -174,7 +174,7 @@ class AppUpdater(QObject):
     # ------------------------------------------------------------------
 
     def download(self, url: str) -> None:
-        """Start downloading the update. Streams to disk — no big RAM spike."""
+        """Start downloading the update. Streams to disk - no big RAM spike."""
         if _is_frozen_windows():
             self._tmp_path = Path(sys.executable).parent / "SoftEdIBO-update.zip"
         else:
@@ -266,7 +266,7 @@ class AppUpdater(QObject):
     def cancel(self) -> None:
         """Abort an in-progress download.
 
-        No-op once the download has completed — the temp file must not be
+        No-op once the download has completed - the temp file must not be
         deleted after ``download_done`` has been emitted, because the apply
         shell script still needs it.  (Qt destroys the QProgressDialog on
         app shutdown and emits ``canceled``, which would otherwise delete the

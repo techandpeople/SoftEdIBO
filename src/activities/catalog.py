@@ -3,9 +3,9 @@
 This module is the **single source of truth** for what a behaviour spec may
 contain. It serves two consumers:
 
-- :class:`~src.activities.scripted_activity.ScriptedActivity` — the runtime
+- :class:`~src.activities.scripted_activity.ScriptedActivity` - the runtime
   interpreter validates specs against these schemas and dispatches each verb.
-- The future Blockly block editor (Fase 2) — generates one block per entry
+- The future Blockly block editor (Fase 2) - generates one block per entry
   here, so adding a verb makes a block appear automatically.
 
 A behaviour **spec** is plain data (JSON-serialisable), authored by hand today
@@ -28,8 +28,8 @@ dict (or a scalar shorthand, e.g. ``{"wait": 500}``). Control-flow verbs
 (``sequence`` / ``repeat`` / ``for_each_chamber`` / ``if_robot``) nest more
 steps under ``do`` (and ``else`` for ``if_robot``). Instantaneous verbs apply
 immediately; ``wait`` / ``wait_for_touch`` suspend the running sequence until
-satisfied — that is what lets an author write "inflate 1, wait, deflate 1,
-inflate 2 …" as a literal sequence.
+satisfied - that is what lets an author write "inflate 1, wait, deflate 1,
+inflate 2 ..." as a literal sequence.
 
 A **condition** is a single-key dict too: ``{"elapsed_ms": 120000}``,
 ``{"touch_count": {"min": 10}}``, or a combinator ``{"any": [..]}`` /
@@ -69,11 +69,11 @@ class Verb:
 
 
 # ---------------------------------------------------------------------------
-# Chamber addressing — every chamber action accepts one of these.
+# Chamber addressing - every chamber action accepts one of these.
 # ---------------------------------------------------------------------------
-#   int      → that local chamber index
-#   "all"    → every chamber of the unit
-#   "current"/None → the chamber bound by the enclosing for_each_chamber
+#   int      -> that local chamber index
+#   "all"    -> every chamber of the unit
+#   "current"/None -> the chamber bound by the enclosing for_each_chamber
 CHAMBER_FIELD = VerbField(
     name="chamber", type="chamber", default="current",
     description="Chamber index, 'all', or 'current' (the for_each_chamber "
@@ -85,15 +85,15 @@ CHAMBER_FIELD = VerbField(
 # Unlike period_ms it needs no calibrated fill curve.
 DUTY_FIELD = VerbField(
     name="duty", type="int", default=0,
-    description="Pump PWM 1-255 — lower = gentler, slower stroke. 0 = full "
+    description="Pump PWM 1-255 - lower = gentler, slower stroke. 0 = full "
                 "speed (no duty sent). Needs no fill calibration.",
 )
 
 # Friendly 1-5 "power" dial the block editor shows instead of the raw ``duty``
 # PWM. Mapped onto the calibrated duty range at runtime (see
 # :func:`~src.hardware.fill_scaling.duty_for_power`): 1 = the per-skin-type
-# minimum usable stroke, 5 = full power. Level 5 is the default — full speed,
-# leaving any ``period_ms`` / calibrated slow-fill in charge — so a lower level
+# minimum usable stroke, 5 = full power. Level 5 is the default - full speed,
+# leaving any ``period_ms`` / calibrated slow-fill in charge - so a lower level
 # is an explicit "run gentler". Overrides ``duty`` when both are present.
 POWER_FIELD = VerbField(
     name="power", type="int", default=5, choices=(1, 2, 3, 4, 5),
@@ -130,7 +130,7 @@ LED_PATTERNS = ("solid", "pulse", "blink", "comet", "off")
 # split sit top/bottom instead of left/right, or start a comet elsewhere.
 ANGLE_FIELD = VerbField(
     name="angle", type="int", default=0,
-    description="Rotate the split/comet around the ring (0-360°). 0 = default "
+    description="Rotate the split/comet around the ring (0-360 deg). 0 = default "
                 "orientation; e.g. 90 turns left/right halves into top/bottom.",
 )
 
@@ -175,11 +175,11 @@ ACTIONS: tuple[Verb, ...] = (
         VerbField("color1", "color", "#8e44ad"),
         VerbField("color2", "color", "#f1c40f"),
         VerbField("period_ms", "ms", 2000,
-                  description="One full colour1 → colour2 → colour1 cycle."),
+                  description="One full colour1 -> colour2 -> colour1 cycle."),
         RING_FIELD,
     )),
     Verb("touch_progress", "action",
-         "Fill an LED ring as the child touches — a touch-counter you can see. "
+         "Fill an LED ring as the child touches - a touch-counter you can see. "
          "Light one more arc every 'per' touches, from 'bg_color' to 'on_color'. "
          "Put it in a phase's 'on touch' so it repaints on each press; once all "
          "'segments' arcs are lit it jumps to phase 'to' (leave 'to' empty to "
@@ -247,7 +247,7 @@ ACTIONS: tuple[Verb, ...] = (
     )),
     # --- Thymio wheeled base (no-ops on robots without wheels) ---
     Verb("thymio_drive", "action",
-         "Set the Thymio's wheel speeds — optionally for a fixed time, then "
+         "Set the Thymio's wheel speeds - optionally for a fixed time, then "
          "stop. 0/0 stops the wheels.", (
         VerbField("left", "int", 100,
                   description="Left wheel target, -500..500 (negative = "
@@ -277,7 +277,7 @@ ACTIONS: tuple[Verb, ...] = (
                   description="Tone duration in ms (only used for a 'freq' tone)."),
         VerbField("track", "int", -1,
                   description="Play recorded track N from the microSD (needs a card); "
-                              "-1 = don't (use system/tone). Takes priority when ≥0."),
+                              "-1 = don't (use system/tone). Takes priority when >=0."),
     ), kinds=(activity_kind.THYMIO,)),
 )
 
@@ -296,7 +296,7 @@ CONTROL: tuple[Verb, ...] = (
     )),
     Verb("if_robot", "control",
          "Run 'do' when the unit's robot is the chosen kind, else 'else'. "
-         "Lets one behaviour cover every robot — e.g. only the Thymio drives "
+         "Lets one behaviour cover every robot - e.g. only the Thymio drives "
          "while the Turtle and Tree skip that part.", (
         VerbField("robot", "enum", activity_kind.THYMIO,
                   choices=activity_kind.KINDS,
@@ -317,7 +317,7 @@ CONDITIONS: tuple[Verb, ...] = (
     )),
     Verb("gesture_count", "condition",
          "True once the child made a gesture at least 'min' times in this state. "
-         "'kind' is either a raw touch (any press — no model needed) or an "
+         "'kind' is either a raw touch (any press - no model needed) or an "
          "ML-classified gesture (tap / press / compressions). Classified kinds "
          "need a trained touch model for this skin type; without one they never "
          "fire, so 'touch' is the safe default.", (
@@ -368,7 +368,7 @@ CONDITIONS: tuple[Verb, ...] = (
         VerbField("bad", "int", 0, description="Bad-organ count threshold."),
     )),
     Verb("robot_is", "condition",
-         "True when the unit's robot is the chosen kind — lets a transition "
+         "True when the unit's robot is the chosen kind - lets a transition "
          "fire only on one robot.", (
         VerbField("robot", "enum", activity_kind.THYMIO,
                   choices=activity_kind.KINDS),
@@ -376,7 +376,7 @@ CONDITIONS: tuple[Verb, ...] = (
     Verb("always", "condition", "Always true (unconditional transition).", ()),
 )
 
-# Aliases accepted in specs for readability (any↔or, all↔and).
+# Aliases accepted in specs for readability (any<->or, all<->and).
 COND_ALIASES = {"or": "any", "and": "all"}
 
 # Verbs no longer offered as blocks but still accepted in saved specs so older
@@ -407,7 +407,7 @@ class SpecError(ValueError):
 def validate_spec(spec: dict[str, Any]) -> None:
     """Raise :class:`SpecError` if ``spec`` is not a runnable behaviour.
 
-    Cheap structural checks only (verb names, state references) — the
+    Cheap structural checks only (verb names, state references) - the
     interpreter tolerates missing optional params via defaults.
     """
     if not isinstance(spec, dict):
@@ -419,7 +419,7 @@ def validate_spec(spec: dict[str, Any]) -> None:
     if initial not in states:
         raise SpecError(f"spec.initial {initial!r} is not a defined state")
 
-    # Optional activity target. New-style: {"skin": <condition>} — the robot
+    # Optional activity target. New-style: {"skin": <condition>} - the robot
     # is chosen at session start and `if_robot` blocks gate robot-specific
     # steps. Legacy: {"kind": <robot kind>}. Absent = "any" behaviour.
     target = spec.get("target")
@@ -437,7 +437,7 @@ def validate_spec(spec: dict[str, Any]) -> None:
                 raise SpecError(f"{sid}.transitions[{i}] needs a 'to'")
             if tr["to"] not in states:
                 raise SpecError(
-                    f"{sid}.transitions[{i}] → unknown state {tr['to']!r}")
+                    f"{sid}.transitions[{i}] -> unknown state {tr['to']!r}")
             _validate_cond(tr.get("when", {"always": True}),
                            f"{sid}.transitions[{i}].when")
 
@@ -483,7 +483,7 @@ def _validate_steps(steps: Any, where: str, kind: str | None = None) -> None:
         raise SpecError(f"{where} must be a list of steps")
     for i, step in enumerate(steps):
         if not isinstance(step, dict) or len(step) != 1:
-            raise SpecError(f"{where}[{i}] must be a single-key {{verb: …}} dict")
+            raise SpecError(f"{where}[{i}] must be a single-key {{verb: ...}} dict")
         name = next(iter(step))
         if name not in STEP_NAMES:
             raise SpecError(f"{where}[{i}] unknown verb {name!r}")
@@ -499,7 +499,7 @@ def _check_verb_kind(v: Verb | None, name: str, kind: str | None,
                      where: str) -> None:
     """Kind gating for LEGACY kind-targeted specs only; skin-targeted and
     target-less specs may use robot-specific verbs anywhere (they no-op on
-    other robots — wrap in `if_robot` to be explicit)."""
+    other robots - wrap in `if_robot` to be explicit)."""
     if v is not None and v.kinds and kind is not None and kind not in v.kinds:
         raise SpecError(
             f"{where} verb {name!r} needs a spec.target of kind "

@@ -2,12 +2,12 @@
 
 ESP-NOW PC->node commands are fire-and-forget: a dropped ``set_max_pressure`` /
 ``set_min_pressure`` leaves the node clamping an inflate to a *stale* safety
-limit — the cause of an observed 20->50 kPa over-inflation (see
+limit - the cause of an observed 20->50 kPa over-inflation (see
 ``docs/ACK_RELIABILITY.md``). This helper tags such a command with a per-node
 sequence number, waits for the node's ``{"type":"ack","seq":...,"ok":...}``,
 and retransmits the *same* seq on timeout, so the limit reliably lands.
 
-Only *idempotent* commands may be confirmed here — a retransmitted ``inflate``
+Only *idempotent* commands may be confirmed here - a retransmitted ``inflate``
 would stack a second pulse, whereas setting a limit twice is harmless. The node
 ACKs *after applying* the command, so an ack means "applied", not merely
 "received"; a rejected command (bad chamber) comes back ``ok=false`` (a NACK) so
@@ -60,7 +60,7 @@ class CommandConfirmer:
         # One persistent handler routes this node's acks into the pending map.
         # The gateway holds it weakly, so it lives exactly as long as this
         # confirmer (owned by the ESP32Controller); it fires on the read thread
-        # and only touches the lock-guarded map — no GUI work.
+        # and only touches the lock-guarded map - no GUI work.
         self._gateway.on_message(self._handle)
 
     def _next_seq(self) -> int:
@@ -78,8 +78,8 @@ class CommandConfirmer:
         (the command must be idempotent). ``fields`` are the command payload
         (e.g. ``chamber=0, value=20.0``). Returns:
 
-        - ``True``  — the node acked ``ok`` (applied);
-        - ``False`` — the node NACK'd (rejected; no retry), or no ack arrived
+        - ``True``  - the node acked ``ok`` (applied);
+        - ``False`` - the node NACK'd (rejected; no retry), or no ack arrived
           after exhausting the retries (node likely unreachable).
         """
         timeout = self.ACK_TIMEOUT if timeout is None else timeout
@@ -94,10 +94,10 @@ class CommandConfirmer:
                 if pending.event.wait(timeout):
                     if pending.ok:
                         return True
-                    logger.warning("Node %s rejected %s (seq %d) — NACK, not retrying",
+                    logger.warning("Node %s rejected %s (seq %d) - NACK, not retrying",
                                    self._mac, command, seq)
                     return False
-            logger.warning("No ack for %s (seq %d) on %s after %d retries — "
+            logger.warning("No ack for %s (seq %d) on %s after %d retries - "
                            "node may be unreachable", command, seq, self._mac, retries)
             return False
         finally:

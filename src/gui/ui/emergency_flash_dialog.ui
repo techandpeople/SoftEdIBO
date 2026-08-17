@@ -13,7 +13,7 @@
     <widget class="QLabel" name="intro_label">
      <property name="wordWrap"><bool>true</bool></property>
      <property name="whatsThis"><string>Cable-flashes node firmware over the UART pins of a board whose own USB no longer works, using a second ESP32 (a classic WROOM DevKit with a CP2102/CH340 chip) held in reset as a transparent USB-to-serial bridge. After this the node has OTA firmware again and can be updated wirelessly from Tools - Update Nodes (OTA).</string></property>
-     <property name="text"><string>Recover a node whose USB is dead by flashing it through a &lt;b&gt;second ESP32&lt;/b&gt; used as a USB-to-serial bridge. The bridge must be a classic &lt;b&gt;WROOM DevKit (CP2102/CH340)&lt;/b&gt; — boards with native USB (S3/C6/XIAO) will not work as a bridge.</string></property>
+     <property name="text"><string>Recover a node whose USB is dead by flashing it through a &lt;b&gt;second ESP32&lt;/b&gt; used as a USB-to-serial bridge. The bridge must be a classic &lt;b&gt;WROOM DevKit (CP2102/CH340)&lt;/b&gt; - boards with native USB (S3/C6/XIAO) will not work as a bridge.</string></property>
     </widget>
    </item>
    <item>
@@ -25,7 +25,7 @@
         <property name="wordWrap"><bool>true</bool></property>
         <property name="textFormat"><enum>Qt::RichText</enum></property>
         <property name="whatsThis"><string>Hold the bridge board in reset (its EN pin to GND) so its USB-serial chip drives the header pins. Because you are tapping that chip, TX and RX go STRAIGHT (TX-TX, RX-RX), not crossed. The bridge cannot drive the target's reset lines, so put the target into download mode by hand before flashing.</string></property>
-        <property name="text"><string>1. Bridge board: jumper &lt;b&gt;EN&#8594;GND&lt;/b&gt; (keeps its own chip in reset).&lt;br/&gt;2. Wire &lt;b&gt;straight-through&lt;/b&gt; (not crossed): bridge &lt;b&gt;TX&#8594;TX&lt;/b&gt;, &lt;b&gt;RX&#8594;RX&lt;/b&gt;, &lt;b&gt;GND&#8594;GND&lt;/b&gt;.&lt;br/&gt;3. Power the target (3V3&#8594;3V3 &lt;i&gt;or&lt;/i&gt; 5V&#8594;5V, never both), common GND.&lt;br/&gt;4. Download mode on the &lt;b&gt;target&lt;/b&gt;: hold &lt;b&gt;BOOT&lt;/b&gt; (IO0), tap &lt;b&gt;EN/RST&lt;/b&gt;, release BOOT — do this when &#8220;Connecting…&#8221; appears.</string></property>
+        <property name="text"><string>1. Bridge board: jumper &lt;b&gt;EN&#8594;GND&lt;/b&gt; (keeps its own chip in reset).&lt;br/&gt;2. Wire &lt;b&gt;straight-through&lt;/b&gt; (not crossed): bridge &lt;b&gt;TX&#8594;TX&lt;/b&gt;, &lt;b&gt;RX&#8594;RX&lt;/b&gt;, &lt;b&gt;GND&#8594;GND&lt;/b&gt;.&lt;br/&gt;3. Power the target (3V3&#8594;3V3 &lt;i&gt;or&lt;/i&gt; 5V&#8594;5V, never both), common GND.&lt;br/&gt;4. Download mode on the &lt;b&gt;target&lt;/b&gt;: hold &lt;b&gt;BOOT&lt;/b&gt; (IO0), tap &lt;b&gt;EN/RST&lt;/b&gt;, release BOOT - do this when &#8220;Connecting...&#8221; appears.</string></property>
        </widget>
       </item>
      </layout>

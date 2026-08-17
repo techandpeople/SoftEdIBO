@@ -1,4 +1,4 @@
-# Study Plan — "Hospital for Sick Robots"
+# Study Plan - "Hospital for Sick Robots"
 
 Living document for the children's study. Tracks what the study needs, what
 already exists, what is being added, and what is still open. Check items off
@@ -14,58 +14,58 @@ done; firmware hard-cap values corrected).
 
 A behavioral-observation study with children. Researchers observe:
 
-- **Behavior types** — what each child does (touch, swap organs, open/close
+- **Behavior types** - what each child does (touch, swap organs, open/close
   the cover, watch, help, wait).
-- **Rhythm** — pacing of actions (inter-event intervals per child / robot).
-- **Imitation / convergence** — whether children do the same as each other
+- **Rhythm** - pacing of actions (inter-event intervals per child / robot).
+- **Imitation / convergence** - whether children do the same as each other
   (cross-participant correlation of event sequences).
 
 ### Robot setups (3 conditions)
 
 | Setup | Robots | Children | Social structure |
 |---|---|---|---|
-| Turtle | 1 TurtleRobot, multiple skins | 3 share one robot | Cooperative — one shared "patient" |
-| Thymio | 3 ThymioRobots | 1 robot per child | Parallel individual — imitation observable across robots |
-| Tree | 1 TreeRobot, 1 branch/skin per child | 3, each owns a branch | Individual within shared body — sharing supported by `TreeRobot.assign_to / share_with` |
+| Turtle | 1 TurtleRobot, multiple skins | 3 share one robot | Cooperative - one shared "patient" |
+| Thymio | 3 ThymioRobots | 1 robot per child | Parallel individual - imitation observable across robots |
+| Tree | 1 TreeRobot, 1 branch/skin per child | 3, each owns a branch | Individual within shared body - sharing supported by `TreeRobot.assign_to / share_with` |
 
 ### Activity theme
 
 At least one activity per robot, themed **Hospital for sick robots**:
 the child must swap the bad organ(s) for good ones, then close the silicone
-cover over the skin. The cover **closes an electrical circuit** — that is how
+cover over the skin. The cover **closes an electrical circuit** - that is how
 the ESP32 knows the cover is back on. Only then is the robot "cured".
 
 The organ/cover logic runs on the declarative behaviour engine
 (`ScriptedActivity`): a behaviour targeting the **organs** skin condition uses
 the `organs` condition verb (per-skin organ verdicts resolved by
 `OrganResolver` from the circuit reading) and runs on any robot type, so the
-same behaviour covers all three setups — robot-specific parts sit inside
+same behaviour covers all three setups - robot-specific parts sit inside
 `if_robot` blocks. (The earlier hardcoded `OrganSwapActivity` and the
-ActivityPreset system were removed in favour of block-authored behaviours —
+ActivityPreset system were removed in favour of block-authored behaviours -
 see [ACTIVITIES.md](ACTIVITIES.md).)
 
 ---
 
-## 2. Cover + organ sensing — hardware design (decided)
+## 2. Cover + organ sensing - hardware design (decided)
 
 One ADC line measures **both** the organ identity and the cover state:
 
 ```
-3V3 ── R_KNOWN (1 kΩ) ──●── organ resistor network ── cover contact ── GND
-                        │
+3V3 -- R_KNOWN (1 kohm) --*-- organ resistor network -- cover contact -- GND
+                          |
                    ORGAN_SENSE_PIN (ADC)
 ```
 
 - Each pluggable organ is a silicone block with a known internal resistor;
   all organ slots are wired **in parallel** (one reading per robot/node).
-- The **cover contact is in series with the whole network**: cover off →
-  open circuit → ADC reads the 3V3 rail → firmware reports `open: true`.
-  Cover on → divider gives `R_total = R_KNOWN * raw / (4095 - raw)`.
+- The **cover contact is in series with the whole network**: cover off ->
+  open circuit -> ADC reads the 3V3 rail -> firmware reports `open: true`.
+  Cover on -> divider gives `R_total = R_KNOWN * raw / (4095 - raw)`.
 - This matches the physical story ("the cover closes the circuit") and costs
-  **zero extra GPIOs** — no separate cover switch needed.
-- Default pin on the direct node: **IO36 (SENSOR_VP)** — the only free
+  **zero extra GPIOs** - no separate cover switch needed.
+- Default pin on the direct node: **IO36 (SENSOR_VP)** - the only free
   ADC1 input (IO34/35/39 are the pressure sensors, IO32/33 the pumps).
-- **Contact mechanism (decided 2026-06-11): gravity** — the cover simply
+- **Contact mechanism (decided 2026-06-11): gravity** - the cover simply
   rests on contact pads, its own weight closes the circuit. Consequences:
   - firmware debounces the open/closed flip (3 consecutive 100 ms samples)
     since a resting contact can bounce while children handle the cover;
@@ -80,9 +80,9 @@ Detection semantics (PC side, the organs-condition behaviour):
 
 | Reading | Meaning | Patient state |
 |---|---|---|
-| `open: true` (R = ∞) | Cover off — "surgery" in progress | `open` |
+| `open: true` (R = inf) | Cover off - "surgery" in progress | `open` |
 | R finite, wrong value | Cover on, wrong/missing organs | `sick` |
-| R matches cured target (±tol) | Cover on + correct organs | `cured` |
+| R matches cured target (+/-tol) | Cover on + correct organs | `cured` |
 
 **One circuit (Turtle / Thymio) vs many (Tree).** The direct node has a single
 organ circuit on IO36. The multiplexed node (Tree) reads several circuits on
@@ -95,7 +95,7 @@ nodes:
     organ_channels: [13, 14, 15]   # one mux channel per branch
 skins:
   - skin_id: branch-1
-    organ: {slot: 0}               # → organ_channels[0] = mux ch 13
+    organ: {slot: 0}               # -> organ_channels[0] = mux ch 13
   - skin_id: branch-2
     organ: {slot: 1}
   - skin_id: branch-3
@@ -109,98 +109,98 @@ Skins without one share a single whole-robot patient.
 
 ## 3. Work breakdown
 
-### Phase A — organ + cover sensing chain (in progress, this session)
+### Phase A - organ + cover sensing chain (in progress, this session)
 
 - [x] Plan written (this file).
-- [x] Firmware (direct node): `organ.h` — periodic ADC sample, voltage-divider
+- [x] Firmware (direct node): `organ.h` - periodic ADC sample, voltage-divider
       conversion, open-circuit detection, hysteresis + heartbeat broadcast
       `{"type":"organ","resistance_ohm":R,"open":bool}`.
-- [x] `ESP32Controller.on_organ(cb)` — dispatch `type=="organ"`;
+- [x] `ESP32Controller.on_organ(cb)` - dispatch `type=="organ"`;
       `open:true` is delivered as `float("inf")`.
 - [x] `SimulatedController.sim_set_organ(ohm | None)` + `on_organ` so the
       activity is fully testable without hardware (`None` = cover off).
 - [x] `OrganSwapActivity`: third state **`open`** (cover off) with its own
-      LED color; transitions sick ⇄ open ⇄ cured driven by organ readings.
-      (Activity since removed — organ states are now authored as declarative
+      LED color; transitions sick <-> open <-> cured driven by organ readings.
+      (Activity since removed - organ states are now authored as declarative
       behaviours with the `organs` condition.)
-- [x] Behavioral event logging from the activity (see §4).
-- [x] `PROTOCOL.md` — document the `organ` broadcast.
+- [x] Behavioral event logging from the activity (see section 4).
+- [x] `PROTOCOL.md` - document the `organ` broadcast.
 - [x] Firmware builds (`pio run -e direct`), Python tests pass.
 
-### Phase B — study tooling
+### Phase B - study tooling
 
-- [x] **Multiplexed node organ sensing** — `multiplexed/organ.h`: per-slot
+- [x] **Multiplexed node organ sensing** - `multiplexed/organ.h`: per-slot
       sensing on configured mux channels, broadcast
       `{"type":"organ","slot":N,"resistance_ohm":R,"open":bool}`. Channels come
       from `configure`'s `organ_channels` (highest channels, scrubbed from the
       chamber autodetect). Wired into `_robot_builder` from a node's
       `organ_channels` YAML field. Tree gets one patient per branch.
-- [x] **Per-patient state machines** — a skin with its own
+- [x] **Per-patient state machines** - a skin with its own
       `organ: {slot}` block is its own patient (Tree branch, own LED + cover);
       skins without one fold into a single whole-robot patient (Turtle shared
       circuit, Thymio). Events/targets use the patient id (`<robot>` or
       `<robot>/<skin>`). (Since superseded in form: `ScriptedActivity` runs
       every behaviour per skin, with organ verdicts per unit via
       `OrganResolver`.)
-- [x] **Child-safety actuation watchdog** — both firmwares force-stop any
+- [x] **Child-safety actuation watchdog** - both firmwares force-stop any
       chamber stuck INFLATING/DEFLATING past 10 s (sensor-failure burst
-      protection). See §8.
-- [x] **Observer quick-tag panel** (`src/gui/observer_panel.py`) — one button
+      protection). See section 8.
+- [x] **Observer quick-tag panel** (`src/gui/observer_panel.py`) - one button
       per behavior code per child; each click logs a timestamped `observer`
       event. Opened/closed with the session by `SessionPanel`. Replaces video
       coding (researcher's preference). Carries the **marker** button too.
-- [x] **Session export** (`src/data/export.py` `SessionExporter`) — flattens
+- [x] **Session export** (`src/data/export.py` `SessionExporter`) - flattens
       `interaction_events` to CSV, attributing each row to `robot_id` +
       `participant` via the session's assignments (decodes patient/skin
       targets). Wired into the Data panel's existing export buttons.
-- [x] **GUI: organ state in the monitor** — `OrganPanel`
+- [x] **GUI: organ state in the monitor** - `OrganPanel`
       (`src/gui/monitor/organ_panel.py`), shown beside the skin grid: one dot
       per organ (green = good, red = bad, outline = absent) plus a state-LED
       dot mirroring the hardware light.
-- [x] **GUI: simulation drive for organs** — in simulation each `OrganPanel`
-      dot is clickable (cycles none → good → bad), feeding the matching
+- [x] **GUI: simulation drive for organs** - in simulation each `OrganPanel`
+      dot is clickable (cycles none -> good -> bad), feeding the matching
       parallel resistance into the simulated organ circuit, so a full session
       can be rehearsed before the study.
-- [x] **Raw sensor stream recording** — `src/data/stream_recorder.py`
+- [x] **Raw sensor stream recording** - `src/data/stream_recorder.py`
       (`StreamRecorder`) taps the gateway and writes every message of a session
       to `data/recordings/<session_id>.jsonl` (header + 1 line/msg, boot
       announces included so it's self-describing). Toggle "Record sensor
       streams" in the session setup dialog (on by default; off in simulation).
-- [x] **Skin geometry registry + `skin_type`** — `src/hardware/skin_geometry.py`
+- [x] **Skin geometry registry + `skin_type`** - `src/hardware/skin_geometry.py`
       hardcodes each skin type's shape + sensor coordinates (editable
       constants); `Skin.skin_type` selects it. GUI: the skin dialog offers only
       the robot's own types and draws the real shape/aspect (square vs
       rectangle vs round/triangle/Thymio 'D'), in both editor and monitor.
-- [x] **Touch-gesture ML pipeline** — per-`skin_type`, coordinate-free; see
-      [TOUCH_ML.md](TOUCH_ML.md). Recording → live label (observer panel) →
-      `scripts/label_touches.py` → `scripts/train_touch_model.py`. scikit-learn
+- [x] **Touch-gesture ML pipeline** - per-`skin_type`, coordinate-free; see
+      [TOUCH_ML.md](TOUCH_ML.md). Recording -> live label (observer panel) ->
+      `scripts/label_touches.py` -> `scripts/train_touch_model.py`. scikit-learn
       is the optional `ml` extra; the classifier is inert without a model.
-- [ ] **Per-condition behaviours** (replaces the per-setup ActivityPresets —
-      presets were removed) — author/tune the study behaviours per skin
+- [ ] **Per-condition behaviours** (replaces the per-setup ActivityPresets -
+      presets were removed) - author/tune the study behaviours per skin
       condition (importable examples in `config/examples/behaviours/`), with
       the organ matching tuned to the physically built organs (measure real
       resistor values; set the organ catalogue / `organ_tolerance_ohm`
       accordingly).
-- [ ] **Thymio movement reactions** (optional polish) — wheeled "happy dance"
+- [ ] **Thymio movement reactions** (optional polish) - wheeled "happy dance"
       on cure. The building blocks are done: dongle-free wireless control via
       the gateway's C6 works (see
       [THYMIO_WIRELESS_CONTROL.md](THYMIO_WIRELESS_CONTROL.md)) and the
       behaviour engine has `thymio_drive` / `thymio_leds` / `thymio_sound`
-      verbs — remaining: author the reaction in the study behaviours.
-- [ ] **Tree sharing events** — log `assign_to` / `share_with` calls as
+      verbs - remaining: author the reaction in the study behaviours.
+- [ ] **Tree sharing events** - log `assign_to` / `share_with` calls as
       events so branch-sharing behavior is in the same timeline.
-- [ ] **Pilot run** — full dry run in simulation, then with one real node:
-      organ values discriminate reliably (check ADC noise vs ±tolerance),
+- [ ] **Pilot run** - full dry run in simulation, then with one real node:
+      organ values discriminate reliably (check ADC noise vs +/-tolerance),
       cover contact is robust to child handling.
 
-### Phase C — analysis support (after pilot)
+### Phase C - analysis support (after pilot)
 
 - [ ] Notebook/script with first-pass metrics:
       - per-child event rate + inter-event interval distributions (rhythm);
       - state-transition timelines per robot (time-to-cure, number of
         cover openings, organ trial-and-error count);
       - cross-child lagged correlation / sequence similarity (imitation).
-- [ ] Decide on ML for behavior detection (see §5) **after** the pilot data
+- [ ] Decide on ML for behavior detection (see section 5) **after** the pilot data
       exists.
 
 ---
@@ -217,25 +217,25 @@ Already logged today:
   participant assigned to the skin (TouchAssignmentPanel flow).
 
 Added by the behaviour engine (`ScriptedActivity`), keyed by **unit id** in
-``target`` (``<robot>/<skin>`` — each skin runs the behaviour independently):
+``target`` (``<robot>/<skin>`` - each skin runs the behaviour independently):
 
 | type | action | target | metadata |
 |---|---|---|---|
 | `activity` | `state` | unit_id | `{"from": "...", "to": "..."}` |
 
 (The removed `OrganSwapActivity` also logged `cover open/close` and
-`organ reading` rows; today the raw `organ` broadcasts — including the
-open-circuit "cover off" readings — are captured by the sensor-stream
+`organ reading` rows; today the raw `organ` broadcasts - including the
+open-circuit "cover off" readings - are captured by the sensor-stream
 recording, `data/recordings/<session>.jsonl`, joinable on timestamps.)
 
 Added by the **observer quick-tag panel** (live coding, no video):
 
 | type | action | target | metadata |
 |---|---|---|---|
-| `observer` | behavior code (`watches`, `points`, `helps`, …) | participant_id | — |
+| `observer` | behavior code (`watches`, `points`, `helps`, ...) | participant_id | - |
 | `marker` | `mark` | (empty) | optional free-text sync note |
 
-`SessionExporter` (Data panel → Export) resolves `robot_id` + `participant`
+`SessionExporter` (Data panel -> Export) resolves `robot_id` + `participant`
 for every row from the session's assignments, decoding patient/skin targets,
 so the CSV is analysis-ready without a manual join.
 
@@ -253,24 +253,24 @@ trial-and-error (organ readings between cover open/close), and imitation
 
 Constraint (researcher): **no video recording**. ML on sensor data is
 acceptable. Recommendation: **classical event analysis for the core
-pipeline; sensor-only ML as a later, additive layer** (see decision §6.4).
+pipeline; sensor-only ML as a later, additive layer** (see decision section 6.4).
 
 - The behaviors of interest (touch, organ swap, cover open/close, cure) are
-  **directly instrumented** — the sensors emit them as discrete, labeled,
+  **directly instrumented** - the sensors emit them as discrete, labeled,
   timestamped events. There is nothing for a classifier to recover; rules on
   the event log are exact, explainable, and auditable (important for a study
   with children, and for reviewers).
 - Rhythm and imitation are better served by **classical sequence statistics**
   (inter-event intervals, lagged cross-correlation, edit/alignment distance
-  between event sequences) than by a learned model — with N ≈ 3 children per
+  between event sequences) than by a learned model - with N ~= 3 children per
   session there is far too little data to train anything robust, and ML output
   would be hard to defend methodologically.
 - Where ML **does** make sense later:
   - **Video-based annotation assist** (pose estimation / action recognition on
     the recordings) to pre-label off-sensor behaviors (watching, pointing,
-    talking) for the human coder to confirm — a big time-saver, but it's a
+    talking) for the human coder to confirm - a big time-saver, but it's a
     post-hoc tool over video, not part of this app. **Note:** the researcher
-    prefers minimal video (decision §6.4), so the default is live observer
+    prefers minimal video (decision section 6.4), so the default is live observer
     coding via the quick-tag panel instead.
   - **Touch-gesture classification** on the magnet-sensor streams (stroke vs
     poke vs press) if the study later needs touch *quality*, not just
@@ -284,26 +284,26 @@ pipeline; sensor-only ML as a later, additive layer** (see decision §6.4).
 
 ## 6. Decisions (closed 2026-06-11 with the researcher)
 
-1. **Turtle**: ONE shared organ circuit — the group cures a single patient
+1. **Turtle**: ONE shared organ circuit - the group cures a single patient
    together (cooperation is the point). Covered by the direct-node firmware
    already implemented.
-2. **Tree**: one organ + cover circuit **per branch** — each child treats
+2. **Tree**: one organ + cover circuit **per branch** - each child treats
    their own branch independently (imitation/rhythm observable). Requires
    the Phase B multiplexed-node organ work (per-slot readings over spare
    mux channels).
-3. **Cover contact**: gravity — the cover rests on the pads (see §2).
+3. **Cover contact**: gravity - the cover rests on the pads (see section 2).
 4. **ML / video** (updated): **no video**; ML is allowed **on sensor data
    only**. Behaviors the sensors can't see (watching, pointing, helping,
-   talking) are captured by **live observer coding** → Phase B item: an
+   talking) are captured by **live observer coding** -> Phase B item: an
    observer quick-tag panel in the GUI (one button per behavior code, per
    child; each click logs a timestamped `observer` event into the same
    timeline). Sensor-only ML candidates, in order of value:
    - **touch-gesture classification** on the raw `magnet` streams (stroke vs
-     poke vs press vs hold) — adds touch *quality* as a behavior dimension;
+     poke vs press vs hold) - adds touch *quality* as a behavior dimension;
    - **unsupervised behavior profiling** over the event log (event rates,
      inter-event intervals, state-transition patterns) to cluster
      interaction styles;
-   - imitation/synchrony still starts with classical lagged correlation —
+   - imitation/synchrony still starts with classical lagged correlation -
      revisit ML only if that proves insufficient.
    Prerequisite for all of it: **record the raw sensor streams during
    sessions** (see Phase B), otherwise there is nothing to train on later.
@@ -313,12 +313,12 @@ pipeline; sensor-only ML as a later, additive layer** (see decision §6.4).
 1. **PCB**: is IO36 routed to a usable connector on the direct node? If not,
    which pin do we sacrifice / patch?
 2. **Tree mux channels**: confirm which 74HC4067 channels remain free after
-   the chambers on the actual build (need 3 — one per branch). Set them in
+   the chambers on the actual build (need 3 - one per branch). Set them in
    each Tree node's `organ_channels:` YAML; each skin gets `organ: {slot: i}`.
-3. **Organ resistor values**: pick values with ≥ 25 % separation between all
+3. **Organ resistor values**: pick values with >= 25 % separation between all
    plausible parallel combinations so ADC noise never confuses two states
-   (the default catalogue 1.5k/2.2k/3.3k vs 4.7k/5.6k/6.8k is OK on paper —
-   verify with real parts and 1 kΩ R_KNOWN).
+   (the default catalogue 1.5k/2.2k/3.3k vs 4.7k/5.6k/6.8k is OK on paper -
+   verify with real parts and 1 kohm R_KNOWN).
 
 ---
 
@@ -327,24 +327,24 @@ pipeline; sensor-only ML as a later, additive layer** (see decision §6.4).
 The robots are handled directly by children, so **no chamber may over-inflate
 and burst**. Layered defences, innermost first:
 
-1. **Per-chamber hard cap in firmware** — `HARD_MAX_KPA` /
-   `HARD_CHAMBER_MAX_KPA` (100 kPa on both boards; ±80 kPa for the multiplexed
+1. **Per-chamber hard cap in firmware** - `HARD_MAX_KPA` /
+   `HARD_CHAMBER_MAX_KPA` (100 kPa on both boards; +/-80 kPa for the multiplexed
    tank limits, unused on the current tankless build) are enforced inside the
    control loop regardless of any PC command. A target above the cap is
    clamped; a reading at the cap stops the actuation. These are last-resort
-   backstops — the protective ceiling children actually meet is the far lower
+   backstops - the protective ceiling children actually meet is the far lower
    configured per-chamber max (next item).
-2. **Per-chamber configured max** — `set_max_pressure` (kPa) is pushed from the
+2. **Per-chamber configured max** - `set_max_pressure` (kPa) is pushed from the
    `Skin` constructor on connect, so each chamber keeps its safe ceiling **even
    if the PC crashes mid-session**. Default 8 kPa, never above the hard cap.
-3. **Actuation watchdog (added this session)** — both firmwares force-stop any
+3. **Actuation watchdog (added this session)** - both firmwares force-stop any
    chamber stuck INFLATING/DEFLATING longer than `ACTUATION_TIMEOUT_MS` (10 s).
    This catches the dangerous failure the hard cap can't: a pressure sensor
    that unplugs or sticks below target, which would otherwise leave the inflate
    valve/pump open indefinitely. Normal actuations finish in a few seconds.
-4. **Dead-man on manual/dev actuation** — operator valve/pump overrides
+4. **Dead-man on manual/dev actuation** - operator valve/pump overrides
    auto-off after 5 s, and are never exposed to children.
-5. **Idle-safe boot** — multiplexed node keeps all valves closed and pumps off
+5. **Idle-safe boot** - multiplexed node keeps all valves closed and pumps off
    until it receives `configure`; both nodes power up with valves closed.
 
 > **TODO (pilot):** confirm the 10 s watchdog is comfortably longer than the

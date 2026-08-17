@@ -1,15 +1,15 @@
 """Always-visible emergency-stop button for the main window.
 
-A single red control that latches all robot actuation off — pumps and valves —
+A single red control that latches all robot actuation off - pumps and valves -
 the instant it is pressed (or the panic key is hit). It owns only its own visual
 state and emits intent as signals; the window decides what stopping and re-arming
 actually do (see :class:`~src.gui.main_window.MainWindow`).
 
 Two states:
 
-* **armed** (default): a big red "EMERGENCY STOP" button. Pressing it — or the
-  app-wide panic key — emits :attr:`stop_requested`.
-* **stopped**: it turns into a "STOPPED — click to re-arm" button. Clicking it
+* **armed** (default): a big red "EMERGENCY STOP" button. Pressing it - or the
+  app-wide panic key - emits :attr:`stop_requested`.
+* **stopped**: it turns into a "STOPPED - click to re-arm" button. Clicking it
   emits :attr:`rearm_requested` (the window confirms before acting). The panic
   key never re-arms, so a second panic press only re-stops.
 
@@ -35,8 +35,8 @@ _STOPPED_STYLE = (
     "QPushButton:hover { background-color: #FFD54F; }"
 )
 
-_ARMED_TEXT = "⏹  EMERGENCY STOP (0)"
-_STOPPED_TEXT = "⚠  STOPPED — click to re-arm"
+_ARMED_TEXT = "EMERGENCY STOP (0)"
+_STOPPED_TEXT = "STOPPED - click to re-arm"
 
 _HELP = (
     "Emergency stop. Immediately turns off every pump and closes every valve on "

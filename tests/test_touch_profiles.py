@@ -75,7 +75,7 @@ def test_position_tracker_only_for_four_sensors():
 def test_compensator_gated_by_config():
     p = MagnetSensorProfile()
     assert p.supports_pressure_coupling is True
-    # No coupling matrix / disabled → no compensator.
+    # No coupling matrix / disabled -> no compensator.
     assert p.build_compensator(None) is None
     assert p.build_compensator({"compensation": {"enabled": False}}) is None
 

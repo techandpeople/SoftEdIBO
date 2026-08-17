@@ -1,10 +1,10 @@
-"""TouchEventRouter — turns a magnet board's raw sensor stream into
+"""TouchEventRouter - turns a magnet board's raw sensor stream into
 chamber-level press/release events.
 
 The magnet board (a real ``node_magnet_sensor`` ESP32 or a
 ``SimulatedMagnetSensor``) streams the *set of currently active sensors* in
-each ``on_magnet`` message. This router edge-detects that set — a sensor
-entering it is a press, one leaving it a release — and maps each sensor to a
+each ``on_magnet`` message. This router edge-detects that set - a sensor
+entering it is a press, one leaving it a release - and maps each sensor to a
 skin-local chamber index, so consumers work in chamber terms rather than sensor
 terms.
 
@@ -34,7 +34,7 @@ class TouchEventRouter:
     def from_touch_config(cls, touch: dict[str, Any] | None,
                           chamber_count: int, *, name: str = "") -> "TouchEventRouter":
         """Build a router from a skin's ``touch`` config, resolving the
-        sensor→chamber map from ``touch.sensor_to_chamber`` and falling back to a
+        sensor->chamber map from ``touch.sensor_to_chamber`` and falling back to a
         1:1 mapping (the same convention used by the activity layer)."""
         return cls(cls._mapping_from_config(touch, chamber_count), name=name)
 
@@ -87,5 +87,5 @@ class TouchEventRouter:
         for cb in self._cbs:
             try:
                 cb(chamber_id, action)
-            except Exception:   # noqa: BLE001 — a bad subscriber must not break others
+            except Exception:   # noqa: BLE001 - a bad subscriber must not break others
                 logger.exception("touch_event callback failed (%s)", self._name)

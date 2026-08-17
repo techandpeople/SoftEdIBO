@@ -25,14 +25,14 @@ from src.hardware.serial_ports import list_esp32_ports
 
 SENTINEL_PATH: Path = Settings.ROOT / "data" / ".setup_done"
 
-# Wizard page ids — used for nextId() branching off the welcome page's choice.
+# Wizard page ids - used for nextId() branching off the welcome page's choice.
 PAGE_WELCOME = 0
 PAGE_GATEWAY = 1
 PAGE_NODE = 2
 PAGE_DONE = 3
 # Read-only bundled assets live in BUNDLE (_internal/ when frozen, repo root in dev)
 #
-# Gateway firmware — the gateway is a Seeed XIAO ESP32-S3 (main) optionally wired to a
+# Gateway firmware - the gateway is a Seeed XIAO ESP32-S3 (main) optionally wired to a
 # companion XIAO ESP32-C6 (Thymio RCP). Each is its own chip and its own USB device, so
 # the flash page offers a board dropdown that flashes either one on its own (or both, one
 # after the other). Both are merged images flashed at 0x0.
@@ -78,7 +78,7 @@ NODE_TYPE_FIRMWARES: dict[str, dict[str, Path]] = {
         "debug_rgbw":   Settings.BUNDLE / "firmware" / "node_actuator" / "firmware-multiplexed-rgbw-debug.bin",
     },
     # node_magnet_sensor ships a single build (no separate debug variant), so both
-    # keys point at the same bin — the debug checkbox is a no-op for it.
+    # keys point at the same bin - the debug checkbox is a no-op for it.
     "node_magnet_sensor": {
         "release": Settings.BUNDLE / "firmware" / "node_magnet_sensor" / "firmware-release.bin",
         "debug":   Settings.BUNDLE / "firmware" / "node_magnet_sensor" / "firmware-release.bin",
@@ -120,7 +120,7 @@ def firmware_for_node_type(node_type: str, debug: bool = False,
 def firmware_for_c6() -> Path:
     """Path to the Thymio RCP (the gateway's C6 half) app image for WiFi-OTA.
 
-    A bare app image (not a merged bundle) — the C6 is WiFi-OTA'd into an app
+    A bare app image (not a merged bundle) - the C6 is WiFi-OTA'd into an app
     partition. `scripts/build-firmware.sh` builds it (the `rcp_c6` env) and copies it
     here; `scripts/ota_c6_wifi.py` serves the same file. The OTA dialog reports
     "build it first" if it's missing.
@@ -165,7 +165,7 @@ def needs_setup() -> bool:
 def mark_setup_done() -> None:
     """Create the sentinel so the first-run wizard is not shown again.
 
-    Called both when the wizard finishes and when it is skipped/cancelled —
+    Called both when the wizard finishes and when it is skipped/cancelled -
     the hardware may already be flashed, and the wizard stays reachable from
     the Tools menu for re-flashing later.
     """
@@ -292,7 +292,7 @@ class _FlashPage(QWizardPage, Ui_FlashPage):
         self._done = False
         self.completeChanged.emit()
 
-        self.log.appendPlainText(f"Flashing {self._firmware.name} to {port}…\n")
+        self.log.appendPlainText(f"Flashing {self._firmware.name} to {port}...\n")
 
         prog, args = _esptool_cmd(port, self._firmware, self._chip)
         self._proc = QProcess(self)
@@ -352,8 +352,8 @@ class _FlashPage(QWizardPage, Ui_FlashPage):
 
     def _rearm_if_flashed(self) -> None:
         """Re-arm Flash when the user picks a different firmware/target after a
-        completed flash — an explicit "flash this one next" gesture, so they need not
-        click the "Flash Another…" button first. Subclasses call this from their
+        completed flash - an explicit "flash this one next" gesture, so they need not
+        click the "Flash Another..." button first. Subclasses call this from their
         selector-change handler. No-op mid-flash (``_done`` is False while a flash runs)
         or when idle (Flash still enabled), and on pages without the button."""
         if self._another_btn is not None and self._done and not self.flash_btn.isEnabled():
@@ -366,7 +366,7 @@ class FlashGatewayPage(_FlashPage):
     The gateway is a XIAO ESP32-S3 (main) optionally wired to a companion XIAO
     ESP32-C6 that speaks 802.15.4 to Thymio robots (docs/THYMIO_WIRELESS_CONTROL.md).
     Each is its own chip and its own USB device, so the board dropdown lets you flash
-    either one on its own — flash just the C6 without touching the S3, or vice versa —
+    either one on its own - flash just the C6 without touching the S3, or vice versa -
     and "Flash Another Board" flashes the second one right after, without leaving the
     page (swap the cable, pick the other board). Mirrors FlashNodePage.
     """
@@ -380,13 +380,13 @@ class FlashGatewayPage(_FlashPage):
         super().__init__(
             "Flash Gateway Firmware",
             "Pick the board, connect it (appears as /dev/ttyACM*), then click Flash. "
-            "The S3 and the companion C6 are separate USB devices — flash either on "
+            "The S3 and the companion C6 are separate USB devices - flash either on "
             "its own, or both one after the other.",
             first["firmware"],
             chip=first["chip"],
         )
 
-        # Board selector — S3 (main) or the optional companion C6 (Thymio RCP).
+        # Board selector - S3 (main) or the optional companion C6 (Thymio RCP).
         board_row = QHBoxLayout()
         board_row.addWidget(QLabel("Board:"))
         self._board_combo = QComboBox()
@@ -394,9 +394,9 @@ class FlashGatewayPage(_FlashPage):
         for label in GATEWAY_FIRMWARES:
             self._board_combo.addItem(label)
         self._board_combo.setWhatsThis(
-            "Which gateway board to flash. 'Gateway S3' is the main board (USB–ESP-NOW "
+            "Which gateway board to flash. 'Gateway S3' is the main board (USB-ESP-NOW "
             "bridge + WiFi + Thymio UART link). 'Companion C6' is the optional XIAO "
-            "ESP32-C6 that drives Thymio robots over 802.15.4 — only on gateways with "
+            "ESP32-C6 that drives Thymio robots over 802.15.4 - only on gateways with "
             "wireless-Thymio support. Each is a separate USB device, so you can flash "
             "one without the other (e.g. re-flash only the C6, leaving the S3 alone)."
         )
@@ -423,7 +423,7 @@ class FlashGatewayPage(_FlashPage):
 class FlashNodePage(_FlashPage):
     """Flash page for nodes; lets the user pick node type and flash multiple units."""
 
-    # Nodes use a classic USB-UART bridge — appears as /dev/ttyUSB*
+    # Nodes use a classic USB-UART bridge - appears as /dev/ttyUSB*
     _preferred_port_hint = "USB"
     _another_label = "Flash Another Node"
 
@@ -435,7 +435,7 @@ class FlashNodePage(_FlashPage):
             NODE_FIRMWARES[first_label]["release"],
         )
 
-        # Node type selector — into the .ui's top extra_layout.
+        # Node type selector - into the .ui's top extra_layout.
         type_row = QHBoxLayout()
         type_row.addWidget(QLabel("Node type:"))
         self._type_combo = QComboBox()
@@ -447,12 +447,12 @@ class FlashNodePage(_FlashPage):
         type_row.addStretch()
         self.extra_layout.addLayout(type_row)
 
-        # Debug-build checkbox — switches to the firmware-debug.bin variant.
+        # Debug-build checkbox - switches to the firmware-debug.bin variant.
         self._debug_check = QCheckBox("Debug build (verbose Serial output)")
         self._debug_check.toggled.connect(self._update_firmware_path)
         self.extra_layout.addWidget(self._debug_check)
 
-        # RGBW-ring checkbox — switches to the -DLED_RGBW build. Only enabled for
+        # RGBW-ring checkbox - switches to the -DLED_RGBW build. Only enabled for
         # node types that ship an RGBW variant (node_direct); see _on_type_changed.
         self._rgbw_check = QCheckBox("RGBW LED ring (SK6812, e.g. Adafruit 2862)")
         self._rgbw_check.setWhatsThis(
@@ -510,7 +510,7 @@ class SetupWizard(QWizard):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("SoftEdIBO — First-Run Setup")
+        self.setWindowTitle("SoftEdIBO - First-Run Setup")
         self.setMinimumSize(660, 520)
         self.setWizardStyle(QWizard.WizardStyle.ModernStyle)
 

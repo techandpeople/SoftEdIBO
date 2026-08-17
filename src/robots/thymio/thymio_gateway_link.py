@@ -1,4 +1,4 @@
-"""ThymioGatewayLink — drive a Thymio through the gateway's C6, with NO RF dongle.
+"""ThymioGatewayLink - drive a Thymio through the gateway's C6, with NO RF dongle.
 
 Same duck-typed interface as :class:`~src.robots.thymio.thymio_link.ThymioLink`
 (``connect`` / ``close`` / ``set_motors`` / ``set_leds`` / ``connected``), so
@@ -6,18 +6,18 @@ Same duck-typed interface as :class:`~src.robots.thymio.thymio_link.ThymioLink`
 transport it was handed. Where ``ThymioLink`` talks to the RF dongle via thymiodirect,
 this one drives the Thymio over **802.15.4 through the gateway's C6**:
 
-* ``connect`` turns on the C6 firmware's continuous ``thymio_link`` — the C6 then polls
+* ``connect`` turns on the C6 firmware's continuous ``thymio_link`` - the C6 then polls
   the Thymio at ~10 Hz on its own to hold its receive window open (the dongle's job),
 * ``set_motors`` / ``set_leds`` just push the held targets (``thymio_drive`` /
-  ``thymio_leds``) — instant, the C6 keeps re-asserting them on every poll,
+  ``thymio_leds``) - instant, the C6 keeps re-asserting them on every poll,
 * ``close`` turns the link off (poller stops, motors to 0).
 
 Requires the S3 gateway (`Gateway`) with its C6 running the leak-fixed ``rcp_c6``
-(the C6's chip antenna is plenty — solid at 20 m through a door; no external
+(the C6's chip antenna is plenty - solid at 20 m through a door; no external
 antenna needed). One C6 drives up to 4 Thymios: each robot is a **slot** (``index``)
 on the C6, addressed by its 802.15.4 short ``address`` (e.g. ``"6a25"``). Give each
 gateway-driven Thymio a distinct ``index`` + ``address`` (discover the addresses via the
-sniffer — see :func:`discover_thymios`). ``address=None`` on ``index=0`` uses the C6's
+sniffer - see :func:`discover_thymios`). ``address=None`` on ``index=0`` uses the C6's
 built-in default (the first Thymio we decoded), so the single-Thymio flow needs no address.
 """
 from __future__ import annotations
@@ -30,7 +30,7 @@ from src.hardware.gateway import Gateway
 
 logger = logging.getLogger(__name__)
 
-# Accelerometer reading with the robot flat + still ≈ (0, 0, 20) (z = gravity, ~20).
+# Accelerometer reading with the robot flat + still ~= (0, 0, 20) (z = gravity, ~20).
 # An impact ("pancada") is a large deviation of the raw acc from this rest vector;
 # a soft touch barely moves it. See memory thymio-sensors-and-sound.
 ACC_REST = (0.0, 0.0, 20.0)
@@ -40,13 +40,13 @@ ACC_REST = (0.0, 0.0, 20.0)
 DEFAULT_IMPACT_THRESHOLD = 20.0
 
 # Re-arm fraction: after an impact fires, the deviation must fall back below
-# threshold × this before another can fire, so one knock is one event (no chatter).
+# threshold x this before another can fire, so one knock is one event (no chatter).
 _IMPACT_REARM_FRAC = 0.6
 
 # Impact intensity levels, classified from the deviation as multiples of the (touch)
-# threshold: 1 = touch (≥1×), 2 = knock (≥ KNOCK×), 3 = slap (≥ SLAP×). Only the base
+# threshold: 1 = touch (>=1x), 2 = knock (>= KNOCKx), 3 = slap (>= SLAPx). Only the base
 # (touch) threshold is calibrated; the bands scale from it. NOTE: at the ~10 Hz poll
-# a fast slap's peak can be under-sampled, so the level is coarse — a native on-board
+# a fast slap's peak can be under-sampled, so the level is coarse - a native on-board
 # tap event would classify it more accurately (see docs / memory).
 IMPACT_TOUCH, IMPACT_KNOCK, IMPACT_SLAP = 1, 2, 3
 _KNOCK_MULT = 2.0
@@ -67,7 +67,7 @@ class ThymioGatewayLink:
         self._gateway = gateway
         self._channel = int(channel)
         self._index = int(index)
-        self._address = address        # hex short address ("6a25"), or None → C6 default
+        self._address = address        # hex short address ("6a25"), or None -> C6 default
         self._active = False
         self._registered = False       # our gateway on_message hook is installed once
         # Latest sensor reading from the C6's thymio_sensors stream (None until first).
@@ -76,7 +76,7 @@ class ThymioGatewayLink:
         self._last_ground: tuple[int, int] | None = None
         # Impact detection (edge-triggered against the deviation threshold).
         self._impact_threshold = float(impact_threshold)
-        self._impact_high = False      # currently above threshold (armed-low → fired)
+        self._impact_high = False      # currently above threshold (armed-low -> fired)
         self._impact_count = 0         # monotonic knock count
         self._last_impact_level = 0    # intensity of the last knock (1/2/3), 0 = none yet
         # Lifted detection (edge-triggered against the ground threshold).
@@ -84,7 +84,7 @@ class ThymioGatewayLink:
         self._lifted = False           # currently off the surface
         self._lifted_count = 0         # monotonic lift count
         # Observers, fired on the gateway read thread (consumers marshal to their
-        # own thread as needed — e.g. the Test Thymio dialog via a Qt signal).
+        # own thread as needed - e.g. the Test Thymio dialog via a Qt signal).
         self._sensor_listeners: list[Callable[..., None]] = []
         self._impact_listeners: list[Callable[[int], None]] = []
         self._lifted_listeners: list[Callable[[bool], None]] = []
@@ -95,9 +95,9 @@ class ThymioGatewayLink:
 
     def connect(self, timeout: float = 6.0) -> bool:
         # `timeout` is accepted for interface parity with ThymioLink; there is no
-        # discovery handshake here — the C6 starts polling as soon as we ask.
+        # discovery handshake here - the C6 starts polling as soon as we ask.
         if self._gateway is None or not self._gateway.is_connected:
-            logger.error("Thymio gateway link: gateway not connected — can't reach the C6")
+            logger.error("Thymio gateway link: gateway not connected - can't reach the C6")
             return False
         ok = self._gateway.send("thymio", "thymio_link", on=True, ch=self._channel)
         # Register this robot's address in its slot. Skip only for the address-less
@@ -157,7 +157,7 @@ class ThymioGatewayLink:
 
         ``acc`` is the raw ``(x, y, z)`` accelerometer, ``mic`` the mic intensity, and
         ``ground`` the two ``prox.ground.delta`` values. Fires on the gateway's serial
-        read thread — GUI callers must marshal to the GUI thread (e.g. via a signal)."""
+        read thread - GUI callers must marshal to the GUI thread (e.g. via a signal)."""
         self._sensor_listeners.append(callback)
 
     def remove_sensors_listener(self, callback) -> None:
@@ -275,7 +275,7 @@ class ThymioGatewayLink:
 
     def _detect_lifted(self, ground: tuple[int, int]) -> None:
         """Edge-trigger lifted/landed when both ground sensors cross the threshold."""
-        low = max(ground) < self._lift_threshold      # both sensors below → off-surface
+        low = max(ground) < self._lift_threshold      # both sensors below -> off-surface
         if low and not self._lifted:
             self._lifted = True
             self._lifted_count += 1
@@ -290,7 +290,7 @@ class ThymioGatewayLink:
     def _safe(cb, *args) -> None:
         try:
             cb(*args)
-        except Exception:   # noqa: BLE001 — a bad listener must not kill the stream
+        except Exception:   # noqa: BLE001 - a bad listener must not kill the stream
             logger.exception("Thymio sensor listener failed")
 
     def play_sound(self, system: int | None = None, freq: int | None = None,
@@ -298,7 +298,7 @@ class ThymioGatewayLink:
         """Play a sound: a built-in ``system`` sound (0-7, -1 stops), a ``freq`` Hz tone,
         or a ``track`` recorded on the Thymio's microSD (sound.play, needs a card).
 
-        The C6 loads a tiny Aseba program that calls the sound native fn and runs it —
+        The C6 loads a tiny Aseba program that calls the sound native fn and runs it -
         the motor targets are untouched, so a driving robot keeps driving.
         """
         gw = self._gateway

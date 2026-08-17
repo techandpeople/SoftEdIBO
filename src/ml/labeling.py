@@ -1,4 +1,4 @@
-"""Touch-gesture labelling — segment recordings, align live tags, CSV I/O.
+"""Touch-gesture labelling - segment recordings, align live tags, CSV I/O.
 
 Shared by the in-app Touch Gestures dialog and the CLI labeller so the labelling
 logic lives in one place. A *label row* ties one touch segment (identified by
@@ -73,7 +73,7 @@ def label_rows_for(recording: Path, skin_type: str = "",
                    ) -> list[LabelRow]:
     """Build one :class:`LabelRow` per touch segment in ``recording``.
 
-    ``gesture_events`` is ``[(epoch_ms, label), …]`` from the live observer
+    ``gesture_events`` is ``[(epoch_ms, label), ...]`` from the live observer
     tags; each segment is pre-filled with the nearest one within ``window_ms``
     (blank if none). Each row's skin type/variant comes from ``source_types`` /
     ``source_variants`` keyed by the touch ``source`` MAC (so one recording can
@@ -88,7 +88,7 @@ def label_rows_for(recording: Path, skin_type: str = "",
     ]
     rows.sort(key=lambda r: r.start_ms)
     # Assign each live tag to the ONE segment it best belongs to (the segment
-    # containing it, else the nearest within window) — so a tag never labels
+    # containing it, else the nearest within window) - so a tag never labels
     # more than one touch.
     for t_ms, label in (gesture_events or []):
         best_i, best_d = None, window_ms

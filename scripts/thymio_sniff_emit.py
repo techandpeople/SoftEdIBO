@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Independent-sniffer test — needs a SECOND gateway combo (a spare S3+C6).
+"""Independent-sniffer test - needs a SECOND gateway combo (a spare S3+C6).
 
 Watches 802.15.4 channel 25 with the second gateway's C6 in pure-RX sniff mode, counting
 the Thymio's pushed sensor-emit frames (Aseba event 0x0AAC, "AC0A" on the wire). This
@@ -19,7 +19,7 @@ SETUP
 RUN
   1. Plug in the second gateway, note its port (it's an Espressif 303a device, like #1;
      if unsure, unplug it, list ports, plug it back, see which /dev/ttyACM* appears).
-  2. Close nothing else — just run:  python3 scripts/thymio_sniff_emit.py /dev/ttyACMx
+  2. Close nothing else - just run:  python3 scripts/thymio_sniff_emit.py /dev/ttyACMx
   3. In the app, open "Test Thymio" on gateway #1 and watch the per-second counts here.
 """
 import json
@@ -89,9 +89,9 @@ def main():
         s.close()
 
     print("\n=== VERDICT ===")
-    print("emit/s stays > 0 for the whole run  -> the Thymio KEEPS emitting on air →")
+    print("emit/s stays > 0 for the whole run  -> the Thymio KEEPS emitting on air ->")
     print("    the LINK gateway's C6 RX (RX-after-TX in link mode) is what dies. Fix the C6 radio.")
-    print("emit/s drops to 0 ~1 s after the link starts -> the Thymio's RF module STOPS →")
+    print("emit/s drops to 0 ~1 s after the link starts -> the Thymio's RF module STOPS ->")
     print("    it de-associates; fix the wireless keep-alive / association like the real dongle.")
 
 

@@ -5,7 +5,7 @@ is too coarse for a fill-calibration sweep, a touch-coupling sweep, or a smooth
 live pressure gauge. A ``status_rate`` command raises that cadence for a bounded,
 keepalive-refreshed window (firmware ``commands::setStatusRate``): the node
 reverts to the default once the window (``ttl``) lapses, so a lost "off" can never
-leave fast telemetry running — the same dead-man idea as the bench-test keepalive.
+leave fast telemetry running - the same dead-man idea as the bench-test keepalive.
 
 :class:`FastTelemetry` owns that request. Drive it from a timer/loop::
 

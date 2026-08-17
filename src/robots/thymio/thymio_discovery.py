@@ -2,13 +2,13 @@
 
 :func:`discover_thymios` is a one-call "which Thymios are out there" so robots can be swapped
 between studies without hand-editing addresses. It returns the distinct Thymio short addresses
-on the Thymio network (PAN 0x4481), as hex strings (e.g. ``["6a25", ...]``) — exactly the
+on the Thymio network (PAN 0x4481), as hex strings (e.g. ``["6a25", ...]``) - exactly the
 ``address`` a :class:`~src.robots.thymio.thymio_gateway_link.ThymioGatewayLink` wants.
 
 Discovery is **active**, exactly how the RF dongle enumerates: the gateway's C6 broadcasts an
 Aseba ``LIST_NODES`` and every powered Thymio replies with a ``NODE_PRESENT`` frame carrying
 its address (the C6 ``thymio_discover`` command; it emits a ``thymio_found`` line per reply).
-This matters because a **Wireless Thymio does NOT announce itself at boot** — a passive sniff
+This matters because a **Wireless Thymio does NOT announce itself at boot** - a passive sniff
 sees an idle robot only if something else makes it transmit. The broadcast makes even an idle,
 powered robot answer, so no dongle and no driving are needed.
 
@@ -35,7 +35,7 @@ _REBOOT_TIMEOUT = 5.0
 def parse_thymio_addr(data_hex: str) -> int | None:
     """The Thymio's 16-bit short address from one sniffed frame's hex, or None.
 
-    Frame: ``FCF(2) seq(1) PAN(2) dst(2) src(2) …`` — all little-endian. Returns the address
+    Frame: ``FCF(2) seq(1) PAN(2) dst(2) src(2) ...`` - all little-endian. Returns the address
     only for a data frame on PAN 0x4481 whose dst or src is a real robot (not the host, not
     broadcast). Too-short frames (e.g. bare ACKs) and other networks return None.
     """
@@ -94,7 +94,7 @@ def _notify_found(on_found: Any, addr: int) -> None:
         return
     try:
         on_found(f"{addr:04x}")
-    except Exception:   # noqa: BLE001 — a bad listener must not kill the scan
+    except Exception:   # noqa: BLE001 - a bad listener must not kill the scan
         logger.exception("Thymio discovery on_found callback failed")
 
 
@@ -118,7 +118,7 @@ def reboot_c6(gateway: Any, timeout: float = _REBOOT_TIMEOUT) -> bool:
     """Reboot the gateway's C6 and wait for its fresh-boot ``rcp_ready`` banner.
 
     Discovery needs a CLEAN 802.15.4 radio: after a link/discover session the C6's
-    RX dies cumulatively (TX still works — the Thymio's RF LED still blinks — but
+    RX dies cumulatively (TX still works - the Thymio's RF LED still blinks - but
     replies are never heard), and ``esp_ieee802154_disable()`` does not restore it.
     A reboot is the only reliable reset, so we reboot before every scan. The C6 is a
     separate chip from the S3 gateway, so this does not disturb ESP-NOW/node control.
@@ -142,7 +142,7 @@ def reboot_c6(gateway: Any, timeout: float = _REBOOT_TIMEOUT) -> bool:
         gateway.remove_raw_callback(_watch)
     if not ready.is_set():
         logger.warning("Thymio discovery: C6 did not re-announce after reboot "
-                       "(no rcp_ready in %.1fs) — scanning anyway", timeout)
+                       "(no rcp_ready in %.1fs) - scanning anyway", timeout)
     return ready.is_set()
 
 
@@ -152,7 +152,7 @@ def discover_thymios(gateway: Any, channel: int = 25, secs: float = 6.0,
 
     Broadcasts ``LIST_NODES`` through the C6 (``thymio_discover``) so every powered
     robot on the network replies with its address, and returns them as hex strings
-    like ``["6a25", ...]`` in FIRST-SEEN order — so powering robots on one at a time
+    like ``["6a25", ...]`` in FIRST-SEEN order - so powering robots on one at a time
     while scanning tells you which address is which. No dongle, and the robots need
     not be driven: even an idle, powered Thymio answers the broadcast. Leaves the C6
     back in plain-RCP mode.
@@ -162,7 +162,7 @@ def discover_thymios(gateway: Any, channel: int = 25, secs: float = 6.0,
 
     Args:
         on_found: Optional ``callback(addr_hex)`` fired the moment a NEW address
-            is seen. Runs on the gateway's serial reader thread — GUI callers
+            is seen. Runs on the gateway's serial reader thread - GUI callers
             must bridge through a signal.
         stop: Optional ``threading.Event``-like; set it to end the scan early.
     """

@@ -8,15 +8,15 @@ surface. The user can paint two independent layers:
 - **sensor layer**: which cell maps to which touch sensor index
   (-1 = no sensor). Sensor indices come from the linked ``node_magnet_sensor``.
 
-The two layers can have **different dimensions** (e.g. 4×2 for chambers,
-8×4 for sensors) — the editor swaps the visible resolution when the user
+The two layers can have **different dimensions** (e.g. 4x2 for chambers,
+8x4 for sensors) - the editor swaps the visible resolution when the user
 switches mode. Cell labels follow the active layer (``C*`` in chamber
 mode, ``S*`` in sensor mode) to avoid visual overlap.
 
 Skin **shape** is one of:
 
-- ``"rect"`` — every cell is paintable (the whole rectangle).
-- ``"round"`` — only cells whose centroid sits inside the inscribed
+- ``"rect"`` - every cell is paintable (the whole rectangle).
+- ``"round"`` - only cells whose centroid sits inside the inscribed
   circle are paintable; off-mask cells are drawn muted so the user can
   still see where the boundary lies.
 
@@ -60,7 +60,7 @@ class SkinGridEditor(QWidget):
                  parent: QWidget | None = None) -> None:
         super().__init__(parent)
         # Per-layer dimensions. Both layers start with the same dims for
-        # backward compatibility — the dialog drives them independently.
+        # backward compatibility - the dialog drives them independently.
         self._cols = {"chamber": max(1, cols), "sensor": max(1, cols)}
         self._rows = {"chamber": max(1, rows), "sensor": max(1, rows)}
         self._chamber_grid: list[list[int]] = self._blank("chamber")
@@ -69,8 +69,8 @@ class SkinGridEditor(QWidget):
         self._paint_value = 0
         self._shape = shape if shape in _SHAPES else "rect"
         # Physical bounding-box size (w, h) in mm of the skin TYPE, used to draw
-        # the grid with the correct aspect ratio (a 125×125 square vs a 75×125
-        # rectangle look different). None → fill the widget (legacy skins).
+        # the grid with the correct aspect ratio (a 125x125 square vs a 75x125
+        # rectangle look different). None -> fill the widget (legacy skins).
         self._size_mm: tuple[float, float] | None = None
         self.setMinimumSize(320, 160)
 
@@ -193,7 +193,7 @@ class SkinGridEditor(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
-        # Non-rect skins clip painting to the physical skin outline — cells on
+        # Non-rect skins clip painting to the physical skin outline - cells on
         # the border get partially shown (the bits outside are clipped), cells
         # fully outside disappear. No cell is "invalidated"; the user can still
         # paint them and the data is preserved verbatim.
@@ -217,9 +217,9 @@ class SkinGridEditor(QWidget):
             p.drawPath(path)
 
     def _paint_cell(self, p: QPainter, cell: QRect, value: int) -> None:
-        """Render a single grid cell — only the active layer is shown so each
+        """Render a single grid cell - only the active layer is shown so each
         mode gives a clean, unambiguous view of what's being edited."""
-        # Empty background + border (always drawn — gives the grid structure).
+        # Empty background + border (always drawn - gives the grid structure).
         p.fillRect(cell, QColor("#fdfefe"))
         p.setPen(QColor("#bdc3c7"))
         p.drawRect(cell)
@@ -281,7 +281,7 @@ class SkinGridEditor(QWidget):
         r = (pos.y() - oy) // ch
         if not (0 <= c < cols and 0 <= r < rows):
             return
-        # No off-mask gating on round skins — clipping is purely visual now,
+        # No off-mask gating on round skins - clipping is purely visual now,
         # so any cell whose centre lies inside the widget is paintable. Cells
         # fully outside the inscribed circle simply render invisible.
         grid = self._chamber_grid if self._layer == "chamber" else self._sensor_grid

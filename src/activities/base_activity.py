@@ -9,7 +9,7 @@ Activities are the plug-in unit of behaviour. Each concrete activity:
 - Implements the lifecycle hooks ``_setup`` / ``start`` / ``pause`` /
   ``resume`` / ``stop`` and exposes its current state via ``get_state``.
 
-Any activity can run in **simulation mode** — set ``simulation_mode = True``
+Any activity can run in **simulation mode** - set ``simulation_mode = True``
 on the instance (or via the SessionPanel checkbox) before ``setup`` is
 called and the default ``prepare_robots`` will substitute real robots with
 ``SimulatedRobot`` instances backed by ``SimulatedController``. Every activity
@@ -39,12 +39,12 @@ class Param:
 
     The GUI uses these descriptors to auto-generate a preset editor form:
 
-    - ``type == "int"`` / ``"float"`` → spin box (uses ``min`` / ``max``)
-    - ``type == "bool"`` → checkbox
-    - ``type == "color"`` → colour picker (default is ``"#RRGGBB"``)
-    - ``type == "enum"`` → combo box (``choices`` lists allowed values)
-    - ``type == "json"`` → multi-line text edit with JSON validation
-    - ``type == "str"`` → single-line text edit
+    - ``type == "int"`` / ``"float"`` -> spin box (uses ``min`` / ``max``)
+    - ``type == "bool"`` -> checkbox
+    - ``type == "color"`` -> colour picker (default is ``"#RRGGBB"``)
+    - ``type == "enum"`` -> combo box (``choices`` lists allowed values)
+    - ``type == "json"`` -> multi-line text edit with JSON validation
+    - ``type == "str"`` -> single-line text edit
     """
     name: str
     type: str
@@ -70,7 +70,7 @@ class BaseActivity(ABC):
     # ScriptedActivity narrows it per instance from its legacy target.
     robot_type: type[BaseRobot]
 
-    # Simulation-only knobs — apply when ``simulation_mode`` is on. Subclasses
+    # Simulation-only knobs - apply when ``simulation_mode`` is on. Subclasses
     # inherit these automatically (merged with their own ``PARAMS``) so every
     # activity exposes the same sim controls in the GUI preset editor.
     SIM_PARAMS: ClassVar[tuple[Param, ...]] = (
@@ -97,7 +97,7 @@ class BaseActivity(ABC):
         ),
     )
 
-    # Activity-specific tunable params — subclasses set this to a tuple of
+    # Activity-specific tunable params - subclasses set this to a tuple of
     # ``Param`` describing their knobs. The GUI auto-generates the editor.
     PARAMS: ClassVar[tuple[Param, ...]] = ()
 
@@ -108,8 +108,8 @@ class BaseActivity(ABC):
 
     # Injected by the SessionPanel when a session starts so activities can
     # record behavioral events (state transitions, cover open/close, organ
-    # readings, …) into the session's interaction_events table. None outside
-    # a session — ``log_event`` is then a no-op.
+    # readings, ...) into the session's interaction_events table. None outside
+    # a session - ``log_event`` is then a no-op.
     event_logger: "EventLogger | None" = None
 
     @classmethod
@@ -133,7 +133,7 @@ class BaseActivity(ABC):
 
     @property
     def display_name(self) -> str:
-        """Name shown in the UI / stored on the session record — tagged with
+        """Name shown in the UI / stored on the session record - tagged with
         the simulation suffix when running without hardware."""
         return f"{self.name}{self.SIM_SUFFIX}" if self.simulation_mode else self.name
 
@@ -166,7 +166,7 @@ class BaseActivity(ABC):
         ``event_logger`` is attached, e.g. in unit tests).
 
         Robot-level events (organ readings, cover open/close) use the robot_id
-        as ``target`` and keep ``participant_id="system"`` — analysis joins
+        as ``target`` and keep ``participant_id="system"`` - analysis joins
         ``session_assignments`` on robot_id for participant attribution.
         """
         if self.event_logger is not None:
@@ -189,7 +189,7 @@ class BaseActivity(ABC):
 
         Raises:
             TypeError: If any robot is not an instance of :attr:`robot_type`
-                — unless ``simulation_mode`` is on, in which case the robots
+                - unless ``simulation_mode`` is on, in which case the robots
                 have already been swapped for ``SimulatedRobot`` (which is a
                 ``BaseRobot``, not the activity's nominal ``robot_type``).
         """

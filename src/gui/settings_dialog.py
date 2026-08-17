@@ -56,7 +56,7 @@ class SettingsDialog(BaseDialog, Ui_SettingsDialog):
     def _build_gateway_section(self) -> None:
         """Add a Gateway group (USB port, baud, auto-connect) before the buttons.
 
-        Built programmatically so we don't have to regenerate the .ui — same
+        Built programmatically so we don't have to regenerate the .ui - same
         approach as the Tools menu actions added in MainWindow.
         """
         group = QGroupBox("SoftEdIBO Gateway", self)
@@ -97,7 +97,7 @@ class SettingsDialog(BaseDialog, Ui_SettingsDialog):
         self.recordings_dir_edit.setToolTip(
             "Folder for per-session sensor-stream JSONL recordings "
             "(absolute, or relative to the app data folder).")
-        browse = QPushButton("Browse…")
+        browse = QPushButton("Browse...")
         browse.clicked.connect(self._browse_recordings)
         row.addWidget(self.recordings_dir_edit, stretch=1)
         row.addWidget(browse)

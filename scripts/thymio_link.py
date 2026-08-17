@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Drive a Thymio dongle-free via the C6's CONTINUOUS on-board link.
 
-The leak-fixed `rcp_c6` keeps the Thymio's RF link hot BY ITSELF — once `thymio_link` is
+The leak-fixed `rcp_c6` keeps the Thymio's RF link hot BY ITSELF - once `thymio_link` is
 on, the C6 polls the Thymio at ~10 Hz in firmware and holds the motor/LED targets. This
 tool opens the C6 once, turns the link on, and just sends target updates: **instant**, no
 per-command port-reopen (which resets the C6 and cost seconds), link stays hot the whole
-session. This is the reliable dongle-free drive — needs a **U.FL-antenna C6** to reach the
+session. This is the reliable dongle-free drive - needs a **U.FL-antenna C6** to reach the
 robot, and the leak-fixed firmware (reflash `rcp_c6`).
 
     python scripts/thymio_link.py --ch 25 --gateway /dev/ttyACM0 --left 200 --right -200
@@ -83,7 +83,7 @@ def main() -> int:
                    help="play a tone: frequency Hz + duration in 1/60 s")
     p.add_argument("--repl", action="store_true", help="interactive line jog")
     p.add_argument("--index", type=int, default=0,
-                   help="which Thymio slot on the C6 (0..3) — for driving several")
+                   help="which Thymio slot on the C6 (0..3) - for driving several")
     p.add_argument("--addr", help="this Thymio's 802.15.4 short address, hex (e.g. 6a25); "
                                   "omit for slot 0 to use the C6 default")
     p.add_argument("--secs", type=float, default=0.0,
@@ -143,7 +143,7 @@ def main() -> int:
             if args.secs:
                 time.sleep(args.secs)
             else:
-                print("driving (C6 holds the link) — Ctrl-C to stop")
+                print("driving (C6 holds the link) - Ctrl-C to stop")
                 while True:
                     time.sleep(0.5)
     except KeyboardInterrupt:

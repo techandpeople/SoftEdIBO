@@ -14,7 +14,7 @@ from src.robots.thymio.thymio_cable import (
 )
 
 
-# --- node id → address -----------------------------------------------------
+# --- node id -> address -----------------------------------------------------
 
 def test_address_is_node_id_bytes_swapped():
     assert address_from_node_id(0x256A) == "6a25"     # the live-confirmed pair
@@ -36,8 +36,8 @@ def _fake_comports(monkeypatch, ports):
 
 def test_find_port_picks_robot_ignores_dongle(monkeypatch):
     ports = [
-        _Port("/dev/ttyACM0", 0x303A, 0x1001, "C6"),          # gateway — ignore
-        _Port("/dev/ttyACM1", 0x0617, 0x000C, "Wireless"),    # dongle — ignore
+        _Port("/dev/ttyACM0", 0x303A, 0x1001, "C6"),          # gateway - ignore
+        _Port("/dev/ttyACM1", 0x0617, 0x000C, "Wireless"),    # dongle - ignore
         _Port("/dev/ttyACM2", 0x0617, 0x000A, "Thymio-II"),   # the robot
     ]
     _fake_comports(monkeypatch, ports)

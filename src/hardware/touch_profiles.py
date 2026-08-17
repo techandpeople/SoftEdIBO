@@ -1,7 +1,7 @@
-"""Touch-sensor profiles — the OOP seam that isolates *how* a board senses touch.
+"""Touch-sensor profiles - the OOP seam that isolates *how* a board senses touch.
 
 Today every touch board is magnetic (an MLX90393 array under the silicone,
-``node_magnet_sensor`` — or a ``node_direct`` that folds the same sensing into
+``node_magnet_sensor`` - or a ``node_direct`` that folds the same sensing into
 its actuator firmware). Tomorrow it could be capacitive, resistive, or something
 else. The rest of the stack should not care: the controller dispatch, the Skin,
 the event router and the gesture ML all speak a generic contract (per-sensor
@@ -10,20 +10,20 @@ sensor technology lives in a :class:`TouchSensorProfile`.
 
 A profile owns, in one place:
 
-* the wire strings the board speaks — its boot-``ready`` status and its live
-  message ``type`` — so the controller dispatches by asking the registry instead
+* the wire strings the board speaks - its boot-``ready`` status and its live
+  message ``type`` - so the controller dispatches by asking the registry instead
   of hard-coding ``"magnet"``;
 * how a raw message becomes per-sensor magnitudes (:meth:`read_magnitudes`);
-* which detection strategy applies — a spatial position tracker
+* which detection strategy applies - a spatial position tracker
   (:meth:`build_position_tracker`) and whether chamber inflation can masquerade
   as a touch, hence a pressure compensator (:meth:`build_compensator`).
 
 Adding a new touch technology is therefore a new :class:`TouchSensorProfile`
 subclass registered here (plus its firmware, and its ``node_type`` added to the
-touch-node list in :mod:`src.core.skin_config`) — not edits scattered across the
+touch-node list in :mod:`src.core.skin_config`) - not edits scattered across the
 controller, the skin and the config layer.
 
-The node-type → technology data stays in ``skin_config`` (pure core); this
+The node-type -> technology data stays in ``skin_config`` (pure core); this
 module (hardware) references it and adds the behaviour, keeping the core layer
 free of hardware imports.
 """
@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 class TouchSensorProfile(ABC):
     """Everything specific to one physical touch-sensing technology.
 
-    Subclasses are stateless strategies — one instance is shared across every
+    Subclasses are stateless strategies - one instance is shared across every
     skin/controller. All the technology-specific knowledge (wire strings, signal
     extraction, detection) is encapsulated here so collaborators can be written
     against the abstract contract.
@@ -61,7 +61,7 @@ class TouchSensorProfile(ABC):
     #: Keys copied from the boot announce into the controller's cached geometry.
     geometry_keys: tuple[str, ...] = ()
     #: True when chamber inflation can physically fake a touch on this sensor
-    #: (magnets shift in the silicone) — i.e. pressure compensation is meaningful.
+    #: (magnets shift in the silicone) - i.e. pressure compensation is meaningful.
     supports_pressure_coupling: bool = False
 
     @abstractmethod
@@ -70,7 +70,7 @@ class TouchSensorProfile(ABC):
         """Return the first ``count`` per-sensor magnitudes from a reading.
 
         Returns ``None`` when the message carries nothing usable, so the caller
-        can skip it. Units are technology-specific (µT for magnets) but must
+        can skip it. Units are technology-specific (uT for magnets) but must
         match whatever :meth:`build_position_tracker` expects.
         """
 
@@ -92,7 +92,7 @@ class TouchSensorProfile(ABC):
 
 
 class MagnetSensorProfile(TouchSensorProfile):
-    """MLX90393 magnet array — the only touch technology shipped today."""
+    """MLX90393 magnet array - the only touch technology shipped today."""
 
     name = "magnet"
     node_types = MAGNET_NODE_TYPES
@@ -103,12 +103,12 @@ class MagnetSensorProfile(TouchSensorProfile):
 
     def read_magnitudes(self, data: Mapping[str, Any],
                         count: int) -> list[float] | None:
-        """Prefer raw ``mag`` (µT); fall back to the binary ``act`` set."""
+        """Prefer raw ``mag`` (uT); fall back to the binary ``act`` set."""
         return self._from_mag(data, count) or self._from_act(data, count)
 
     @staticmethod
     def _from_mag(data: Mapping[str, Any], count: int) -> list[float] | None:
-        """Extract raw magnitudes in µT from the ``mag`` field."""
+        """Extract raw magnitudes in uT from the ``mag`` field."""
         raw = data.get("mag")
         if not isinstance(raw, (list, tuple)) or len(raw) < count:
             return None
@@ -124,8 +124,8 @@ class MagnetSensorProfile(TouchSensorProfile):
     def _from_act(data: Mapping[str, Any], count: int) -> list[float] | None:
         """Extract from ``act`` (active sensor indices) as binary 0/1.
 
-        Last-resort fallback — the µT thresholds won't fire on 0/1 unless the
-        threshold is ≤1 µT, but it keeps the tracker from crashing when only
+        Last-resort fallback - the uT thresholds won't fire on 0/1 unless the
+        threshold is <=1 uT, but it keeps the tracker from crashing when only
         ``act`` is present.
         """
         raw = data.get("act")
@@ -156,7 +156,7 @@ class MagnetSensorProfile(TouchSensorProfile):
             from src.hardware.quadrant_detector import (
                 QuadrantDetector, TouchPositionTracker)
         except ImportError:
-            logger.warning("Quadrant detector unavailable — position tracking off")
+            logger.warning("Quadrant detector unavailable - position tracking off")
             return None
 
         detector = QuadrantDetector(
@@ -174,13 +174,13 @@ class MagnetSensorProfile(TouchSensorProfile):
 
 
 class CapacitiveSensorProfile(TouchSensorProfile):
-    """PLACEHOLDER — a future capacitive touch board. NOT wired up yet.
+    """PLACEHOLDER - a future capacitive touch board. NOT wired up yet.
 
     This is a skeleton so the shape is on record; it is deliberately **not
     registered** (see the bottom of this module), so it changes nothing at
     runtime until its firmware exists. Activating it is a one-line uncomment.
 
-    Two possible hardware shapes, both handled the same way here — pick when the
+    Two possible hardware shapes, both handled the same way here - pick when the
     firmware is built:
 
     * **Own node** (``node_capacitive_sensor``): keep ``node_types`` as below and
@@ -188,10 +188,10 @@ class CapacitiveSensorProfile(TouchSensorProfile):
     * **Folded into the direct board** (like the magnet sensing is): add
       ``"node_direct"`` to ``node_types`` and use a ``message_type`` *distinct*
       from ``"magnet"`` (dispatch is by message type, so one board can stream
-      both — magnet and capacitive — side by side without clashing).
+      both - magnet and capacitive - side by side without clashing).
 
     Capacitive doesn't move a magnet in the silicone, so there is no
-    chamber→touch contamination: ``supports_pressure_coupling`` stays False and
+    chamber->touch contamination: ``supports_pressure_coupling`` stays False and
     ``build_compensator`` inherits the no-op default. Spatial position tracking
     (``build_position_tracker``) also inherits None until a capacitive-specific
     detector is written; touch *events* (press/release) already work off the
@@ -210,7 +210,7 @@ class CapacitiveSensorProfile(TouchSensorProfile):
 
     def read_magnitudes(self, data: Mapping[str, Any],
                         count: int) -> list[float] | None:
-        """Template extractor — reads a provisional ``cap`` list of per-sensor
+        """Template extractor - reads a provisional ``cap`` list of per-sensor
         readings. TODO(firmware): confirm the field name, units, and whether a
         baseline is already subtracted on-device (mirror ``mag`` if so)."""
         raw = data.get("cap")

@@ -225,7 +225,7 @@ def test_wifi_ota_rejects_invalid_image(tmp_path):
 
 
 def test_wifi_ota_without_ssid_lets_the_gateway_inject(tmp_path):
-    """No ssid → ota_wifi goes out WITHOUT credentials; the gateway fills in
+    """No ssid -> ota_wifi goes out WITHOUT credentials; the gateway fills in
     its own stored AP ssid/pass while forwarding (apInjectCreds)."""
     app = bytes([_ESP_APP_MAGIC]) + b"x" * 50
     gw = FakeGateway()

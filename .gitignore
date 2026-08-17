@@ -24,7 +24,7 @@ htmlcov/
 coverage.xml
 *.coveragerc
 
-# Generated UI Python files (from pyside6-uic — source of truth is src/gui/ui/*.ui)
+# Generated UI Python files (from pyside6-uic - source of truth is src/gui/ui/*.ui)
 src/gui/ui_*.py
 
 # IDE
@@ -68,7 +68,7 @@ capture_*.jsonl
 *.pcap
 
 # KiCad throwaways (hardware/PCB/). The auto-backup zips alone were 89 MB and
-# every save adds another, so they must never be committed — the .kicad_* source
+# every save adds another, so they must never be committed - the .kicad_* source
 # files are the record. fp-info-cache is regenerated on demand.
 *-backups/
 _autosave-*

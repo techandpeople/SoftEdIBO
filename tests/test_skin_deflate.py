@@ -30,7 +30,7 @@ def _skin(with_deflate_profile=True):
         "controller": ctrl,
         "node_slot": 0,
         "max_pressure": 8.0,
-        # Falling curve: full → measured floor at ~6 % (ambient on this gauge).
+        # Falling curve: full -> measured floor at ~6 % (ambient on this gauge).
         "deflate_profile": [[0, 100], [1000, 50], [3000, 6]]
         if with_deflate_profile else None,
     }
@@ -41,7 +41,7 @@ def test_deflate_to_floor_sends_time_budget():
     skin, ctrl = _skin(with_deflate_profile=True)
     skin.chambers[0].target_pressure = 80
     skin.chambers[0].pressure = 80
-    assert skin.deflate(0, 80)                    # target 0 — below the 6 % floor
+    assert skin.deflate(0, 80)                    # target 0 - below the 6 % floor
     ms = ctrl.deflate_calls[-1]["ms"]
     assert ms is not None and 0 < ms <= MAX_DEFLATE_MS
 
@@ -50,7 +50,7 @@ def test_deflate_above_floor_stays_closed_loop():
     skin, ctrl = _skin(with_deflate_profile=True)
     skin.chambers[0].target_pressure = 80
     skin.chambers[0].pressure = 80
-    assert skin.deflate(0, 30)                    # target 50 — well above the floor
+    assert skin.deflate(0, 30)                    # target 50 - well above the floor
     assert ctrl.deflate_calls[-1]["ms"] is None
 
 

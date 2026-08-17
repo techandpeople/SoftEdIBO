@@ -1,4 +1,4 @@
-"""RobotMonitorWidget — visualises all Skins of a robot.
+"""RobotMonitorWidget - visualises all Skins of a robot.
 
 Layout: one SkinWidget per Skin in robot.skins. Works for any robot that
 exposes a ``skins: dict[str, Skin]`` attribute.
@@ -15,7 +15,7 @@ from src.robots.base_robot import BaseRobot
 
 
 class RobotMonitorWidget(QGroupBox):
-    """Widget for a single robot — one SkinWidget per Skin."""
+    """Widget for a single robot - one SkinWidget per Skin."""
 
     touch_event = Signal(str, int, str)  # (skin_id, chamber_id, action)
 
@@ -37,7 +37,7 @@ class RobotMonitorWidget(QGroupBox):
             layout.addWidget(sw)
 
         if not skins:
-            layout.addWidget(QLabel(f"{robot.robot_id} — nothing configured"))
+            layout.addWidget(QLabel(f"{robot.robot_id} - nothing configured"))
 
     def organ_view_for(self, skin_id: str):
         """The organ display (grid view) of a skin on this robot, or None."""

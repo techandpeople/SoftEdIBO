@@ -1,7 +1,7 @@
-"""Fill-curve calibration dialog (Tools → Calibrate Fill Times…).
+"""Fill-curve calibration dialog (Tools -> Calibrate Fill Times...).
 
-Measures, per actuator chamber, its **time→pressure fill curve** — how the
-pressure climbs as the inflate valve is held open — using the pressure sensor as
+Measures, per actuator chamber, its **time->pressure fill curve** - how the
+pressure climbs as the inflate valve is held open - using the pressure sensor as
 ground truth, and stores it as the chamber's ``fill_profile`` in settings. At
 runtime the app converts an inflate target into an open-valve time from that
 curve, so the firmware doesn't have to close the loop on the laggy multiplexed
@@ -9,7 +9,7 @@ pressure sensor (the firmware ``HARD_MAX`` cutoff + a total-time ceiling stay as
 safety nets).
 
 The sweep is **continuous**: the inflate valve is held open (a bench ``test_run``)
-while the node streams pressure at a fast cadence (``status_rate`` — see
+while the node streams pressure at a fast cadence (``status_rate`` - see
 :class:`~src.hardware.fast_telemetry.FastTelemetry`), timestamping each reading
 into the curve. One valve-open pass per chamber, no per-step settle.
 
@@ -64,10 +64,10 @@ from src.hardware.fill_calibration import (
 from src.hardware.fill_profile import FillProfile
 from src.hardware.fill_scaling import duty_sweep
 
-# Every sweep — and especially each duty step of a duty-curve run — MUST fill from
+# Every sweep - and especially each duty step of a duty-curve run - MUST fill from
 # the same empty baseline or their times aren't comparable. Ambient does NOT read
 # 0 kPa on this gauge (it sits ~6 kPa), so instead of a fixed threshold we deflate
-# until the reading stops dropping — i.e. it has reached its floor (true ambient,
+# until the reading stops dropping - i.e. it has reached its floor (true ambient,
 # whatever value that is on this sensor). "Stopped dropping" = no further drop of at
 # least _DEFLATE_MIN_DROP_KPA for _DEFLATE_SETTLE_MS, after a short minimum so the
 # vacuum can start pulling. Bounded by _MAX_DEFLATE_MS so a stuck sensor can't hang.
@@ -84,12 +84,12 @@ _KEEPALIVE_MS = 1000
 # to finish (e.g. the fast telemetry never arrived because the node wasn't flashed).
 _SWEEP_GRACE_MS = 2000
 
-# Telemetry cadence choices offered by the "Detail" combo (label → ms). Finer =
+# Telemetry cadence choices offered by the "Detail" combo (label -> ms). Finer =
 # more curve points at a little more radio traffic.
 _RATE_CHOICES: tuple[tuple[str, int], ...] = (("Fine", 20), ("Normal", 40), ("Coarse", 60))
 _DEFAULT_RATE_MS = 40
 
-# PWM duties swept (fastest → slowest) when measuring a chamber's duty→fill-speed
+# PWM duties swept (fastest -> slowest) when measuring a chamber's duty->fill-speed
 # curve. Each is swept from empty; the fastest is the reference for the slowdown.
 # Geometrically spaced from full duty down to the stall floor (see duty_sweep):
 # the pump's response is exponential, so the points bunch up near the floor where
@@ -105,7 +105,7 @@ _MAX_PREFILL_MS = 12000
 class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
     """Calibrate per-chamber fill curves against the pressure sensor."""
 
-    # gateway read thread → GUI thread: (mac, chamber, pressure_pct, kpa)
+    # gateway read thread -> GUI thread: (mac, chamber, pressure_pct, kpa)
     _pressure = Signal(str, int, float, float)
     # Emitted after fill curves are written to settings, so the app can rebuild
     # robots to pick up the new ``fill_profile`` values.
@@ -127,18 +127,18 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
         # every actuator chamber across all configured robots.
         self._chambers = (chambers if chambers is not None
                           else iter_actuator_chambers(settings.data))
-        # measured solo results: (mac, slot) → fill_profile list ([[ms, pct], ...])
+        # measured solo results: (mac, slot) -> fill_profile list ([[ms, pct], ...])
         self._results: dict[tuple[str, int], list[list[float]]] = {}
-        # measured duty→speed sweeps: (mac, slot) → [[duty, full_time_ms], ...]
+        # measured duty->speed sweeps: (mac, slot) -> [[duty, full_time_ms], ...]
         self._duty_results: dict[tuple[str, int], list[list[float]]] = {}
-        # measured falling deflate curves: (mac, slot) → [[ms, pct], ...]
+        # measured falling deflate curves: (mac, slot) -> [[ms, pct], ...]
         self._deflate_results: dict[tuple[str, int], list[list[float]]] = {}
         # currently-running calibration job, or None
         self._job: dict | None = None
         self._rows: dict[tuple[str, int], dict] = {}
 
         for label, ms in _RATE_CHOICES:
-            self.detail_combo.addItem(f"{label} — {ms} ms", userData=int(ms))
+            self.detail_combo.addItem(f"{label} - {ms} ms", userData=int(ms))
         idx = self.detail_combo.findData(_DEFAULT_RATE_MS)
         self.detail_combo.setCurrentIndex(idx if idx >= 0 else 0)
 
@@ -197,15 +197,15 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
         bar.setRange(0, 100)
         bar.setTextVisible(False)
         bar.setMaximumHeight(10)
-        # Live kPa readout (firmware reports it per chamber); "—" until a status
+        # Live kPa readout (firmware reports it per chamber); "-" until a status
         # message arrives. Fixed width so rows stay aligned.
-        kpa = QLabel("—")
+        kpa = QLabel("-")
         kpa.setFixedWidth(80)
         kpa.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         kpa.setToolTip("Live chamber pressure in kPa.")
         # Calibration result (full fill time + fill-order rank). Pre-filled from any
         # stored curve so the user sees what's already calibrated.
-        result = QLabel("—")
+        result = QLabel("-")
         result.setFixedWidth(140)
         result.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         btn = QPushButton("Calibrate")
@@ -222,7 +222,7 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
 
     def _profile_for(self, key: tuple[str, int]) -> FillProfile | None:
         """The best-known fill curve for a row: a fresh measurement if any, else the
-        chamber's own stored curve, else its skin-type template — used for the
+        chamber's own stored curve, else its skin-type template - used for the
         result text and the fill-order ranking."""
         fresh = self._results.get(key)
         if fresh is not None:
@@ -254,7 +254,7 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
             self._set_row_result(key, row, profiles[key], rank.get(key), total)
 
     def _duty_curve_for(self, key: tuple[str, int], row: dict) -> Any:
-        """The best-known duty→speed sweep for a row: a fresh measurement if any,
+        """The best-known duty->speed sweep for a row: a fresh measurement if any,
         else the chamber's stored curve."""
         return self._duty_results.get(key) or row["cfg"].get("duty_curve")
 
@@ -264,34 +264,34 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
         label = row["result"]
         if prof is None:
             duty = self._duty_curve_for(key, row)
-            label.setText("⚡ duty" if duty else "—")
+            label.setText("duty" if duty else "-")
             label.setToolTip(f"Duty curve: {len(duty)} points; fill curve not measured."
                              if duty else "Not calibrated yet.")
             return
         ms = int(round(prof.full_time_ms))
         tag = f" (#{rank}/{total})" if rank and total > 1 else ""
         if row.get("timed_out"):
-            label.setText(f"≥{ms} ms{tag}")
+            label.setText(f">={ms} ms{tag}")
             label.setToolTip(
-                f"Timed out at {int(prof.top_pct)}% — chamber did not reach the "
+                f"Timed out at {int(prof.top_pct)}% - chamber did not reach the "
                 "target. Curve still saved up to that point.")
             return
-        mark = " ✓" if key in self._results else ""
+        mark = " ok" if key in self._results else ""
         rank_txt = f" Fills #{rank} of {total} (shorter = first)." if rank and total > 1 else ""
         marks, extra_txt = self._row_markers(key, row)
         label.setText(f"{ms} ms{mark}{marks}{tag}")
         label.setToolTip(f"Fills to {int(prof.top_pct)}% in {ms} ms.{rank_txt}{extra_txt}")
 
     def _row_markers(self, key: tuple[str, int], row: dict) -> tuple[str, str]:
-        """Markers + tooltip suffix for the extra curves a chamber has: ⚡ = a
-        measured duty→speed curve, ▼ = a measured deflate curve."""
+        """Markers + tooltip suffix for the extra curves a chamber has: "d" = a
+        measured duty->speed curve, "f" = a measured deflate curve."""
         marks, txt = "", ""
         duty = self._duty_curve_for(key, row)
         if duty:
-            marks += " ⚡"
+            marks += " d"
             txt += f" Duty curve: {len(duty)} points."
         if self._deflate_results.get(key) or row["cfg"].get("deflate_profile"):
-            marks += " ▼"
+            marks += " f"
             txt += " Deflate curve measured."
         return marks, txt
 
@@ -310,12 +310,12 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
                          for ch in self._chambers])
 
     def _calibrate_duty_all(self) -> None:
-        """Sweep every chamber's duty→speed curve (each at several PWM duties)."""
+        """Sweep every chamber's duty->speed curve (each at several PWM duties)."""
         self._run_specs([{"mac": ch["mac"], "slot": int(ch["slot"]), "kind": "duty"}
                          for ch in self._chambers])
 
     def _calibrate_deflate_all(self) -> None:
-        """Sweep every chamber's deflate curve (fill → record the fall to the floor)."""
+        """Sweep every chamber's deflate curve (fill -> record the fall to the floor)."""
         self._run_specs([{"mac": ch["mac"], "slot": int(ch["slot"]), "kind": "deflate"}
                          for ch in self._chambers])
 
@@ -345,7 +345,7 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
         if row is not None:
             row["bar"].setValue(0)
             row["timed_out"] = False
-            row["result"].setText("…")
+            row["result"].setText("...")
         self._set_buttons_enabled(False)
         self._job = {
             "mac": mac, "slot": slot, "kind": kind, "phase": "deflate",
@@ -398,7 +398,7 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
     def _send_vent(self, mac: str, slot: int) -> None:
         """Passively vent a chamber to ambient: open BOTH valves with NO pump, so it
         equalises to atmosphere. The vacuum pump (``deflate``) would instead pull
-        below ambient — which the gauge can't read — so it never settles at the true
+        below ambient - which the gauge can't read - so it never settles at the true
         ambient baseline every sweep must start from. Re-sent as the manual dead-man
         keepalive; the same open-valves-no-pump the Test Actuators bench uses."""
         self._gateway.send(mac, "valve_manual", chamber=slot, side=0, open=1)
@@ -466,7 +466,7 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
         # Filling toward ~full before the falling sweep; keepalives as in a sweep.
         self._keepalive_hold(job)
         if job["phase_elapsed"] >= _MAX_PREFILL_MS:
-            # Chamber never made ~full (leak/slow) — sweep down from wherever.
+            # Chamber never made ~full (leak/slow) - sweep down from wherever.
             self._begin_downsweep(job)
 
     def _tick_sweep(self, job: dict) -> None:
@@ -581,10 +581,10 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
         extra = ""
         job = self._job
         if job is not None and job.get("kind") == "duty":
-            extra = f" · duty {job['duties'][job['duty_i']]}"
+            extra = f" | duty {job['duties'][job['duty_i']]}"
         elif job is not None and job.get("kind") == "deflate":
-            extra = " · deflate curve"
-        self.combo_status.setText(f"Run {idx}/{total} — {mac} slot {slot}{extra}")
+            extra = " | deflate curve"
+        self.combo_status.setText(f"Run {idx}/{total} - {mac} slot {slot}{extra}")
 
     def _set_buttons_enabled(self, on: bool) -> None:
         # Buttons disabled == a sweep (or queued batch) is running: pulse the
@@ -721,7 +721,7 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
             self.accept()
 
     # ------------------------------------------------------------------
-    # Gateway plumbing (read thread → Signal → GUI thread)
+    # Gateway plumbing (read thread -> Signal -> GUI thread)
     # ------------------------------------------------------------------
 
     def _on_gateway_message(self, data: dict) -> None:

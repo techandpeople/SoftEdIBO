@@ -1,4 +1,4 @@
-"""SkinWidget — visualises a Skin as a labelled group of ChamberWidgets.
+"""SkinWidget - visualises a Skin as a labelled group of ChamberWidgets.
 
 A Skin is a group of AirChambers sharing an ESP32 node.
 One ChamberWidget is created per AirChamber in skin.chambers.
@@ -23,11 +23,11 @@ from src.hardware.touch_source import CompensatedMagnetSource
 
 
 class SkinWidget(QGroupBox):
-    """Widget for a single Skin — one ChamberWidget per AirChamber."""
+    """Widget for a single Skin - one ChamberWidget per AirChamber."""
 
     touch_event   = Signal(str, int, str)  # (skin_id, chamber_id, action)
-    _sensor_pulse = Signal(int)            # thread-safe bridge → pulse_sensor
-    _touch_log    = Signal(int, str)       # thread-safe bridge → touch_event log
+    _sensor_pulse = Signal(int)            # thread-safe bridge -> pulse_sensor
+    _touch_log    = Signal(int, str)       # thread-safe bridge -> touch_event log
 
     def __init__(self, skin: Skin) -> None:
         super().__init__(skin.skin_id)
@@ -74,7 +74,7 @@ class SkinWidget(QGroupBox):
         if self._grid_view is not None or self._organ_panel is not None:
             outer.addLayout(top)
 
-        # Raw↔compensated toggle for the sensor highlight, shown only when this
+        # Raw<->compensated toggle for the sensor highlight, shown only when this
         # skin has a calibrated + enabled coupling (so ``touch_source`` is the
         # compensating source). Default compensated: the grid then lights the same
         # touches the activities react to, instead of false ones from actuation.
@@ -86,7 +86,7 @@ class SkinWidget(QGroupBox):
             help_text = (
                 "Subtract the calibrated actuation coupling from the sensor "
                 "highlight, so an inflating chamber no longer flashes a false "
-                "touch on the grid — matching what the activities detect. "
+                "touch on the grid - matching what the activities detect. "
                 "Uncheck to see the raw sensor field for diagnosis.")
             compensate_cb.setToolTip(help_text)
             compensate_cb.setWhatsThis(help_text)
@@ -95,7 +95,7 @@ class SkinWidget(QGroupBox):
 
         # Live tuning panel for skins with 4-sensor quadrant touch detection.
         # Keep it compact: it must NOT stretch to the (now wider) grid view's
-        # width — only the SkinGridView shape should scale up.
+        # width - only the SkinGridView shape should scale up.
         if skin.has_touch_tracking:
             tuning = TouchTuningPanel(skin)
             tuning.setSizePolicy(QSizePolicy.Policy.Maximum,

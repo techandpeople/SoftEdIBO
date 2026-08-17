@@ -29,7 +29,7 @@
      <item>
       <widget class="QPushButton" name="closeButton">
        <property name="text"><string>Close</string></property>
-       <property name="whatsThis"><string>Close the editor. Unsaved changes are discarded — Save the behaviour first.</string></property>
+       <property name="whatsThis"><string>Close the editor. Unsaved changes are discarded - Save the behaviour first.</string></property>
       </widget>
      </item>
     </layout>

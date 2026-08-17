@@ -39,27 +39,27 @@
       </item>
       <item row="1" column="1">
        <widget class="QPushButton" name="fwd_btn">
-        <property name="text"><string>▲ Forward</string></property>
+        <property name="text"><string>^ Forward</string></property>
        </widget>
       </item>
       <item row="2" column="0">
        <widget class="QPushButton" name="left_btn">
-        <property name="text"><string>◄ Left</string></property>
+        <property name="text"><string>&lt; Left</string></property>
        </widget>
       </item>
       <item row="2" column="1">
        <widget class="QPushButton" name="stop_btn">
-        <property name="text"><string>■ Stop</string></property>
+        <property name="text"><string>Stop</string></property>
        </widget>
       </item>
       <item row="2" column="2">
        <widget class="QPushButton" name="right_btn">
-        <property name="text"><string>Right ►</string></property>
+        <property name="text"><string>Right ></string></property>
        </widget>
       </item>
       <item row="3" column="1">
        <widget class="QPushButton" name="back_btn">
-        <property name="text"><string>▼ Back</string></property>
+        <property name="text"><string>v Back</string></property>
        </widget>
       </item>
      </layout>
@@ -174,22 +174,22 @@
    <item>
     <widget class="QGroupBox" name="sensors_group">
      <property name="title"><string>Sensors &amp; impact</string></property>
-     <property name="whatsThis"><string>Live accelerometer and mic readout streamed from the Thymio over the gateway/C6 link. "Impact" is how far the accelerometer is from rest (0,0,20); a knock spikes it. Set the threshold above the resting value and below a real knock — calibrate by knocking the robot and watching the bar cross the line. The tuned threshold is written back to the robot config on close.</string></property>
+     <property name="whatsThis"><string>Live accelerometer and mic readout streamed from the Thymio over the gateway/C6 link. "Impact" is how far the accelerometer is from rest (0,0,20); a knock spikes it. Set the threshold above the resting value and below a real knock - calibrate by knocking the robot and watching the bar cross the line. The tuned threshold is written back to the robot config on close.</string></property>
      <layout class="QVBoxLayout" name="sensors_vbox">
       <item>
        <widget class="QLabel" name="sensors_status_label">
-        <property name="text"><string>Waiting for sensor data… (needs the gateway/C6 wireless link on)</string></property>
+        <property name="text"><string>Waiting for sensor data... (needs the gateway/C6 wireless link on)</string></property>
         <property name="wordWrap"><bool>true</bool></property>
        </widget>
       </item>
       <item>
        <widget class="QLabel" name="acc_label">
-        <property name="text"><string>acc:  x —  y —  z —</string></property>
+        <property name="text"><string>acc:  x -  y -  z -</string></property>
        </widget>
       </item>
       <item>
        <widget class="QLabel" name="ground_label">
-        <property name="text"><string>ground: —  —      on the table</string></property>
+        <property name="text"><string>ground: -  -      on the table</string></property>
        </widget>
       </item>
       <item>
@@ -210,7 +210,7 @@
         <item>
          <widget class="QLabel" name="mic_value_label">
           <property name="minimumSize"><size><width>60</width><height>0</height></size></property>
-          <property name="text"><string>—</string></property>
+          <property name="text"><string>-</string></property>
          </widget>
         </item>
        </layout>
@@ -233,7 +233,7 @@
         <item>
          <widget class="QLabel" name="dev_value_label">
           <property name="minimumSize"><size><width>60</width><height>0</height></size></property>
-          <property name="text"><string>—</string></property>
+          <property name="text"><string>-</string></property>
          </widget>
         </item>
        </layout>

@@ -1,21 +1,21 @@
 """Hardcoded skin-geometry registry, keyed by ``skin_type``.
 
 Single, reliable source of truth for each skin type's physical shape and the
-**sensor coordinates** — the data the firmware does not announce and that the
+**sensor coordinates** - the data the firmware does not announce and that the
 per-skin GUI editor was configuring unreliably. Edit these constants by hand
 when the hardware changes; both the GUI (to draw each skin type correctly) and
 any future spatial analysis read from here.
 
 Coordinates are in **millimetres**, origin at the skin's top-left bounding box,
-x→right, y→down (screen convention). Sensor order matches the firmware's stream
-order (sensor index *i* ↔ ``mag[i]``/``act`` index *i*).
+x->right, y->down (screen convention). Sensor order matches the firmware's stream
+order (sensor index *i* <-> ``mag[i]``/``act`` index *i*).
 
 The touch-gesture ML does **not** depend on these coordinates (it is per-skin-
 type and index-based); they exist for rendering and as the reliable geometry
 source should spatial features ever be added.
 
 > Several entries below are first-pass placeholders (marked ``# TODO: measure``)
-> — adjust to the real builds. Sensor count varies by build: a skin uses as many
+> - adjust to the real builds. Sensor count varies by build: a skin uses as many
 > of the board's sensors as fit (e.g. ``tree_round`` 1, ``turtle_side`` 2,
 > ``turtle_square`` 4).
 >
@@ -24,7 +24,7 @@ source should spatial features ever be added.
 > Fewer-sensor skins still get touch *reactions* and per-skin-type gesture ML,
 > but resolve less:
 >   - **1 sensor** (e.g. ``tree_round``): only tap / press / hold, by magnitude
->     and timing — no direction, no drag.
+>     and timing - no direction, no drag.
 >   - **2 sensors** (e.g. ``turtle_side``): the above plus one axis of direction.
 >   - **4 sensors** (e.g. ``turtle_square``): full quadrant position + drag.
 """
@@ -59,10 +59,10 @@ class SkinGeometry:
         return len(self.sensors_mm)
 
     def sensor_grid(self, cols: int = 4, rows: int = 4) -> list[list[int]]:
-        """Derive a ``rows×cols`` sensor-index grid from the sensor coordinates,
+        """Derive a ``rowsxcols`` sensor-index grid from the sensor coordinates,
         for the activity view to place sensors without a drawn grid. Each sensor
         is dropped into the cell nearest its position within the bounding box;
-        cells with no sensor are ``-1``. (Positions are constants — see the
+        cells with no sensor are ``-1``. (Positions are constants - see the
         ``sensors_mm`` of this type.)"""
         grid = [[-1] * cols for _ in range(rows)]
         w, h = self.size_mm
@@ -76,7 +76,7 @@ class SkinGeometry:
                             ) -> tuple[int, int, list[list[int]]]:
         """Sensor grid sized to the actual sensor arrangement: one column per
         distinct x position and one row per distinct y position. Each sensor
-        then fills a whole cell (e.g. a quadrant for a 2×2 layout) instead of a
+        then fills a whole cell (e.g. a quadrant for a 2x2 layout) instead of a
         single cell of an arbitrarily fine grid, so the activity view's touch
         highlight covers the sensor's region. Returns ``(cols, rows, grid)``."""
         if not self.sensors_mm:
@@ -105,7 +105,7 @@ def _cluster_axis(values, tol_mm: float) -> list[float]:
 
 
 def _grid_2x2(w: float, h: float) -> tuple[tuple[float, float], ...]:
-    """Four sensors at the quadrant centres of a ``w×h`` box.
+    """Four sensors at the quadrant centres of a ``wxh`` box.
     Order S0=TL, S1=TR, S2=BL, S3=BR (firmware/QuadrantDetector convention)."""
     return ((w * 0.25, h * 0.25), (w * 0.75, h * 0.25),
             (w * 0.25, h * 0.75), (w * 0.75, h * 0.75))
@@ -116,13 +116,13 @@ def _grid_2x2(w: float, h: float) -> tuple[tuple[float, float], ...]:
 # its skins in settings.yaml). Nothing else needs code changes for the data.
 
 SKIN_GEOMETRIES: dict[str, SkinGeometry] = {
-    # Turtle — central square pad.
+    # Turtle - central square pad.
     "turtle_square": SkinGeometry(
         skin_type="turtle_square", shape="rect", size_mm=(125.0, 125.0),
         sensors_mm=_grid_2x2(125.0, 125.0), robot_kind="turtle",
         notes="Turtle central square, 4 sensors at quadrant centres.",
     ),
-    # Turtle — lateral rectangles (left/right flanks). Only 2 sensors fit on the
+    # Turtle - lateral rectangles (left/right flanks). Only 2 sensors fit on the
     # narrow 75 mm width, stacked along the 125 mm length.
     "turtle_side": SkinGeometry(
         skin_type="turtle_side", shape="rect", size_mm=(75.0, 125.0),
@@ -130,34 +130,34 @@ SKIN_GEOMETRIES: dict[str, SkinGeometry] = {
         notes="Turtle side rectangle, 2 sensors at 1/3 and 2/3 of the length. "
               "TODO: confirm exact positions on the real build.",
     ),
-    # Turtle — functional corner triangles (head/tail are aesthetic and are
+    # Turtle - functional corner triangles (head/tail are aesthetic and are
     # NOT skins, so they are absent from this registry).
     "turtle_triangle": SkinGeometry(
         skin_type="turtle_triangle", shape="triangle", size_mm=(75.0, 75.0),
         sensors_mm=((37.5, 25.0), (20.0, 60.0), (55.0, 60.0), (37.5, 45.0)),
         robot_kind="turtle",
-        notes="TODO: measure — functional corner triangle sensor positions.",
+        notes="TODO: measure - functional corner triangle sensor positions.",
     ),
-    # Tree — round branch skins, Ø99 mm. A single sensor at the centre (one
+    # Tree - round branch skins, dia 99 mm. A single sensor at the centre (one
     # magnet per branch); no spatial position tracking, only touch reactions.
     "tree_round": SkinGeometry(
         skin_type="tree_round", shape="round", size_mm=(99.0, 99.0),
         sensors_mm=((49.5, 49.5),),
         robot_kind="tree",
-        notes="Tree branch, Ø99 round, single central sensor.",
+        notes="Tree branch, dia 99 round, single central sensor.",
     ),
-    # Thymio — 'D' (rotated +90°): semicircular bulge on top, flat bottom.
-    # 134 mm wide × 120 mm tall. Four MLX90393 sensors in a 2×2 (top pair in the
+    # Thymio - 'D' (rotated +90 deg): semicircular bulge on top, flat bottom.
+    # 134 mm wide x 120 mm tall. Four MLX90393 sensors in a 2x2 (top pair in the
     # bulge, bottom pair on the flat edge).
     "thymio": SkinGeometry(
         skin_type="thymio", shape="thymio", size_mm=(134.0, 120.0),
         # Corners measured from the BOTTOM-left (y up), converted to the
-        # registry's top-left origin (y down, y' = 120 - y). Index → position
+        # registry's top-left origin (y down, y' = 120 - y). Index -> position
         # matches the firmware stream order: S0 = top-right, S1 = bottom-left,
-        # S2 = bottom-right, S3 = top-left  →  grid  [S3 S0 / S1 S2].
+        # S2 = bottom-right, S3 = top-left  ->  grid  [S3 S0 / S1 S2].
         sensors_mm=((105.0, 30.0), (40.0, 90.0), (105.0, 90.0), (40.0, 30.0)),
         robot_kind="thymio",
-        notes="Measured 2026-07-05 (~mm), 134×120, 2×2.",
+        notes="Measured 2026-07-05 (~mm), 134x120, 2x2.",
     ),
 }
 
@@ -200,7 +200,7 @@ def max_organs_for(skin_type: str | None) -> int:
 # SHAPE, so the shape is pinned by its own variant: ``organ_rectangle`` /
 # ``organ_triangle`` / ``organ_ellipse``. All are organ-bearing variants
 # (``ORGAN_VARIANTS``); the per-type cap lives in ``MAX_ORGANS_BY_TYPE``.
-# Keep the order stable and only APPEND new variants — the touch ML one-hot
+# Keep the order stable and only APPEND new variants - the touch ML one-hot
 # encodes against it, so appending grows the vector while existing indices stay.
 SKIN_VARIANTS: tuple[str, ...] = (
     "natural", "wrinkles", "organ", "three_organ",

@@ -1,15 +1,15 @@
 #pragma once
 /**
- * SoftEdIBO — shared ESP-NOW OTA receiver (Arduino nodes only).
+ * SoftEdIBO - shared ESP-NOW OTA receiver (Arduino nodes only).
  *
  * Lets the PC push a new firmware image to a node wirelessly, relayed verbatim
- * by the gateway over the existing JSON/ESP-NOW pipe — no WiFi/AP needed. This
+ * by the gateway over the existing JSON/ESP-NOW pipe - no WiFi/AP needed. This
  * is the node-side counterpart of src/hardware/node_ota_updater.py.
  *
  * The PC drives the whole transfer; the node only writes flash + ACKs:
  *   PC -> node  {"cmd":"ota_begin","size":N,"md5":"<hex>","chunk":144}
  *   node -> PC  {"type":"ota_ready"}            | {"type":"ota_error","reason":..}
- *   PC -> node  {"cmd":"ota_data","seq":S,"data":"<base64>"}   (seq 0,1,2,…)
+ *   PC -> node  {"cmd":"ota_data","seq":S,"data":"<base64>"}   (seq 0,1,2,...)
  *   node -> PC  {"type":"ota_ack","seq":S}      | {"type":"ota_error","reason":..}
  *   PC -> node  {"cmd":"ota_end"}
  *   node        verify MD5, arm the boot-done flag, reboot. The *new* firmware
@@ -17,7 +17,7 @@
  *               actually boots  | {"type":"ota_error","reason":"verify_failed"}
  *
  * Chunks are written inline in the ESP-NOW recv callback (WiFi task). A 144-byte
- * flash write is a few ms — acceptable, and far simpler than buffering through a
+ * flash write is a few ms - acceptable, and far simpler than buffering through a
  * queue. Integrity is verified by Update via the MD5 supplied in ota_begin, and
  * success is confirmed only after the new image boots (not before the reboot),
  * so an image that passes MD5 but fails to boot is reported as a failure rather
@@ -81,7 +81,7 @@ inline char wifiUrl[160] = {};
 
 // Armed before any OTA-triggered reboot (the WiFi HTTPUpdate path and the
 // ESP-NOW ota_end path both set it), so the freshly-booted new firmware can
-// confirm success from checkBootDone() — proving the image actually boots, not
+// confirm success from checkBootDone() - proving the image actually boots, not
 // just that it verified. Survives the software reset (RTC_NOINIT memory is not
 // cleared on a restart, only on power loss). Deliberately NOT inline/initialised:
 // a zero-init would defeat the noinit section, and exactly one translation unit
@@ -133,7 +133,7 @@ inline int b64decode(const char* in, size_t inlen, uint8_t* out, size_t outcap) 
 }
 
 // Arm the done flag, join the AP and pull the image over HTTP. Runs from the
-// main task (via pollWifi), never the recv callback. Returns only on failure — a
+// main task (via pollWifi), never the recv callback. Returns only on failure - a
 // successful HTTPUpdate reboots from inside update(), and the fresh boot reports
 // ota_done via checkBootDone(). On any failure the flag is cleared and the node
 // restarts into its current firmware to recover the ESP-NOW link.
@@ -194,7 +194,7 @@ inline bool tryHandle(const uint8_t* data, int len) {
         uint32_t seq = doc["seq"] | 0;
         // Tolerate a sliding window: re-ACK anything we already have (duplicate /
         // reorder) so the PC can advance, and silently drop chunks from the
-        // future — the PC retransmits the one we actually need on timeout. Only
+        // future - the PC retransmits the one we actually need on timeout. Only
         // the exactly-expected chunk is written.
         if (seq < expectedSeq) { replyAck(seq); return true; }
         if (seq > expectedSeq) { return true; }
@@ -240,11 +240,11 @@ inline bool tryHandle(const uint8_t* data, int len) {
         return true;
     }
 
-    return true;  // unknown ota_* command — consume it anyway
+    return true;  // unknown ota_* command - consume it anyway
 }
 
 // Call from loop(): if a WiFi OTA was requested (ota_wifi), run it now from the
-// main task — safe to block and tear down ESP-NOW here, unlike the recv
+// main task - safe to block and tear down ESP-NOW here, unlike the recv
 // callback. Does not return on a successful update (the node reboots). A no-op
 // when nothing is pending, so it is cheap to call every loop.
 inline void pollWifi() {
@@ -257,7 +257,7 @@ inline void pollWifi() {
 
 // Call once from setup() after se::begin(): if an OTA just completed (either the
 // WiFi or the ESP-NOW path), the flag armed before the reboot survived in RTC
-// memory — announce success to the PC and clear it. This is the *only* ota_done:
+// memory - announce success to the PC and clear it. This is the *only* ota_done:
 // it fires from the new firmware, so it proves the image booted, not merely that
 // it verified. Broadcast (not toGateway) because a fresh boot has not learned the
 // gateway MAC yet; the gateway forwards broadcasts to the PC all the same. A cold

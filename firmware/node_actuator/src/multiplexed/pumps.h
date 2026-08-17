@@ -3,7 +3,7 @@
 #include "pins.h"
 #include "dbg.h"
 
-// 6 pumps via 3× DRV3297. Each pump has a single PWM input. LEDC channels 0..5
+// 6 pumps via 3x DRV3297. Each pump has a single PWM input. LEDC channels 0..5
 // are dedicated to pump PWM. Each pump is assigned a "role" (PRESSURE_TANK,
 // VACUUM_TANK, or UNKNOWN) by the boot autodetect; runtime configure can override.
 

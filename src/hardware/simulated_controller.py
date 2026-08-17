@@ -1,10 +1,10 @@
-"""SimulatedController — mock chamber actuator for simulation.
+"""SimulatedController - mock chamber actuator for simulation.
 
 Pure **chamber actuation**: accepts inflate / deflate / set_pressure commands
 (the *targets*) and animates the chamber pressure locally toward them at a
 configurable rate, firing ``on_pressure`` callbacks exactly as real hardware
 would report back the *actual* pressure. This lets the widget / activity layer
-stay hardware-agnostic — swap in an ``ESP32Controller`` and behaviour is
+stay hardware-agnostic - swap in an ``ESP32Controller`` and behaviour is
 identical.
 
 Touch / magnet sensor sensing lives in :class:`~src.hardware.simulated_magnet_sensor.SimulatedMagnetSensor`,
@@ -24,17 +24,17 @@ logger = logging.getLogger(__name__)
 
 # Defaults for the tunable simulation knobs. Each ``SimulatedController``
 # overrides these from the activity's ``sim_params`` dict when constructed.
-# The rate models the pump speed — real motors differ, so it is configurable.
-_DEFAULT_INFLATE_PCT_PER_S = 33    # → step ~3 every 100 ms tick
+# The rate models the pump speed - real motors differ, so it is configurable.
+_DEFAULT_INFLATE_PCT_PER_S = 33    # -> step ~3 every 100 ms tick
 _DEFAULT_DEFLATE_PCT_PER_S = 33
 
-# Internal tick cadence — fixed at 100 ms. The configurable speeds set the
+# Internal tick cadence - fixed at 100 ms. The configurable speeds set the
 # step size per tick so the user can dial the rate without changing the timer.
 _TICK_MS = 100
 
 
 class SimulatedController(QObject):
-    """Mock chamber actuator — animates pressure toward targets at a set rate."""
+    """Mock chamber actuator - animates pressure toward targets at a set rate."""
 
     def __init__(
         self,
@@ -45,7 +45,7 @@ class SimulatedController(QObject):
     ) -> None:
         super().__init__(parent)
         self.mac_address = mac_address
-        # Interface parity with ESP32Controller — Skin consults ``fill_load`` to
+        # Interface parity with ESP32Controller - Skin consults ``fill_load`` to
         # scale calibrated fill times. The simulation ignores the resulting
         # ``ms`` (it models pressure directly), but the attribute must exist.
         from src.hardware.fill_scaling import FillLoadTracker
@@ -65,7 +65,7 @@ class SimulatedController(QObject):
         # Tunable knobs from the activity preset (Param defaults in
         # BaseActivity.SIM_PARAMS). Values converted from "%/s" to per-tick
         # step sizes so the fixed-rate timer can stay simple. The deflate /
-        # inflate rates model real pumps — slower or faster motors — and are
+        # inflate rates model real pumps - slower or faster motors - and are
         # configurable so simulation matches the eventual hardware.
         params = sim_params or {}
         self._inflate_step = max(1, round(int(
@@ -94,7 +94,7 @@ class SimulatedController(QObject):
         """Inflate by delta % (relative to current target).
 
         ``ms`` (time-based fill) and ``duty`` (pump PWM speed) are accepted for
-        interface parity and ignored — the simulation models pressure directly."""
+        interface parity and ignored - the simulation models pressure directly."""
         if self._stopped:
             return False
         self._current.setdefault(chamber, 0)
@@ -196,7 +196,7 @@ class SimulatedController(QObject):
                 index: int | None = None, ring: int | None = None,
                 fade_ms: int | None = None, angle: float | None = None,
                 color2: str | None = None) -> bool:
-        """No-op shim — simulation has no LED strip but activities call this on
+        """No-op shim - simulation has no LED strip but activities call this on
         enter/exit so we accept and log to keep the code paths symmetric with
         real hardware. ``index``/``ring``/``fade_ms``/``angle``/``color2`` mirror
         the real controller's signature (``color2`` is the "fade" pattern's

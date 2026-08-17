@@ -1,36 +1,36 @@
-"""Pressure-informed touch compensation — pure, Qt-free, testable.
+"""Pressure-informed touch compensation - pure, Qt-free, testable.
 
 A magnet sits in the silicone above each MLX90393 touch sensor; inflating a
 chamber deforms the silicone and shifts the magnet, so chamber actuation can
 masquerade as a touch (see :mod:`src.core.touch_coupling` and
-``docs/TOUCH_COUPLING.md``). The geometry is irregular — one chamber can move
+``docs/TOUCH_COUPLING.md``). The geometry is irregular - one chamber can move
 *two* sensors by different amounts, and two chambers inflated together deform the
-silicone **non-additively** — so the fix is a full N-dimensional model measured
+silicone **non-additively** - so the fix is a full N-dimensional model measured
 over combinations of chambers, not a per-chamber sum.
 
 The model is composed of three collaborators:
 
-* :class:`GridCompensation` — the measured actuation offset as an N-dimensional
+* :class:`GridCompensation` - the measured actuation offset as an N-dimensional
   lookup table over chamber levels. The calibration sweep visits every chamber
   *subset* over a per-member level grid, which is exactly the full Cartesian grid
   over each chamber's axis ``[0, g1, .., 100]`` (a state with a member at 0 is a
   lower-order subset). At runtime the expected offset for arbitrary live levels
-  is the **multilinear interpolation** of the surrounding measured corners —
+  is the **multilinear interpolation** of the surrounding measured corners -
   correct for co-inflation, and reducing to the old per-chamber curve when only
-  one chamber is up. Corners may carry per-sensor **3-axis** deltas (µT vectors,
+  one chamber is up. Corners may carry per-sensor **3-axis** deltas (uT vectors,
   from the ``MAG_VECTOR`` firmware), enabling vector compensation.
-* :class:`TransitionGuard` — marks a chamber "unsettled" for a window after its
+* :class:`TransitionGuard` - marks a chamber "unsettled" for a window after its
   level moves. The calibration only measures steady state, so during transitions
   (pump running, level readings lagging) the expected offset is unreliable; the
   compensator hardens the threshold of the affected sensors for that window.
-* :class:`TouchCompensator` — subtracts the expected actuation offset from each
+* :class:`TouchCompensator` - subtracts the expected actuation offset from each
   sensor's live reading and recomputes the active-sensor set from the residual.
   Scalar mode subtracts magnitudes; when both the message and the calibration
   carry 3-axis data it subtracts **vectors** and takes the residual's norm,
   which is physically correct (touch and actuation displace the magnet along
   different axes, so magnitudes alone under- or over-compensate). The activation
-  threshold grows with the size of the correction (``margin_frac``) so large —
-  hence less certain — corrections are trusted less. An optional
+  threshold grows with the size of the correction (``margin_frac``) so large -
+  hence less certain - corrections are trusted less. An optional
   ``suppress_pct`` implements the last-resort "ignore a sensor while its chamber
   is (near) fully actuated".
 
@@ -54,7 +54,7 @@ from typing import Any, Mapping, Sequence
 DEFAULT_THRESHOLD_UT = 300.0
 
 # A chamber must couple a sensor by at least this many uT (at its strongest
-# measured level) for the ``suppress_pct`` fallback to blank that sensor — so a
+# measured level) for the ``suppress_pct`` fallback to blank that sensor - so a
 # faintly-coupled sensor is not killed just because some far chamber is inflated.
 DEFAULT_SUPPRESS_COUPLING_UT = 50.0
 
@@ -65,7 +65,7 @@ DEFAULT_GUARD_MS = 800.0
 DEFAULT_GUARD_LEVEL_EPS = 3.0
 
 # Level-bin width (%) used to snap a measured state's per-member level to a grid
-# index — must match the sweep/analysis bin (touch_coupling.BIN_PCT).
+# index - must match the sweep/analysis bin (touch_coupling.BIN_PCT).
 DEFAULT_BIN_PCT = 10.0
 
 Vec = list[float]           # one sensor's [dx, dy, dz] in uT
@@ -100,7 +100,7 @@ def _fit_vecs(vecs: Any, n: int) -> list[Vec] | None:
 class CouplingState:
     """One measured operating point fed to :class:`GridCompensation`: the set of
     co-inflated chambers, each member's level (%), and the per-sensor offset (uT,
-    already rest-subtracted) it produced — with optional 3-axis vectors."""
+    already rest-subtracted) it produced - with optional 3-axis vectors."""
     chambers: frozenset[int]
     levels: dict[int, float]
     mag: list[float]
@@ -113,7 +113,7 @@ class GridCompensation:
     Each :class:`CouplingState` is a *corner* of the grid, keyed by its members'
     (chamber, level-bin). A query at arbitrary live levels brackets each involved
     chamber between its surrounding grid levels (with an implicit origin at 0)
-    and blends the ``2**k`` surrounding corners by the multilinear weights — the
+    and blends the ``2**k`` surrounding corners by the multilinear weights - the
     exact interpolation for a regular grid, and a plain per-chamber curve when
     only one chamber is up. An unmeasured higher-order corner (an incomplete
     sweep) degrades gracefully to the additive sum of its members' single-chamber
@@ -167,14 +167,14 @@ class GridCompensation:
 
     def chamber_max_abs(self, chamber: int, sensor: int) -> float:
         """Largest |offset| (uT) ``chamber`` was measured to put on ``sensor`` at
-        any level — the worst-case bound for the guard and suppression."""
+        any level - the worst-case bound for the guard and suppression."""
         row = self._chamber_max.get(int(chamber))
         return row[sensor] if row and sensor < len(row) else 0.0
 
     def _corner(self, key: frozenset) -> tuple[list[float], list[Vec] | None]:
         """Offset at a grid corner, with an additive-over-singles fallback for an
         unmeasured higher-order corner. A missing *single-member* corner has no
-        lower decomposition, so it degrades to zero (no data) — never recursing
+        lower decomposition, so it degrades to zero (no data) - never recursing
         on itself, which is what a chamber measured only in combination hits."""
         zeros = [0.0] * self.sensor_count
         zvec = ([list(_ZERO_VEC) for _ in range(self.sensor_count)]
@@ -245,7 +245,7 @@ class TransitionGuard:
 
     The calibration only measures steady state, so while a chamber transitions
     (pump running, status/telemetry lagging the true pressure) the expected
-    offset is unreliable — the compensator hardens the affected sensors'
+    offset is unreliable - the compensator hardens the affected sensors'
     thresholds for that window, mirroring the settle window the calibration
     itself uses. The reference level only re-anchors when it trips, so a slow
     creep still triggers once it accumulates past ``level_eps``.
@@ -351,7 +351,7 @@ class TouchCompensator:
         """Return ``(compensated_mag, active_sensors)`` for one reading.
 
         ``compensated_mag`` is the residual after removing the expected
-        actuation offset — vectorially when both ``vec`` (the message's 3-axis
+        actuation offset - vectorially when both ``vec`` (the message's 3-axis
         deltas) and a vector calibration are available, else scalar (clamped at
         0). ``active_sensors`` are the indices whose residual reaches the
         effective threshold (base + margin + transition-guard boost), minus any
@@ -380,7 +380,7 @@ class TouchCompensator:
     @staticmethod
     def _residual(s: int, mag: list[float], v: Any, off_mag: list[float],
                   off_vec: list[Vec] | None) -> tuple[float, float]:
-        """One sensor's (residual, applied-offset size) — vectorial when the
+        """One sensor's (residual, applied-offset size) - vectorial when the
         message sample ``v`` carries 3-axis data, scalar otherwise."""
         if off_vec is not None and isinstance(v, (list, tuple)) and len(v) >= 3:
             return (_norm3([float(v[0]) - off_vec[s][0],
@@ -393,8 +393,8 @@ class TouchCompensator:
     def apply(self, data: Mapping[str, Any], levels: Mapping[int, float], *,
               now_ms: float | None = None) -> dict[str, Any]:
         """Return a shallow copy of a ``type:"magnet"`` message with ``mag`` and
-        ``act`` replaced by their compensated values (other fields — including
-        the raw ``vec`` — preserved).
+        ``act`` replaced by their compensated values (other fields - including
+        the raw ``vec`` - preserved).
 
         When there is no coupling and no suppression, the message is returned
         unchanged so the stream is bit-for-bit identical to raw."""
@@ -416,7 +416,7 @@ class TouchCompensator:
 
 
 # ---------------------------------------------------------------------------
-# Config (de)serialisation — the stored ``touch.coupling`` / ``touch.compensation``
+# Config (de)serialisation - the stored ``touch.coupling`` / ``touch.compensation``
 # ---------------------------------------------------------------------------
 
 def coupling_to_config(model: Any, *, bin_pct: float = DEFAULT_BIN_PCT
@@ -468,9 +468,9 @@ def compensator_from_config(touch: Mapping[str, Any] | None) -> TouchCompensator
     Absent tuning keys default to the pre-upgrade behaviour (no margin, no
     guard).
 
-    The activation threshold resolves ``compensation.threshold_ut`` →
+    The activation threshold resolves ``compensation.threshold_ut`` ->
     ``touch.act_threshold_ut`` (the sensitivity pushed to the node, e.g. the
-    per-skin-type saved value) → :data:`DEFAULT_THRESHOLD_UT`, so the
+    per-skin-type saved value) -> :data:`DEFAULT_THRESHOLD_UT`, so the
     compensated ``act`` and the node's own detection agree by default."""
     touch = touch or {}
     coupling = touch.get("coupling")

@@ -23,7 +23,7 @@ class DataPanel(QWidget, Ui_DataPanel):
     """Panel for viewing, exporting and deleting collected session data.
 
     Deletion is recoverable: "Delete Session" moves a session to the trash, and
-    the "Trash…" button opens a dialog to restore or permanently delete it.
+    the "Trash..." button opens a dialog to restore or permanently delete it.
 
     Args:
         db: Open database instance to load sessions and events from.
@@ -69,7 +69,7 @@ class DataPanel(QWidget, Ui_DataPanel):
                 record.start_time.isoformat(timespec="seconds")
             ))
             self.sessions_table.setItem(row, 3, QTableWidgetItem(
-                record.end_time.isoformat(timespec="seconds") if record.end_time else "—"
+                record.end_time.isoformat(timespec="seconds") if record.end_time else "-"
             ))
 
     def _selected_rows(self) -> list[int]:

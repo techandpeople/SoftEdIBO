@@ -1,4 +1,4 @@
-"""Tools => Update Nodes (OTA)… — flash node firmware wirelessly.
+"""Tools => Update Nodes (OTA)... - flash node firmware wirelessly.
 
 Lists every flashable node declared across the configured robots, lets the user
 pick which to update, and pushes the bundled firmware to each through the
@@ -43,7 +43,7 @@ _TRANSPORT_ESPNOW, _TRANSPORT_WIFI = range(2)
 
 _DIALOG_TITLE = "Update Nodes"
 
-# The gateway's C6 half (Thymio RCP) — WiFi-OTA only, reached by target "thymio"
+# The gateway's C6 half (Thymio RCP) - WiFi-OTA only, reached by target "thymio"
 # (not a MAC), so it gets a synthetic row key + a fixed "wired" state.
 _C6_KEY = "__c6_rcp__"
 _C6_LABEL = "C6 (Thymio RCP)"
@@ -80,7 +80,7 @@ class _OTAWorker(QThread):
 
     def _make_updater(self, mac: str, path: Path) -> NodeOTAUpdater | WifiOTAUpdater:
         # WiFi updaters carry no AP credentials: the gateway injects its own
-        # stored ssid/pass (Tools → Gateway WiFi AP…) while forwarding ota_wifi.
+        # stored ssid/pass (Tools -> Gateway WiFi AP...) while forwarding ota_wifi.
         on_progress = lambda p, m=mac: self.progress.emit(m, p)
         on_log = lambda s, m=mac: self.status.emit(m, s)
         if mac == _C6_KEY:
@@ -103,10 +103,10 @@ class _OTAWorker(QThread):
             if self._cancelled:
                 self.status.emit(mac, "Cancelled")
                 continue
-            self.status.emit(mac, "Starting…")
+            self.status.emit(mac, "Starting...")
             self._current = self._make_updater(mac, path)
             ok, msg = self._current.run()
-            self.status.emit(mac, ("✓ " if ok else "✗ ") + msg)
+            self.status.emit(mac, ("ok " if ok else "FAIL ") + msg)
         self._current = None
         self.done.emit()
 
@@ -158,7 +158,7 @@ class OTAUpdateDialog(BaseDialog, Ui_OTAUpdateDialog):
             QTimer.singleShot(2000, self._refresh_online)
             # The gateway owns the AP config (NVS): mirror its real name here,
             # and Save AP writes edits back. The stored password never leaves
-            # the gateway — during an update it hands it to the node itself.
+            # the gateway - during an update it hands it to the node itself.
             self._gateway.send_gateway("get_ap")
 
     # ------------------------------------------------------------------
@@ -166,7 +166,7 @@ class OTAUpdateDialog(BaseDialog, Ui_OTAUpdateDialog):
     # ------------------------------------------------------------------
 
     def _on_gateway_message(self, data: dict[str, Any]) -> None:
-        """Serial-read-thread callback — hand off to the GUI thread."""
+        """Serial-read-thread callback - hand off to the GUI thread."""
         self._message_received.emit(data)
 
     def _handle_gateway_message(self, data: dict[str, Any]) -> None:
@@ -178,7 +178,7 @@ class OTAUpdateDialog(BaseDialog, Ui_OTAUpdateDialog):
             if data.get("ok"):
                 self.ap_pass_edit.clear()
                 self._flash_ap_status(
-                    f"Access point saved — network is now “{data.get('ssid', '')}”.")
+                    f'Access point saved - network is now "{data.get("ssid", "")}".')
             else:
                 QMessageBox.warning(self, _DIALOG_TITLE,
                                     "The gateway rejected the AP change: "
@@ -272,11 +272,11 @@ class OTAUpdateDialog(BaseDialog, Ui_OTAUpdateDialog):
         item = self.table.item(row, _COL_ONLINE)
         led = self.table.item(row, _COL_LED)
         if mac == _C6_KEY:
-            # Reached over the wired UART to the S3, not ESP-NOW — no MAC to scan.
+            # Reached over the wired UART to the S3, not ESP-NOW - no MAC to scan.
             if item is not None:
                 item.setText("wired")
             if led is not None:
-                led.setText("—")
+                led.setText("-")
             return
         if item is not None:
             item.setText("online" if mac in online else "offline")
@@ -296,11 +296,11 @@ class OTAUpdateDialog(BaseDialog, Ui_OTAUpdateDialog):
 
     def _led_text(self, mac: str, ntype: str) -> str:
         """LED-ring variant to show for a node: 'rgb'/'rgbw' if reported, '?' if
-        not yet known (offline / pre-reporting firmware), '—' for node types
+        not yet known (offline / pre-reporting firmware), '-' for node types
         with no distinct RGBW build."""
         if (firmware_for_node_type(ntype, rgbw=True)
                 == firmware_for_node_type(ntype, rgbw=False)):
-            return "—"
+            return "-"
         rgbw = self._gateway.node_rgbw(mac) if self._gateway.is_connected else None
         if rgbw is None:
             return "?"
@@ -309,13 +309,13 @@ class OTAUpdateDialog(BaseDialog, Ui_OTAUpdateDialog):
     def _update_banner(self) -> None:
         if not self._gateway.is_connected:
             self.banner_label.setText(
-                "⚠ Gateway not connected. Connect it in Settings or the "
+                "WARNING: Gateway not connected. Connect it in Settings or the "
                 "Robots tab, then reopen this dialog."
             )
             self.flash_btn.setEnabled(False)
         elif self._session_active:
             self.banner_label.setText(
-                "⚠ A session is running. Stop it before updating firmware."
+                "WARNING: A session is running. Stop it before updating firmware."
             )
             self.flash_btn.setEnabled(False)
         else:
@@ -352,7 +352,7 @@ class OTAUpdateDialog(BaseDialog, Ui_OTAUpdateDialog):
         # the others. Each node self-reports its variant in its ready/pong frame,
         # so we flash the matching bin automatically. The checkbox is only a
         # fallback for nodes that haven't reported it (offline, or firmware from
-        # before the field existed) — e.g. the first OTA that installs it.
+        # before the field existed) - e.g. the first OTA that installs it.
         fallback_rgbw = self.rgbw_check.isChecked()
         jobs: list[tuple[str, Path]] = []
         for mac, row in self._row_by_mac.items():
@@ -364,7 +364,7 @@ class OTAUpdateDialog(BaseDialog, Ui_OTAUpdateDialog):
                 if not fw.exists():
                     self._set_status(
                         row,
-                        "✗ firmware not found — build rcp_c6 first "
+                        "FAIL firmware not found - build rcp_c6 first "
                         "(pio run -d firmware/thymio_rcp -e rcp_c6)")
                     continue
                 jobs.append((mac, fw))
@@ -374,7 +374,7 @@ class OTAUpdateDialog(BaseDialog, Ui_OTAUpdateDialog):
             rgbw = fallback_rgbw if reported is None else reported
             fw = firmware_for_node_type(ntype, debug, rgbw)
             if fw is None or not fw.exists():
-                self._set_status(row, f"✗ firmware not found: {fw}")
+                self._set_status(row, f"FAIL firmware not found: {fw}")
                 continue
             jobs.append((mac, fw))
         return jobs
@@ -412,8 +412,8 @@ class OTAUpdateDialog(BaseDialog, Ui_OTAUpdateDialog):
         # Release the QThread only once it has *actually* stopped. ``done`` is
         # emitted from inside run() while the thread is still winding down, so
         # dropping the reference there would delete the QThread with
-        # isRunning() still true → "QThread: Destroyed while thread is still
-        # running" → hard abort. ``finished`` fires after run() returns and the
+        # isRunning() still true -> "QThread: Destroyed while thread is still
+        # running" -> hard abort. ``finished`` fires after run() returns and the
         # thread has stopped, so releasing it then is safe.
         self._worker.finished.connect(self._on_worker_finished)
         self._worker.start()

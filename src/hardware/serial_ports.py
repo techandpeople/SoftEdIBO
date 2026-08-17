@@ -10,7 +10,7 @@ _ESP32_VIDS: frozenset[int] = frozenset({
     0x303A,  # Espressif: native USB (ESP32-S3, C3, C6, H2)
 })
 
-# Description substrings — fallback when the driver doesn't expose VID (Windows)
+# Description substrings - fallback when the driver doesn't expose VID (Windows)
 _ESP32_DESC_KEYWORDS: tuple[str, ...] = (
     "ch340", "ch341", "ch9102",
     "cp210", "cp2102", "cp2104",

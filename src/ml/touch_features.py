@@ -1,7 +1,7 @@
 """Coordinate-free features for a touch segment.
 
 Features depend only on sensor **index** and activation **sequence**, never on
-metric positions — so they need no (often unreliable) geometry config and stay
+metric positions - so they need no (often unreliable) geometry config and stay
 valid within a skin type, where index *i* is always the same physical spot.
 Pure Python (no numpy) so the runtime stays dependency-free.
 
@@ -31,7 +31,7 @@ def extract_features(seg: TouchSegment) -> dict[str, float]:
         "n_pulses": float(getattr(seg, "n_pulses", 1)),
     }
     if n_samples == 0 or n_sensors == 0:
-        # Empty/degenerate segment — fill the schema with zeros so the feature
+        # Empty/degenerate segment - fill the schema with zeros so the feature
         # vector stays a fixed length.
         feats.update({
             "peak_mag": 0.0, "mean_mag": 0.0, "rise_ms": 0.0,
@@ -122,7 +122,7 @@ def dominant_z_frac(seg: TouchSegment) -> float | None:
     when the segment carries no vector data.
 
     Near 1.0 = the magnet was pushed straight down (tap/press); clearly lower =
-    lateral shear — the x/y signature of a finger actually travelling across the
+    lateral shear - the x/y signature of a finger actually travelling across the
     skin. Used by :mod:`src.ml.touch_motion` to tell a real slide apart from
     separate touches on different sensors."""
     _units, z_fracs = _unit_deltas(seg, _dominant_sensor(seg))

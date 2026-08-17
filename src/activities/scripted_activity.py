@@ -1,4 +1,4 @@
-"""ScriptedActivity — runtime for the declarative behaviour engine.
+"""ScriptedActivity - runtime for the declarative behaviour engine.
 
 Interprets a behaviour *spec* (see :mod:`src.activities.catalog`) as a
 per-unit finite state machine. A **unit** is one skin: it owns its chambers,
@@ -8,7 +8,7 @@ spec independently (the Thymio has one skin/3 chambers; a Turtle several).
 Each state runs a **program** (its ``do`` steps) as a cooperatively-scheduled
 sequence: instantaneous verbs apply at once, while ``wait`` / ``wait_for_touch``
 suspend the sequence until satisfied. This is what makes hand-authored
-sequences like "inflate 1, wait, deflate 1, inflate 2 …" express literally.
+sequences like "inflate 1, wait, deflate 1, inflate 2 ..." express literally.
 Transitions are re-checked every tick; the first whose ``when`` condition is
 true switches the unit's state (time- and/or touch-driven).
 
@@ -48,11 +48,11 @@ logger = logging.getLogger(__name__)
 _TICK_MS = 50
 
 # A suspended step yields one of these tokens to the driver:
-#   ("ms", duration)        — resume after duration ms
-#   ("touch", chamber|None) — resume on the next touch (of that chamber)
+#   ("ms", duration)        - resume after duration ms
+#   ("touch", chamber|None) - resume on the next touch (of that chamber)
 WaitToken = tuple
 
-# Default match tolerance (Ω) for decomposing the organ circuit reading when a
+# Default match tolerance (ohm) for decomposing the organ circuit reading when a
 # spec uses an `organs` condition. Overridable per-spec via
 # ``spec["organ_tolerance_ohm"]``.
 _DEFAULT_ORGAN_TOLERANCE_OHM = 80.0
@@ -81,9 +81,9 @@ class _Unit:
     touch_seq: int = 0
     touch_seq_by_chamber: dict[int, int] = field(default_factory=dict)
     active_touch: set[int] = field(default_factory=set)
-    # Classified gestures (tap/stroke/…) counted in the current state, by label,
+    # Classified gestures (tap/stroke/...) counted in the current state, by label,
     # plus the live classifier feeding them (kept alive here). Empty/None when the
-    # skin has no trained model — raw-touch `gesture_count` still works.
+    # skin has no trained model - raw-touch `gesture_count` still works.
     gesture_counts: dict[str, int] = field(default_factory=dict)
     gesture_clf: Any = None
     # A phase jump requested from inside a per-press handler (touch_progress),
@@ -113,9 +113,9 @@ class ScriptedActivity(BaseActivity):
     @staticmethod
     def _robot_type_for(kind: str) -> type[BaseRobot]:
         """Resolve an activity kind to its robot class (lazy import to avoid a
-        cycle: robots import activities). The kind→class-name registry lives in
-        :mod:`activity_kind`; only the name→class resolution happens here.
-        Unknown → BaseRobot (accepts anything)."""
+        cycle: robots import activities). The kind->class-name registry lives in
+        :mod:`activity_kind`; only the name->class resolution happens here.
+        Unknown -> BaseRobot (accepts anything)."""
         from src.activities.activity_kind import robot_type_name
         from src.robots.thymio.thymio_robot import ThymioRobot
         from src.robots.tree.tree_robot import TreeRobot
@@ -130,9 +130,9 @@ class ScriptedActivity(BaseActivity):
         catalog.validate_spec(spec)
         self._spec = spec
         # Declared target, or None for a target-less "any" behaviour.
-        # New-style targets carry a skin condition ({"skin": …}) and run on any
-        # robot — `if_robot` blocks gate the robot-specific steps. Only a
-        # LEGACY {"kind": …} target narrows robot_type to that kind's class.
+        # New-style targets carry a skin condition ({"skin": ...}) and run on any
+        # robot - `if_robot` blocks gate the robot-specific steps. Only a
+        # LEGACY {"kind": ...} target narrows robot_type to that kind's class.
         self.target = catalog.spec_target(spec)
         # Skin condition ("natural"/"wrinkles"/"organs") the behaviour is
         # written for, or None. The session setup pre-selects by it and warns
@@ -147,8 +147,8 @@ class ScriptedActivity(BaseActivity):
         self._units: dict[str, _Unit] = {}
         self._tick_owner: QObject | None = None
         self._tick: QTimer | None = None
-        # Callbacks fired whenever any unit changes phase (state) — manual,
-        # timed or touch-driven — so a GUI can keep phase controls in sync.
+        # Callbacks fired whenever any unit changes phase (state) - manual,
+        # timed or touch-driven - so a GUI can keep phase controls in sync.
         self._phase_listeners: list = []
 
     # ------------------------------------------------------------------
@@ -177,7 +177,7 @@ class ScriptedActivity(BaseActivity):
                 self._setup_organs(unit, skin)
             if not skins:
                 # A robot without skins (e.g. a bare Thymio) still runs the
-                # spec — its unit just has no chambers/LED ring/touch board,
+                # spec - its unit just has no chambers/LED ring/touch board,
                 # so only robot-level verbs (thymio_drive/thymio_leds) act.
                 unit = _Unit(unit_id=robot.robot_id, robot=robot,
                              skin=None, ctrl=None, chambers=[])
@@ -193,7 +193,7 @@ class ScriptedActivity(BaseActivity):
         try:
             from src.config.settings import Settings
             return Settings().data
-        except Exception:   # noqa: BLE001 — settings must never block a session
+        except Exception:   # noqa: BLE001 - settings must never block a session
             logger.exception("could not load settings for pump-duty floor")
             return {}
 
@@ -262,7 +262,7 @@ class ScriptedActivity(BaseActivity):
 
     def has_phases(self) -> bool:
         """True when the spec is a multi-phase timeline (any state has a
-        transition) — i.e. there is a 'next phase' to advance to. Used by the
+        transition) - i.e. there is a 'next phase' to advance to. Used by the
         GUI to decide whether to offer the manual 'Next Phase' control."""
         return any(state.get("transitions")
                    for state in self._states.values())
@@ -271,12 +271,12 @@ class ScriptedActivity(BaseActivity):
         """Manually advance every unit to its current state's next phase.
 
         The 'next phase' is the destination of the current state's first
-        transition (the study conditions are linear phase1 → phase2 → phase3),
+        transition (the study conditions are linear phase1 -> phase2 -> phase3),
         so this fires the same transition the timer would, just now. Units
         already in a terminal state (no transition) are left untouched.
 
         Returns the state advanced into (for logging/UI), or None when no unit
-        had a next phase — i.e. the timeline has reached its end.
+        had a next phase - i.e. the timeline has reached its end.
         """
         return self._step_phase(self._next_phase)
 
@@ -284,7 +284,7 @@ class ScriptedActivity(BaseActivity):
         """Manually rewind every unit to its current state's previous phase.
 
         The 'previous phase' is the state whose first transition leads into the
-        unit's current state — the inverse of :meth:`advance_phase` along the
+        unit's current state - the inverse of :meth:`advance_phase` along the
         linear timeline. Units at the initial phase have no predecessor and are
         left untouched. Returns the state rewound into, or None when no unit
         could go back.
@@ -338,7 +338,7 @@ class ScriptedActivity(BaseActivity):
         for cb in self._phase_listeners:
             try:
                 cb()
-            except Exception:   # noqa: BLE001 — a bad listener must not kill a tick
+            except Exception:   # noqa: BLE001 - a bad listener must not kill a tick
                 logger.exception("phase listener failed")
 
     # ------------------------------------------------------------------
@@ -360,7 +360,7 @@ class ScriptedActivity(BaseActivity):
         unit.runner = self._run_steps(unit, body, {})
         unit.wait = None
         if prev != state:
-            logger.info("Scripted %s: %s → %s", unit.unit_id, prev, state)
+            logger.info("Scripted %s: %s -> %s", unit.unit_id, prev, state)
             self.log_event("activity", "state", target=unit.unit_id,
                            metadata=f'{{"from": "{prev}", "to": "{state}"}}')
         # Run the body's first slice immediately so on-enter visuals (LED) show
@@ -451,7 +451,7 @@ class ScriptedActivity(BaseActivity):
 
     @staticmethod
     def _unit_kind(unit: _Unit) -> str:
-        """The unit's robot kind ("thymio"/"turtle"/"tree", "" if unknown) —
+        """The unit's robot kind ("thymio"/"turtle"/"tree", "" if unknown) -
         what `if_robot` steps and `robot_is` conditions test against."""
         return getattr(unit.robot, "robot_kind", "") or ""
 
@@ -501,7 +501,7 @@ class ScriptedActivity(BaseActivity):
         except StopIteration:
             unit.runner = None
             return
-        except Exception:   # noqa: BLE001 — a bad step shouldn't kill the tick
+        except Exception:   # noqa: BLE001 - a bad step shouldn't kill the tick
             logger.exception("ScriptedActivity step failed on %s", unit.unit_id)
             unit.runner = None
             return
@@ -525,7 +525,7 @@ class ScriptedActivity(BaseActivity):
 
     def _arm_wait(self, unit: _Unit, token: WaitToken) -> tuple:
         """Turn a yielded wait token into a (kind, key, threshold) the driver
-        polls. ``ms`` → deadline timestamp; ``touch`` → the touch counter the
+        polls. ``ms`` -> deadline timestamp; ``touch`` -> the touch counter the
         wait must see exceeded (whole-unit or per-chamber)."""
         kind = token[0]
         if kind == "ms":
@@ -585,7 +585,7 @@ class ScriptedActivity(BaseActivity):
             yield from self._run_thymio_drive(unit, params)
         else:
             self._apply_action(unit, verb, params, ctx)
-            # instantaneous — no yield
+            # instantaneous - no yield
 
     def _run_repeat(self, unit: _Unit, params: dict, ctx: dict) -> Generator:
         body = params.get("do", [])
@@ -606,7 +606,7 @@ class ScriptedActivity(BaseActivity):
         pct = int(params.get("pct", 60))
         pct2 = int(params.get("pct2", 20))
         period = max(100, int(params.get("period_ms", 2000)))
-        # An optional duty makes every up-stroke gentler/slower — the beat's
+        # An optional duty makes every up-stroke gentler/slower - the beat's
         # "energy". The release back to 0 stays at full speed (a normal vent).
         duty = self._duty(unit, params)
         chambers = list(unit.chambers)
@@ -642,13 +642,13 @@ class ScriptedActivity(BaseActivity):
             yield ("ms", period - period // 2)
 
     def _run_fade(self, unit: _Unit, params: dict) -> Generator:
-        """One smooth colour1 → colour2 → colour1 cross-fade across a ring
+        """One smooth colour1 -> colour2 -> colour1 cross-fade across a ring
         (``ring`` selects one of the four, default all). Authors wrap this in
         'repeat forever' for a continuous fade.
 
         The node runs the interpolation itself (the ``fade`` LED pattern), so
         this emits a single ``set_led`` frame per cycle instead of streaming a
-        colour every tick. That is far less ESP-NOW traffic — the per-frame
+        colour every tick. That is far less ESP-NOW traffic - the per-frame
         stream was heavy enough to drop/corrupt frames and flip the odd pixel to
         a stray colour. ``count=1`` runs exactly one cycle and rests on colour1,
         preserving the one-shot-unless-repeated semantics."""
@@ -675,7 +675,7 @@ class ScriptedActivity(BaseActivity):
 
         Duck-typed (no robot-class import): non-Thymio robots simply lack
         ``set_motors``/``set_leds``/``play_sound`` and the verb is a logged no-op
-        — that is what lets one skin-targeted behaviour run on every robot, with
+        - that is what lets one skin-targeted behaviour run on every robot, with
         `if_robot` blocks (or this no-op) skipping the wheeled parts."""
         fn = getattr(unit.robot, method, None)
         if fn is None:
@@ -684,11 +684,11 @@ class ScriptedActivity(BaseActivity):
             return
         try:
             fn(*args, **kwargs)
-        except Exception:   # noqa: BLE001 — a bad link must not kill the tick
+        except Exception:   # noqa: BLE001 - a bad link must not kill the tick
             logger.exception("%s%r failed on %s", method, args, unit.unit_id)
 
     # ------------------------------------------------------------------
-    # Impact input (for `on_impact` conditions) — Thymio knocks
+    # Impact input (for `on_impact` conditions) - Thymio knocks
     # ------------------------------------------------------------------
 
     def _subscribe_impact(self, unit: _Unit) -> None:
@@ -804,7 +804,7 @@ class ScriptedActivity(BaseActivity):
             self._thymio_call(unit, "set_leds",
                               r * 32 // 255, g * 32 // 255, b * 32 // 255)
         elif verb == "thymio_sound":
-            # Priority: microSD track (≥0) → tone (freq > 0) → system sound.
+            # Priority: microSD track (>=0) -> tone (freq > 0) -> system sound.
             track = int(params.get("track", -1))
             freq = int(params.get("freq") or 0)
             if track >= 0:
@@ -828,9 +828,9 @@ class ScriptedActivity(BaseActivity):
 
         Prefers the friendly 1-5 ``power`` dial, mapped onto this skin type's
         calibrated duty range (level 1 = its minimum, 5 = full). Level 5 returns
-        ``None`` so a full-power stroke still lets any ``over ms`` slow-fill act —
+        ``None`` so a full-power stroke still lets any ``over ms`` slow-fill act -
         keeping the historical default. Falls back to a raw ``duty`` (advanced /
-        legacy specs); 0 / absent there means 'no duty — full speed'."""
+        legacy specs); 0 / absent there means 'no duty - full speed'."""
         power = params.get("power")
         if power not in (None, ""):
             try:
@@ -838,7 +838,7 @@ class ScriptedActivity(BaseActivity):
             except (TypeError, ValueError):
                 return None
             if level >= POWER_MAX_LEVEL:
-                return None                    # full power — let period_ms act
+                return None                    # full power - let period_ms act
             return duty_for_power(level, getattr(unit, "min_duty", MIN_PUMP_DUTY))
         try:
             duty = int(params.get("duty") or 0)
@@ -884,7 +884,7 @@ class ScriptedActivity(BaseActivity):
     @staticmethod
     def _fade_ms(params: dict) -> int | None:
         """Read an optional LED ``fade_ms`` (cross-fade time) from a step's params.
-        Absent / invalid means 'send no fade_ms — use the node default (~250 ms)'."""
+        Absent / invalid means 'send no fade_ms - use the node default (~250 ms)'."""
         val = params.get("fade_ms")
         if val is None:
             return None
@@ -1000,7 +1000,7 @@ class ScriptedActivity(BaseActivity):
         return ctrl, slot
 
     def _on_cover(self, unit: _Unit, closed: bool) -> None:
-        if not closed:                      # open circuit → every organ absent
+        if not closed:                      # open circuit -> every organ absent
             unit.organ_verdicts = dict.fromkeys(unit.organ_verdicts, "absent")
 
     def _on_resistance(self, unit: _Unit, resistance_ohm: float) -> None:
@@ -1018,10 +1018,10 @@ class ScriptedActivity(BaseActivity):
 
     def _subscribe_gestures(self, unit: _Unit) -> None:
         """Attach a live ML gesture classifier so `gesture_count` can count
-        classified gestures (tap/stroke/…).
+        classified gestures (tap/stroke/...).
 
-        Inert and cheap when the skin has no trained model for its type — the
-        classifier's ``attach()`` returns False and never subscribes — so
+        Inert and cheap when the skin has no trained model for its type - the
+        classifier's ``attach()`` returns False and never subscribes - so
         raw-touch `gesture_count` keeps working while classified kinds simply
         never fire. Mirrors :meth:`_subscribe_touch`; the classifier taps the same
         compensated magnet stream itself (both subscribers coexist)."""
@@ -1034,14 +1034,14 @@ class ScriptedActivity(BaseActivity):
                 lambda sid, label, seg, u=unit: self._on_gesture(u, label))
             if clf.attach():
                 unit.gesture_clf = clf
-        except Exception:   # noqa: BLE001 — ML deps optional; must not block a session
+        except Exception:   # noqa: BLE001 - ML deps optional; must not block a session
             logger.debug("gesture classifier unavailable on %s",
                          unit.unit_id, exc_info=True)
 
     def _on_gesture(self, unit: _Unit, label: str) -> None:
         """Gateway-thread callback: count one classified gesture (by label).
 
-        Plain int increment mirrors `touch_count`/`impact_count` — read on the
+        Plain int increment mirrors `touch_count`/`impact_count` - read on the
         GUI tick in `_eval_gesture_count`, so no lock is needed."""
         unit.gesture_counts[label] = unit.gesture_counts.get(label, 0) + 1
 

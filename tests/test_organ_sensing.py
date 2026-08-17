@@ -100,7 +100,7 @@ def test_organ_sensor_cover_and_resistance_streams():
 
     ctrl.fire(float("inf"))          # first reading: cover off
     ctrl.fire(950.0)                 # cover on, organs read
-    ctrl.fire(940.0)                 # value drifts — no cover event
+    ctrl.fire(940.0)                 # value drifts - no cover event
     ctrl.fire(float("inf"))          # cover lifted
 
     assert covers == [False, True, False]
@@ -114,7 +114,7 @@ def test_organ_sensor_filters_by_slot():
     resistances: list[float] = []
     sensor.on_resistance(resistances.append)
 
-    ctrl.fire(950.0, slot=0)         # other branch — ignored
+    ctrl.fire(950.0, slot=0)         # other branch - ignored
     ctrl.fire(1500.0, slot=1)        # ours
     assert resistances == [1500.0]
     assert sensor.slot == 1

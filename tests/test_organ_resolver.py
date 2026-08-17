@@ -66,7 +66,7 @@ def test_single_good_organ():
 # --- resolve: out of tolerance --------------------------------------------
 
 def test_unmatched_reading_all_absent():
-    # A reading nowhere near any combination → cannot trust → all absent.
+    # A reading nowhere near any combination -> cannot trust -> all absent.
     verdicts = OrganResolver(ORGANS, tolerance_ohm=10).resolve(123.0)
     assert verdicts == {"liver": ABSENT, "heart": ABSENT, "lung": ABSENT}
 

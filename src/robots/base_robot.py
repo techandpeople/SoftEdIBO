@@ -20,7 +20,7 @@ class BaseRobot(ABC):
 
     # Activity-kind slug of this robot ("thymio" / "turtle" / "tree", see
     # src/activities/activity_kind.KINDS). Read by the behaviour engine's
-    # ``if robot is …`` blocks and by the session setup. Subclasses set it;
+    # ``if robot is ...`` blocks and by the session setup. Subclasses set it;
     # SimulatedRobot copies it from the robot it mirrors. "" = unknown.
     robot_kind: str = ""
 
@@ -60,7 +60,7 @@ class BaseRobot(ABC):
         """Allow new commands after a pause. Override if needed."""
 
     def emergency_stop(self) -> None:
-        """Immediately halt all actuation — pumps off, valves closed.
+        """Immediately halt all actuation - pumps off, valves closed.
 
         Stronger than :meth:`pause`: it kills the pumps too and latches the
         robot's nodes off until :meth:`rearm`. Override for hardware robots.

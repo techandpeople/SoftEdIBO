@@ -29,7 +29,7 @@ class _SkinRow(QFrame):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(6, 3, 6, 3)
         self._name_label = QLabel(f"<b>{skin_name}</b>")
-        self._status_label = QLabel("Waiting for touch…")
+        self._status_label = QLabel("Waiting for touch...")
         self._status_label.setStyleSheet("color: #888;")
         layout.addWidget(self._name_label, stretch=1)
         layout.addWidget(self._status_label, stretch=2)
@@ -41,7 +41,7 @@ class _SkinRow(QFrame):
             self.setStyleSheet("")
 
     def set_assigned(self, participant_id: str) -> None:
-        self._status_label.setText(f"→ {participant_id}")
+        self._status_label.setText(f"-> {participant_id}")
         self._status_label.setStyleSheet("color: #2a7a2a; font-weight: bold;")
         self.setStyleSheet("background-color: #d4edda; border-radius: 4px;")
 

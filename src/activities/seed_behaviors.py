@@ -1,19 +1,19 @@
-"""Example behaviour specs for the hospital study — the 3 conditions.
+"""Example behaviour specs for the hospital study - the 3 conditions.
 
 These are **no longer auto-registered** as activities (``ACTIVITIES`` is now
-empty). They are kept as reference/example ScriptedActivity specs — the basis
-for the importable JSON examples — and as fixtures for the tests.
+empty). They are kept as reference/example ScriptedActivity specs - the basis
+for the importable JSON examples - and as fixtures for the tests.
 
 Each condition is a 3-phase timeline that heals the robot autonomously over
 time, and can be hurried along by the child's touch. All three converge on the
 same "cured" look (yellow ring, all chambers beating together):
 
-- Condition A (Heartbeat): the *rhythm* changes — slow random beat → mixed
-  amplitudes → strong synchronised beat.
-- Condition B (Movement): chambers move *one at a time* (low energy) → mixed
-  amplitudes → synchronised beat.
-- Condition C (Texture): the *skin* changes — emptied / rough (chambers at
-  0 %) → half empty / half smooth → smooth and breathing.
+- Condition A (Heartbeat): the *rhythm* changes - slow random beat -> mixed
+  amplitudes -> strong synchronised beat.
+- Condition B (Movement): chambers move *one at a time* (low energy) -> mixed
+  amplitudes -> synchronised beat.
+- Condition C (Texture): the *skin* changes - emptied / rough (chambers at
+  0 %) -> half empty / half smooth -> smooth and breathing.
 
 These are behaviours 1-3 / 4-6 / 7-9 from the study brief. They are authored
 here as plain data so the same specs can be loaded into the Blockly block
@@ -37,7 +37,7 @@ TOUCHES_TO_ADVANCE = 15          # touch shortcut for either transition
 
 def _advance(to: str, since_state_ms: int) -> dict[str, Any]:
     """A transition that fires after a time in the current state OR after
-    enough touches — encodes the study's 'time + interaction' rule."""
+    enough touches - encodes the study's 'time + interaction' rule."""
     return {
         "to": to,
         "when": {"any": [
@@ -129,20 +129,20 @@ CONDITION_C = {
             ],
             "transitions": [_advance("phase3", PHASE3_AFTER_MS - PHASE2_AFTER_MS)],
         },
-        # Smooth and breathing together — cured.
+        # Smooth and breathing together - cured.
         "phase3": _PHASE3,
     },
 }
 
 
 SEED_CONDITIONS: list[tuple[str, str, dict]] = [
-    ("Behaviour A — Heartbeat",
+    ("Behaviour A - Heartbeat",
      "Hospital study condition: heals by changing the heartbeat rhythm "
-     "(slow random → mixed → strong synchronised).", CONDITION_A),
-    ("Behaviour B — Movement",
+     "(slow random -> mixed -> strong synchronised).", CONDITION_A),
+    ("Behaviour B - Movement",
      "Hospital study condition: chambers move one at a time, then converge on "
      "a synchronised beat.", CONDITION_B),
-    ("Behaviour C — Texture",
+    ("Behaviour C - Texture",
      "Hospital study condition: skin goes from emptied / rough (chambers at "
      "0 %) to smooth and breathing.", CONDITION_C),
 ]

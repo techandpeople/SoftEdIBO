@@ -3,8 +3,8 @@
 A shared, gateway-level visual cue: whenever any calibration (fill, duty,
 deflate or touch coupling) is in progress, every configured actuator node
 softly pulses its LED ring so operators can see at a glance that the rig is
-busy driving pumps and should not be touched. Best-effort — a dropped or
-offline node just does not light — and idempotent, so overlapping ``on``
+busy driving pumps and should not be touched. Best-effort - a dropped or
+offline node just does not light - and idempotent, so overlapping ``on``
 calls (e.g. a queued "Calibrate All" batch) keep the rings lit until the
 matching ``off``.
 
@@ -21,7 +21,7 @@ from src.hardware.fill_calibration import iter_actuator_chambers
 
 logger = logging.getLogger(__name__)
 
-# Cyan — deliberately distinct from the purple/yellow behaviour phase colours
+# Cyan - deliberately distinct from the purple/yellow behaviour phase colours
 # so a pulsing ring reads as "calibrating", not as a healing state.
 CALIBRATING_COLOR = "#00C8FF"
 # One fade in/out breathing cycle; "pulse" is a smooth triangle (blink w/ fade).
@@ -81,5 +81,5 @@ class CalibrationLedIndicator:
                 self._gateway.send(mac, "set_led", repeat=2, color=color,
                                    pattern=pattern, period_ms=period_ms,
                                    fade_ms=FADE_MS)
-            except Exception:   # noqa: BLE001 — the indicator is best-effort
+            except Exception:   # noqa: BLE001 - the indicator is best-effort
                 logger.exception("calibration LED %s failed for %s", pattern, mac)

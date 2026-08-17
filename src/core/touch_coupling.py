@@ -1,11 +1,11 @@
-"""Touch coupling — measure which chamber, when inflated, moves which sensor.
+"""Touch coupling - measure which chamber, when inflated, moves which sensor.
 
 A magnet sits in the silicone above each touch sensor; inflating a nearby
 chamber deforms the silicone and shifts the magnet, so chamber actuation can
 masquerade as a touch. This module turns a *sweep* (inflate one chamber at a
-time, no touching) into per-chamber **level→offset curves**: for each inflation
+time, no touching) into per-chamber **level->offset curves**: for each inflation
 level held during the sweep, how much that chamber moves each sensor's reading
-(raw µT, the ``mag`` field) — plus a derived chamber<->sensor map. A sweep that
+(raw uT, the ``mag`` field) - plus a derived chamber<->sensor map. A sweep that
 holds several levels per chamber (e.g. 25/50/75/100 %) yields a multi-point
 curve, capturing the (nonlinear) silicone response; a single-level sweep yields
 the legacy one-point matrix. When the samples carry the firmware's 3-axis
@@ -37,8 +37,8 @@ REST_MAX = 10.0     # every chamber at/below this means "rest" (baseline)
 SETTLE_MS = 800.0   # guard window after a state change, dropped from the means
 BIN_PCT = 10.0      # level-bin width: samples this close share one curve point
 
-# A single sweep sample: timestamp (ms), per-chamber pressure %, per-sensor µT,
-# and optionally the per-sensor 3-axis deltas ([[dx,dy,dz], ...], µT).
+# A single sweep sample: timestamp (ms), per-chamber pressure %, per-sensor uT,
+# and optionally the per-sensor 3-axis deltas ([[dx,dy,dz], ...], uT).
 Sample = Sequence[Any]
 
 
@@ -49,7 +49,7 @@ def classify_state(pressures: dict[int, float], *,
     The empty set means rest. One element is a single-chamber state; two or more
     is a co-inflation (a combination). A chamber merely off-rest but below
     ``active_min`` (e.g. a narrow-range chamber venting to a small residual) is
-    treated as **not** part of the state — its faint coupling is folded into the
+    treated as **not** part of the state - its faint coupling is folded into the
     active state's measured delta rather than dropping the whole sample. The
     time-based settle guard, not this classifier, rejects transitions.
     """
@@ -80,7 +80,7 @@ class MeasuredState:
 
     ``chambers`` is the inflated set (size 1 = single chamber; >= 2 = a
     combination). ``levels`` is the mean measured level (%) of each member.
-    ``mag`` is the per-sensor mean µT shift vs rest; ``vec`` the per-sensor mean
+    ``mag`` is the per-sensor mean uT shift vs rest; ``vec`` the per-sensor mean
     3-axis shift when every contributing sample carried the firmware ``vec``
     field, else ``None``. ``n`` = samples averaged."""
     chambers: frozenset[int]
@@ -96,13 +96,13 @@ class MeasuredState:
 
 @dataclass
 class CouplingModel:
-    """Every operating point a sweep measured — singles *and* combinations.
+    """Every operating point a sweep measured - singles *and* combinations.
 
     Sweeping all chamber subsets over a per-member level grid is exactly the
     full Cartesian grid over each chamber's axis ``[0, g1, .., 100]`` (a state
     with a member at level 0 is simply a lower-order subset), so this list of
     :class:`MeasuredState` is an N-dimensional lookup table the runtime
-    interpolates multilinearly. ``baseline`` is the rest mean per sensor — the
+    interpolates multilinearly. ``baseline`` is the rest mean per sensor - the
     ``mag`` offsets are already rest-subtracted."""
     sensor_count: int
     states: list[MeasuredState] = field(default_factory=list)
@@ -127,7 +127,7 @@ class CouplingModel:
 
     def singles(self) -> dict[int, MeasuredState]:
         """The strongest-level single-chamber state per chamber (the classic
-        per-chamber view — used for the mapping and the preview table)."""
+        per-chamber view - used for the mapping and the preview table)."""
         best: dict[int, MeasuredState] = {}
         for st in self.states:
             if st.order != 1:
@@ -213,7 +213,7 @@ class _StateAccum:
                 else [0.0] * self._count)
 
     def mean_vec(self) -> list[list[float]] | None:
-        """Per-sensor mean 3-axis reading — only when every sample carried it."""
+        """Per-sensor mean 3-axis reading - only when every sample carried it."""
         if not self.n or self.vec_n != self.n:
             return None
         return [[c / self.vec_n for c in row] for row in self.vec_sum]
@@ -328,7 +328,7 @@ def _magnet_sample(t_iso: str, msg: dict, pressures: dict[int, float],
     """Build one sample from a ``magnet`` message, or None if it lacks ``field``.
 
     Compensated messages (recorded alongside raw when compensation is on) are
-    skipped: the coupling must be measured on the raw µT, otherwise it would be
+    skipped: the coupling must be measured on the raw uT, otherwise it would be
     fitted against readings that already had a coupling subtracted."""
     if msg.get("compensated"):
         return None
@@ -345,9 +345,9 @@ def samples_from_recording(path: str | Path, field: str = "mag") -> Iterator[Sam
 
     Tracks the latest per-chamber pressure from ``status`` messages and emits a
     sample at each ``magnet`` message (the fast stream), pairing the chosen
-    magnet ``field`` vector — plus the 3-axis ``vec`` rows when the recording
-    has them — with the last-known chamber pressures. Defaults to ``"mag"``
-    (raw uT — what the live stream, the PC detection path and
+    magnet ``field`` vector - plus the 3-axis ``vec`` rows when the recording
+    has them - with the last-known chamber pressures. Defaults to ``"mag"``
+    (raw uT - what the live stream, the PC detection path and
     :mod:`src.core.touch_compensation` use). ``"adj"`` is only for older
     recordings that still carried the normalised field (no longer streamed).
     """
@@ -373,6 +373,6 @@ def build_coupling_from_recording(path: str | Path, sensor_count: int,
                                   field: str = "mag", **kw) -> CouplingModel:
     """Convenience: parse a recording and build the coupling model.
 
-    ``field`` selects the magnet vector ("mag" raw uT — the default; "adj" only
+    ``field`` selects the magnet vector ("mag" raw uT - the default; "adj" only
     for older recordings that carried the normalised field)."""
     return build_coupling(samples_from_recording(path, field), sensor_count, **kw)

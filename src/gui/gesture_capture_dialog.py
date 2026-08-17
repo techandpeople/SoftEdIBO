@@ -1,10 +1,10 @@
-"""Guided gesture-capture dialog — prompt, collect, train, and score, live.
+"""Guided gesture-capture dialog - prompt, collect, train, and score, live.
 
 Drives a :class:`~src.ml.gesture_capture.GestureCaptureSession` from the live
-gateway magnet stream: it prompts one gesture at a time ("do a TAP — 2 / 5"), the
+gateway magnet stream: it prompts one gesture at a time ("do a TAP - 2 / 5"), the
 user performs it, and each detected touch is captured under the prompt. When the
 plan is done it trains a per-skin-type model straight from the captured segments
-and shows the cross-validation **accuracy + confusion matrix** — the deliberate
+and shows the cross-validation **accuracy + confusion matrix** - the deliberate
 counterpart to the record-a-session-then-label-offline flow in
 :class:`~src.gui.train_touch_dialog.TrainTouchDialog`.
 
@@ -67,7 +67,7 @@ _SHORT_LABELS = {
 class GestureCaptureDialog(BaseDialog, Ui_GestureCaptureDialog):
     """Guided, prompt-driven capture of touch gestures + immediate scoring."""
 
-    # Gateway read thread → GUI thread. Carries one magnet message dict.
+    # Gateway read thread -> GUI thread. Carries one magnet message dict.
     _magnet = Signal(object)
     # Same hop for the bound skin's (pressure-compensated) stream.
     _comp_magnet = Signal(object)
@@ -79,8 +79,8 @@ class GestureCaptureDialog(BaseDialog, Ui_GestureCaptureDialog):
         self.setupUi(self)
         self._gateway = gateway
         # Configured skins (from the app's robots). When the locked node belongs
-        # to one, capture reads that skin's stream — pressure-compensated when
-        # coupling calibration is enabled — so gestures can be collected while
+        # to one, capture reads that skin's stream - pressure-compensated when
+        # coupling calibration is enabled - so gestures can be collected while
         # chambers inflate and still match what live inference sees.
         self._skins = list(skins or [])
         self._bound_skin: Any | None = None
@@ -90,7 +90,7 @@ class GestureCaptureDialog(BaseDialog, Ui_GestureCaptureDialog):
         self._recording_path: Path | None = None
         self._events: list[tuple[float, str]] = []   # (epoch_ms, label) for the CSV
         self._t0: float | None = None
-        # Live touch test: a SensorTester (µT bars + adjustable sensitivity) plus
+        # Live touch test: a SensorTester (uT bars + adjustable sensitivity) plus
         # spatial grids (setup + capture pages) built once the node streams.
         self._sensor_tester: SensorTester | None = None
         self._grids: list[SensorGridView] = []
@@ -127,14 +127,14 @@ class GestureCaptureDialog(BaseDialog, Ui_GestureCaptureDialog):
 
         if self._gateway is not None and self._gateway.is_connected:
             # Bound method (the gateway keeps a WeakMethod), so the dialog must
-            # stay alive while listening — it does, for its modal lifetime.
+            # stay alive while listening - it does, for its modal lifetime.
             self._gateway.on_message(self._on_gateway_message)
         else:
             self.source_label.setText(
-                "No gateway connected — connect one to capture gestures.")
+                "No gateway connected - connect one to capture gestures.")
 
     # ------------------------------------------------------------------
-    # Live source (gateway read thread → GUI thread)
+    # Live source (gateway read thread -> GUI thread)
     # ------------------------------------------------------------------
 
     def _on_gateway_message(self, data: dict) -> None:
@@ -148,7 +148,7 @@ class GestureCaptureDialog(BaseDialog, Ui_GestureCaptureDialog):
 
     def _on_magnet(self, data: dict) -> None:
         """GUI thread, RAW stream: lock the source and drive the sensitivity
-        bars (the node's own µT view, which the pushed threshold acts on)."""
+        bars (the node's own uT view, which the pushed threshold acts on)."""
         if not self._source:
             self._source = str(data.get("source", ""))
             self.source_label.setText(f"Touch node: {self._source}")
@@ -193,8 +193,8 @@ class GestureCaptureDialog(BaseDialog, Ui_GestureCaptureDialog):
     def _bind_skin(self) -> None:
         """Adopt the configured skin that owns the locked node, if any.
 
-        Subscribes to its detection stream via ``subscribe_skin_magnet`` — the
-        same single entry point live inference uses — so capture sees
+        Subscribes to its detection stream via ``subscribe_skin_magnet`` - the
+        same single entry point live inference uses - so capture sees
         pressure-compensated readings whenever the skin has coupling calibration
         enabled. Also pre-selects the skin's type/variant in the combos."""
         from src.hardware.touch_source import (CompensatedMagnetSource,
@@ -213,10 +213,10 @@ class GestureCaptureDialog(BaseDialog, Ui_GestureCaptureDialog):
             compensated = isinstance(getattr(skin, "touch_source", None),
                                      CompensatedMagnetSource)
             self.source_label.setText(
-                f"Touch node: {self._source} — skin "
+                f"Touch node: {self._source} - skin "
                 f"'{getattr(skin, 'skin_id', '?')}'"
                 + (" (pressure-compensated stream)" if compensated
-                   else " (raw stream — no coupling calibration)"))
+                   else " (raw stream - no coupling calibration)"))
             return
 
     @staticmethod
@@ -227,12 +227,12 @@ class GestureCaptureDialog(BaseDialog, Ui_GestureCaptureDialog):
             combo.setCurrentIndex(i)
 
     def _show_capture_summary(self, event) -> None:
-        """One line about the gesture just captured — duration, pulses, peak
+        """One line about the gesture just captured - duration, pulses, peak
         and (for slides) the direction of travel across the skin."""
         geo = geometry_for(self.type_combo.currentData() or "")
         positions = list(geo.sensors_mm) if geo is not None else []
         self.last_capture_label.setText(
-            "✔ " + segment_summary(event.segment, event.label, positions))
+            "ok " + segment_summary(event.segment, event.label, positions))
 
     # ------------------------------------------------------------------
     # Setup
@@ -244,7 +244,7 @@ class GestureCaptureDialog(BaseDialog, Ui_GestureCaptureDialog):
         self.start_btn.setEnabled(ready)
 
     def _on_type_changed(self) -> None:
-        """New skin type → re-seed its saved sensitivity and re-shape the grids."""
+        """New skin type -> re-seed its saved sensitivity and re-shape the grids."""
         self._refresh_start_enabled()
         if self._sensor_tester is not None:
             self._seed_threshold()
@@ -364,7 +364,7 @@ class GestureCaptureDialog(BaseDialog, Ui_GestureCaptureDialog):
                 # on the same stream this capture (and live inference) consumes.
                 self._recorder.attach_compensated(
                     getattr(self._bound_skin, "touch_source", None))
-        except Exception:   # noqa: BLE001 — recording is a bonus; capture must go on
+        except Exception:   # noqa: BLE001 - recording is a bonus; capture must go on
             self._recorder = None
             self._recording_path = None
 
@@ -394,7 +394,7 @@ class GestureCaptureDialog(BaseDialog, Ui_GestureCaptureDialog):
         self._refresh_capture()
 
     # ------------------------------------------------------------------
-    # Finish → persist labels + train + report
+    # Finish -> persist labels + train + report
     # ------------------------------------------------------------------
 
     def _finish(self) -> None:
@@ -405,7 +405,7 @@ class GestureCaptureDialog(BaseDialog, Ui_GestureCaptureDialog):
         self._stop_recording()
         self._write_labels()
         self.stack.setCurrentIndex(_PAGE_RESULTS)
-        self.result_label.setText("Training…")
+        self.result_label.setText("Training...")
         skin_type = self.type_combo.currentData() or ""
         variant = self.variant_combo.currentData() or ""
         samples = session.labeled_samples(skin_type, variant)
@@ -441,7 +441,7 @@ class GestureCaptureDialog(BaseDialog, Ui_GestureCaptureDialog):
                 source_types={self._source: skin_type},
                 source_variants={self._source: variant})
             labeling.write_csv(rows, self._recording_path.with_suffix(".labels.csv"))
-        except Exception:   # noqa: BLE001 — the model is the real output
+        except Exception:   # noqa: BLE001 - the model is the real output
             pass
 
     def _on_trained(self, report) -> None:
@@ -456,7 +456,7 @@ class GestureCaptureDialog(BaseDialog, Ui_GestureCaptureDialog):
             self._render_confusion(res.labels, res.confusion)
         elif res.trained:
             self.result_label.setText(
-                f"Model trained ({res.n_samples} samples) — do more repetitions "
+                f"Model trained ({res.n_samples} samples) - do more repetitions "
                 "for an accuracy estimate.")
         else:
             self.result_label.setText(

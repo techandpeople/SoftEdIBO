@@ -1,8 +1,8 @@
-"""Skin module — a logical grouping of 1-3 air chambers from a single ESP32 node.
+"""Skin module - a logical grouping of 1-3 air chambers from a single ESP32 node.
 
 A Skin is a physical tactile piece. With the current hardware (`node_direct`
 3 chambers, `node_multiplexed` up to 12 chambers) every chamber of a skin lives
-on the same ESP32 — multi-node skins are no longer a use case. The class is
+on the same ESP32 - multi-node skins are no longer a use case. The class is
 correspondingly simple: one controller, one slot list.
 
 Config expected by the constructor (``chamber_inputs``):
@@ -33,7 +33,7 @@ from src.hardware.touch_source import CompensatedMagnetSource
 
 logger = logging.getLogger(__name__)
 
-# Firmware status ``st`` field → chamber actuation state. The firmware reports
+# Firmware status ``st`` field -> chamber actuation state. The firmware reports
 # only whether a chamber is actively driven (INFLATING/DEFLATING) or not (IDLE);
 # AirChamber maps a firmware-IDLE chamber to INFLATED/IDLE from its pressure.
 _FW_ACTUATION = {
@@ -66,16 +66,16 @@ class Skin:
 
         self.skin_id = skin_id
 
-        # Layout descriptors — see SkinGridEditor for the grid format.
+        # Layout descriptors - see SkinGridEditor for the grid format.
         # ``shape``: "rect" or "round" (round skins mask off-circle cells).
-        # ``grid``: {"cols": int, "rows": int} — chamber grid dimensions.
-        # ``chamber_grid``: rows × cols of chamber-index-or-(-1).
+        # ``grid``: {"cols": int, "rows": int} - chamber grid dimensions.
+        # ``chamber_grid``: rows x cols of chamber-index-or-(-1).
         # ``touch``: {"node_mac": str, "sensor_count": int,
         #   "grid": {cols, rows}?,            # optional, defaults to ``grid``
-        #   "sensor_grid": rows × cols of sensor-index-or-(-1),
+        #   "sensor_grid": rows x cols of sensor-index-or-(-1),
         #   "sensor_to_chamber": {str_idx: chamber_idx}?}.
         # ``touch_controller``: optional ESP32Controller (or sim) for the magnet sensor
-        # node referenced by ``touch.node_mac`` — bound in build_skins so the
+        # node referenced by ``touch.node_mac`` - bound in build_skins so the
         # UI can subscribe to `on_magnet` directly via ``skin.touch_controller``.
         self.shape = shape if shape in ("rect", "round") else "rect"
         self.grid = grid
@@ -84,10 +84,10 @@ class Skin:
         self.touch_controller = touch_controller
         # Which touch-sensing technology this skin's board uses (magnet today).
         # Selected by the ``touch.sensor`` field; every technology-specific
-        # decision — signal extraction, compensation, spatial detection — is
+        # decision - signal extraction, compensation, spatial detection - is
         # delegated to this profile instead of assuming "magnet".
         self._touch_profile = touch_profiles.for_config(touch)
-        # ``organ``: {"slot": int, "node_mac": str?} — this skin has its OWN
+        # ``organ``: {"slot": int, "node_mac": str?} - this skin has its OWN
         # organ+cover circuit (e.g. a Tree branch). ``slot`` indexes the
         # node's organ circuits (``configure`` ``organ_channels``); ``node_mac``
         # defaults to this skin's chamber node. Skins without this block share
@@ -101,7 +101,7 @@ class Skin:
         self.organs: list[dict[str, Any]] = list(organs or [])
         # ``skin_type``: stable identity of this skin's TYPE (e.g.
         # "turtle_square"). Indexes the hardcoded geometry registry
-        # (src/hardware/skin_geometry.py) — used by the GUI to render the skin
+        # (src/hardware/skin_geometry.py) - used by the GUI to render the skin
         # and by the touch-gesture ML to pick a per-type model. Empty string
         # means the skin opts out of both.
         self.skin_type = skin_type or ""
@@ -113,33 +113,33 @@ class Skin:
         self._ctrl = chamber_inputs[0]["controller"]
         self.mac: str = self._ctrl.mac_address
 
-        # local_idx → node_slot
+        # local_idx -> node_slot
         self._slots: list[int] = []
-        # node_slot → local_idx
+        # node_slot -> local_idx
         self._reverse: dict[int, int] = {}
-        # local_idx → AirChamber
+        # local_idx -> AirChamber
         self._chambers: dict[int, AirChamber] = {}
-        # local_idx → calibrated fill time (ms) or None (pressure-based). Kept
+        # local_idx -> calibrated fill time (ms) or None (pressure-based). Kept
         # for status/serialisation; the runtime fill timing reads _fill_profiles.
         self._fill_times: dict[int, int | None] = {}
-        # local_idx → calibrated time→pressure curve, or None (pressure-based).
+        # local_idx -> calibrated time->pressure curve, or None (pressure-based).
         # Built from the chamber's ``fill_profile`` curve, falling back to a
         # straight line through a legacy scalar ``fill_time_ms``.
         self._fill_profiles: dict[int, FillProfile | None] = {}
-        # local_idx → {frozenset(node_slots): FillProfile} — curves measured with
+        # local_idx -> {frozenset(node_slots): FillProfile} - curves measured with
         # exactly that set of chambers inflating together (the shared-pump load is
         # baked into the curve). Runtime prefers an exact match over scaling the
         # solo curve; falls back to scale_fill_ms when no combination matches.
         self._combo_profiles: dict[int, dict[frozenset[int], FillProfile]] = {}
-        # local_idx → measured pump-duty→fill-speed model, or None. When present the
+        # local_idx -> measured pump-duty->fill-speed model, or None. When present the
         # runtime picks the "over (ms)" slow-fill duty from the measured curve
         # instead of the rough linear duty_for_period fallback.
         self._duty_models: dict[int, DutyModel | None] = {}
-        # local_idx → measured falling deflate curve, or None. Times a deflate the
+        # local_idx -> measured falling deflate curve, or None. Times a deflate the
         # gauge cannot supervise: a target below the node's sensor floor gets an
         # open-time budget from this curve instead of the (blind) closed loop.
         self._deflate_profiles: dict[int, DeflateProfile | None] = {}
-        # local_idx → fill mode ("time" | "pressure"). In "pressure" mode the
+        # local_idx -> fill mode ("time" | "pressure"). In "pressure" mode the
         # chamber inflates closed-loop on the gauge sensor even when a calibrated
         # curve exists, so the curve is ignored for runtime timing.
         self._fill_modes: dict[int, str] = {}
@@ -170,7 +170,7 @@ class Skin:
 
         # Higher-level touch events (press/release per chamber), independent of
         # position tracking so they work for any sensor count. Delegated to a
-        # TouchEventRouter (edge detection + sensor→chamber mapping). Fed from the
+        # TouchEventRouter (edge detection + sensor->chamber mapping). Fed from the
         # compensated source so a false touch never reaches the activity layer.
         self._touch_router = TouchEventRouter.from_touch_config(
             touch, len(self._chambers), name=self.skin_id)
@@ -193,7 +193,7 @@ class Skin:
         if threshold > 0 and hasattr(touch_controller, "send_command"):
             # The skin's saved sensitivity (calibrated in the guided capture /
             # Test Actuators, resolved per skin type by the robot builder)
-            # becomes the node's live activation threshold at every build —
+            # becomes the node's live activation threshold at every build -
             # same re-push semantics as stream_vec below (RAM-only firmware
             # setting; harmless no-op while the node is offline).
             touch_controller.send_command("configure",
@@ -204,7 +204,7 @@ class Skin:
         logger.info("Pressure-informed touch compensation enabled for skin %s",
                     self.skin_id)
         if compensator.has_vector and hasattr(touch_controller, "send_command"):
-            # The calibration carries offset vectors — ask the node to stream
+            # The calibration carries offset vectors - ask the node to stream
             # its 3-axis deltas so the compensator can subtract vectorially
             # (RAM-only firmware flag, so re-push on every build; harmless
             # no-op on older firmware).
@@ -213,7 +213,7 @@ class Skin:
             touch_controller, compensator, self._chamber_levels)
 
     def _chamber_levels(self) -> dict[int, float]:
-        """Current inflation level (% of max) per node slot — the live signal the
+        """Current inflation level (% of max) per node slot - the live signal the
         compensator scales the coupling matrix by (matrix chambers are keyed by
         slot, matching the firmware ``status`` broadcasts)."""
         return {self._slots[idx]: float(ch.pressure)
@@ -256,7 +256,7 @@ class Skin:
 
     @staticmethod
     def _parse_combos(raw: Any) -> dict[frozenset[int], FillProfile]:
-        """Parse a chamber's stored ``fill_profiles`` (combo_key → curve) into a
+        """Parse a chamber's stored ``fill_profiles`` (combo_key -> curve) into a
         ``{frozenset(node_slots): FillProfile}`` lookup. Ignores malformed entries
         and single-slot keys (those are the solo ``fill_profile``)."""
         out: dict[frozenset[int], FillProfile] = {}
@@ -274,7 +274,7 @@ class Skin:
 
         Prefers the controller's confirmed (ACK'd, retransmitted) path so a
         dropped safety limit is retried instead of silently leaving the node on
-        a stale ceiling — the historical 20->50 kPa over-inflation. This runs
+        a stale ceiling - the historical 20->50 kPa over-inflation. This runs
         off-thread and is belt-and-suspenders with the fire-and-forget re-push
         before every actuation (:meth:`_push_limits`). Falls back to that plain
         push for controllers without confirmation (the simulator); no-op for
@@ -315,7 +315,7 @@ class Skin:
 
     @property
     def chambers(self) -> dict[int, AirChamber]:
-        """Local-index → AirChamber mapping."""
+        """Local-index -> AirChamber mapping."""
         return self._chambers
 
     @property
@@ -326,7 +326,7 @@ class Skin:
     def geometry(self):
         """Hardcoded geometry for this skin's ``skin_type`` (or None).
 
-        Looks the type up in the geometry registry — the reliable source of the
+        Looks the type up in the geometry registry - the reliable source of the
         skin's shape and sensor coordinates. Returns None when ``skin_type`` is
         empty or unregistered, so callers fall back to per-skin descriptors."""
         from src.hardware.skin_geometry import geometry_for
@@ -403,8 +403,8 @@ class Skin:
         measured fill time (the pressure cutoff still decides the final level).
         Needs a calibrated fill curve; without one it falls back to full speed.
 
-        ``duty`` (1-255) sets the pump PWM directly — a gentler/slower stroke at
-        a lower value — and takes precedence over the ``period_ms``-derived duty.
+        ``duty`` (1-255) sets the pump PWM directly - a gentler/slower stroke at
+        a lower value - and takes precedence over the ``period_ms``-derived duty.
         Unlike ``period_ms`` it needs no fill curve, so it works uncalibrated."""
         if local_idx is None:
             return all(self._apply(i, "set_pressure", value,
@@ -511,10 +511,10 @@ class Skin:
 
         A calibrated chamber in ``time`` mode inflates by a *time window* derived
         from its measured fill curve (time to climb from the current target to
-        the new one — the curve is non-linear, so this beats assuming
+        the new one - the curve is non-linear, so this beats assuming
         proportionality). When a curve was measured for *exactly* the set of
         chambers about to fill together (``co_active`` for a batch, else the live
-        fill-load snapshot), that combination curve is used directly — its
+        fill-load snapshot), that combination curve is used directly - its
         shared-pump slowdown is already baked in. Otherwise the solo curve is
         scaled by the node's concurrent fill load (more chambers at once = each
         takes longer). A chamber in ``pressure`` mode (or one with no curve) uses
@@ -567,8 +567,8 @@ class Skin:
         """Open-time budget (ms) for a deflate the gauge cannot supervise.
 
         The calibrated deflate curve's **measured floor** (where the falling
-        reading plateaued) embodies the sensor's real low end — today ~ambient,
-        below zero once the -40 kPa sensors are in — so a target under it (with
+        reading plateaued) embodies the sensor's real low end - today ~ambient,
+        below zero once the -40 kPa sensors are in - so a target under it (with
         a small margin) is timed off the curve (:meth:`DeflateProfile.extrapolate_ms`,
         hard-capped) and sent as the firmware's per-chamber cap. Returns ``None``
         (pure closed loop) when the target is comfortably above the floor or the
@@ -584,7 +584,7 @@ class Skin:
                          period_ms: int) -> int | None:
         """Pump duty that stretches an inflate to ~``period_ms`` (None = full speed).
 
-        Returns None — meaning "send no duty, run at full speed" — when no period
+        Returns None - meaning "send no duty, run at full speed" - when no period
         was asked, when the move is a deflate (no inflate curve applies), or when
         the chamber has no measured fill curve to time the move with."""
         if not period_ms or period_ms <= 0 or target_pct <= cur_pct:
@@ -595,7 +595,7 @@ class Skin:
                          self.skin_id, local_idx)
             return None
         natural_ms = profile.time_for_pct(target_pct) - profile.time_for_pct(cur_pct)
-        # Prefer the chamber's measured duty→speed curve; fall back to the rough
+        # Prefer the chamber's measured duty->speed curve; fall back to the rough
         # linear model when it was never swept.
         model = self._duty_models.get(local_idx)
         if model is not None and not model.is_empty:
@@ -610,7 +610,7 @@ class Skin:
         """Register ``callback(chamber_id, action)`` for sensor press/release on
         this skin's magnet board. ``chamber_id`` is the skin-local chamber the
         sensor maps to (raw sensor index when unmapped); ``action`` is
-        ``"press"`` or ``"release"``. Fires on the gateway thread — marshal to
+        ``"press"`` or ``"release"``. Fires on the gateway thread - marshal to
         the GUI thread before touching Qt."""
         self._touch_router.subscribe(callback)
 
@@ -620,7 +620,7 @@ class Skin:
         This is the source detection consumers (activities, gesture ML) should
         use instead of subscribing to ``touch_controller`` directly, so they see
         pressure-compensated readings. Returns False when the skin has no magnet
-        source. Fires on the gateway thread — marshal to the GUI thread first."""
+        source. Fires on the gateway thread - marshal to the GUI thread first."""
         src = self.touch_source
         on_magnet = getattr(src, "on_magnet", None) if src is not None else None
         if on_magnet is None:
@@ -637,7 +637,7 @@ class Skin:
 
         The detector/tracker pair is built by the skin's touch profile (the
         magnet profile resolves *where* a touch lands from a 4-sensor board, so
-        it only engages for that layout). Other sensors/layouts return nothing —
+        it only engages for that layout). Other sensors/layouts return nothing -
         they still get touch *reactions* via the activity's on_magnet handler;
         only spatial position tracking is unavailable."""
         try:
@@ -659,9 +659,9 @@ class Skin:
         """Process magnet sensor touch data for position tracking.
 
         The node_magnet_sensor sends: {"type":"magnet", "mag":[...], "act":[...]}
-        - mag: raw magnitudes in μT (preferred — passed directly to QuadrantDetector)
+        - mag: raw magnitudes in uT (preferred - passed directly to QuadrantDetector)
         - act: list of active sensor indices (binary fallback)
-        Raw μT values with absolute PC-side thresholds keep detection robust and
+        Raw uT values with absolute PC-side thresholds keep detection robust and
         independent of any firmware normalisation.
         """
         if self._touch_position_tracker is None:

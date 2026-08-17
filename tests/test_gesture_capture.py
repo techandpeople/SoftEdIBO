@@ -1,9 +1,9 @@
-"""Tests for GestureCaptureSession — the guided capture state machine.
+"""Tests for GestureCaptureSession - the guided capture state machine.
 
 Drives synthetic magnet streams through the session and checks that prompts
 advance per repetition, a compressions bout is captured as one merged gesture,
 undo steps the prompt back, and the session goes inert once its plan is done.
-Pure Python — no Qt, no sklearn.
+Pure Python - no Qt, no sklearn.
 """
 
 from src.ml import gesture_taxonomy as tax
@@ -39,8 +39,8 @@ class _Driver:
             self._feed(_HOT)
             self._feed(_HOT)
             self._feed(_IDLE)        # release (still < gap from the next pulse)
-            self.t += 100.0          # short inter-pulse idle → stays merged
-        self.t += tax.BOUT_GAP_MS + 300.0    # long idle past the gap → flush
+            self.t += 100.0          # short inter-pulse idle -> stays merged
+        self.t += tax.BOUT_GAP_MS + 300.0    # long idle past the gap -> flush
         return self.session.feed(_IDLE, self.t)
 
 
@@ -54,7 +54,7 @@ def test_prompt_advances_per_repetition():
     assert s.current_gesture == tax.TAP and s.current_done == 1
 
     d.gesture()
-    assert s.current_gesture == tax.PRESS      # tap quota met → next gesture
+    assert s.current_gesture == tax.PRESS      # tap quota met -> next gesture
     assert s.current_done == 0
 
     ev = d.gesture()

@@ -1,9 +1,9 @@
-"""Guided, dongle-free Thymio address discovery (Thymio config → Discover…).
+"""Guided, dongle-free Thymio address discovery (Thymio config -> Discover...).
 
 Runs a long sniff through the gateway's C6 while telling the user to power the
 Thymios on: a Wireless Thymio announces itself at boot, so switching each robot
-on during the scan is all it takes — no RF dongle. Addresses appear live, in
-first-seen order, so powering robots on one at a time maps address → robot.
+on during the scan is all it takes - no RF dongle. Addresses appear live, in
+first-seen order, so powering robots on one at a time maps address -> robot.
 
 The sniff runs off-thread (:func:`~src.gui.async_task.run_async`);
 ``discover_thymios`` reports each new address from the gateway's serial reader
@@ -28,10 +28,10 @@ from src.robots.thymio.thymio_discovery import discover_thymios
 class ThymioDiscoverDialog(QDialog, Ui_ThymioDiscoverDialog):
     """Live-updating scan dialog; :meth:`address` is the user's pick."""
 
-    #: One scan window — long enough to walk over and power-cycle a robot.
+    #: One scan window - long enough to walk over and power-cycle a robot.
     SCAN_SECS = 20.0
 
-    # Serial-reader thread → GUI thread bridge for live address updates.
+    # Serial-reader thread -> GUI thread bridge for live address updates.
     _found = Signal(str)
 
     def __init__(self, gateway: Any, channel: int,
@@ -85,9 +85,9 @@ class ThymioDiscoverDialog(QDialog, Ui_ThymioDiscoverDialog):
         self.rescan_btn.setEnabled(True)
         n = self.addr_list.count()
         self.status_label.setText(
-            f"Scan finished — {n} Thymio(s) seen."
+            f"Scan finished - {n} Thymio(s) seen."
             if n else
-            "Scan finished — nothing seen. Power a Thymio on DURING the scan "
+            "Scan finished - nothing seen. Power a Thymio on DURING the scan "
             "and try again.")
 
     def _scan_failed(self, exc: Exception) -> None:
@@ -122,5 +122,5 @@ class ThymioDiscoverDialog(QDialog, Ui_ThymioDiscoverDialog):
         left = max(0, int(self._deadline - time.monotonic()))
         n = self.addr_list.count()
         self.status_label.setText(
-            f"Scanning channel {self._channel}… {left} s left — "
+            f"Scanning channel {self._channel}... {left} s left - "
             f"{n} Thymio(s) seen. Power them on now.")

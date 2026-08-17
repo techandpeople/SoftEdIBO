@@ -1,9 +1,9 @@
-"""StreamRecorder — captures all gateway messages of a session to JSONL.
+"""StreamRecorder - captures all gateway messages of a session to JSONL.
 
 The study records the **raw sensor streams** (not video) so touch/organ data can
 be analysed and used to train a touch-gesture model later. This recorder taps
-the single firehose — `Gateway.on_message` — so it captures every node
-message (`magnet`, `organ`, `status`, boot announces, …) with a PC-side receive
+the single firehose - `Gateway.on_message` - so it captures every node
+message (`magnet`, `organ`, `status`, boot announces, ...) with a PC-side receive
 timestamp, one JSON object per line.
 
 Responsibility is narrow: subscribe, timestamp, write, unsubscribe. It owns the
@@ -13,7 +13,7 @@ SessionPanel's job.
 Two gateway contracts matter (`src/hardware/gateway.py`):
 - `on_message` stores a ``weakref.WeakMethod`` of the callback, so we must
   register a **bound method** (`self.handle_message`) and stay alive while
-  recording — the owner keeps a reference.
+  recording - the owner keeps a reference.
 - messages are delivered on the gateway's daemon read thread, so writes are
   guarded by a lock.
 """
@@ -44,7 +44,7 @@ class StreamRecorder:
             tell which skin type each touch ``source`` belongs to and filter /
             train per type without the operator re-tagging anything.
         skin_variants: ``{touch_source: skin_variant}`` (silicone format) for the
-            same sources — stored alongside ``skin_types`` and fed to the touch
+            same sources - stored alongside ``skin_types`` and fed to the touch
             ML as a feature.
     """
 
@@ -90,10 +90,10 @@ class StreamRecorder:
         # Bound method so the gateway's WeakMethod stays valid while we're alive.
         if self._gateway is not None:
             self._gateway.on_message(self.handle_message)
-        logger.info("StreamRecorder started → %s", self._path)
+        logger.info("StreamRecorder started -> %s", self._path)
 
     def attach_magnet(self, controller: Any) -> None:
-        """Also record ``on_magnet`` events from a touch controller — used in
+        """Also record ``on_magnet`` events from a touch controller - used in
         simulation, where touches come from SimulatedMagnetSensor rather than
         through the gateway. No-op if the controller has no ``on_magnet``."""
         on_magnet = getattr(controller, "on_magnet", None)
@@ -108,7 +108,7 @@ class StreamRecorder:
         Live gesture inference consumes the compensated stream (it never passes
         through the gateway), so the recording must carry it too or models get
         trained on raw data they will never see at inference time. Only messages
-        the compensator actually rewrote (flagged ``compensated``) are written —
+        the compensator actually rewrote (flagged ``compensated``) are written -
         raw passthrough never duplicates lines. No-op without ``on_magnet``."""
         on_magnet = getattr(source, "on_magnet", None)
         if on_magnet is None:
@@ -142,5 +142,5 @@ class StreamRecorder:
                 self._file.flush()
                 self._file.close()
                 self._file = None
-        logger.info("StreamRecorder stopped (%d messages) → %s",
+        logger.info("StreamRecorder stopped (%d messages) -> %s",
                     self._count, self._path)

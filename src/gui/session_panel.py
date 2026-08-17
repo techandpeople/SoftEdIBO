@@ -49,7 +49,7 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         self.setupUi(self)
 
         self._db = db
-        # Optional SoftEdIBO gateway — only used to record raw sensor streams of a
+        # Optional SoftEdIBO gateway - only used to record raw sensor streams of a
         # real session. None in tests / headless contexts (then no recording).
         self._gateway = gateway
         self._stream_recorder = None   # StreamRecorder | None, active during a session
@@ -116,12 +116,12 @@ class SessionPanel(QWidget, Ui_SessionPanel):
 
         The robots are rebuilt from the session's own ``start`` event metadata
         (see :meth:`Database.get_session_start_meta`), so resume restores
-        exactly the robots that session ran with — not whatever the global
+        exactly the robots that session ran with - not whatever the global
         ``last_assignments.json`` cache happens to hold.
         """
         activity = get_activity(record.activity_name, self._db)
         if activity is None:
-            # Legacy/removed activity (e.g. an old "Simulation" session) — it
+            # Legacy/removed activity (e.g. an old "Simulation" session) - it
             # can no longer be rebuilt, so close it out rather than half-resume.
             QMessageBox.warning(
                 self,
@@ -304,7 +304,7 @@ class SessionPanel(QWidget, Ui_SessionPanel):
                         robots: list[BaseRobot]) -> None:
         """Set up and start the activity so it subscribes to controller events
         (e.g. ``on_magnet``) and drives its state machine. Without this the
-        activity never reacts to touches — real or simulated."""
+        activity never reacts to touches - real or simulated."""
         from src.core.session import Session
         from src.data.event_logger import EventLogger
         try:
@@ -314,14 +314,14 @@ class SessionPanel(QWidget, Ui_SessionPanel):
             activity.start()
             self._wire_organ_views(activity)
             self._wire_phase_controls(activity)
-        except Exception:   # noqa: BLE001 — surface but don't crash the GUI
+        except Exception:   # noqa: BLE001 - surface but don't crash the GUI
             logger.exception("Failed to start activity %s", activity.name)
 
     def _wire_phase_controls(self, activity: BaseActivity) -> None:
         """Keep the Previous/Next phase buttons in sync with the activity.
 
         Registers a listener so the activity's own timed and touch-driven
-        transitions update the buttons too — not only the manual presses — then
+        transitions update the buttons too - not only the manual presses - then
         sets their initial state for the phase the activity just started in."""
         add_listener = getattr(activity, "add_phase_listener", None)
         if add_listener is not None:
@@ -369,7 +369,7 @@ class SessionPanel(QWidget, Ui_SessionPanel):
             return False
         if reply == QMessageBox.StandardButton.No:
             return True                      # start anyway (pressure-based)
-        # Yes → calibrate now; reload robots afterwards and let the operator
+        # Yes -> calibrate now; reload robots afterwards and let the operator
         # restart the session so the new fill times take effect.
         from src.gui.fill_calibration_dialog import FillCalibrationDialog
         dlg = FillCalibrationDialog(Settings(), self._gateway, parent=self,
@@ -410,7 +410,7 @@ class SessionPanel(QWidget, Ui_SessionPanel):
                     if src is not None and src is not tc:
                         recorder.attach_compensated(src)
             self._stream_recorder = recorder
-        except Exception:   # noqa: BLE001 — recording must never break a session
+        except Exception:   # noqa: BLE001 - recording must never break a session
             logger.exception("Failed to start stream recording for %s", session_id)
 
     @staticmethod
@@ -420,7 +420,7 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         every touch-capable skin.
 
         Keyed by the *source* each magnet board actually stamps on its messages
-        — a real board's MAC, or a simulated board's ``sim:`` id — so the
+        - a real board's MAC, or a simulated board's ``sim:`` id - so the
         recording header maps cleanly onto the recorded ``source`` field. Stored
         so the Touch Gestures dialog is self-describing and auto-selects the
         skin type per recording, without re-tagging."""
@@ -445,7 +445,7 @@ class SessionPanel(QWidget, Ui_SessionPanel):
             self._stream_recorder = None
 
     def _build_skin_participant_map(self, session_id: str) -> None:
-        """Build a skin_id → participant_id lookup from session assignments."""
+        """Build a skin_id -> participant_id lookup from session assignments."""
         self._skin_participant = {}
         for assignment in self._db.get_session_assignments(session_id):
             for skin_id in assignment.unit_ids:
@@ -458,12 +458,12 @@ class SessionPanel(QWidget, Ui_SessionPanel):
 
         if action == "press" and skin_id not in self._skin_participant:
             if self._assignment_panel is not None:
-                # Defer logging — accumulate all chamber touches for this skin.
+                # Defer logging - accumulate all chamber touches for this skin.
                 # enqueue() adds to queue on first touch; warns if skin already pending.
                 self._pending_touches.append((skin_id, chamber_id))
                 self._assignment_panel.enqueue(skin_id)
                 return
-            # No panel (no participants) — log immediately as unknown
+            # No panel (no participants) - log immediately as unknown
         participant_id = self._skin_participant.get(skin_id, "unknown")
         self._db.log_event(InteractionEvent(
             session_id=self._current_record.session_id,
@@ -537,8 +537,8 @@ class SessionPanel(QWidget, Ui_SessionPanel):
     def _show_observer_panel(self) -> None:
         """Reopen the live-coding window (from the Live Coding button).
 
-        Reuses the existing panel if it is still around — even if the user
-        closed (hid) its window — so observations keep flowing to the same
+        Reuses the existing panel if it is still around - even if the user
+        closed (hid) its window - so observations keep flowing to the same
         session; only creates a fresh one when there is none."""
         if self._observer_panel is None:
             self._open_observer_panel()
@@ -550,7 +550,7 @@ class SessionPanel(QWidget, Ui_SessionPanel):
     def _open_observer_panel(self) -> None:
         """Open the live behavioral-coding panel for the session's participants.
 
-        No participants → nothing to code, so the panel is skipped. Events the
+        No participants -> nothing to code, so the panel is skipped. Events the
         observer taps are logged via :meth:`_on_observer_event`."""
         if self._observer_panel is not None:
             self._observer_panel.close()
@@ -686,7 +686,7 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         """Freeze the running activity so it stops issuing actuation commands.
 
         Called by the app-wide emergency stop. Leaves the session open but
-        forces it into the paused state — the activity is resumed only when the
+        forces it into the paused state - the activity is resumed only when the
         operator deliberately re-arms (see :meth:`emergency_rearm`).
         """
         if self._current_activity is None:
@@ -727,7 +727,7 @@ class SessionPanel(QWidget, Ui_SessionPanel):
             ))
 
     def _flush_last_assignments(self, session_id: str) -> None:
-        """Overwrite last_assignments.json with the complete final skin→participant map.
+        """Overwrite last_assignments.json with the complete final skin->participant map.
 
         Called on session stop so that on-touch assignments made during the session
         are included in the prefill for the next session, not just pre-session ones.
@@ -774,10 +774,10 @@ class SessionPanel(QWidget, Ui_SessionPanel):
 
         self._stop_recording()
 
-        self.session_id_label.setText("—")
-        self.activity_label.setText("—")
-        self.robots_label.setText("—")
-        self.participants_label.setText("—")
+        self.session_id_label.setText("-")
+        self.activity_label.setText("-")
+        self.robots_label.setText("-")
+        self.participants_label.setText("-")
         self.status_label.setText("Status: No active session")
         self.new_session_btn.setEnabled(True)
         self.pause_btn.setText("Pause")

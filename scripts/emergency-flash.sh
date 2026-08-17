@@ -4,7 +4,7 @@
 # USB-to-serial bridge. After this the node has OTA-capable firmware again and
 # can be updated wirelessly (app: Tools -> Update Nodes (OTA)).
 #
-# The GUI exposes the same thing under Tools -> Emergency Flash (dead USB)…;
+# The GUI exposes the same thing under Tools -> Emergency Flash (dead USB)...;
 # this script is the headless dev fallback. It flashes the LOCAL firmware/*.bin
 # (build them with scripts/build-firmware.sh). See docs/EMERGENCY_FLASH.md for
 # the wiring (TX->TX, RX->RX straight-through) and the manual download-mode step.
@@ -93,4 +93,4 @@ echo
 
 echo
 echo ">>> Done. Remove the IO0/BOOT jumper, tap EN/RST. The node now runs"
-echo ">>> OTA-capable firmware — update it wirelessly from the app from here on."
+echo ">>> OTA-capable firmware - update it wirelessly from the app from here on."

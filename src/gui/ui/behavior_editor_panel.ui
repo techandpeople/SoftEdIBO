@@ -19,7 +19,7 @@
      </item>
      <item>
       <widget class="QComboBox" name="behaviorCombo">
-       <property name="whatsThis"><string>A saved block program from the database. Pick one to load its blocks, or choose "New behaviour…" to start from scratch.</string></property>
+       <property name="whatsThis"><string>A saved block program from the database. Pick one to load its blocks, or choose "New behaviour..." to start from scratch.</string></property>
        <property name="minimumSize">
         <size><width>260</width><height>0</height></size>
        </property>
@@ -39,13 +39,13 @@
      </item>
      <item>
       <widget class="QPushButton" name="importButton">
-       <property name="text"><string>Import…</string></property>
+       <property name="text"><string>Import...</string></property>
        <property name="whatsThis"><string>Load a behaviour from a portable .json file as a new, unsaved behaviour for review.</string></property>
       </widget>
      </item>
      <item>
       <widget class="QPushButton" name="exportButton">
-       <property name="text"><string>Export…</string></property>
+       <property name="text"><string>Export...</string></property>
        <property name="whatsThis"><string>Save the current behaviour to a portable .json file you can share or back up.</string></property>
       </widget>
      </item>
@@ -67,7 +67,7 @@
      <item>
       <widget class="QLineEdit" name="nameEdit">
        <property name="whatsThis"><string>A human-readable name for this behaviour. It appears in the activity list once saved.</string></property>
-       <property name="placeholderText"><string>e.g. Hospital — gentle heartbeat</string></property>
+       <property name="placeholderText"><string>e.g. Hospital - gentle heartbeat</string></property>
       </widget>
      </item>
     </layout>
@@ -76,7 +76,7 @@
     <layout class="QHBoxLayout" name="editor_row">
      <item>
       <widget class="QWidget" name="webContainer" native="true">
-       <property name="whatsThis"><string>Drag blocks here to build the activity behaviour. Phases are States; inside each State you stack actions (set the LED, beat, inflate, wait, wait for touch…) and add Transitions that move to another phase after a time, enough touches, or an organ condition.</string></property>
+       <property name="whatsThis"><string>Drag blocks here to build the activity behaviour. Phases are States; inside each State you stack actions (set the LED, beat, inflate, wait, wait for touch...) and add Transitions that move to another phase after a time, enough touches, or an organ condition.</string></property>
        <property name="sizePolicy">
         <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
          <horstretch>1</horstretch><verstretch>1</verstretch>
@@ -117,7 +117,7 @@
         </item>
         <item>
          <widget class="QPushButton" name="pickColourButton">
-          <property name="text"><string>Custom colour…</string></property>
+          <property name="text"><string>Custom colour...</string></property>
           <property name="whatsThis"><string>Open the full colour picker to choose any colour.</string></property>
          </widget>
         </item>

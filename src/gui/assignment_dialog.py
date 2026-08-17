@@ -33,7 +33,7 @@ class AssignmentDialog(BaseDialog, Ui_AssignmentDialog):
     """Let the operator assign robot units (skins / branches) to participants.
 
     For every selected robot a group box is shown.  Inside, each participant
-    gets a row of checkboxes — one per assignable unit on that robot.  The
+    gets a row of checkboxes - one per assignable unit on that robot.  The
     **Auto** button distributes units evenly across participants in round-robin
     order, clearing any manual selection first.
 
@@ -87,7 +87,7 @@ class AssignmentDialog(BaseDialog, Ui_AssignmentDialog):
     # ------------------------------------------------------------------
 
     def _build_robot_group(self, robot: BaseRobot, units: list[str]) -> None:
-        group = QGroupBox(f"{type(robot).__name__}  —  {robot.robot_id}")
+        group = QGroupBox(f"{type(robot).__name__}  -  {robot.robot_id}")
         group_layout = QVBoxLayout(group)
 
         self._checks[robot.robot_id] = {}

@@ -8,12 +8,12 @@
 #include "dbg.h"
 
 // ---------------------------------------------------------------------------
-// Organ + cover sensing — multiplexed variant.
+// Organ + cover sensing - multiplexed variant.
 //
 // Same electrical design as the direct node (see direct/organ.h):
 //
-//   3V3 ── R_KNOWN ──●── organ resistor network ── cover contact ── GND
-//                    │
+//   3V3 -- R_KNOWN --*-- organ resistor network -- cover contact -- GND
+//                    |
 //              74HC4067 input channel
 //
 // but each organ circuit hangs off its own mux channel, so one node can
@@ -25,7 +25,7 @@
 //   {"type":"organ","slot":i,"resistance_ohm":R,"open":bool}
 //
 // Convention: wire organ circuits to the HIGHEST mux channels (I13..I15) so
-// the boot chamber/tank autodetect — which claims low channels first — does
+// the boot chamber/tank autodetect - which claims low channels first - does
 // not collide with them. setChannels() also scrubs the configured channels
 // from any autodetected chamber/tank assignment as a backstop.
 // ---------------------------------------------------------------------------
@@ -45,7 +45,7 @@ constexpr uint32_t HEARTBEAT_MS     = 2000;
 struct Slot {
     int      mux_ch       = -1;
     bool     open         = true;    // debounced, reported state
-    float    resistance   = -1.0f;   // last measured R (Ω), -1 when open
+    float    resistance   = -1.0f;   // last measured R (ohm), -1 when open
     int      flipCount    = 0;
     float    lastSentOhm  = -1.0f;
     bool     lastSentOpen = true;
@@ -65,7 +65,7 @@ inline void setChannels(const int channels[], int count) {
     }
 }
 
-// Average a few mux reads, classify open/short, convert to Ω via the divider.
+// Average a few mux reads, classify open/short, convert to ohm via the divider.
 inline float sample(int mux_ch, bool& isOpen) {
     uint32_t acc = 0;
     for (int i = 0; i < 8; i++) acc += mux::readRaw(mux_ch);

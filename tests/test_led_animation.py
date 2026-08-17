@@ -44,7 +44,7 @@ class TestAnimationMaths:
     def test_two_comets_are_opposite_and_coloured_per_segment(self):
         red, green = QColor("#ff0000"), QColor("#00ff00")
         px = comet_pixels([red, green], 24, head_frac=0.0)
-        # comet 0 (red) head at pixel 0, comet 1 (green) head 180° round at pixel 12
+        # comet 0 (red) head at pixel 0, comet 1 (green) head 180 deg round at pixel 12
         assert px[0].red() > 240 and px[0].green() < 20
         assert px[12].green() > 240 and px[12].red() < 20
 
@@ -60,7 +60,7 @@ class TestLedRingTesterFrames:
         return t, sent
 
     def test_choosing_a_colour_applies_live(self, qtbot):
-        # No "apply" step — picking a colour sends the whole-ring frame at once.
+        # No "apply" step - picking a colour sends the whole-ring frame at once.
         t, sent = self._tester(qtbot)
         t._set_color("#0000ff")
         assert sent[-1] == (None, ["#0000ff"], "solid", 250, 0.0)
@@ -93,9 +93,9 @@ class TestLedRingTesterFrames:
         t, sent = self._tester(qtbot)
         t._set_segments(2)
         n = len(sent)
-        t._ring.angleChanged.emit(90.0)   # live drag — tracks, no send
+        t._ring.angleChanged.emit(90.0)   # live drag - tracks, no send
         assert len(sent) == n
-        t._ring.angleReleased.emit(90.0)  # drop — one send carrying the angle
+        t._ring.angleReleased.emit(90.0)  # drop - one send carrying the angle
         assert sent[-1][4] == 90.0
 
     def test_off_sends_off(self, qtbot):
@@ -168,7 +168,7 @@ class TestRingWidgetAngle:
         w.set_look([red, green], AnimationPattern.SOLID, 0, 0, 0.0)
         assert w._base[0].name() == "#ff0000"
         assert w._base[12].name() == "#00ff00"
-        # angle 180° (half a ring) swaps which arc each pixel belongs to
+        # angle 180 deg (half a ring) swaps which arc each pixel belongs to
         w.set_look([red, green], AnimationPattern.SOLID, 0, 0, 180.0)
         assert w._base[0].name() == "#00ff00"
         assert w._base[12].name() == "#ff0000"
@@ -182,7 +182,7 @@ class TestRingWidgetAngle:
         cx, cy, _r, _l = w._center_radius()
         # a point straight above the centre is angle 0 (top)
         assert abs(w._angle_at(QPointF(cx, cy - 50))) < 1.0
-        # straight right is 90°
+        # straight right is 90 deg
         assert abs(w._angle_at(QPointF(cx + 50, cy)) - 90.0) < 1.0
 
 

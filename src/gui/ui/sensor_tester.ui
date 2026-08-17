@@ -12,11 +12,11 @@
    </sizepolicy>
   </property>
   <property name="title"><string>Magnet sensor test</string></property>
-  <property name="whatsThis"><string>Live readout of the node's magnet/touch sensors. Each bar shows how far that sensor's field has moved from its baseline, in µT — press the skin above a sensor and its bar rises. A sensor lights green once it passes the &quot;Active threshold&quot;. Re-zero resets the baseline (do it at rest, hands off). Push to node sends this threshold to the board so its own touch detection (used by activities and the monitor) fires at the same level.</string></property>
+  <property name="whatsThis"><string>Live readout of the node's magnet/touch sensors. Each bar shows how far that sensor's field has moved from its baseline, in uT - press the skin above a sensor and its bar rises. A sensor lights green once it passes the &quot;Active threshold&quot;. Re-zero resets the baseline (do it at rest, hands off). Push to node sends this threshold to the board so its own touch detection (used by activities and the monitor) fires at the same level.</string></property>
   <layout class="QVBoxLayout" name="main_layout">
    <item>
     <widget class="QLabel" name="status_label">
-     <property name="text"><string>Waiting for sensor data… (this node may have no magnet sensors)</string></property>
+     <property name="text"><string>Waiting for sensor data... (this node may have no magnet sensors)</string></property>
     </widget>
    </item>
    <item>
@@ -39,10 +39,10 @@
      </item>
      <item>
       <widget class="QDoubleSpinBox" name="threshold_spin">
-       <property name="whatsThis"><string>A sensor counts as touched once its reading (µT) reaches this value. Lower = more sensitive. Set it above the resting values (near 0 after a Re-zero) and below a real press. Push to node applies it to the board.
+       <property name="whatsThis"><string>A sensor counts as touched once its reading (uT) reaches this value. Lower = more sensitive. Set it above the resting values (near 0 after a Re-zero) and below a real press. Push to node applies it to the board.
 
-This is the single touch threshold: the node's own detection uses it, and the pressure-compensated detection (coupling) falls back to it — there is no separate threshold in the coupling dialog. To pick it: press the skin and note a real touch's peak µT; then, with compensation on, inflate/deflate and note the largest residual that leaks through; set it between (e.g. touch ~120-180, residual ~30-50 → ~80-120). The Margin and transition guard cover actuation, so tune this for the steady touch-vs-noise case. The firmware default 300 is often too high (a touch is ~100 µT) — start lower and adjust in ~20-30 µT steps.</string></property>
-       <property name="suffix"><string> µT</string></property>
+This is the single touch threshold: the node's own detection uses it, and the pressure-compensated detection (coupling) falls back to it - there is no separate threshold in the coupling dialog. To pick it: press the skin and note a real touch's peak uT; then, with compensation on, inflate/deflate and note the largest residual that leaks through; set it between (e.g. touch ~120-180, residual ~30-50 -> ~80-120). The Margin and transition guard cover actuation, so tune this for the steady touch-vs-noise case. The firmware default 300 is often too high (a touch is ~100 uT) - start lower and adjust in ~20-30 uT steps.</string></property>
+       <property name="suffix"><string> uT</string></property>
        <property name="decimals"><number>0</number></property>
        <property name="minimum"><double>1.000000000000000</double></property>
        <property name="maximum"><double>2000.000000000000000</double></property>
@@ -52,13 +52,13 @@ This is the single touch threshold: the node's own detection uses it, and the pr
      </item>
      <item>
       <widget class="QPushButton" name="rezero_btn">
-       <property name="whatsThis"><string>Re-zero the sensors' baseline on the node so the current field reads as 0 µT. Do this at rest, with nothing pressing the skin.</string></property>
+       <property name="whatsThis"><string>Re-zero the sensors' baseline on the node so the current field reads as 0 uT. Do this at rest, with nothing pressing the skin.</string></property>
        <property name="text"><string>Re-zero</string></property>
       </widget>
      </item>
      <item>
       <widget class="QPushButton" name="push_btn">
-       <property name="whatsThis"><string>Send the active threshold above to the board so its own touch detection fires at this µT level — fixing detection everywhere (this test, activities and the monitor), not only in this readout.</string></property>
+       <property name="whatsThis"><string>Send the active threshold above to the board so its own touch detection fires at this uT level - fixing detection everywhere (this test, activities and the monitor), not only in this readout.</string></property>
        <property name="text"><string>Push to node</string></property>
       </widget>
      </item>

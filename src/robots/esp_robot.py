@@ -1,4 +1,4 @@
-"""EspRobot — concrete base for any robot that drives ESP32 nodes via the gateway.
+"""EspRobot - concrete base for any robot that drives ESP32 nodes via the gateway.
 
 Houses everything that's identical across TurtleRobot, TreeRobot, ThymioRobot:
   * Controller dictionary built from ``node_configs``
@@ -90,7 +90,7 @@ class EspRobot(BaseRobot):
     def nodes_seen_since(self, since: float) -> tuple[int, int]:
         """``(alive, total)`` of this robot's nodes heard from after ``since``
         (a ``time.monotonic()`` reference, e.g. taken just before a gateway
-        scan). ``(0, 0)`` when the robot has no nodes or no gateway — the
+        scan). ``(0, 0)`` when the robot has no nodes or no gateway - the
         caller decides what that means (a bare wireless Thymio is still
         usable when its transport is up)."""
         if self._gateway is None or not self._controllers:
@@ -127,7 +127,7 @@ class EspRobot(BaseRobot):
                 skin.hold(local_idx)
 
     def emergency_stop(self) -> None:
-        """Latch every node OFF — all pumps off, all valves closed.
+        """Latch every node OFF - all pumps off, all valves closed.
 
         Sent to each controller directly (not per chamber) so the nodes drop
         all actuation and the firmware holds the safe state even if the link

@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 
 # Raw bytes per ota_store_data line. The gateway reads USB lines into a 512-byte
 # buffer, so the whole JSON line must stay under that: 256 raw -> 344 base64 chars
-# + ~33 envelope ≈ 380 bytes, comfortably below 512.
+# + ~33 envelope ~= 380 bytes, comfortably below 512.
 STORE_CHUNK = 256
 
 # Flow control for the staging stream. USB is ordered but the gateway's RX buffer
@@ -64,9 +64,9 @@ STORE_WINDOW = 8192
 
 # Friendlier text for the gateway's ota_store_error reasons.
 _STAGE_ERRORS = {
-    "no_psram": "gateway has no PSRAM for staging — WiFi OTA needs the S3 "
+    "no_psram": "gateway has no PSRAM for staging - WiFi OTA needs the S3 "
                 "access-point build",
-    "ap_not_supported": "this gateway is not the access-point build — flash the "
+    "ap_not_supported": "this gateway is not the access-point build - flash the "
                         "S3 AP firmware, or use the ESP-NOW transport",
 }
 
@@ -79,7 +79,7 @@ class WifiOTAUpdater:
     STORE_END_TIMEOUT = 10.0    # wait for ota_stored after ota_store_end
     START_TIMEOUT = 8.0         # wait for ota_wifi_start (node accepted)
     START_RESEND = 2.0          # resend ota_wifi until accepted
-    # connect (≤15 s on the node) + download + verify + reboot + re-announce.
+    # connect (<=15 s on the node) + download + verify + reboot + re-announce.
     DONE_TIMEOUT = 90.0
 
     def __init__(
@@ -144,7 +144,7 @@ class WifiOTAUpdater:
     # ------------------------------------------------------------------
 
     def _drive(self, image: bytes, md5: str) -> tuple[bool, str]:
-        self._log(f"{self._path.name}: {len(image)} bytes — staging on the gateway")
+        self._log(f"{self._path.name}: {len(image)} bytes - staging on the gateway")
 
         # 1. Stage the image on the gateway over USB.
         url = self._stage(image, md5)
@@ -152,12 +152,12 @@ class WifiOTAUpdater:
             return False, self._stage_failure_message()
 
         # 2. Tell the node to join the AP and pull from the gateway.
-        self._log("image staged — telling the node to download it")
+        self._log("image staged - telling the node to download it")
         if not self._await_start(url):
             return False, self._start_failure_message()
 
         # 3. Wait for the node to finish + reboot + announce.
-        self._log("node joining the access point and downloading…")
+        self._log("node joining the access point and downloading...")
         return self._await_done()
 
     def _stage_failure_message(self) -> str:
@@ -182,7 +182,7 @@ class WifiOTAUpdater:
             if self._done:
                 if self._on_progress:
                     self._on_progress(100)
-                return True, "Update complete — node rebooted into new firmware"
+                return True, "Update complete - node rebooted into new firmware"
             if self._error:
                 return False, f"Node error: {self._error}{self._error_detail}"
             self._event.wait(0.2)
@@ -239,7 +239,7 @@ class WifiOTAUpdater:
                 return False
             if time.monotonic() >= deadline:
                 self._error = "stage_stalled"
-                self._error_detail = " (gateway stopped acking — likely USB loss)"
+                self._error_detail = " (gateway stopped acking - likely USB loss)"
                 return False
             if self._event.wait(0.2):
                 self._event.clear()
@@ -256,7 +256,7 @@ class WifiOTAUpdater:
                 return True
             now = time.monotonic()
             if now >= next_send:
-                # No ssid → the gateway injects its own stored AP credentials
+                # No ssid -> the gateway injects its own stored AP credentials
                 # while forwarding, so the PC never has to know them. An
                 # explicit ssid overrides ("pass" is a Python keyword, so it
                 # can't be a kwarg name).
@@ -333,7 +333,7 @@ class WifiOTAUpdater:
 class C6WifiOTAUpdater(WifiOTAUpdater):
     """WiFi-OTA for the Thymio radio co-processor (XIAO ESP32-C6).
 
-    Identical staged pull as a node — the whole flow (stage on the gateway, tell the
+    Identical staged pull as a node - the whole flow (stage on the gateway, tell the
     device to join the SoftAP and pull ``/fw``, wait for it to reboot) is inherited.
     Only two things differ:
 
@@ -361,7 +361,7 @@ class C6WifiOTAUpdater(WifiOTAUpdater):
             self._done = True
             return True
         if mtype == "ota_wifi_ok":
-            self._log("C6 activated the new image — rebooting…")
+            self._log("C6 activated the new image - rebooting...")
             return True
         if mtype == "ota_activate":
             self._log(f"C6 activate failed: {data.get('esp_err')} "
@@ -370,7 +370,7 @@ class C6WifiOTAUpdater(WifiOTAUpdater):
             return True
         if mtype == "ota_wifi_retry":
             self._log(f"C6 download attempt {data.get('attempt')} failed "
-                      f"(err {data.get('err')}) — retrying…")
+                      f"(err {data.get('err')}) - retrying...")
             return True
         if mtype == "ota_wifi_fail":
             self._error = str(data.get("reason", "wifi_fail"))

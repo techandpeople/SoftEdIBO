@@ -7,5 +7,5 @@ inert classifier import only the stdlib. scikit-learn / joblib are needed
 tests run without them.
 
 Models are **per skin type** (``skin.skin_type``) with coordinate-free,
-index-based features — see ``docs/TOUCH_ML.md`` and the study plan.
+index-based features - see ``docs/TOUCH_ML.md`` and the study plan.
 """

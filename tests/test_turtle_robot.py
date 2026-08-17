@@ -1,4 +1,4 @@
-"""Tests for the Turtle robot — several shared skins spread across nodes."""
+"""Tests for the Turtle robot - several shared skins spread across nodes."""
 
 from unittest.mock import MagicMock, PropertyMock
 
@@ -74,9 +74,9 @@ def test_small_skins_share_node():
     robot, _ = _make_turtle()
     skin_a = robot.skins["skin_small_a"]
     skin_b = robot.skins["skin_small_b"]
-    # Both skins live on the same node (single-node-per-skin invariant)…
+    # Both skins live on the same node (single-node-per-skin invariant)...
     assert skin_a.node_macs == skin_b.node_macs == ["AA:BB:CC:DD:EE:02"]
-    # …but cover a different number of chambers.
+    # ...but cover a different number of chambers.
     assert skin_a.chamber_count == 1
     assert skin_b.chamber_count == 2
 

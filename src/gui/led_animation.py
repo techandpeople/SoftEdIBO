@@ -1,4 +1,4 @@
-"""LED animation utilities — reusable colour animation for LEDs.
+"""LED animation utilities - reusable colour animation for LEDs.
 
 Pure, hardware-free maths that mirrors the node firmware (``leds.h`` on both
 boards) so an on-screen preview looks like the real ring:
@@ -31,7 +31,7 @@ def pattern_scale(pattern: AnimationPattern, frac: float) -> float:
     """Brightness scale (0..1) of a blink/pulse pattern at cycle fraction ``frac``.
 
     Mirrors the firmware: BLINK is on for the first half of the cycle then off;
-    PULSE is a triangle ramp 0 → 1 → 0. SOLID/COMET return 1 (COMET handles its
+    PULSE is a triangle ramp 0 -> 1 -> 0. SOLID/COMET return 1 (COMET handles its
     own per-pixel brightness).
     """
     frac = frac % 1.0
@@ -61,7 +61,7 @@ def apply_animation(color: QColor, pattern: AnimationPattern, step: int,
 
 
 def lerp_color(a: QColor, b: QColor, t: float) -> QColor:
-    """Linear cross-fade between two colours (t=0 → a, t=1 → b)."""
+    """Linear cross-fade between two colours (t=0 -> a, t=1 -> b)."""
     t = max(0.0, min(1.0, t))
     return QColor(
         round(a.red()   + (b.red()   - a.red())   * t),
@@ -76,8 +76,8 @@ def comet_pixels(seg_colors: list[QColor], count: int, head_frac: float
 
     ``head_frac`` is the lead comet's head position as a fraction of the ring
     (0..1, increasing = clockwise). Comet ``j`` sits ``j/k`` of the way further
-    round and trails a 1 → 0 fade behind its head, coloured by ``seg_colors[j]``
-    — so one colour gives one comet, two give two comets 180° apart. Mirrors the
+    round and trails a 1 -> 0 fade behind its head, coloured by ``seg_colors[j]``
+    - so one colour gives one comet, two give two comets 180 deg apart. Mirrors the
     firmware ``renderComet_``.
     """
     k = max(1, len(seg_colors))
@@ -101,7 +101,7 @@ def comet_pixels(seg_colors: list[QColor], count: int, head_frac: float
 
 
 class LedAnimator(QWidget):
-    """Timer-driven LED animator — emits animation updates at fixed intervals.
+    """Timer-driven LED animator - emits animation updates at fixed intervals.
 
     Useful for coordinating animation across multiple LED displays.
     """

@@ -59,7 +59,7 @@ class AirChamber:
         """Latest measured absolute pressure in kPa, or NaN if unknown.
 
         NaN means no firmware kPa has arrived (the simulator, or firmware too
-        old to report it) — consumers fall back to the percentage.
+        old to report it) - consumers fall back to the percentage.
         """
         return self._kpa
 
@@ -88,7 +88,7 @@ class AirChamber:
 
         ``actuating`` is the chamber's *real* actuation state as reported by the
         firmware status: ``INFLATING``/``DEFLATING`` while a pump is driving it,
-        ``IDLE`` once it stops. When given it is authoritative — a firmware-idle
+        ``IDLE`` once it stops. When given it is authoritative - a firmware-idle
         chamber settles to ``INFLATED`` (holding a level) or ``IDLE`` (empty), so
         a chamber whose pressure never reached its target (e.g. the pumps are
         off) no longer shows a perpetual INFLATING/DEFLATING. When ``None`` (old

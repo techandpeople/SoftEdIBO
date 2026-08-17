@@ -1,8 +1,8 @@
-"""Session CSV export — flattens the event timeline for offline analysis.
+"""Session CSV export - flattens the event timeline for offline analysis.
 
 Lives apart from the GUI so the export schema and the participant-attribution
 logic have a single home (the DataPanel just calls it). Each row is one
-``interaction_event`` enriched with its session header and — crucially — the
+``interaction_event`` enriched with its session header and - crucially - the
 ``robot_id`` and ``participant`` the event belongs to, resolved from the
 session's assignments.
 
@@ -103,8 +103,8 @@ class _Attribution:
     """Maps an event to (robot_id, participant_id) using session assignments.
 
     Builds two lookups from the assignments:
-    - ``unit → (robot, participant)`` for skin/branch-scoped events;
-    - ``robot → participant`` for whole-robot events (only unambiguous when the
+    - ``unit -> (robot, participant)`` for skin/branch-scoped events;
+    - ``robot -> participant`` for whole-robot events (only unambiguous when the
       robot has a single participant, e.g. Thymio).
     """
 

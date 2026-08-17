@@ -1,4 +1,4 @@
-"""SimulatedMagnetSensor — mock node_magnet_sensor (touch / sensor board) for simulation.
+"""SimulatedMagnetSensor - mock node_magnet_sensor (touch / sensor board) for simulation.
 
 On real hardware a ``node_magnet_sensor`` board streams touch activations (and, later,
 organ bio-impedance readings) over ESP-NOW. In simulation there is no one
@@ -8,11 +8,11 @@ every ``on_magnet`` subscriber exactly as the real board would.
 
 This keeps a clean split of responsibilities:
 
-- ``SimulatedMagnetSensor``        — simulated **touch / sensor input** (this file).
-- ``SimulatedController`` — simulated **chamber actuation** (pressures).
+- ``SimulatedMagnetSensor``        - simulated **touch / sensor input** (this file).
+- ``SimulatedController`` - simulated **chamber actuation** (pressures).
 
 Activities subscribe to ``on_magnet`` / ``on_organ`` without knowing whether the
-source is a ``SimulatedMagnetSensor`` or a real ``ESP32Controller`` — so plugging in real
+source is a ``SimulatedMagnetSensor`` or a real ``ESP32Controller`` - so plugging in real
 hardware leaves the activity behaviour identical.
 """
 
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 class SimulatedMagnetSensor:
-    """Mock magnet sensor/sensor node — emits ``on_magnet`` (touch) and ``on_organ`` events.
+    """Mock magnet sensor/sensor node - emits ``on_magnet`` (touch) and ``on_organ`` events.
 
     Mirrors the slice of the ``ESP32Controller`` API that activities use for
     sensing, so it can be dropped in as a skin's ``touch_controller`` in
@@ -35,7 +35,7 @@ class SimulatedMagnetSensor:
     def __init__(self, mac_address: str) -> None:
         self.mac_address = mac_address
         # Touches fired in simulation didn't come off a real radio, so they're
-        # tagged with a ``sim:`` source (not the config MAC) — recordings stay
+        # tagged with a ``sim:`` source (not the config MAC) - recordings stay
         # honest about which samples are synthetic.
         self.source_id = f"sim:{mac_address}"
         self._magnet_callbacks:   list[Callable[[dict[str, Any]], None]] = []

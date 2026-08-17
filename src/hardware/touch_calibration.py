@@ -1,10 +1,10 @@
-"""Touch↔chamber coupling calibration — GUI-free core + settings helpers.
+"""Touch<->chamber coupling calibration - GUI-free core + settings helpers.
 
 Builds the pressure-informed compensation model (see
 :mod:`src.core.touch_compensation`) from a *sweep*: inflate one chamber at a
 time through a staircase of levels, hold each, and read the magnet sensors at
 steady state. The per-(chamber, level, sensor) magnitude shift vs rest is the
-coupling curve — measured in raw uT, the same units the PC detection path uses.
+coupling curve - measured in raw uT, the same units the PC detection path uses.
 
 :class:`SweepProgram` is the pure step sequence of that sweep (what to send,
 how long to dwell); the Qt dialog (``src/gui/touch_calibration_dialog.py``)
@@ -59,8 +59,8 @@ class SweepStep:
 class SweepProgram:
     """The pure step sequence of a coupling sweep over chamber *combinations*.
 
-    Coupling is non-additive — two chambers inflated together can move a sensor
-    differently than the sum of each alone — so the sweep visits every chamber
+    Coupling is non-additive - two chambers inflated together can move a sensor
+    differently than the sum of each alone - so the sweep visits every chamber
     *subset* (up to ``max_order``) over a per-member level grid. Because a state
     with a member at 0 is just a lower-order subset, this is exactly the full
     Cartesian grid over each chamber's axis ``[0, g1, .., 100]``; the runtime
@@ -94,11 +94,11 @@ class SweepProgram:
 
         for sub in self.subsets:
             steps.append(SweepStep("rest", {}, rest_ms,
-                                   "Resting (venting all chambers)…", pct()))
+                                   "Resting (venting all chambers)...", pct()))
             for point in product(self.grid, repeat=len(sub)):
                 levels = dict(zip(sub, point))
                 label = ("Chambers " if len(sub) > 1 else "Chamber ") + "+".join(
-                    f"{c}@{levels[c]:.0f}%" for c in sub) + "…"
+                    f"{c}@{levels[c]:.0f}%" for c in sub) + "..."
                 steps.append(SweepStep("state", levels, dwell_ms, label, pct()))
         self.steps = steps
 
@@ -107,7 +107,7 @@ class SweepProgram:
                     min_level: float = ACTIVE_MIN) -> tuple[float, ...]:
         """Per-member grid levels: ``step_pct`` apart up to 100 %, floored at
         ``min_level`` (levels below the inflated threshold cannot register as a
-        member, so they are skipped — the origin at 0 is implicit)."""
+        member, so they are skipped - the origin at 0 is implicit)."""
         step = max(1.0, float(step_pct))
         out, v = [], step
         while v < 100.0:
@@ -137,7 +137,7 @@ def iter_touch_skins(settings_data: dict) -> list[dict]:
     Each entry: ``{robot_id, skin_id, touch_mac, chamber_mac, sensor_count,
     slots, limits, coupling, enabled}``. ``coupling`` is the stored matrix dict
     (or ``None``); ``enabled`` reflects ``touch.compensation.enabled``;
-    ``limits`` maps each slot to its configured ``(min_kpa, max_kpa)`` — the
+    ``limits`` maps each slot to its configured ``(min_kpa, max_kpa)`` - the
     range the sweep uses to recompute inflation % from the status ``kpa`` (the
     firmware's own ``pressure`` field is computed against the limits the node
     currently holds, which lag the PC config)."""
@@ -211,7 +211,7 @@ def set_compensation(settings_data: dict, robot_id: str, skin_id: str, *,
     correction; ``guard_ms`` hardens sensors for that long after a coupled
     chamber's level changes (0 disables the guard). ``clear_threshold`` drops any
     stored ``threshold_ut`` so the compensator falls back to the single source of
-    truth — the node's ``act_threshold_ut`` set from the sensor tester."""
+    truth - the node's ``act_threshold_ut`` set from the sensor tester."""
     skin = _find_skin(settings_data, robot_id, skin_id)
     if skin is None:
         return False
@@ -240,7 +240,7 @@ def sweep_diagnostics(samples: Any, slots: list[int],
 
     Distinguishes the failure modes: no magnet samples at all (the touch node
     never streamed); samples whose chamber levels never reached "inflated"
-    (pressure never hit :data:`ACTIVE_MIN` % — stale kPa limits, pumps not
+    (pressure never hit :data:`ACTIVE_MIN` % - stale kPa limits, pumps not
     running, wrong chamber node); or a chamber that *did* inflate but got no
     usable data because a neighbour was co-inflated whenever it peaked.
 
@@ -250,7 +250,7 @@ def sweep_diagnostics(samples: Any, slots: list[int],
     peak moment is named. Returns a short multi-line hint for the operator."""
     samples = list(samples)
     if not samples:
-        return ("Diagnostics: 0 magnet samples arrived — the touch node never "
+        return ("Diagnostics: 0 magnet samples arrived - the touch node never "
                 "streamed during the sweep. Check that it is powered, paired "
                 "to the gateway, and that the skin's touch node_mac is right.")
     peaks: dict[int, float] = {int(s): 0.0 for s in slots}
@@ -267,7 +267,7 @@ def sweep_diagnostics(samples: Any, slots: list[int],
             lines += _missing_slot_hint(samples, slot, peaks[slot])
     if all(peak < ACTIVE_MIN for peak in peaks.values()):
         lines.append(
-            f"All below {ACTIVE_MIN:.0f}% — no sample ever classified as "
+            f"All below {ACTIVE_MIN:.0f}% - no sample ever classified as "
             "'inflated'. Check the chambers' kPa limits in the skin config, "
             "and that the pumps actually ran during the sweep.")
     return "\n".join(lines)
@@ -290,7 +290,7 @@ def _worst_neighbor_at_peak(samples: Any, slot: int) -> tuple[int | None, float]
     """The other chamber that was most inflated at ``slot``'s peak moment.
 
     Finds the sample where ``slot`` read highest and returns the neighbour with
-    the largest level there — the likely reason ``slot``'s samples were all
+    the largest level there - the likely reason ``slot``'s samples were all
     classified ambiguous. Returns ``(None, 0.0)`` if no neighbour was up."""
     best_level, best_other, best_other_pct = -1.0, None, 0.0
     for sample in samples:
@@ -311,9 +311,9 @@ def coupling_config_from_samples(samples: Any, sensor_count: int,
     """Build a stored ``touch.coupling`` dict from sweep samples.
 
     ``samples`` are ``(t_ms, {slot: pct}, mag_vector[, vec_rows])`` tuples (the
-    magnet vector in raw uT). The config carries every measured state — single
-    chambers *and* combinations — as an N-dimensional grid the runtime
-    interpolates. Returns ``(coupling_config, model)`` — the model is handy for a
+    magnet vector in raw uT). The config carries every measured state - single
+    chambers *and* combinations - as an N-dimensional grid the runtime
+    interpolates. Returns ``(coupling_config, model)`` - the model is handy for a
     UI preview of the measured states before saving."""
     model = build_coupling(samples, sensor_count, **build_kw)
     bin_pct = float(build_kw.get("bin_pct", BIN_PCT))

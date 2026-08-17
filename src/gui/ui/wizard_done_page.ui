@@ -7,7 +7,7 @@
    <item>
     <widget class="QLabel" name="done_label">
      <property name="wordWrap"><bool>true</bool></property>
-     <property name="text"><string>&lt;p&gt;Setup is complete.&lt;/p&gt;&lt;p&gt;Click &lt;b&gt;Finish&lt;/b&gt; to open the application.&lt;/p&gt;&lt;p&gt;You can re-flash firmware at any time from &lt;b&gt;Tools =&gt; Flash Firmware…&lt;/b&gt;&lt;/p&gt;</string></property>
+     <property name="text"><string>&lt;p&gt;Setup is complete.&lt;/p&gt;&lt;p&gt;Click &lt;b&gt;Finish&lt;/b&gt; to open the application.&lt;/p&gt;&lt;p&gt;You can re-flash firmware at any time from &lt;b&gt;Tools =&gt; Flash Firmware...&lt;/b&gt;&lt;/p&gt;</string></property>
     </widget>
    </item>
    <item>

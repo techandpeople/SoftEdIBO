@@ -1,4 +1,4 @@
-"""Touch-gesture training core — shared by the CLI script and the GUI.
+"""Touch-gesture training core - shared by the CLI script and the GUI.
 
 Keeps the data-wrangling (segment recordings, match labels, extract features)
 and the model fitting in one place so ``scripts/train_touch_model.py`` and the
@@ -30,7 +30,7 @@ def _epoch_ms(iso: str) -> float:
 
 
 def _magnet_by_source(recording: Path) -> dict[str, list]:
-    """``{source: [(msg, t_ms), …]}`` for every magnet message in a recording."""
+    """``{source: [(msg, t_ms), ...]}`` for every magnet message in a recording."""
     by_source: dict[str, list] = {}
     with open(recording, encoding="utf-8") as f:
         for line in f:
@@ -50,7 +50,7 @@ def segments_of(recording: Path):
 
     When a source carries pressure-compensated magnet messages (recorded
     alongside the raw stream while compensation was enabled), only those are
-    segmented — live inference consumes the compensated stream, so training
+    segmented - live inference consumes the compensated stream, so training
     must see the same data (no train/serve skew)."""
     out = []
     for source, samples in _magnet_by_source(recording).items():
@@ -77,7 +77,7 @@ def collect_samples(pairs):
     either a CSV path or an in-memory ``{(source, round(start_ms)):
     (skin_type, skin_variant, label, group_id)}`` map (so the GUI can train
     without writing a CSV). Rows sharing a non-zero ``group_id`` (within a
-    recording + source) are merged into a single sample — that's how a multi-tap
+    recording + source) are merged into a single sample - that's how a multi-tap
     is labelled as one gesture (see :func:`merge_segments`)."""
     for gi, (rec, lab) in enumerate(pairs):
         labels = lab if isinstance(lab, dict) else _labels_of(Path(lab))
@@ -192,7 +192,7 @@ def _cv_splitter(ml, cv: str, y, groups):
     if cv == "group":
         n_groups = len(set(groups))
         if n_groups < 2:
-            return None, None, "only one recording — fitting on all data"
+            return None, None, "only one recording - fitting on all data"
         return (ml["GroupKFold"](n_splits=min(n_groups, 5)), groups,
                 "grouped by recording")
     # "stratified": guided capture is a single session, so group CV would see one
@@ -203,7 +203,7 @@ def _cv_splitter(ml, cv: str, y, groups):
         counts[label] = counts.get(label, 0) + 1
     min_class = min(counts.values())
     if min_class < 2:
-        return None, None, ("a gesture has <2 samples — fitting on all data; "
+        return None, None, ("a gesture has <2 samples - fitting on all data; "
                             "capture more repetitions")
     n_splits = min(min_class, 5)
     return (ml["StratifiedKFold"](n_splits=n_splits, shuffle=True,
@@ -217,7 +217,7 @@ def _fit_per_type(per_type: dict[str, dict], models_dir: Path, log,
 
     ``cv`` is ``"group"`` (recording-grouped, for :func:`train_models`) or
     ``"stratified"`` (for :func:`train_from_segments`). The RandomForest and the
-    ≥10-sample / ≥2-class gate are identical across both modes; only the CV
+    >=10-sample / >=2-class gate are identical across both modes; only the CV
     splitter differs.
     """
     ml = _import_ml()
@@ -232,12 +232,12 @@ def _fit_per_type(per_type: dict[str, dict], models_dir: Path, log,
         log(f"\n=== {skin_type or '(none)'}: {n} samples, {n_classes} classes ===")
         log(f"rule baseline accuracy: {res.baseline_acc:.3f}")
         if n < 10 or n_classes < 2:
-            log("Too few samples/classes to train — collect more. Skipping.")
+            log("Too few samples/classes to train - collect more. Skipping.")
             results.append(res)
             continue
 
         # balanced: real sessions are dominated by taps, with a handful of
-        # squeezes/strokes — unweighted trees would just learn the majority.
+        # squeezes/strokes - unweighted trees would just learn the majority.
         clf = ml["rf"](n_estimators=200, random_state=0, class_weight="balanced",
                        max_features="sqrt", min_samples_leaf=1)
         splitter, groups_arg, why = _cv_splitter(ml, cv, y, groups)
@@ -260,7 +260,7 @@ def _fit_per_type(per_type: dict[str, dict], models_dir: Path, log,
         ml["joblib"].dump(clf, out)
         res.trained = True
         res.model_path = str(out)
-        log(f"saved → {out}")
+        log(f"saved -> {out}")
         results.append(res)
     return results
 
@@ -274,7 +274,7 @@ def train_models(pairs, models_dir: Path,
     report, log = _new_report(on_log)
     per_type = _per_type_bins(collect_samples(pairs))
     if not per_type:
-        log("No labelled segments matched the recordings — check the CSVs.")
+        log("No labelled segments matched the recordings - check the CSVs.")
         return report
     report.results = _fit_per_type(per_type, models_dir, log, cv="group")
     return report
@@ -285,7 +285,7 @@ def train_from_segments(labeled, models_dir: Path,
                         ) -> TrainingReport:
     """Train per-``skin_type`` models directly from labelled touch segments.
 
-    ``labeled`` is an iterable of ``(skin_type, skin_variant, label, segment)`` —
+    ``labeled`` is an iterable of ``(skin_type, skin_variant, label, segment)`` -
     e.g. from :meth:`src.ml.gesture_capture.GestureCaptureSession.labeled_samples`.
     Feeds the same :func:`_sample` / :func:`~src.ml.touch_features.full_feature_vector`
     pipeline the recording path uses (so features are identical), then cross-

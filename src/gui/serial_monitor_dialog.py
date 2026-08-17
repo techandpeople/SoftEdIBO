@@ -14,7 +14,7 @@ from src.gui.base_dialog import BaseDialog
 from src.gui.ui_serial_monitor_dialog import Ui_SerialMonitorDialog
 from src.hardware.gateway import Gateway
 
-_PREFIX = {"rx": "«", "tx": "»"}
+_PREFIX = {"rx": "<<", "tx": ">>"}
 
 
 class SerialMonitorDialog(BaseDialog, Ui_SerialMonitorDialog):
@@ -72,7 +72,7 @@ class SerialMonitorDialog(BaseDialog, Ui_SerialMonitorDialog):
         if self._gateway.send_raw(text):
             self.input_edit.clear()
         else:
-            self._append("rx", "[not sent — gateway disconnected]")
+            self._append("rx", "[not sent - gateway disconnected]")
         self._update_status()
 
     def _update_status(self) -> None:

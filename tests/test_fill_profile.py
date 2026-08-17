@@ -1,4 +1,4 @@
-"""Tests for the calibrated time→pressure fill curve (src.hardware.fill_profile)."""
+"""Tests for the calibrated time->pressure fill curve (src.hardware.fill_profile)."""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ def test_clamps_above_measured_top():
 
 
 def test_forces_monotone_pressure_over_noise():
-    # A noisy dip (40 → 38) must not make the curve go backwards.
+    # A noisy dip (40 -> 38) must not make the curve go backwards.
     p = FillProfile([(0, 0), (500, 40), (1000, 38), (1500, 70)])
     pts = dict(p.points)
     assert pts[1000.0] == 40                     # clamped up to the running max
@@ -65,13 +65,13 @@ def test_round_trips_through_list():
 def test_from_list_rejects_empty_or_degenerate():
     assert FillProfile.from_list(None) is None
     assert FillProfile.from_list([]) is None
-    assert FillProfile.from_list([[0, 0]]) is None   # only an anchor → no rise
+    assert FillProfile.from_list([[0, 0]]) is None   # only an anchor -> no rise
     assert FillProfile([]).is_empty
     assert FillProfile([(0, 0)]).is_empty
 
 
 # ---------------------------------------------------------------------------
-# DeflateProfile — the falling (vacuum-side) mirror
+# DeflateProfile - the falling (vacuum-side) mirror
 # ---------------------------------------------------------------------------
 
 def test_deflate_anchors_at_start_and_falls_monotone():
@@ -86,12 +86,12 @@ def test_deflate_anchors_at_start_and_falls_monotone():
 
 
 def test_deflate_time_from_to_interpolates():
-    # 100%@0 → 50%@1000 → 10%@3000 (tail slower).
+    # 100%@0 -> 50%@1000 -> 10%@3000 (tail slower).
     p = DeflateProfile([(0, 100), (1000, 50), (3000, 10)])
     assert p.time_from_to(100, 50) == approx(1000)
     assert p.time_from_to(75, 50) == approx(500)   # halfway down the fast segment
     assert p.time_from_to(50, 30) == approx(1000)  # halfway down the slow segment
-    assert p.time_from_to(30, 60) == 0             # non-falling request → 0
+    assert p.time_from_to(30, 60) == 0             # non-falling request -> 0
 
 
 def test_deflate_extrapolates_below_floor_with_cap():

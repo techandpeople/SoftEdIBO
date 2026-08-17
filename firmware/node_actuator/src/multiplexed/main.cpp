@@ -27,7 +27,7 @@ constexpr uint32_t STATUS_REPORT_MS  = 500;
 // two checks: at 200 ms a single "+" step (e.g. +10 % of range) blew past to ~30 %
 // before the cutoff looked at the sensor. 20 ms shrinks that window ~10x so the
 // measured level settles on the commanded target (mirrors node_direct). Tank
-// control stays on the slow PRESSURE_CHECK_MS cadence — its pumps must not toggle
+// control stays on the slow PRESSURE_CHECK_MS cadence - its pumps must not toggle
 // fast, and the slow mux scan is fine for them.
 constexpr uint32_t CHAMBER_CHECK_MS  = 20;
 
@@ -80,7 +80,7 @@ void sendStatus(int chamber, float kpa) {
     // PC reflects whether a chamber is actually being driven rather than
     // inferring it from pressure-vs-target (which never settles with pumps off).
     // "vi"/"vd" are the ACTUAL inflate/deflate valve outputs (pca_valves mirror),
-    // so the PC shows a valve as open whoever opened it — manual toggle, an
+    // so the PC shows a valve as open whoever opened it - manual toggle, an
     // inflate/deflate, or the firmware closing it again.
     char buf[96];
     int len = snprintf(buf, sizeof(buf),
@@ -92,9 +92,9 @@ void sendStatus(int chamber, float kpa) {
 }
 
 // Batched status: every chamber in ONE frame (parallel arrays) instead of one esp_now_send
-// per chamber. Cuts the status frame count num_chambers× — the biggest win during a
-// status_rate fast window — freeing ESP-NOW airtime the Thymio's co-channel 802.15.4
-// shares. "pressure" is omitted (redundant — the PC recomputes it from "kpa"; kpa is
+// per chamber. Cuts the status frame count num_chambersx - the biggest win during a
+// status_rate fast window - freeing ESP-NOW airtime the Thymio's co-channel 802.15.4
+// shares. "pressure" is omitted (redundant - the PC recomputes it from "kpa"; kpa is
 // authoritative). Even a full 12-chamber frame is ~200 B, under the 250 B ESP-NOW limit,
 // so it is always a single frame (no splitting). kpa at 0.1 kPa. An old PC ignores it (no
 // "chamber" field); an old node still sends the scalar frame the new PC also parses.
@@ -150,7 +150,7 @@ void sendEngEvent(uint8_t ev, uint16_t mask, uint8_t dir) {
 
 // Pump-vs-valve sanity: report a pump role running with NO open valve (dead-head,
 // the "running dry / forcing" failure) OR more pumps running than the open valves
-// should need (forcing the manifold). recalcPumps() should make both impossible —
+// should need (forcing the manifold). recalcPumps() should make both impossible -
 // this only fires on a regression.
 void checkDryPumps() {
     if (!gatewayKnown) return;
@@ -222,13 +222,13 @@ void detectSensors(int valid_channels[], int& valid_count, int tank_candidates[]
     for (int i = 0; i < valid_count && pos < static_cast<int>(sizeof(channels)) - 8; i++) {
         pos += snprintf(channels + pos, sizeof(channels) - pos, "%s%d", i == 0 ? "" : ",", valid_channels[i]);
     }
-    LOG("TODO: valid sensors detected at mux channels: %s — confirm\n", channels);
+    LOG("TODO: valid sensors detected at mux channels: %s - confirm\n", channels);
 }
 
 // No reservoir tanks: the pumps push directly into the chambers, so their role
 // (pressure = inflate, vacuum = deflate) can't be discovered by watching a tank
-// sensor. Split the pumps evenly by default — first half PRESSURE, second half
-// VACUUM (e.g. 3 + 3 of NUM_PUMPS = 6) — which the gateway's `configure`
+// sensor. Split the pumps evenly by default - first half PRESSURE, second half
+// VACUUM (e.g. 3 + 3 of NUM_PUMPS = 6) - which the gateway's `configure`
 // (pump_groups / pump_inflate_count / pump_deflate_count) overrides with the real
 // wiring. There are no tank sensors to assign.
 void assignDefaultPumpRoles() {
@@ -396,7 +396,7 @@ void parseAndQueue(const uint8_t* data, int len) {
         return;
     } else if (strcmp(cmd, "set_led_halves") == 0) {
         // Split ring(s) into len(colors) equal arcs (the purple/yellow look) in
-        // ONE frame. Replaces the PC's old per-pixel burst — 24 set_led frames
+        // ONE frame. Replaces the PC's old per-pixel burst - 24 set_led frames
         // that reset the node by calling show() once per pixel in the recv task.
         // {"cmd":"set_led_halves","ring":0..3,"colors":["#RRGGBB",...],"pattern":...,
         //  "fade_ms":N}  pattern "comet" paints one comet per colour.
@@ -431,7 +431,7 @@ void parseAndQueue(const uint8_t* data, int len) {
 //      control resumes, so a lost "off" command can't leave a pump running.
 //   2. HARD limits: pumps/valves are cut if a tank or chamber hits its hard cap.
 // At most one valve per chamber is held open at a time (inflate XOR deflate).
-// Dev/teacher tool only — never exposed to children.
+// Dev/teacher tool only - never exposed to children.
 // ---------------------------------------------------------------------------
 
 constexpr uint32_t MANUAL_MAX_ON_MS = 5000;
@@ -469,7 +469,7 @@ void manualClearAll() {
     manualActive = false;
 }
 
-// Emergency stop — slam everything off immediately. loop() keeps it that way
+// Emergency stop - slam everything off immediately. loop() keeps it that way
 // (and skips all control) while emergencyStopped is set.
 void emergencyStopAll() {
     chambers::abortSequences();   // drop any in-progress coupled-fill sequence
@@ -481,7 +481,7 @@ void emergencyStopAll() {
 
 // Actuation commands that a ``chamber == -1`` target fans out to every chamber
 // (so "Inflate All" / "Deflate All" is one frame, not one per chamber). Limit
-// commands (set_max/set_min — each chamber has its own) and the manual bench
+// commands (set_max/set_min - each chamber has its own) and the manual bench
 // controls are deliberately excluded; they stay single-target.
 bool isFanOut(cmd_queue::CmdType t) {
     using namespace cmd_queue;
@@ -592,7 +592,7 @@ void processCommand(const cmd_queue::Cmd& c) {
         return;
     }
 
-    // Emergency stop / re-arm — works regardless of configured/error state.
+    // Emergency stop / re-arm - works regardless of configured/error state.
     if (c.type == CMD_STOP)   { emergencyStopped = true;  emergencyStopAll(); return; }
     if (c.type == CMD_RESUME) { emergencyStopped = false; return; }
 
@@ -619,7 +619,7 @@ void processCommand(const cmd_queue::Cmd& c) {
     }
 
     // Zero the pressure sensors at the current (vented) reading; needs the mux
-    // channel map, so it runs after the error guard. Non-actuating. (No ack —
+    // channel map, so it runs after the error guard. Non-actuating. (No ack -
     // this board only acks the confirmable set_max/set_min, like stop/resume.)
     if (c.type == CMD_TARE) { chambers::tare(); return; }
 
@@ -703,7 +703,7 @@ void applyPendingOrganChannels() {
         if (config::state.pressure_tank_mux_ch == ch) config::state.pressure_tank_mux_ch = -1;
         if (config::state.vacuum_tank_mux_ch == ch) config::state.vacuum_tank_mux_ch = -1;
     }
-    LOG("TODO: organ circuits on %d mux channel(s) — confirm wiring\n", count);
+    LOG("TODO: organ circuits on %d mux channel(s) - confirm wiring\n", count);
 }
 
 void onReceived(const uint8_t* mac_addr, const uint8_t* data, int len) {
@@ -781,7 +781,7 @@ void setup() {
 }
 
 void loop() {
-    // Run a pending WiFi OTA from the main task (never returns if it starts —
+    // Run a pending WiFi OTA from the main task (never returns if it starts -
     // the node reboots into the new firmware).
     se::ota::pollWifi();
 
@@ -829,8 +829,8 @@ void loop() {
     }
 
     // ---- Coupled-fill engines on their own (tight) cadence: open the group
-    //      together → fill to the lowest open target → close → settle → measure
-    //      each isolated → repeat. Reads the mux gauges itself (median-filtered)
+    //      together -> fill to the lowest open target -> close -> settle -> measure
+    //      each isolated -> repeat. Reads the mux gauges itself (median-filtered)
     //      and recalcs the count-scaled pumps when valves change. ----
     if (!manualActive && now - lastChamberMs >= CHAMBER_CHECK_MS) {
         lastChamberMs = now;

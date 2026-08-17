@@ -68,7 +68,7 @@ def build_skins(
     """Construct Skin objects from the config format.
 
     Each skin's chambers must all reference the same MAC (single-node invariant
-    — see Skin docstring). Skins that mix MACs or reference unknown nodes are
+    - see Skin docstring). Skins that mix MACs or reference unknown nodes are
     skipped with an error log.
 
     Args:
@@ -106,14 +106,14 @@ def _build_one_skin(skin_cfg: dict[str, Any],
     macs = {ch["mac"] for ch in chambers}
     if len(macs) > 1:
         logger.error(
-            "Skin %s spans multiple MACs (%s) — skipping. "
+            "Skin %s spans multiple MACs (%s) - skipping. "
             "A skin must belong to a single node.", skin_id, sorted(macs))
         return None
 
     mac = next(iter(macs))
     ctrl = controllers.get(mac)
     if ctrl is None:
-        logger.error("Skin %s references unknown MAC %s — skipping.",
+        logger.error("Skin %s references unknown MAC %s - skipping.",
                      skin_id, mac)
         return None
 
@@ -130,7 +130,7 @@ def _build_one_skin(skin_cfg: dict[str, Any],
          "fill_mode": ch.get("fill_mode")}
         for ch in chambers
     ]
-    # Per-ring LED mounting angle (from the skin config) → the node's controller,
+    # Per-ring LED mounting angle (from the skin config) -> the node's controller,
     # so every activity's LED look is rotated to match a physically-turned ring
     # without the behaviour having to know about it.
     led_angles = skin_cfg.get("led_angles")
@@ -168,8 +168,8 @@ def _touch_with_saved_threshold(touch_cfg: dict[str, Any] | None,
                                 skin_type: str) -> dict[str, Any] | None:
     """Overlay the skin type's saved sensitivity onto a touch config.
 
-    The µT activation threshold calibrated once per skin type (guided gesture
-    capture / Test Actuators → ``Settings.touch_threshold_ut``) becomes the
+    The uT activation threshold calibrated once per skin type (guided gesture
+    capture / Test Actuators -> ``Settings.touch_threshold_ut``) becomes the
     general default: the Skin pushes it to the node at build and the pressure
     compensator rederives ``act`` at the same value. An explicit per-skin
     ``act_threshold_ut`` in the config always wins; without a saved value the

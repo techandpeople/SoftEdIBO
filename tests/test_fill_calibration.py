@@ -30,9 +30,9 @@ from src.hardware.fill_calibration import (
 def test_sweep_records_curve_until_target_reached():
     cal = FillProfileCalibrator(step_ms=500, target_pct=95)
     # Each step opens the valve for 500 ms; the driver feeds the settled pct.
-    assert cal.record(20) is False        # 500 ms → 20 %
-    assert cal.record(55) is False        # 1000 ms → 55 %
-    assert cal.record(96) is True         # 1500 ms → 96 %, crosses target
+    assert cal.record(20) is False        # 500 ms -> 20 %
+    assert cal.record(55) is False        # 1000 ms -> 55 %
+    assert cal.record(96) is True         # 1500 ms -> 96 %, crosses target
     assert not cal.timed_out
     assert cal.elapsed_ms == 1500
     prof = cal.profile
@@ -44,7 +44,7 @@ def test_sweep_times_out_on_asymptotic_creep():
     cal = FillProfileCalibrator(step_ms=1000, target_pct=98, max_total_ms=3000)
     assert cal.record(40) is False        # 1000
     assert cal.record(60) is False        # 2000
-    assert cal.record(70) is True         # 3000 → hits the ceiling, never 98 %
+    assert cal.record(70) is True         # 3000 -> hits the ceiling, never 98 %
     assert cal.timed_out
     assert cal.profile.top_pct == 70
 
@@ -90,7 +90,7 @@ def test_continuous_sweep_tracks_top_pct_cheaply():
     assert cal.top_pct == 0
     cal.record(100, 40)
     assert cal.top_pct == 40
-    cal.record(200, 35)                       # sensor dip — top holds
+    cal.record(200, 35)                       # sensor dip - top holds
     assert cal.top_pct == 40
     cal.record(300, 96)
     assert cal.top_pct == 96
@@ -100,8 +100,8 @@ def test_continuous_sweep_tracks_top_pct_cheaply():
 def test_continuous_sweep_ignores_non_monotone_samples():
     cal = ContinuousFillCalibrator(target_pct=95)
     assert cal.record(100, 30) is False
-    assert cal.record(100, 34) is False       # duplicate timestamp — ignored
-    assert cal.record(80, 40) is False        # out-of-order — ignored
+    assert cal.record(100, 34) is False       # duplicate timestamp - ignored
+    assert cal.record(80, 40) is False        # out-of-order - ignored
     assert cal.samples == 1
     assert cal.elapsed_ms == 100
     assert cal.record(150, 96) is True        # later sample still lands
@@ -110,7 +110,7 @@ def test_continuous_sweep_ignores_non_monotone_samples():
 def test_plateau_detector_declares_floor_when_drop_stops():
     det = PlateauDetector(min_drop=0.5, settle_ms=600, min_ms=300)
     assert det.update(100, 50.0) is False        # still early (min_ms)
-    assert det.update(400, 30.0) is False        # falling — floor keeps moving
+    assert det.update(400, 30.0) is False        # falling - floor keeps moving
     assert det.update(800, 10.0) is False
     assert det.update(1200, 9.8) is False        # < min_drop: not "falling"
     assert det.update(1400, 9.9) is True         # 600 ms without a real drop
@@ -118,19 +118,19 @@ def test_plateau_detector_declares_floor_when_drop_stops():
     det2 = PlateauDetector(min_drop=0.5, settle_ms=600, min_ms=0)
     det2.update(0, 10.0)
     det2.update(500, 9.8)
-    assert det2.update(550, 8.0) is False        # real drop at 550 → window resets
+    assert det2.update(550, 8.0) is False        # real drop at 550 -> window resets
     assert det2.update(1100, 7.9) is False       # only 550 ms since the drop
     assert det2.update(1200, 7.9) is True
 
 
 def test_continuous_deflate_sweep_ends_on_measured_floor():
     cal = ContinuousDeflateCalibrator(plateau_drop_pct=1.0, plateau_ms=500)
-    # Falling stream; the gauge floor sits at ~6 % (ambient ≠ 0 on this sensor).
+    # Falling stream; the gauge floor sits at ~6 % (ambient != 0 on this sensor).
     assert cal.record(300, 95) is False
     assert cal.record(600, 60) is False
     assert cal.record(900, 20) is False
     assert cal.record(1200, 6.2) is False
-    assert cal.record(1500, 6.1) is False        # < 1 % drop — plateau window runs
+    assert cal.record(1500, 6.1) is False        # < 1 % drop - plateau window runs
     assert cal.record(1800, 6.0) is True         # 600 ms without a real drop
     assert not cal.timed_out
     prof = cal.profile
@@ -242,7 +242,7 @@ def test_iter_actuator_chambers_reports_calibration_state():
 def test_set_fill_profile_writes_and_drops_legacy_scalar():
     data = _settings()
     curve = [[0.0, 0.0], [500.0, 30.0], [1200.0, 95.0]]
-    # Slot 1 had a legacy fill_time_ms — writing a profile must drop it.
+    # Slot 1 had a legacy fill_time_ms - writing a profile must drop it.
     assert set_fill_profile(data, "AA:01", 1, curve) == 1
     ch1 = data["robots"]["turtles"][0]["skins"][0]["chambers"][1]
     assert ch1["fill_profile"] == curve
@@ -259,7 +259,7 @@ def test_chambers_missing_calibration():
 
 def test_pressure_mode_chamber_not_flagged_for_calibration():
     data = _settings()
-    # Slot 0 is uncalibrated but set to pressure fill mode → needs no curve.
+    # Slot 0 is uncalibrated but set to pressure fill mode -> needs no curve.
     data["robots"]["turtles"][0]["skins"][0]["chambers"][0]["fill_mode"] = "pressure"
     assert chambers_missing_calibration(data) == []
 
@@ -277,7 +277,7 @@ def test_iter_actuator_nodes_groups_chambers_by_mac():
 def test_set_fill_profiles_writes_combo_map_and_drops_legacy_scalar():
     data = _settings()
     combos = {"0,1": [[0.0, 0.0], [600.0, 40.0], [1500.0, 92.0]]}
-    # Slot 1 had a legacy fill_time_ms — writing a measured combo must drop it.
+    # Slot 1 had a legacy fill_time_ms - writing a measured combo must drop it.
     assert set_fill_profiles(data, "AA:01", 1, combos) == 1
     ch1 = data["robots"]["turtles"][0]["skins"][0]["chambers"][1]
     assert ch1["fill_profiles"] == combos
@@ -293,7 +293,7 @@ def test_set_fill_profiles_writes_combo_map_and_drops_legacy_scalar():
 def test_type_slug_composes_type_and_variant():
     assert type_slug("tree_round", "organ") == "tree_round_organ"
     assert type_slug("thymio", "") == "thymio"          # no variant
-    assert type_slug("", "organ") == ""                 # no type → no template
+    assert type_slug("", "organ") == ""                 # no type -> no template
 
 
 def test_set_and_get_type_profile_round_trip_and_prune():
@@ -317,7 +317,7 @@ def test_set_and_get_type_profile_round_trip_and_prune():
 def test_set_and_get_type_min_duty_round_trip_and_prune():
     from src.hardware.fill_scaling import MIN_PUMP_DUTY, FULL_DUTY
     data: dict = {}
-    # Absent → the global default floor.
+    # Absent -> the global default floor.
     assert get_type_min_duty(data, "tree_round", "organ") == MIN_PUMP_DUTY
     assert set_type_min_duty(data, "tree_round", "organ", 150) is True
     assert data["min_pump_duty_by_type"]["tree_round_organ"] == 150
@@ -338,7 +338,7 @@ def test_resolve_fill_profiles_inherits_template_without_mutating():
         "skin_id": "branch-1", "skin_type": "tree_round", "skin_variant": "organ",
         "chambers": [
             {"mac": "AA:01", "slot": 0},                          # inherits template
-            {"mac": "AA:01", "slot": 1},                          # no template → nothing
+            {"mac": "AA:01", "slot": 1},                          # no template -> nothing
             {"mac": "AA:01", "slot": 0, "fill_profile": [[0, 0], [100, 50]]},  # override wins
         ],
     }]
@@ -353,7 +353,7 @@ def test_resolve_fill_profiles_inherits_template_without_mutating():
 
 def test_combos_do_not_gate_activity_start():
     # A chamber with only combo curves but no solo curve still counts as missing
-    # calibration — combinations are a refinement, not the solo prerequisite.
+    # calibration - combinations are a refinement, not the solo prerequisite.
     data = _settings()
     ch0 = data["robots"]["turtles"][0]["skins"][0]["chambers"][0]
     ch0["fill_profiles"] = {"0,1": [[0, 0], [800, 95]]}

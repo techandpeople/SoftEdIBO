@@ -57,7 +57,7 @@ def test_export_rejects_an_invalid_spec():
 
 def test_import_accepts_a_bare_spec():
     name, description, spec = deserialize_activity(json.dumps(_spec()))
-    assert name == ""                    # no wrapper → no name
+    assert name == ""                    # no wrapper -> no name
     assert spec["initial"] == "phase1"
 
 

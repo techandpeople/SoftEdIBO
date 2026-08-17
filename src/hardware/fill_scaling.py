@@ -10,14 +10,14 @@ pump count::
 
     effective_ms = base_ms * fill_fraction * max(1.0, active_chambers / pumps)
 
-The ``max(1.0, …)`` floor matters: the base time was measured with a single
+The ``max(1.0, ...)`` floor matters: the base time was measured with a single
 chamber, so a single chamber (or any count up to the pump count, where each
 chamber effectively gets its own pump) must reproduce the measured time and
-never *less* — otherwise a lone chamber would under-inflate. Above the pump
+never *less* - otherwise a lone chamber would under-inflate. Above the pump
 count the chambers share flow and slow down.
 
-The firmware keeps its own independent backstops — a hard 5 s fill ceiling and
-the per-chamber HARD_MAX pressure cutoff — so this estimate only has to be
+The firmware keeps its own independent backstops - a hard 5 s fill ceiling and
+the per-chamber HARD_MAX pressure cutoff - so this estimate only has to be
 roughly right: it can never drive a chamber past its pressure limit.
 """
 
@@ -33,7 +33,7 @@ def scale_fill_ms(base_ms: float, active_chambers: int, pump_count: int) -> int:
     ``base_ms`` is the open-valve time this chamber needs *alone* (e.g. the time
     a :class:`~src.hardware.fill_profile.FillProfile` says it takes to climb from
     the current level to the target). The result scales it up by the concurrent
-    fill load, never below ``base_ms`` (the floor — see module docstring), and is
+    fill load, never below ``base_ms`` (the floor - see module docstring), and is
     always >= 1."""
     n = max(1, int(active_chambers))
     p = max(1, int(pump_count))
@@ -48,8 +48,8 @@ def scale_fill_ms(base_ms: float, active_chambers: int, pump_count: int) -> int:
 # calibrate-at-several-dutys sweep would replace this rough linear model with a
 # measured duty->flow curve per chamber.
 #
-# The diaphragm pumps barely move air until well over half duty — below ~190 the
-# motor stalls and the fill never completes — so the floor sits there, not near 0.
+# The diaphragm pumps barely move air until well over half duty - below ~190 the
+# motor stalls and the fill never completes - so the floor sits there, not near 0.
 FULL_DUTY = 255
 MIN_PUMP_DUTY = 190
 
@@ -64,8 +64,8 @@ def duty_for_power(level: int, min_duty: int = MIN_PUMP_DUTY,
                    max_duty: int = FULL_DUTY) -> int:
     """Map a 1-5 pump-power ``level`` onto a PWM duty over ``[min_duty, max_duty]``.
 
-    Level 1 is the gentlest usable stroke — ``min_duty``, the calibrated stall
-    floor below which a diaphragm pump moves no air — and level 5 is full power
+    Level 1 is the gentlest usable stroke - ``min_duty``, the calibrated stall
+    floor below which a diaphragm pump moves no air - and level 5 is full power
     (``max_duty``, normally :data:`FULL_DUTY` = 255). Intermediate levels
     interpolate linearly, so the 1-5 dial spans exactly the useful part of the
     duty range. ``min_duty`` is configurable per skin type (a stiffer silicone
@@ -81,10 +81,10 @@ def duty_for_power(level: int, min_duty: int = MIN_PUMP_DUTY,
 
 def duty_sweep(count: int = 4, top: int = FULL_DUTY,
                floor: int = MIN_PUMP_DUTY) -> tuple[int, ...]:
-    """Geometrically-spaced PWM duties (fastest → slowest) for the duty-curve sweep.
+    """Geometrically-spaced PWM duties (fastest -> slowest) for the duty-curve sweep.
 
-    The pump's air-flow vs duty response is roughly exponential — most of the
-    useful range sits near full duty and it collapses toward the stall floor — so
+    The pump's air-flow vs duty response is roughly exponential - most of the
+    useful range sits near full duty and it collapses toward the stall floor - so
     linear steps waste samples on the dead low end. Geometric spacing between
     ``top`` and ``floor`` puts the points closer together as duty drops, sampling
     the steep part of the curve where it matters. ``count`` distinct duties,
@@ -107,7 +107,7 @@ def duty_for_period(natural_ms: float, period_ms: float,
     measured :class:`~src.hardware.fill_profile.FillProfile`). Air moved per ms is
     assumed roughly proportional to duty, so to make a fill that naturally takes
     ``natural_ms`` last ``period_ms`` instead, run the pump at
-    ``FULL_DUTY * natural_ms / period_ms`` — clamped to ``[min_duty, FULL_DUTY]``.
+    ``FULL_DUTY * natural_ms / period_ms`` - clamped to ``[min_duty, FULL_DUTY]``.
     A ``period_ms`` at or below ``natural_ms`` (can't go faster than full) or a
     non-positive ``natural_ms`` returns full duty. The mapping is deliberately
     approximate; the firmware's pressure cutoff decides the final level."""
@@ -118,17 +118,17 @@ def duty_for_period(natural_ms: float, period_ms: float,
 
 
 class DutyModel:
-    """Measured pump-duty → fill-speed model — replaces the rough linear
+    """Measured pump-duty -> fill-speed model - replaces the rough linear
     :func:`duty_for_period` when a chamber has a **duty-curve sweep**.
 
     The sweep records the full-fill time at several PWM duties (each swept from
     empty). A lower duty moves less air per ms, so the whole fill takes longer; the
     **slowdown factor** at duty ``d`` is ``T(d) / T_fastest`` (>= 1). To make a fill
     that naturally takes ``natural_ms`` at full duty last ``period_ms`` instead,
-    pick the duty whose slowdown factor ≈ ``period_ms / natural_ms``.
+    pick the duty whose slowdown factor ~= ``period_ms / natural_ms``.
 
     Samples are ``(duty, full_time_ms)``. Times are forced monotone non-increasing
-    over ascending duty (higher duty is never slower — sweep noise can invert two
+    over ascending duty (higher duty is never slower - sweep noise can invert two
     neighbours), and the factor lookup interpolates only within the measured duty
     range, clamping outside it. Pure / Qt-free, so it unit-tests trivially. The
     firmware pressure cutoff remains the real backstop, so a rough duty is safe.
@@ -155,7 +155,7 @@ class DutyModel:
         if len(ordered) < 2:
             return []
         # Force time non-increasing as duty rises, so the slowdown factor is a clean
-        # monotone function of duty (invertible for the period→duty lookup).
+        # monotone function of duty (invertible for the period->duty lookup).
         times: list[float] = []
         running = float("inf")
         for _, t in ordered:
@@ -186,7 +186,7 @@ class DutyModel:
         if ratio >= pts[0][1]:
             return pts[0][0]                         # slower than slowest measured duty
         if ratio <= pts[-1][1]:
-            return pts[-1][0]                        # at/above fastest → full-ish
+            return pts[-1][0]                        # at/above fastest -> full-ish
         for i in range(len(pts) - 1):
             d_lo, f_lo = pts[i]                      # lower duty, higher factor
             d_hi, f_hi = pts[i + 1]                  # higher duty, lower factor
@@ -244,7 +244,7 @@ class FillLoadTracker:
         return len(self._until)
 
     def active_slots(self) -> set[int]:
-        """Slots whose fill window is still open — the live co-active set.
+        """Slots whose fill window is still open - the live co-active set.
 
         Used to look up a chamber's fill curve measured under exactly this
         concurrent set (see :mod:`src.hardware.fill_calibration` combinations);

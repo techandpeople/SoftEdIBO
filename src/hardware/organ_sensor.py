@@ -1,13 +1,13 @@
-"""OrganSensor — interprets a node's organ-resistance stream.
+"""OrganSensor - interprets a node's organ-resistance stream.
 
 Sits between a controller (real ``ESP32Controller`` or ``SimulatedController``)
 and whoever cares about organs (activities, GUI panels). The controller layer
-delivers raw readings — ``float`` ohms, ``float("inf")`` for an open circuit;
+delivers raw readings - ``float`` ohms, ``float("inf")`` for an open circuit;
 this class turns them into two clean, separate event streams:
 
-- **cover events** — the silicone cover closing/opening the sensing circuit
-  (``inf`` ⇄ finite transitions);
-- **resistance events** — the organ network's value while the cover is on.
+- **cover events** - the silicone cover closing/opening the sensing circuit
+  (``inf`` <-> finite transitions);
+- **resistance events** - the organ network's value while the cover is on.
 
 Keeping this interpretation out of the activities means every consumer agrees
 on what "cover off" means and activities only deal with domain events.
@@ -31,7 +31,7 @@ class OrganSensor:
             (``inf`` = cover off).
         slot: Which of the controller's organ circuits this sensor follows.
             Direct nodes have a single circuit (slot 0); multiplexed nodes
-            expose one slot per configured ``organ_channels`` entry — e.g.
+            expose one slot per configured ``organ_channels`` entry - e.g.
             one per Tree branch.
     """
 
@@ -46,7 +46,7 @@ class OrganSensor:
         if on_organ is not None:
             on_organ(self._handle_reading)
         else:
-            logger.debug("Controller %r has no on_organ — OrganSensor inert",
+            logger.debug("Controller %r has no on_organ - OrganSensor inert",
                          controller)
 
     @property
@@ -60,7 +60,7 @@ class OrganSensor:
 
     @property
     def resistance_ohm(self) -> float:
-        """Last reported total resistance (Ω); ``inf`` while the cover is off."""
+        """Last reported total resistance (ohm); ``inf`` while the cover is off."""
         return self._resistance
 
     @property
@@ -99,7 +99,7 @@ class OrganSensor:
         self._seen_reading = True
         now_closed = not math.isinf(value)
 
-        if now_closed != was_closed:   # includes the None → first-reading edge
+        if now_closed != was_closed:   # includes the None -> first-reading edge
             for cb in self._cover_callbacks:
                 cb(now_closed)
         if now_closed:

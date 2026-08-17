@@ -1,4 +1,4 @@
-"""SimulatedRobot — a robot backed by SimulatedController instead of ESP32Controller."""
+"""SimulatedRobot - a robot backed by SimulatedController instead of ESP32Controller."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from src.robots.base_robot import BaseRobot, RobotStatus
 
 
 class SimulatedRobot(BaseRobot):
-    """Mock robot — skins backed by SimulatedController instead of real ESP32."""
+    """Mock robot - skins backed by SimulatedController instead of real ESP32."""
 
     def __init__(
         self,
@@ -29,7 +29,7 @@ class SimulatedRobot(BaseRobot):
             name:         Display name.
             skin_configs: List of skin dicts in the standard format.
             sim_params:   Optional dict of simulation knobs (sim_inflate_speed,
-                          sim_deflate_speed, sim_touch_release_delay_ms, …).
+                          sim_deflate_speed, sim_touch_release_delay_ms, ...).
                           Forwarded to each SimulatedController so the operator-
                           tunable inflate/deflate rates take effect.
         """
@@ -46,7 +46,7 @@ class SimulatedRobot(BaseRobot):
                         mac, sim_params=self._sim_params,
                     )
 
-        # One SimulatedMagnetSensor **per skin** — the simulated "sensor board" the
+        # One SimulatedMagnetSensor **per skin** - the simulated "sensor board" the
         # T-buttons feed. Keyed by skin_id (not node_mac) so each skin's
         # T-buttons drive only that skin, even if several skins share a touch
         # node_mac. Keeps touch input separate from chamber actuation,
@@ -88,7 +88,7 @@ class SimulatedRobot(BaseRobot):
 
     def resume(self) -> None:
         # No-op: SimulatedController state is restored by Skin/AirChamber writes
-        # already issued before pause() — there is nothing extra to revive here.
+        # already issued before pause() - there is nothing extra to revive here.
         return
 
     def emergency_stop(self) -> None:

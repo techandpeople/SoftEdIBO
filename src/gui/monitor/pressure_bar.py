@@ -1,4 +1,4 @@
-"""PressureBar — vertical bar showing current pressure (fill) + target (line).
+"""PressureBar - vertical bar showing current pressure (fill) + target (line).
 
 A pure QPainter widget, kept in its own module so it can be used as a *promoted
 widget* inside ``ui/chamber_widget.ui`` without a circular import (the generated

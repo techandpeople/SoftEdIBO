@@ -1,4 +1,4 @@
-"""Tests for train_from_segments — the guided-capture training entry point.
+"""Tests for train_from_segments - the guided-capture training entry point.
 
 Feeds labelled touch segments straight in (as GestureCaptureSession would) and
 checks the model is saved and the TypeResult carries an accuracy + a square
@@ -36,7 +36,7 @@ def _press_seg():
 
 
 def _compressions_seg():
-    """A bout of three press→release pulses merged into one gesture."""
+    """A bout of three press->release pulses merged into one gesture."""
     hot = _msg([5.0, 0, 0, 0], [0])
     idle = _msg([0, 0, 0, 0], [])
     segs = TouchSegmenter().segment_stream([
@@ -49,7 +49,7 @@ def _compressions_seg():
 
 
 def _labeled(counts):
-    """``{label: (segment_factory, n)}`` → list of (type, variant, label, seg)."""
+    """``{label: (segment_factory, n)}`` -> list of (type, variant, label, seg)."""
     out = []
     for label, (factory, n) in counts.items():
         out += [("turtle_square", "wrinkles", label, factory()) for _ in range(n)]
@@ -76,7 +76,7 @@ def test_trains_and_reports_accuracy_and_confusion(tmp_path):
 
 
 def test_too_few_per_class_trains_without_cv(tmp_path):
-    # 11 samples, 2 classes → trains, but PRESS has <2 so no honest CV.
+    # 11 samples, 2 classes -> trains, but PRESS has <2 so no honest CV.
     labeled = _labeled({tax.TAP: (_tap_seg, 10), tax.PRESS: (_press_seg, 1)})
     res = train_from_segments(labeled, tmp_path).results[0]
     assert res.trained

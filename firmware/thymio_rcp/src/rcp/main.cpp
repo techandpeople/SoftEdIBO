@@ -1,8 +1,8 @@
 /*
- * SoftEdIBO — Thymio RCP (XIAO ESP32-C6): dual-transport link + WiFi-OTA.
+ * SoftEdIBO - Thymio RCP (XIAO ESP32-C6): dual-transport link + WiFi-OTA.
  *
  * Reads command lines from BOTH the USB-Serial/JTAG port (Serial) and the
- * inter-board UART (Serial1), and replies on the SAME channel — so one binary
+ * inter-board UART (Serial1), and replies on the SAME channel - so one binary
  * works flashed-solo-on-USB and wired to the S3 host over TX/RX.
  *
  * Commands (JSON, one per line; the S3 gateway forwards {"target":"thymio",...}
@@ -25,7 +25,7 @@
  *   {"cmd":"sniff_stop"}            -> radio off, back to a plain RCP
  *   {"cmd":"tx","ch":N,"data":"<hex>"} -> transmit a raw 802.15.4 frame on channel N
  *           (Phase 1: replay/forge a Thymio SET_VARIABLES motor command). Pass the PSDU
- *           WITHOUT its 2-byte FCS — the radio appends it. See the protocol notes below:
+ *           WITHOUT its 2-byte FCS - the radio appends it. See the protocol notes below:
  *           motor.left.target=0x56, motor.right.target=0x57, msg type SET_VARIABLES=0xA00C.
  * A bare "PING <n>" line (not JSON) still gets "PONG <n>" for the bring-up link test.
  *
@@ -47,7 +47,7 @@ static constexpr int      LINK_TX   = 16;      // D6 on the XIAO ESP32-C6
 static constexpr int      LINK_RX   = 17;      // D7
 static constexpr uint32_t LINK_BAUD = 115200;
 static constexpr uint32_t WIFI_TIMEOUT_MS = 15000;
-static constexpr int      OTA_ATTEMPTS    = 4;   // retries — the shared-radio AP can
+static constexpr int      OTA_ATTEMPTS    = 4;   // retries - the shared-radio AP can
                                                  // drop a sustained bulk download
 
 // Join the S3's SoftAP and pull the staged image from its /fw. httpUpdate reboots
@@ -56,7 +56,7 @@ static void doWifiOta(const char* ssid, const char* pass, const char* url, Print
     io.println("{\"type\":\"ota_wifi_start\",\"src\":\"c6\"}");
     WiFi.persistent(false);                     // don't rewrite creds to NVS each begin
     WiFi.mode(WIFI_STA);
-    WiFi.setSleep(false);                        // no modem sleep — steadier bulk download
+    WiFi.setSleep(false);                        // no modem sleep - steadier bulk download
     WiFi.begin(ssid, pass);
     const uint32_t t0 = millis();
     while (WiFi.status() != WL_CONNECTED && millis() - t0 < WIFI_TIMEOUT_MS) delay(200);
@@ -69,7 +69,7 @@ static void doWifiOta(const char* ssid, const char* pass, const char* url, Print
 
     // Retry the pull (OTA_ATTEMPTS): the AP link (shared radio, contended by
     // ESP-NOW) can drop a sustained download. A successful attempt never returns
-    // (we reboot into the new image), so the loop only runs on failure — except an
+    // (we reboot into the new image), so the loop only runs on failure - except an
     // ACTIVATE failure, which is not a transport drop and is handled below instead.
     // Download + write + verify via HTTPUpdate, but activate ourselves so we can
     // report the EXACT esp_err (HTTPUpdate only surfaces a generic "err 9").
@@ -101,7 +101,7 @@ static void doWifiOta(const char* ssid, const char* pass, const char* url, Print
                   "\"run\":\"%s\",\"run_state\":%d,\"next\":\"%s\"}\n",
                   esp_err_to_name(e), run ? run->label : "?", (int)rst,
                   next ? next->label : "?");
-        if (e == ESP_OK) {                            // worked on the retry → boot it
+        if (e == ESP_OK) {                            // worked on the retry -> boot it
             io.println("{\"type\":\"ota_wifi_ok\",\"src\":\"c6\"}");
             delay(200);
             esp_restart();
@@ -116,7 +116,7 @@ static void doWifiOta(const char* ssid, const char* pass, const char* url, Print
 // Frames are streamed as JSON over Serial1 so the S3 relays them to the PC. 127 is
 // the full 802.15.4 PSDU, so nothing is ever cut; the worst-case line (~320 chars)
 // needs the S3's 384-char relay buffer (gateways on the old 256-char build truncate
-// near-max frames — reflash the S3 too). Never armed at boot — a radio hiccup is
+// near-max frames - reflash the S3 too). Never armed at boot - a radio hiccup is
 // always recoverable by a reboot.
 static constexpr uint8_t  SNIFF_MAX_BYTES = 127;
 static constexpr uint32_t SNIFF_HOP_MS    = 1500;   // dwell per channel when hopping
@@ -129,7 +129,7 @@ struct SniffFrame {
     uint8_t channel;
 };
 // One RX queue shared by the sniffer AND the link-mode sensor reader (they never
-// run at once — the poller pauses while sniffing). The ISR fills it; whichever pump
+// run at once - the poller pauses while sniffing). The ISR fills it; whichever pump
 // is active drains it.
 static QueueHandle_t s_rxQ      = nullptr;
 static volatile bool s_sniffing = false;
@@ -139,7 +139,7 @@ static uint8_t       s_sniffFixed = 0;    // 0 = hop 11..26, else locked channel
 // The 802.15.4 radio is enabled ONCE per boot and then left up, for two reasons:
 // (1) esp_ieee802154_enable() allocates the ZB_MAC interrupt; calling it again without
 // a matching disable() leaks that allocation until "No free interrupt inputs for
-// ZB_MAC" — after which the radio silently stops transmitting even though
+// ZB_MAC" - after which the radio silently stops transmitting even though
 // esp_ieee802154_transmit() still returns ESP_OK. So gate it.
 // (2) esp_ieee802154_disable() poisons the modem for the REST OF THE BOOT: a later
 // re-enable comes up deaf (only-first-discover-works) and a later WiFi STA join
@@ -157,7 +157,7 @@ static void radioDown() { if (s_radioEnabled)  { esp_ieee802154_disable(); s_rad
 // reason "wifi"; every fresh-boot attempt joined fine). So when the radio has been
 // used, ota_wifi parks the request here and reboots; setup() resumes it on the clean
 // boot BEFORE anything touches the 15.4 radio. Same RTC_NOINIT pattern as the nodes'
-// se_ota.h otaDoneFlag (survives esp_restart, garbage after power-on — hence magic).
+// se_ota.h otaDoneFlag (survives esp_restart, garbage after power-on - hence magic).
 struct OtaPark {
     uint32_t magic;
     char     ssid[33];
@@ -168,7 +168,7 @@ struct OtaPark {
 static RTC_NOINIT_ATTR OtaPark s_otaPark;
 static constexpr uint32_t OTA_PARK_MAGIC = 0x4F544150;   // "OTAP"
 
-// Set by the driver when a transmit (incl. its ACK wait) completes — lets thTx() pace
+// Set by the driver when a transmit (incl. its ACK wait) completes - lets thTx() pace
 // back-to-back frames instead of bursting them into a busy radio (which drops them).
 // The semaphore mirrors the flag so the pacing wait can BLOCK (yield the single core
 // to the UART writer task) instead of busy-spinning up to 15 ms per frame.
@@ -183,7 +183,7 @@ static inline void txBegin() {
 }
 
 // Pace: wait (blocking, yields) until the transmit + its ACK are done, capped at `ms`.
-static volatile uint32_t s_txTimeouts = 0;   // TXs whose ACK never came in `ms` — climbs
+static volatile uint32_t s_txTimeouts = 0;   // TXs whose ACK never came in `ms` - climbs
                                              // if the Thymio stops ACKing (radio degrading)
 static void txWait(uint32_t ms) {
     if (s_txDoneSem) {
@@ -212,10 +212,10 @@ void IRAM_ATTR esp_ieee802154_receive_done(uint8_t* frame,
     // Hand the RX buffer back to the driver's pool. WITHOUT this every received frame
     // leaks a buffer: the pool (CONFIG_IEEE802154_RX_BUFFER_SIZE, default 20) exhausts
     // after exactly 20 frames and RX goes deaf until a reboot. That is the real cause of
-    // "the sensors kill the link ~1 s after loading the push program" — the Thymio's
+    // "the sensors kill the link ~1 s after loading the push program" - the Thymio's
     // emit flood hits 20 frames in a couple of seconds. Free unconditionally (even when
     // s_rxQ is null and we drop the frame), or idle traffic exhausts the pool too. The
-    // ISR is alloc'd with flags 0 (not IRAM), so it always runs cache-enabled → calling
+    // ISR is alloc'd with flags 0 (not IRAM), so it always runs cache-enabled -> calling
     // this flash-resident function here is safe.
     esp_ieee802154_receive_handle_done(frame);
 }
@@ -245,7 +245,7 @@ static void sniffStart(uint8_t fixed_ch, Print& io) {
     s_sniffFixed = fixed_ch;
     s_sniffCh    = fixed_ch ? fixed_ch : 11;
     radioUp();
-    delay(50);                       // let the radio settle — tuning RX too soon after
+    delay(50);                       // let the radio settle - tuning RX too soon after
                                      // enable() can come up un-armed (a fixed channel
                                      // then never receives; sniffPump re-arms as backup)
     esp_ieee802154_set_promiscuous(true);
@@ -260,7 +260,7 @@ static void sniffStop(Print& io) {
     if (!s_sniffing) return;
     s_sniffing = false;
     // The radio STAYS up: esp_ieee802154_disable() poisons the modem for the rest
-    // of the boot — the next enable comes up deaf (only-first-scan-works) and a
+    // of the boot - the next enable comes up deaf (only-first-scan-works) and a
     // WiFi join fails outright (see OtaPark). Down only on reboot-bound paths.
     io.println("{\"type\":\"sniff\",\"src\":\"c6\",\"state\":\"stop\"}");
 }
@@ -322,7 +322,7 @@ static size_t hexToBytes(const char* s, uint8_t* out, size_t cap) {
 }
 
 // Transmit a raw 802.15.4 frame (Phase 1: replay/forge Thymio SET_VARIABLES commands).
-// Pass the PSDU WITHOUT the 2-byte FCS — the radio computes and appends it. frame[0] is
+// Pass the PSDU WITHOUT the 2-byte FCS - the radio computes and appends it. frame[0] is
 // the PHR length (PSDU incl. FCS). Untested on hardware; the radio TX path is new here.
 static void doTx(uint8_t ch, const char* hex, Print& io) {
     static uint8_t frame[130];
@@ -332,7 +332,7 @@ static void doTx(uint8_t ch, const char* hex, Print& io) {
         return;
     }
     radioUp();                               // bring the radio up ONCE (never re-enable per
-                                             // tx — that leaks the ZB_MAC interrupt)
+                                             // tx - that leaks the ZB_MAC interrupt)
     esp_ieee802154_set_channel(ch);
     frame[0] = (uint8_t)(n + 2);             // PHR = payload + FCS
     esp_err_t e = esp_ieee802154_transmit(frame, false);
@@ -344,35 +344,35 @@ static void doTx(uint8_t ch, const char* hex, Print& io) {
 // ---- Continuous Thymio link (the C6 IS the dongle) ----------------------------------
 // The Thymio only keeps its receive window open while it is actively polled (~the dongle's
 // 10 Hz GET_VARIABLES). Driving it from the PC over serial is laggy (each command reopens
-// the port → resets the C6 → seconds of dead time) and only holds the link while a script
+// the port -> resets the C6 -> seconds of dead time) and only holds the link while a script
 // runs. So the poll loop lives HERE: once thymio_link is on, loop() transmits the poll +
 // the held motor/LED targets every TH_POLL_MS with an incrementing seq. The PC just sets
-// the targets ({"cmd":"thymio_drive",...}) — instant, and the link stays hot forever.
+// the targets ({"cmd":"thymio_drive",...}) - instant, and the link stays hot forever.
 static const uint8_t  TH_PAN[2] = {0x81, 0x44};   // PAN 0x4481 (this dongle network)
 static const uint16_t TH_SET_VARIABLES = 0xA00C;
 static const uint16_t TH_GET_VARIABLES = 0xA00B;
 static const uint16_t TH_SET_BYTECODE  = 0xA001;   // load a program (payload [dest][addr][words])
 static const uint16_t TH_RUN           = 0xA003;   // run it (payload [dest]); NOT 0xA002 = RESET
-static const uint16_t TH_VARIABLES     = 0x9005;   // node→host reply to GET_VARIABLES
+static const uint16_t TH_VARIABLES     = 0x9005;   // node->host reply to GET_VARIABLES
 static const uint16_t TH_HOST_ADDR     = 0x3237;   // our spoofed host short address
 // Poll one contiguous window that fits a single 802.15.4 frame (38 words = 76 B):
-//   prox.ground.delta @0x54,0x55  → value[0..1]   (table reflection; ~0 when lifted)
-//   acc               @0x62..0x64 → value[14..16] (impact = deviation from rest 0,0,20)
-//   mic.intensity     @0x79       → value[37]      (ambient loudness)
+//   prox.ground.delta @0x54,0x55  -> value[0..1]   (table reflection; ~0 when lifted)
+//   acc               @0x62..0x64 -> value[14..16] (impact = deviation from rest 0,0,20)
+//   mic.intensity     @0x79       -> value[37]      (ambient loudness)
 static const uint16_t TH_SENSE_START   = 0x0054;   // prox.ground.delta @0x54
 static const uint8_t  TH_SENSE_COUNT   = 17;        // 0x54..0x64: ground.delta + acc (no mic)
 static const uint32_t TH_SENSE_EVERY   = 3;         // sensor GET only every Nth poll (~3 Hz). PROVEN:
                                                     // a GET at the full 10 Hz overruns the Thymio's
-                                                    // CPU and the MOTORS lag — regardless of reply
+                                                    // CPU and the MOTORS lag - regardless of reply
                                                     // size (even a 3-value GET at 10 Hz lagged). So
                                                     // motors win; sensors get ~3 Hz (best when idle).
 static const uint32_t TH_KEEPALIVE_EVERY = 1;       // motor SET every poll (10 Hz). Pure SETs never
                                                     // lagged the motors (the lag came from the GET
                                                     // reply work), and each frame we send is also an
                                                     // opportunity for the Thymio's RF module to flush
-                                                    // queued emits — at 2 Hz TX the emits died ~1 s
+                                                    // queued emits - at 2 Hz TX the emits died ~1 s
                                                     // after the program load (queue fill), so 10 Hz.
-static const uint32_t TH_POLL_MS = 100;           // ~10 Hz per Thymio — holds the RX window
+static const uint32_t TH_POLL_MS = 100;           // ~10 Hz per Thymio - holds the RX window
                                                   // open (dongle-like; cooler + LED blinks)
 #define TH_MAX 4                                   // up to 4 Thymios on this one C6
 
@@ -396,24 +396,24 @@ static bool       s_thLink = false;
 static uint8_t    s_thCh   = 25;
 static uint8_t    s_thSeq  = 0;
 static uint32_t   s_thLastPoll = 0;
-static uint32_t   s_thPollCount = 0;   // polls actually run — rcp_health reports the real
+static uint32_t   s_thPollCount = 0;   // polls actually run - rcp_health reports the real
                                        // poll Hz (the Thymio's RF-LED blink rate, in numbers)
-static uint32_t   s_thRxCount   = 0;   // acc events parsed → rcp_health rx_hz
-static uint32_t   s_thRxFrames  = 0;   // ALL addressed frames from the PAN (pre-parse) →
+static uint32_t   s_thRxCount   = 0;   // acc events parsed -> rcp_health rx_hz
+static uint32_t   s_thRxFrames  = 0;   // ALL addressed frames from the PAN (pre-parse) ->
                                        // rcp_health rx_frames: splits "Thymio not emitting"
                                        // (0) from "emitting but we mis-parse" (>0, rx_hz=0)
 static bool       s_thRxDebug = false;   // stream raw RX frames (link bring-up only)
 static uint8_t    s_thAutoDbg = 0;       // auto-dump this many raw RX frames after link-up
                                          // (as thymio_rx) to reveal the emit-event byte layout
-static uint32_t   s_wdRx   = 0;          // watchdog tier-1 fires (full RX revive) → rcp_health
-static uint32_t   s_wdProg = 0;          // watchdog tier-2 fires (program reload)  → rcp_health
+static uint32_t   s_wdRx   = 0;          // watchdog tier-1 fires (full RX revive) -> rcp_health
+static uint32_t   s_wdProg = 0;          // watchdog tier-2 fires (program reload)  -> rcp_health
 static bool       s_thDiscover = false;  // active discovery: broadcast LIST_NODES, report replies
 static uint8_t    s_thDiscCh   = 25;
 static uint32_t   s_thDiscLast = 0;
 
 // Build + transmit one Aseba-over-802.15.4 frame for Thymio `addr` (radio up + on ch).
 // `payload` is the Aseba message body AFTER the msgType and the dest-node word (which
-// every message here carries): [startAddr, values…] for SET/GET_VARIABLES and
+// every message here carries): [startAddr, values...] for SET/GET_VARIABLES and
 // SET_BYTECODE, or empty for RUN.
 static void thSend(uint16_t addr, uint16_t msgType,
                    const int16_t* payload, uint8_t npayload) {
@@ -434,9 +434,9 @@ static void thSend(uint16_t addr, uint16_t msgType,
     txBegin();
     esp_ieee802154_transmit(f, false);
     txWait(15);                                    // pace: TX (+ACK) done before the next
-}                                                  // frame — blocking wait, yields the core
+}                                                  // frame - blocking wait, yields the core
 
-// SET/GET_VARIABLES & SET_BYTECODE: body = [startAddr, values…].
+// SET/GET_VARIABLES & SET_BYTECODE: body = [startAddr, values...].
 static void thTx(uint16_t addr, uint16_t msgType, uint16_t startAddr,
                  const int16_t* vals, uint8_t nvals) {
     static int16_t body[48];
@@ -450,7 +450,7 @@ static void thTx(uint16_t addr, uint16_t msgType, uint16_t startAddr,
 static void thRun(uint16_t addr) { thSend(addr, TH_RUN, nullptr, 0); }
 
 // Broadcast an Aseba LIST_NODES so every Thymio on the network answers with a
-// NODE_PRESENT (0x900C) — how the dongle enumerates robots. This is what makes
+// NODE_PRESENT (0x900C) - how the dongle enumerates robots. This is what makes
 // dongle-free discovery work: a powered-but-idle Thymio never announces itself,
 // but it DOES reply to LIST_NODES. Frame bytes captured verbatim from a real RF
 // dongle (docs/THYMIO_WIRELESS_CONTROL.md): a broadcast frame differs from our
@@ -490,7 +490,7 @@ static void thPlayFreq(uint16_t addr, int16_t freqHz, int16_t dur60) {   // dur 
     thTx(addr, TH_SET_BYTECODE, 0, bc, sizeof(bc) / sizeof(bc[0]));
     thRun(addr);
 }
-// Play a recorded track from the Thymio's microSD (sound.play(trackId) → /SD Pn.wav;
+// Play a recorded track from the Thymio's microSD (sound.play(trackId) -> /SD Pn.wav;
 // needs a card inserted). One arg, so the bytecode mirrors thPlaySystem with the track.
 // TODO(confirm via recon): sound.play's native-function INDEX on this firmware is unknown.
 // Run scratchpad thymio_natives.py on the USB Thymio, read the index of "sound.play", and
@@ -510,27 +510,27 @@ static bool thPlayTrack(uint16_t addr, int16_t track) {
 
 // ---- Sensor PUSH: the Thymio emits its own sensors (no GET polling) ------------------
 // Polling GET_VARIABLES at 10 Hz overran the Thymio's CPU (motors lagged) and its long
-// reply frames were lost on our link. The native Aseba way — what Studio/the dongle do —
+// reply frames were lost on our link. The native Aseba way - what Studio/the dongle do -
 // is to load a tiny program that EMITs the sensor variables on the firmware's timer0
 // event. The Thymio then PUSHES small event frames on its own clock (asynchronous to our
-// TX, so no RX-window collision; short frames survive), and its CPU is free → motors stay
+// TX, so no RX-window collision; short frames survive), and its CPU is free -> motors stay
 // fast. We hand-built the bytecode from the verified Aseba VM spec (event-vector header +
 // EMIT opcode 0xB000|id, src addr, len). Emit reads straight from the sensor variables, so
-// no scratch copy. ids 0x0AAC/0x0AAD are our user events (must be ≤0x0FFF; distinct enough
+// no scratch copy. ids 0x0AAC/0x0AAD are our user events (must be <=0x0FFF; distinct enough
 // to scan for on the wire). timer.period is set via SET_VARIABLES after RUN because
-// SET_BYTECODE resets+zeroes ALL variables (incl. motor.*.target) — so the poll re-asserts
+// SET_BYTECODE resets+zeroes ALL variables (incl. motor.*.target) - so the poll re-asserts
 // motors right after. See docs/THYMIO_WIRELESS_CONTROL.md + the Aseba research report.
 static const uint16_t TH_EV_ACC    = 0x0AAC;   // emit id: ONE combined event, vars 0x54..0x64
 static const uint16_t TH_TIMER_PERIOD = 0x007C;  // timer.period[0] variable
-static const int16_t  TH_EMIT_PERIOD  = 200;   // timer0 every 200 ms → emit at 5 Hz. Proven-
-                                               // perfect over USB at 10 Hz×2 events, but the
-                                               // Thymio's RF MODULE choked ~1 s in — so cut the
+static const int16_t  TH_EMIT_PERIOD  = 200;   // timer0 every 200 ms -> emit at 5 Hz. Proven-
+                                               // perfect over USB at 10 Hzx2 events, but the
+                                               // Thymio's RF MODULE choked ~1 s in - so cut the
                                                // air load: ONE event (17 vars covering ground+
                                                // acc), at 5 Hz = 5 frames/s instead of 20.
 static void thLoadSensorProgram(uint16_t addr) {
-    // ONE emit of the contiguous window 0x54..0x64 (17 words = ground.delta[0..1] … acc[0..2]).
+    // ONE emit of the contiguous window 0x54..0x64 (17 words = ground.delta[0..1] ... acc[0..2]).
     static const int16_t prog[] = {
-        0x0003, (int16_t)0xFFEF, 0x0003,               // event table: timer0 (0xFFEF) → handler @3
+        0x0003, (int16_t)0xFFEF, 0x0003,               // event table: timer0 (0xFFEF) -> handler @3
         (int16_t)(0xB000 | TH_EV_ACC), 0x0054, 0x0011,  // emit 0x54..0x64 (17 words) as ONE event
         0x0000,                                        // STOP (ends the timer0 handler)
     };
@@ -540,7 +540,7 @@ static void thLoadSensorProgram(uint16_t addr) {
     thTx(addr, TH_SET_VARIABLES, TH_TIMER_PERIOD, &period, 1);
 }
 
-// Line-assembly buffer for the S3→C6 command UART (Serial1), at file scope so the Thymio
+// Line-assembly buffer for the S3->C6 command UART (Serial1), at file scope so the Thymio
 // poll can drain + dispatch a mid-poll command through the same buffer that loop() uses
 // (a line split across the poll boundary still assembles correctly). See pumpThymioUart.
 static char   s_uartBuf[256];
@@ -551,10 +551,10 @@ static void   pumpThymioUart();   // defined just before loop(), after pump()/ha
 // High-rate telemetry (sensor frames, health reports) is NEVER written to the UART from
 // the radio hot path. loop() enqueues complete JSON lines here; a small higher-priority
 // writer task dequeues and does the (possibly blocking) serial writes. If the S3 stalls
-// draining (PC backpressure), the WRITER blocks — and the scheduler hands the core back
+// draining (PC backpressure), the WRITER blocks - and the scheduler hands the core back
 // to loop(), so the 10 Hz Thymio poll stays rock-solid. This kills the failure mode
 // where a blocking println in thymioRxPump froze the poll (Thymio RF LED at ~2 Hz,
-// motors lagging ~10 s). Queue full → drop the OLDEST line (freshest sensor data wins);
+// motors lagging ~10 s). Queue full -> drop the OLDEST line (freshest sensor data wins);
 // drops + worst write stall are reported in the periodic rcp_health frame.
 struct OutLine { uint16_t len; char text[184]; };
 static QueueHandle_t s_outQ = nullptr;
@@ -570,9 +570,9 @@ static void qLine(const char* line) {
     ol.len = (uint16_t)(n + 1);
     if (xQueueSend(s_outQ, &ol, 0) != pdTRUE) {
         OutLine junk;
-        xQueueReceive(s_outQ, &junk, 0);           // drop the oldest…
+        xQueueReceive(s_outQ, &junk, 0);           // drop the oldest...
         s_outDrops = s_outDrops + 1;
-        xQueueSend(s_outQ, &ol, 0);                // …keep the newest
+        xQueueSend(s_outQ, &ol, 0);                // ...keep the newest
     }
 }
 
@@ -582,7 +582,7 @@ static void outWriterTask(void*) {
         if (xQueueReceive(s_outQ, &ol, portMAX_DELAY) != pdTRUE) continue;
         uint32_t t0 = millis();
         // Single write per line (newline included) so a concurrent command reply from
-        // loop() can't interleave mid-line. Serial1 may block on a full TX ring — only
+        // loop() can't interleave mid-line. Serial1 may block on a full TX ring - only
         // this task waits. USB Serial has tx-timeout 0 (drops when no host, never blocks).
         Serial1.write(reinterpret_cast<const uint8_t*>(ol.text), ol.len);
         Serial.write(reinterpret_cast<const uint8_t*>(ol.text), ol.len);
@@ -599,12 +599,12 @@ static void thymioLinkPump() {
     if (now - s_thLastPoll < TH_POLL_MS) return;
     s_thLastPoll = now;
     s_thPollCount++;
-    // RX-alive watchdog, TWO tiers (instrumented — wd_rx/wd_prog in rcp_health say which
+    // RX-alive watchdog, TWO tiers (instrumented - wd_rx/wd_prog in rcp_health say which
     // one actually brings the emits back): measured pattern is ~1 s of full-rate emits
     // right after the program load, then silence; a soft receive() re-arm never revived
     // them but a re-link (which reloads the program) always did. Tier 1 = full link-on
     // style RX revive incl. set_channel (tests "C6 RX died"). Tier 2, if still silent =
-    // reload the push program (SET_BYTECODE resets the robot/RF-module side — tests "the
+    // reload the push program (SET_BYTECODE resets the robot/RF-module side - tests "the
     // Thymio stopped emitting"). The reload's var-zeroing is healed by the 10 Hz motor SET.
     static uint32_t s_rxAliveFrames = 0, s_rxAliveMs = 0;
     static uint8_t  s_wdTier = 0;
@@ -616,7 +616,7 @@ static void thymioLinkPump() {
             s_wdTier = 1; s_wdRx++;
             esp_ieee802154_set_promiscuous(true);
             esp_ieee802154_set_rx_when_idle(true);
-            esp_ieee802154_set_channel(s_thCh);  // full retune — exactly what link-on does
+            esp_ieee802154_set_channel(s_thCh);  // full retune - exactly what link-on does
             esp_ieee802154_receive();
         } else {
             s_wdTier = 0; s_wdProg++;
@@ -626,7 +626,7 @@ static void thymioLinkPump() {
     }
     // The Thymio now PUSHES acc/ground asynchronously (timer0 emits, ~10 Hz each). Our TX
     // is half-duplex with that: every motor SET we send is a window in which an incoming
-    // emit is lost. So keep the C6 LISTENING almost all the time — re-assert the motor
+    // emit is lost. So keep the C6 LISTENING almost all the time - re-assert the motor
     // targets only every TH_KEEPALIVE_EVERY-th poll (~2 Hz; the Thymio latches them and a
     // NEW command asserts instantly via thymioAssertMotors). We only re-arm RX after a TX;
     // on the quiet polls the radio stays in RX (rx_when_idle) to catch the emits.
@@ -636,7 +636,7 @@ static void thymioLinkPump() {
         ThymioSlot& t = s_th[i];
         if (!t.active) continue;
         // Load the sensor-push program ONCE (SET_BYTECODE resets+zeroes vars incl. motor
-        // targets — the keep-alive below re-asserts them; never re-flash mid-drive).
+        // targets - the keep-alive below re-asserts them; never re-flash mid-drive).
         if (!t.progLoaded) { thLoadSensorProgram(t.addr); t.progLoaded = true; txd = true; }
         if (keepalive) {
             int16_t lr[2] = {t.left, t.right};
@@ -645,7 +645,7 @@ static void thymioLinkPump() {
             txd = true;
         }
         // Service a drive/LED command that landed on the UART. A command that flips the
-        // radio (sniff / link-off / reboot) trips the guard → bail cleanly.
+        // radio (sniff / link-off / reboot) trips the guard -> bail cleanly.
         pumpThymioUart();
         if (!s_thLink || s_sniffing) { esp_ieee802154_receive(); return; }
     }
@@ -656,11 +656,11 @@ static void thymioLinkPump() {
 
 // Push one slot's held motor targets to its Thymio right now, off the poll cadence.
 // An arriving thymio_drive would otherwise only reach the wheels at the next ~10 Hz
-// poll — up to TH_POLL_MS of lag, worse if that single frame drops (weak antenna) and
+// poll - up to TH_POLL_MS of lag, worse if that single frame drops (weak antenna) and
 // waits another poll to re-assert. Sending on the command edge makes a button press
 // feel instant; the poll still re-asserts, so a dropped edge frame self-heals. No-op
 // unless the link owns the radio (up + tuned to the Thymio's channel) and we're not
-// mid-sniff — same guard as the poll, so we never TX on a down/retuned radio.
+// mid-sniff - same guard as the poll, so we never TX on a down/retuned radio.
 static void thymioAssertMotors(int idx) {
     if (!s_thLink || s_sniffing || idx < 0 || idx >= TH_MAX) return;
     ThymioSlot& t = s_th[idx];
@@ -706,12 +706,12 @@ static void thEmitRaw(const SniffFrame& f) {
 // Drain received frames in link mode and turn each VARIABLES reply into a
 // {"type":"thymio_sensors",...}. The Thymio answers our GET_VARIABLES poll with a
 // VARIABLES (0x9005) frame addressed to the host (0x3237); its Aseba body is
-// [start_addr][values…]. We poll from 0x62 (acc x/y/z) through 0x79 (mic.intensity),
+// [start_addr][values...]. We poll from 0x62 (acc x/y/z) through 0x79 (mic.intensity),
 // so values[0..2] = acc and values[23] = mic. The RF-module wrapper offset isn't
 // fixed, so we locate the Aseba message by scanning for its msgType word (05 90 LE)
 // rather than a hardcoded offset. Promiscuous RX (set on link-on) lets us hear the
 // reply even though the C6 never claimed the host address. See memory
-// thymio-sensors-and-sound. NOTE: unverified on hardware — thymio_rx_debug streams
+// thymio-sensors-and-sound. NOTE: unverified on hardware - thymio_rx_debug streams
 // the raw frames so we can confirm the reply arrives and the parse is right.
 static void thymioRxPump() {
     if (!s_thLink || s_sniffing || !s_rxQ) return;
@@ -722,10 +722,10 @@ static void thymioRxPump() {
         uint16_t pan = f.data[3] | (f.data[4] << 8);
         uint16_t src = f.data[7] | (f.data[8] << 8);
         if (pan != 0x4481) continue;                      // our network only
-        s_thRxFrames++;                                   // any addressed frame from the PAN —
+        s_thRxFrames++;                                   // any addressed frame from the PAN -
                                                           // rcp_health's rx_frames (diagnostic):
-                                                          // >0 with rx_hz=0 ⇒ Thymio DOES send,
-                                                          // parse is wrong; =0 ⇒ it isn't emitting
+                                                          // >0 with rx_hz=0 => Thymio DOES send,
+                                                          // parse is wrong; =0 => it isn't emitting
         if (s_thAutoDbg) {                                // dump the first few frames' hex so
             s_thAutoDbg--;                                // the emit-event byte layout is visible
             static const char H[] = "0123456789ABCDEF";
@@ -738,11 +738,11 @@ static void thymioRxPump() {
             dl[o++] = '"'; dl[o++] = '}'; dl[o] = '\0';
             qLine(dl);
         }
-        // Emitted events may be broadcast (dst 0xFFFF), not addressed to the host — so we no
+        // Emitted events may be broadcast (dst 0xFFFF), not addressed to the host - so we no
         // longer require dst==host; we match by our event id below (specific enough).
         // Find our emitted user event by its msgType word (the RF-module wrapper length
         // isn't fixed, so scan). Decoded from a captured frame the on-wire layout after the
-        // type is [src-node word][values…] — so the payload is at type+4 (NOT type+2; reading
+        // type is [src-node word][values...] - so the payload is at type+4 (NOT type+2; reading
         // +2 grabbed the src-node = the addr 0x6A25 = the bogus "9578" we saw). acc=3 words,
         // ground=2 words, values only (no start-addr prefix like a VARIABLES reply).
         int slot = thSlotForAddr(src);
@@ -773,7 +773,7 @@ static void thymioRxPump() {
 
 // Active discovery: broadcast LIST_NODES ~2 Hz and turn every reply into a
 // {"type":"thymio_found","addr":"XXXX"}. A reply is any frame on our PAN whose
-// MAC source is a real robot (not the host, not broadcast) — its src IS the
+// MAC source is a real robot (not the host, not broadcast) - its src IS the
 // address the app needs. The PC de-dups and orders by first-seen. Runs on the
 // same shared radio as the link/sniffer, so callers pause those first.
 static void thymioDiscoverPump() {
@@ -806,7 +806,7 @@ static void thymioDiscoverPump() {
 }
 
 // Stop the wheels before the sniffer takes the radio: the pump pauses while
-// sniffing and a Thymio holds its last motor target — don't let it coast blind.
+// sniffing and a Thymio holds its last motor target - don't let it coast blind.
 static void thymioStopForSniff() {
     if (!s_thLink) return;
     int16_t zero = 0;
@@ -826,7 +826,7 @@ static void handleLine(char* line, Print& io) {
         const char* cmd = doc["cmd"] | "";
         if (strcmp(cmd, "reboot") == 0) {
             // Clean-radio reset. esp_ieee802154_disable() does NOT restore the C6's
-            // RX after repeated link/discover cycles (RX dies cumulatively — TX still
+            // RX after repeated link/discover cycles (RX dies cumulatively - TX still
             // works, the Thymio's RF LED still blinks, but replies are never heard) nor
             // let WiFi rejoin (see OtaPark). A reboot is the only reliable reset, so the
             // PC reboots the C6 before a discovery pass to guarantee it can hear replies.
@@ -836,7 +836,7 @@ static void handleLine(char* line, Print& io) {
             esp_restart();
         } else if (strcmp(cmd, "ota_wifi") == 0) {
             // The whole 802.15.4 side must be quiet before WiFi shares the
-            // radio: stop the Thymio poller (wheels to zero — a Thymio holds
+            // radio: stop the Thymio poller (wheels to zero - a Thymio holds
             // its last target), the sniffer, and the radio itself.
             bool wasLink = s_thLink;
             thymioStopForSniff();
@@ -848,7 +848,7 @@ static void handleLine(char* line, Print& io) {
             sniffStop(io);          // free the shared radio for WiFi before updating
             radioDown();            // ...also if a tx (not a sniff) had brought it up
             if (s_radioUsed) {
-                // WiFi can't join anymore this boot (see OtaPark) — park the
+                // WiFi can't join anymore this boot (see OtaPark) - park the
                 // request and reboot; setup() resumes it on the clean boot. The
                 // start banner is sent NOW so the PC's updater switches to its
                 // (long) done-wait instead of resending ota_wifi into the reboot.
@@ -885,14 +885,14 @@ static void handleLine(char* line, Print& io) {
         } else if (strcmp(cmd, "tx") == 0) {
             doTx((uint8_t)(doc["ch"] | 0), doc["data"] | "", io);
         } else if (strcmp(cmd, "thymio_link") == 0) {
-            // {"cmd":"thymio_link","on":true[,"ch":25]} — start/stop the background poller
+            // {"cmd":"thymio_link","on":true[,"ch":25]} - start/stop the background poller
             s_thCh = (uint8_t)(doc["ch"] | s_thCh);
             if (doc["on"] | true) {
                 radioUp();
                 if (!s_rxQ) s_rxQ = xQueueCreate(24, sizeof(SniffFrame));
                 // Promiscuous + rx_when_idle so we hear the Thymio's VARIABLES reply
                 // (addressed to the host 0x3237, which the C6 never claimed) between
-                // our TX bursts — thymioRxPump parses it into thymio_sensors.
+                // our TX bursts - thymioRxPump parses it into thymio_sensors.
                 esp_ieee802154_set_promiscuous(true);
                 esp_ieee802154_set_rx_when_idle(true);
                 esp_ieee802154_set_channel(s_thCh);
@@ -900,13 +900,13 @@ static void handleLine(char* line, Print& io) {
                 s_thSeq = (uint8_t)millis();       // fresh seq so repeats aren't dup-dropped
                 bool any = false;
                 for (int i = 0; i < TH_MAX; i++) any |= s_th[i].active;
-                // TODO(later, per user): drop this hardcoded 0x6a25 default — require the PC
+                // TODO(later, per user): drop this hardcoded 0x6a25 default - require the PC
                 // to register every Thymio explicitly with thymio_set (addresses come from
                 // discovery/config). Kept for now for backward-compat with the single-Thymio
                 // thymio_link.py flow that doesn't send an address.
                 if (!any) { s_th[0].active = true; s_th[0].addr = 0x6A25; }   // default: one
                 for (int i = 0; i < TH_MAX; i++) s_th[i].progLoaded = false;  // (re)load the
-                s_thAutoDbg = 8;             // dump the first few RX frames → see event layout
+                s_thAutoDbg = 8;             // dump the first few RX frames -> see event layout
                 s_thLink = true;                                             // sensor-push program
             } else {
                 s_thLink = false;
@@ -918,7 +918,7 @@ static void handleLine(char* line, Print& io) {
             io.printf("{\"type\":\"thymio_link\",\"src\":\"c6\",\"on\":%d,\"ch\":%u}\n",
                       s_thLink ? 1 : 0, s_thCh);
         } else if (strcmp(cmd, "thymio_discover") == 0) {
-            // {"cmd":"thymio_discover","on":true[,"ch":25]} — dongle-free discovery:
+            // {"cmd":"thymio_discover","on":true[,"ch":25]} - dongle-free discovery:
             // broadcast LIST_NODES and report every Thymio that replies (thymio_found).
             // Shares the radio with the link/sniffer, so pause the poller first.
             s_thDiscCh = (uint8_t)(doc["ch"] | s_thDiscCh);
@@ -927,10 +927,10 @@ static void handleLine(char* line, Print& io) {
                 s_thLink = false;
                 s_sniffing = false;
                 if (!s_rxQ) s_rxQ = xQueueCreate(24, sizeof(SniffFrame));
-                // NO down→up "fresh radio" here: esp_ieee802154_disable() poisons
+                // NO down->up "fresh radio" here: esp_ieee802154_disable() poisons
                 // the modem for the rest of the boot, so re-enabling gave a DEAF
                 // radio every scan after the first (and the same poisoning is why
-                // a WiFi join fails after any 15.4 use — see OtaPark). Once up the
+                // a WiFi join fails after any 15.4 use - see OtaPark). Once up the
                 // radio stays up; a scan just re-tunes and re-arms RX.
                 bool fresh = !s_radioEnabled;
                 radioUp();
@@ -948,14 +948,14 @@ static void handleLine(char* line, Print& io) {
             io.printf("{\"type\":\"thymio_discover\",\"src\":\"c6\",\"on\":%d,\"ch\":%u}\n",
                       s_thDiscover ? 1 : 0, s_thDiscCh);
         } else if (strcmp(cmd, "thymio_rx_debug") == 0) {
-            // {"cmd":"thymio_rx_debug","on":true} — stream raw RX frames while the
+            // {"cmd":"thymio_rx_debug","on":true} - stream raw RX frames while the
             // link is on, to confirm the Thymio's sensor reply arrives / check the
             // parse. Noisy; leave off in normal use.
             s_thRxDebug = (bool)(doc["on"] | true);
             io.printf("{\"type\":\"thymio_rx_debug\",\"src\":\"c6\",\"on\":%d}\n",
                       s_thRxDebug ? 1 : 0);
         } else if (strcmp(cmd, "thymio_set") == 0) {
-            // {"cmd":"thymio_set","idx":0,"addr":"6a25"} — register a Thymio in a slot
+            // {"cmd":"thymio_set","idx":0,"addr":"6a25"} - register a Thymio in a slot
             int idx = doc["idx"] | 0;
             if (idx >= 0 && idx < TH_MAX) {
                 s_th[idx].addr = (uint16_t)strtol(doc["addr"] | "6a25", nullptr, 16);
@@ -966,7 +966,7 @@ static void handleLine(char* line, Print& io) {
                           idx, s_th[idx].addr);
             }
         } else if (strcmp(cmd, "thymio_drive") == 0) {
-            // {"cmd":"thymio_drive"[,"idx":0],"left":200,"right":-200} — held motor targets
+            // {"cmd":"thymio_drive"[,"idx":0],"left":200,"right":-200} - held motor targets
             int idx = doc["idx"] | 0;
             if (idx >= 0 && idx < TH_MAX) {
                 s_th[idx].left  = (int16_t)(int)(doc["left"]  | 0);
@@ -974,8 +974,8 @@ static void handleLine(char* line, Print& io) {
                 thymioAssertMotors(idx);   // react now, don't wait for the next poll
                 // Echo the moment the C6 RECEIVED this drive, so the PC log can compare it
                 // to the "Sent to thymio: thymio_drive" timestamp: if the ack lags the send,
-                // the command path (PC→S3→C6) is slow; if it's instant but the robot still
-                // lags, the delay is C6↔Thymio (the robot). Splits the two decisively.
+                // the command path (PC->S3->C6) is slow; if it's instant but the robot still
+                // lags, the delay is C6<->Thymio (the robot). Splits the two decisively.
                 char ack[64];
                 snprintf(ack, sizeof(ack),
                          "{\"type\":\"drive_ack\",\"src\":\"c6\",\"idx\":%d,\"l\":%d,\"r\":%d}",
@@ -983,7 +983,7 @@ static void handleLine(char* line, Print& io) {
                 qLine(ack);
             }
         } else if (strcmp(cmd, "thymio_leds") == 0) {
-            // {"cmd":"thymio_leds"[,"idx":0],"r":32,"g":0,"b":0} — leds.top (burst-resent)
+            // {"cmd":"thymio_leds"[,"idx":0],"r":32,"g":0,"b":0} - leds.top (burst-resent)
             int idx = doc["idx"] | 0;
             if (idx >= 0 && idx < TH_MAX) {
                 s_th[idx].leds[0] = (int16_t)(int)(doc["r"] | 0);
@@ -993,9 +993,9 @@ static void handleLine(char* line, Print& io) {
                 thymioAssertLeds(idx);     // show the colour now, not at the next poll
             }
         } else if (strcmp(cmd, "thymio_sound") == 0) {
-            // {"cmd":"thymio_sound"[,"idx":0],"sys":2}   → system sound 0..7 (-1 stops)
-            // {"cmd":"thymio_sound"[,"idx":0],"freq":700,"dur":30}  → tone (dur in 1/60 s)
-            // Needs the link on (radio up + on channel — held by the poller).
+            // {"cmd":"thymio_sound"[,"idx":0],"sys":2}   -> system sound 0..7 (-1 stops)
+            // {"cmd":"thymio_sound"[,"idx":0],"freq":700,"dur":30}  -> tone (dur in 1/60 s)
+            // Needs the link on (radio up + on channel - held by the poller).
             int idx = doc["idx"] | 0;
             if (idx < 0 || idx >= TH_MAX) idx = 0;
             uint16_t addr = s_th[idx].active ? s_th[idx].addr : 0x6A25;
@@ -1011,7 +1011,7 @@ static void handleLine(char* line, Print& io) {
             } else {
                 thPlaySystem(addr, (int16_t)(int)(doc["sys"] | 0));
             }
-            // A sound loads its own bytecode, replacing our sensor-push program → reload it
+            // A sound loads its own bytecode, replacing our sensor-push program -> reload it
             // on the next poll (sensors resume after the beep; a very short beep may be cut).
             if (idx >= 0 && idx < TH_MAX) s_th[idx].progLoaded = false;
         }
@@ -1046,7 +1046,7 @@ void setup() {
     Serial1.begin(LINK_BAUD, SERIAL_8N1, LINK_RX, LINK_TX);
     // Radio-pacing semaphore (txWait blocks instead of busy-spinning) and the outbound
     // line queue + writer task: telemetry writes happen OFF the radio hot path, so a
-    // stalled S3/PC can never freeze the 10 Hz Thymio poll. Priority 2 — above the
+    // stalled S3/PC can never freeze the 10 Hz Thymio poll. Priority 2 - above the
     // Arduino loop task (1): the writer wakes only when a line is queued, writes into
     // the serial TX ring, and blocks again (or blocks on a full ring, yielding to loop).
     s_txDoneSem = xSemaphoreCreateBinary();
@@ -1059,7 +1059,7 @@ void setup() {
     // ourselves so OTA can activate, and so a good OTA sticks instead of rolling back.
     esp_ota_mark_app_valid_cancel_rollback();
     // A parked WiFi-OTA (see OtaPark): resume it on this clean boot, before any
-    // 15.4 use can poison the WiFi join. One-shot — clear the magic FIRST so a
+    // 15.4 use can poison the WiFi join. One-shot - clear the magic FIRST so a
     // crash mid-update can't boot-loop into it. On success doWifiOta never
     // returns (reboots into the new image, whose banner is the PC's done signal);
     // on failure fall through to a normal boot (the fail line already went out).
@@ -1073,7 +1073,7 @@ void setup() {
     // Announce on BOTH transports. This banner doubles as the WiFi-OTA "done" signal,
     // so it MUST reach the S3 over the UART (the host reads Serial1, not the C6's USB).
     // Multi-send it: a single frame lost to the reboot glitch would otherwise hang the
-    // updater at ~99% ("rebooting…") until it times out — same fix as the nodes' ota_done.
+    // updater at ~99% ("rebooting...") until it times out - same fix as the nodes' ota_done.
     for (int i = 0; i < 4; i++) {
         Serial.println("{\"type\":\"rcp_ready\",\"src\":\"c6\",\"fw\":\"thymio-rxfree-1\"}");
         Serial1.println("{\"type\":\"rcp_ready\",\"src\":\"c6\",\"fw\":\"thymio-rxfree-1\"}");
@@ -1081,7 +1081,7 @@ void setup() {
     }
 }
 
-// Drain + dispatch complete command lines from the S3→C6 UART (Serial1). Shared with the
+// Drain + dispatch complete command lines from the S3->C6 UART (Serial1). Shared with the
 // Thymio poll (thymioLinkPump calls this between its paced TXs) through the file-scope
 // s_uartBuf, so a drive/LED command that lands mid-poll is acted on immediately instead
 // of waiting for the poll to finish its TX burst.
@@ -1090,15 +1090,15 @@ static void pumpThymioUart() { pump(Serial1, s_uartBuf, s_uartLen, sizeof(s_uart
 void loop() {
     static char usb_buf[256]; static size_t usb_len = 0;
     pump(Serial, usb_buf, usb_len, sizeof(usb_buf));   // C6's own USB (unused for data)
-    pumpThymioUart();  // S3→C6 command link (same buffer the poll drains mid-burst)
+    pumpThymioUart();  // S3->C6 command link (same buffer the poll drains mid-burst)
     sniffPump();       // stream any 802.15.4 frames while sniffing (no-op otherwise)
     thymioLinkPump();  // keep the Thymio link hot + assert motor/LED targets (no-op if off)
-    thymioRxPump();    // parse the Thymio's VARIABLES reply → thymio_sensors (no-op if off)
+    thymioRxPump();    // parse the Thymio's VARIABLES reply -> thymio_sensors (no-op if off)
     thymioDiscoverPump();  // broadcast LIST_NODES + report replies while discovering (no-op if off)
 
     // ---- Link health report: measurement instead of guesswork -----------------------
     // Every 5 s while the link runs, emit the REAL poll rate (the Thymio's RF-LED blink
-    // rate in numbers — 10.0 = healthy, ~2 = the poll is being stalled), the worst
+    // rate in numbers - 10.0 = healthy, ~2 = the poll is being stalled), the worst
     // single serial-write stall the writer task saw, and how many telemetry lines were
     // dropped to protect the poll. Lands in softedibo.log as {"type":"rcp_health",...}.
     static uint32_t s_lastHealthMs = 0, s_lastPolls = 0, s_lastTxTo = 0, s_lastRx = 0, s_lastRxFr = 0;
@@ -1113,10 +1113,10 @@ void loop() {
         uint32_t hzX10   = (s_thPollCount - s_lastPolls) * 10000UL / dt;
         // rx_hz = full sensor replies/s the Thymio actually returned. We ask for ~3.3 Hz;
         // if rx_hz sags below that (while poll_hz stays 10 and tx_to is 0), the THYMIO's
-        // own CPU can't keep up — the bottleneck is in the robot, not our side.
+        // own CPU can't keep up - the bottleneck is in the robot, not our side.
         uint32_t rxHzX10 = (s_thRxCount - s_lastRx) * 10000UL / dt;
-        // rx_frames = ALL addressed PAN frames/s (pre-parse). rx_frames>0 & rx_hz=0 ⇒ the
-        // Thymio IS sending but we mis-parse; rx_frames=0 ⇒ it isn't emitting (bytecode).
+        // rx_frames = ALL addressed PAN frames/s (pre-parse). rx_frames>0 & rx_hz=0 => the
+        // Thymio IS sending but we mis-parse; rx_frames=0 => it isn't emitting (bytecode).
         uint32_t rxFrX10 = (s_thRxFrames - s_lastRxFr) * 10000UL / dt;
         char h[208];
         snprintf(h, sizeof(h),

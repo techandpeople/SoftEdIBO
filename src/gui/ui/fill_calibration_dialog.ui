@@ -16,7 +16,7 @@
    <item>
     <widget class="QLabel" name="intro_label">
      <property name="wordWrap"><bool>true</bool></property>
-     <property name="text"><string>Inflates each chamber from empty while streaming pressure, to measure its time→pressure fill curve in one continuous pass. Curves are saved per chamber and used instead of live pressure control, and rank which chamber fills first. "Calibrate all" sweeps every chamber. Keep hands clear.</string></property>
+     <property name="text"><string>Inflates each chamber from empty while streaming pressure, to measure its time->pressure fill curve in one continuous pass. Curves are saved per chamber and used instead of live pressure control, and rank which chamber fills first. "Calibrate all" sweeps every chamber. Keep hands clear.</string></property>
     </widget>
    </item>
    <item>
@@ -28,7 +28,7 @@
      </item>
      <item>
       <widget class="QComboBox" name="detail_combo">
-       <property name="whatsThis"><string>How densely to sample the fill curve — the live telemetry cadence during the sweep. Finer captures more points on the curve at the cost of a little more radio traffic.</string></property>
+       <property name="whatsThis"><string>How densely to sample the fill curve - the live telemetry cadence during the sweep. Finer captures more points on the curve at the cost of a little more radio traffic.</string></property>
       </widget>
      </item>
      <item>
@@ -38,7 +38,7 @@
      </item>
      <item>
       <widget class="QSpinBox" name="min_power_spin">
-       <property name="whatsThis"><string>The pump PWM (1-255) that "power level 1" — the gentlest — maps to in the activity editor's 1-5 power dial; level 5 is always full (255). Below ~190 a diaphragm pump stalls and moves no air, so that is the usual floor. Saved per skin type for the type(s) shown here. Raise it if a stiffer silicone needs more push to start.</string></property>
+       <property name="whatsThis"><string>The pump PWM (1-255) that "power level 1" - the gentlest - maps to in the activity editor's 1-5 power dial; level 5 is always full (255). Below ~190 a diaphragm pump stalls and moves no air, so that is the usual floor. Saved per skin type for the type(s) shown here. Raise it if a stiffer silicone needs more push to start.</string></property>
        <property name="minimum"><number>60</number></property>
        <property name="maximum"><number>255</number></property>
        <property name="value"><number>190</number></property>
@@ -82,20 +82,20 @@
      </item>
      <item>
       <widget class="QPushButton" name="duty_btn">
-       <property name="whatsThis"><string>Measure each chamber's pump duty→fill-speed curve: sweep it from empty at several PWM duties and record how much slower a lower duty fills. Lets the "over (ms)" slow-fill pick the right duty from measured data instead of a rough estimate. Keep hands clear during the run.</string></property>
+       <property name="whatsThis"><string>Measure each chamber's pump duty->fill-speed curve: sweep it from empty at several PWM duties and record how much slower a lower duty fills. Lets the "over (ms)" slow-fill pick the right duty from measured data instead of a rough estimate. Keep hands clear during the run.</string></property>
        <property name="text"><string>Duty curves</string></property>
       </widget>
      </item>
      <item>
       <widget class="QPushButton" name="deflate_btn">
-       <property name="whatsThis"><string>Measure each chamber's deflate (vacuum) curve: fill it, then hold the deflate valve open while recording the falling pressure until it stops dropping — the sensor's floor. Times deflates the gauge cannot supervise (targets at or below the floor, e.g. wrinkles), so the vacuum pull ends deterministically. Keep hands clear during the run.</string></property>
+       <property name="whatsThis"><string>Measure each chamber's deflate (vacuum) curve: fill it, then hold the deflate valve open while recording the falling pressure until it stops dropping - the sensor's floor. Times deflates the gauge cannot supervise (targets at or below the floor, e.g. wrinkles), so the vacuum pull ends deterministically. Keep hands clear during the run.</string></property>
        <property name="text"><string>Deflate curves</string></property>
       </widget>
      </item>
      <item>
       <widget class="QPushButton" name="stop_btn">
        <property name="whatsThis"><string>Abort the current calibration immediately and halt every chamber (close valves, pumps off). Does not run the vacuum pump.</string></property>
-       <property name="text"><string>⏹ Stop</string></property>
+       <property name="text"><string> Stop</string></property>
       </widget>
      </item>
      <item>

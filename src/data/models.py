@@ -61,7 +61,7 @@ class ActivityPreset:
 
     The activity itself (Python class) defines the parameter schema via its
     ``PARAMS`` class attribute. The preset only carries the user-tunable
-    values for that schema — multiple presets per activity are supported so
+    values for that schema - multiple presets per activity are supported so
     the same Organ Swap can have an 'Easy', 'Therapy v3', etc.
     """
     preset_id: str = ""                          # "AP001", "AP002", ...
@@ -80,7 +80,7 @@ class DeclarativeActivity:
     The ``spec`` is the declarative state machine interpreted by
     :class:`~src.activities.scripted_activity.ScriptedActivity` (see
     :mod:`src.activities.catalog` for its shape). Authored by hand today and
-    by the Blockly block editor later — the editor compiles its blocks down to
+    by the Blockly block editor later - the editor compiles its blocks down to
     this same spec, so nothing of the editor is needed at session time.
     """
     activity_id: str = ""                         # "DA001", "DA002", ...
@@ -93,11 +93,11 @@ class DeclarativeActivity:
 
 @dataclass
 class SkinTemplate:
-    """Reusable skin layout template — shared across skins of any robot.
+    """Reusable skin layout template - shared across skins of any robot.
 
     A template captures everything that's "layout-shaped" about a skin: number
     of chambers, default pressure caps, the painted grid (chamber zones), and
-    the optional touch-sensor grid. It does NOT capture a node MAC — that's
+    the optional touch-sensor grid. It does NOT capture a node MAC - that's
     bound at skin-instance time when the template is applied.
     """
     template_id: str = ""                                # "T001", "T002", ...
@@ -108,7 +108,7 @@ class SkinTemplate:
     default_min_pressure: float = 0.0                    # kPa
     grid: dict[str, int] = field(default_factory=lambda: {"cols": 8, "rows": 4})
     chamber_grid: list[list[int]] = field(default_factory=list)
-    sensor_count: int = 0                                # 0 → no touch sensor
+    sensor_count: int = 0                                # 0 -> no touch sensor
     sensor_grid: list[list[int]] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:

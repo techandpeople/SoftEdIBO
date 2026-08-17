@@ -1,8 +1,8 @@
 {
   "format": "softedibo.activity",
   "version": 1,
-  "name": "Skin Wrinkles — study timeline",
-  "description": "Wrinkles skin, 3 timed phases (advances by time, or manually with Prev/Next phase). Phase 1 (0:00): purple, skin emptied of air — wrinkled and still. Phase 2 (after 2 min): half purple / half yellow, half-inflated — 2 chambers wrinkled (0 %), 1 smooth (~50 %). Phase 3 (after a further 5 min): yellow, inflated so the wrinkles smooth out, with a rhythmic beat that never fully deflates (70 % ↔ 45 %). Pump duty keeps the strokes gentle.",
+  "name": "Skin Wrinkles - study timeline",
+  "description": "Wrinkles skin, 3 timed phases (advances by time, or manually with Prev/Next phase). Phase 1 (0:00): purple, skin emptied of air - wrinkled and still. Phase 2 (after 2 min): half purple / half yellow, half-inflated - 2 chambers wrinkled (0 %), 1 smooth (~50 %). Phase 3 (after a further 5 min): yellow, inflated so the wrinkles smooth out, with a rhythmic beat that never fully deflates (70 % <-> 45 %). Pump duty keeps the strokes gentle.",
   "spec": {
     "initial": "phase1",
     "states": {

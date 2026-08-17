@@ -13,7 +13,7 @@ CONFIG_SPIRAM_SPEED_80M=y
 CONFIG_SPIRAM_IGNORE_NOTFOUND=y
 
 # The XIAO ESP32-S3 has 8 MB flash; without this the build defaults to 2 MB and
-# PlatformIO warns about the size mismatch. (Cosmetic — the app is tiny and staging
-# buffers in PSRAM, not flash — but keep it correct.)
+# PlatformIO warns about the size mismatch. (Cosmetic - the app is tiny and staging
+# buffers in PSRAM, not flash - but keep it correct.)
 CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
 CONFIG_ESPTOOLPY_FLASHSIZE="8MB"

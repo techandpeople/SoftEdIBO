@@ -5,13 +5,13 @@ per-robot RobotConfigDialog both embed this form, so the Thymio schema
 (``thymio_id``/``wireless``/``wireless_via``/``node_id``/``channel``/
 ``thymio_addr``) is defined in exactly one place. Layout and help strings live
 in ``ui/thymio_config_form.ui``. The robot's skin nodes are NOT configured
-here — they are their own entries (robot panel "+ Node" → ``cfg["nodes"]``).
+here - they are their own entries (robot panel "+ Node" -> ``cfg["nodes"]``).
 
 The Discover button has the gateway's C6 broadcast a LIST_NODES query and fills
 the address field with a robot that answers; the gateway is fetched lazily via
 the injected ``gateway_provider`` so the form works both where a live robot
 exists (RobotConfigDialog) and where only the panel's gateway does (RobotPanel).
-The From-cable button reads the address off a USB-cabled Thymio instead — no
+The From-cable button reads the address off a USB-cabled Thymio instead - no
 gateway, for a robot not yet paired to this network.
 """
 
@@ -43,9 +43,9 @@ class ThymioConfigForm(QWidget, Ui_ThymioConfigForm):
         self.setupUi(self)
 
         # Combo items carry the settings value as userData, which the .ui
-        # format can't express — populate here.
+        # format can't express - populate here.
         self.via_combo.addItem("RF dongle", "dongle")
-        self.via_combo.addItem("Gateway C6 — no dongle", "gateway")
+        self.via_combo.addItem("Gateway C6 - no dongle", "gateway")
 
         self._gateway_provider = gateway_provider
 
@@ -60,7 +60,7 @@ class ThymioConfigForm(QWidget, Ui_ThymioConfigForm):
     # ------------------------------------------------------------------
 
     def set_values(self, cfg: dict) -> None:
-        """Load the form from a settings.yaml thymio entry (missing keys → defaults)."""
+        """Load the form from a settings.yaml thymio entry (missing keys -> defaults)."""
         self.id_edit.setText(cfg.get("thymio_id", ""))
         self.wireless_check.setChecked(bool(cfg.get("wireless", False)))
         via = cfg.get("wireless_via", "dongle")
@@ -112,12 +112,12 @@ class ThymioConfigForm(QWidget, Ui_ThymioConfigForm):
 
         The dialog has the gateway's C6 broadcast a LIST_NODES query while the
         user powers the Thymios on; each powered robot answers with its address,
-        listed live — see :class:`ThymioDiscoverDialog`.
+        listed live - see :class:`ThymioDiscoverDialog`.
         """
         gateway = self._gateway_provider()
         if gateway is None or not getattr(gateway, "is_connected", False):
             QMessageBox.warning(self, _DISCOVER_TITLE,
-                                "The gateway isn't connected — connect it first.")
+                                "The gateway isn't connected - connect it first.")
             return
         from PySide6.QtWidgets import QDialog
         from src.gui.thymio_discover_dialog import ThymioDiscoverDialog
@@ -131,14 +131,14 @@ class ThymioConfigForm(QWidget, Ui_ThymioConfigForm):
 
         Runs off-thread (the Aseba handshake takes a second or two) so the dialog
         stays responsive; the button shows progress and is restored on completion.
-        This needs no gateway and no network — it's the way to onboard a robot that
+        This needs no gateway and no network - it's the way to onboard a robot that
         isn't paired to this network yet, which wireless Discover cannot see.
         """
         from src.gui.async_task import run_async
         from src.robots.thymio.thymio_cable import read_cabled_thymio_address
 
         self.cable_btn.setEnabled(False)
-        self.cable_btn.setText("Reading…")
+        self.cable_btn.setText("Reading...")
         run_async(
             read_cabled_thymio_address,
             on_done=self._cable_done, on_error=self._cable_failed, parent=self,
@@ -153,5 +153,5 @@ class ThymioConfigForm(QWidget, Ui_ThymioConfigForm):
         QMessageBox.warning(self, _CABLE_TITLE, str(exc))
 
     def _restore_cable_btn(self) -> None:
-        self.cable_btn.setText("From cable…")
+        self.cable_btn.setText("From cable...")
         self._update_enables()

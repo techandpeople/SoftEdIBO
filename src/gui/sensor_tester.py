@@ -1,17 +1,17 @@
-"""Magnet sensor tester — a live per-sensor µT readout for the Test Actuators dialog.
+"""Magnet sensor tester - a live per-sensor uT readout for the Test Actuators dialog.
 
 Shows one bar per magnet/touch sensor (S0..S{n-1}) driven by the node's ``magnet``
-stream: each bar is that sensor's baseline-subtracted field magnitude in µT (the
+stream: each bar is that sensor's baseline-subtracted field magnitude in uT (the
 firmware ``mag`` field), so pressing the skin above a sensor makes its bar rise.
 A sensor lights green once its reading passes the "Active threshold", giving a
-visible, adjustable sensitivity — the whole point of the panel is that you can
-watch a real press (~100 µT) cross the line, instead of tuning blind.
+visible, adjustable sensitivity - the whole point of the panel is that you can
+watch a real press (~100 uT) cross the line, instead of tuning blind.
 
 The widget is hardware-agnostic: it renders values and reports intents via two
 callbacks the host (Test Actuators dialog) wires to the gateway:
 
-  * ``rezero_cb()``            — user asked to re-zero the node's baseline.
-  * ``configure_cb(threshold)`` — user asked to push this µT threshold to the
+  * ``rezero_cb()``            - user asked to re-zero the node's baseline.
+  * ``configure_cb(threshold)`` - user asked to push this uT threshold to the
     node so the board's own touch detection fires at the same level.
 
 Layout lives in ``src/gui/ui/sensor_tester.ui`` (edit in Qt Designer + recompile
@@ -33,13 +33,13 @@ from src.gui.ui_sensor_tester import Ui_SensorTester
 # Bar scale: full-scale is a few times the threshold so a resting sensor sits
 # near the left and a firm press fills a good part of the bar without clipping.
 _BAR_HEADROOM = 3.0
-_BAR_MIN_FULLSCALE = 200      # µT floor so a low threshold still leaves a usable bar
+_BAR_MIN_FULLSCALE = 200      # uT floor so a low threshold still leaves a usable bar
 
 _ACTIVE_CHUNK = "QProgressBar::chunk { background-color: #2ecc71; }"   # touched
 _IDLE_CHUNK   = "QProgressBar::chunk { background-color: #3498db; }"   # resting
 
 # Re-zero completion detection: the node stops streaming ``magnet`` frames while
-# it rebuilds its baseline (70 samples), then resumes at ~0 µT. So a gap in the
+# it rebuilds its baseline (70 samples), then resumes at ~0 uT. So a gap in the
 # stream marks the re-zero in progress, and the next frame after it = done.
 _REZERO_SILENCE_MS = 500      # a stream gap this long means the node went quiet
 _REZERO_MIN_MS     = 1500     # ignore earlier gaps (transient ESP-NOW drops)
@@ -47,11 +47,11 @@ _REZERO_TIMEOUT_MS = 12000    # give up waiting for the stream to resume
 
 
 class SensorTester(QGroupBox, Ui_SensorTester):
-    """Live µT readout + adjustable sensitivity for a node's magnet sensors."""
+    """Live uT readout + adjustable sensitivity for a node's magnet sensors."""
 
     # Emitted when the user flips the "Compensate actuation coupling" checkbox.
     # The host owns the compensator + chamber levels, so it re-feeds the last
-    # reading (raw or compensated) in response — this widget only renders values.
+    # reading (raw or compensated) in response - this widget only renders values.
     compensation_toggled = Signal(bool)
 
     def __init__(
@@ -93,7 +93,7 @@ class SensorTester(QGroupBox, Ui_SensorTester):
             bar = QProgressBar()
             bar.setTextVisible(False)
             bar.setStyleSheet(_IDLE_CHUNK)
-            value = QLabel("—")
+            value = QLabel("-")
             value.setMinimumWidth(150)
             value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             row.addWidget(name)
@@ -114,7 +114,7 @@ class SensorTester(QGroupBox, Ui_SensorTester):
     # ------------------------------------------------------------------
 
     def set_compensation_available(self, available: bool) -> None:
-        """Show the raw↔compensated toggle only when the host has a calibrated,
+        """Show the raw<->compensated toggle only when the host has a calibrated,
         enabled coupling to apply. Hidden (the default) means the panel just
         renders the raw stream, so nothing changes for uncalibrated skins."""
         self._compensation_available = bool(available)
@@ -131,11 +131,11 @@ class SensorTester(QGroupBox, Ui_SensorTester):
     # ------------------------------------------------------------------
 
     def update_values(self, mag: Sequence[float]) -> None:
-        """Render the latest per-sensor magnitudes (µT).
+        """Render the latest per-sensor magnitudes (uT).
 
         ``mag`` is the firmware ``mag`` array (baseline-subtracted, so ~0 at rest).
         The active highlight is computed here against the local threshold so it
-        tracks the spin box live — no round-trip to the node needed to *see* the
+        tracks the spin box live - no round-trip to the node needed to *see* the
         effect of changing sensitivity."""
         now = time.monotonic() * 1000.0
         gap = now - self._last_frame_ms
@@ -181,9 +181,9 @@ class SensorTester(QGroupBox, Ui_SensorTester):
             if is_active != self._active_shown[i]:
                 self._bars[i].setStyleSheet(_ACTIVE_CHUNK if is_active else _IDLE_CHUNK)
                 self._active_shown[i] = is_active
-            dot = " ●" if is_active else ""
+            dot = " *" if is_active else ""
             self._value_labels[i].setText(
-                f"{mag:5.0f} µT · pk {self._peaks[i]:.0f}{dot}")
+                f"{mag:5.0f} uT | pk {self._peaks[i]:.0f}{dot}")
         self.status_label.setText(
             "Active: " + (", ".join(active_names) if active_names else "none"))
 
@@ -196,22 +196,22 @@ class SensorTester(QGroupBox, Ui_SensorTester):
 
     def _on_rezero(self) -> None:
         # After a re-zero the field reads ~0 again, so the local peaks no longer
-        # reflect anything meaningful — clear them too.
+        # reflect anything meaningful - clear them too.
         self._peaks = [0.0] * self._count
         self._rezero()
         self._begin_rezero()
         self._render()
 
     def _begin_rezero(self) -> None:
-        """Grey the button out to ``Re-zeroing…`` until the node's stream resumes
-        (or a fallback timeout fires), so the label reflects the real ~2.5–7 s the
+        """Grey the button out to ``Re-zeroing...`` until the node's stream resumes
+        (or a fallback timeout fires), so the label reflects the real ~2.5-7 s the
         node spends rebuilding its baseline rather than pretending it is instant."""
         self._awaiting_rezero = True
         now = time.monotonic() * 1000.0
         self._rezero_click_ms = now
         self._last_frame_ms = now
         self.rezero_btn.setEnabled(False)
-        self.rezero_btn.setText("Re-zeroing…")
+        self.rezero_btn.setText("Re-zeroing...")
         self._rezero_timeout.start()
 
     def _finish_rezero(self) -> None:

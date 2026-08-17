@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-  Block editor for the SoftEdIBO behaviour engine (Tools => Activity Editor…).
+  Block editor for the SoftEdIBO behaviour engine (Tools => Activity Editor...).
 
   Scratch-like authoring: drag blocks to build a behaviour, which compiles to
   the declarative spec interpreted by ScriptedActivity (src/activities/
   scripted_activity.py). The editor (Blockly) is only ever loaded inside this
-  dialog — never during a session.
+  dialog - never during a session.
 
   Python talks to this page through three global functions, called via
   QWebEngineView.page().runJavaScript:
@@ -15,7 +15,7 @@
 
   Colours are plain "#rrggbb" tags in the colour blocks. The hosting panel
   shows a "Colour helper" side panel to pick a colour visually, copy its tag
-  and preview it live on the connected robots — see behavior_editor_panel.py.
+  and preview it live on the connected robots - see behavior_editor_panel.py.
 
   Blockly is loaded from a vendored copy (./blockly.min.js) when present, else
   from the unpkg CDN. Run scripts/fetch_blockly.sh to vendor it for offline use.
@@ -23,7 +23,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Activity Editor — Visual</title>
+  <title>Activity Editor - Visual</title>
   <style>
     html, body { margin: 0; height: 100%; font-family: sans-serif; }
     #blocklyDiv { position: absolute; top: 0; left: 0; right: 0; bottom: 0; }
@@ -105,22 +105,22 @@
     // gentlest usable stroke (the calibrated per-skin-type minimum), 5 = full
     // power. Mapped onto the calibrated duty range at runtime (fill_scaling.
     // duty_for_power); 5 is the default and leaves any "over ms" slow-fill acting.
-    // Listed 5→1 so the dropdown defaults to its first option, 5 (full) — the
-    // historical "full speed" default — with no imperative init needed.
+    // Listed 5->1 so the dropdown defaults to its first option, 5 (full) - the
+    // historical "full speed" default - with no imperative init needed.
     var POWER_OPTIONS = [['5 (full)', '5'], ['4', '4'], ['3', '3'],
                          ['2', '2'], ['1 (gentle)', '1']];
     // Gesture kinds for the "skip after N gestures" condition: a raw touch (any
     // press, no model needed) or an ML-classified gesture (needs a trained model
     // for the skin type). Kept in sync with gesture_taxonomy.GESTURE_CLASSES
-    // (tap / press / compressions) — 'compressions' is the study's active gesture.
+    // (tap / press / compressions) - 'compressions' is the study's active gesture.
     var GESTURE_KINDS = [['a touch', 'touch'], ['a tap', 'tap'],
                          ['a press', 'press'], ['compressions', 'compressions']];
 
     function init() {
-      if (workspace) return;            // both loaders fired — ignore the 2nd
+      if (workspace) return;            // both loaders fired - ignore the 2nd
       // Blockly needs a "media" folder (sprites for the trashcan/zoom/dropdown
       // icons + click/delete sounds). Use a vendored ./media/ when present
-      // (offline), else the CDN — otherwise those assets 404 ("Failed to
+      // (offline), else the CDN - otherwise those assets 404 ("Failed to
       // fetch") and the icons go missing. Probe a sprite to decide.
       resolveMedia(function (media) {
         if (workspace) return;
@@ -181,7 +181,7 @@
                   { type: 'field_number', name: 'ANGLE', value: 0, min: 0, max: 360 },
                   { type: 'field_dropdown', name: 'RING', options: RING }],
           previousStatement: 'Step', nextStatement: 'Step', colour: 230,
-          tooltip: 'Light a ring. The colour is a "#rrggbb" tag — use '
+          tooltip: 'Light a ring. The colour is a "#rrggbb" tag - use '
                  + 'the Colour helper panel on the right to pick one and copy '
                  + 'it. "pattern" comet sweeps a single rotating light. "period" '
                  + 'is the pulse/blink speed or comet revolution in ms (ignored '
@@ -236,7 +236,7 @@
                  + '(0..3) or "all rings".' },
 
         { type: 'se_touch_progress',
-          message0: 'touch fill — %1 arcs, %2 touch(es) each',
+          message0: 'touch fill - %1 arcs, %2 touch(es) each',
           args0: [{ type: 'field_number', name: 'SEGMENTS', value: 4, min: 1, max: 8 },
                   { type: 'field_number', name: 'PER', value: 1, min: 1 }],
           message1: 'from %1 to %2 on ring %3',
@@ -249,7 +249,7 @@
           tooltip: 'A touch-counter you can see. Put it in a phase\'s "on touch": '
                  + 'every "each" touches lights one more of the ring\'s arcs '
                  + '(4 arcs = quarters), from the "from" colour to the "to" '
-                 + 'colour. Once every arc is lit it jumps to the named phase — '
+                 + 'colour. Once every arc is lit it jumps to the named phase - '
                  + 'leave that blank to just fill and let a transition move on. '
                  + 'Counts touches since the phase started, so it resets each phase.' },
 
@@ -264,7 +264,7 @@
                  + 'slowing the pump (needs a calibrated fill time). "power" is '
                  + 'the pump strength on a 1-5 dial: 1 = gentlest usable, 5 = full '
                  + '(the default, which leaves "over ms" in charge). Lower it for '
-                 + 'a gentler, quieter fill — no calibration needed.' },
+                 + 'a gentler, quieter fill - no calibration needed.' },
 
         { type: 'se_deflate',
           message0: 'deflate chamber %1',
@@ -288,7 +288,7 @@
         // --- Thymio wheeled base (no-ops on robots without wheels; wrap in
         // "if robot is Thymio" so the Turtle/Tree skip it explicitly) ---
         { type: 'se_thymio_drive',
-          message0: 'drive Thymio — left wheel %1 right wheel %2 for %3 ms',
+          message0: 'drive Thymio - left wheel %1 right wheel %2 for %3 ms',
           args0: [{ type: 'field_number', name: 'LEFT', value: 100, min: -500, max: 500 },
                   { type: 'field_number', name: 'RIGHT', value: 100, min: -500, max: 500 },
                   { type: 'field_number', name: 'MS', value: 1000, min: 0 }],
@@ -302,17 +302,17 @@
           message0: 'Thymio top LED colour %1',
           args0: [{ type: 'field_input', name: 'COLOR', text: DEFAULT_COLOUR }],
           previousStatement: 'Step', nextStatement: 'Step', colour: 160,
-          tooltip: 'Colour the Thymio\'s top LED. The colour is a "#rrggbb" tag — '
+          tooltip: 'Colour the Thymio\'s top LED. The colour is a "#rrggbb" tag - '
                  + 'use the Colour helper panel to pick one and copy it.' },
 
         { type: 'se_thymio_sound',
-          message0: 'Thymio sound — system %1 or tone %2 Hz for %3 ms or SD track %4',
+          message0: 'Thymio sound - system %1 or tone %2 Hz for %3 ms or SD track %4',
           args0: [{ type: 'field_number', name: 'SYS', value: 2, min: -1, max: 7 },
                   { type: 'field_number', name: 'FREQ', value: 0, min: 0 },
                   { type: 'field_number', name: 'DUR', value: 200, min: 0 },
                   { type: 'field_number', name: 'TRACK', value: -1, min: -1 }],
           previousStatement: 'Step', nextStatement: 'Step', colour: 160,
-          tooltip: 'Play a sound. "SD track" ≥ 0 plays a recording off the microSD '
+          tooltip: 'Play a sound. "SD track" >= 0 plays a recording off the microSD '
                  + '(needs a card) and wins. Else a "tone Hz" > 0 plays that tone for '
                  + '"for N ms"; else the built-in system sound (0-7; -1 stops). The '
                  + 'wheels keep driving through the sound.' },
@@ -341,7 +341,7 @@
           previousStatement: 'Step', nextStatement: 'Step', colour: 120,
           tooltip: 'Run "do" only when the session robot is the chosen kind, '
                  + 'else run "else". This is how one behaviour covers every '
-                 + 'robot — e.g. put the Thymio drive blocks under '
+                 + 'robot - e.g. put the Thymio drive blocks under '
                  + '"if robot is Thymio" and the Turtle/Tree skip them. '
                  + 'Chain another "if robot is" inside "else" for 3 ways.' },
 
@@ -387,10 +387,10 @@
           args0: [{ type: 'field_dropdown', name: 'SCOPE',
                     options: [['by count', 'count'], ['all good', 'all_good'], ['all bad', 'all_bad']] },
                   { type: 'field_dropdown', name: 'GOOD_OP',
-                    options: [['≥', '>='], ['≤', '<='], ['=', '==']] },
+                    options: [['>=', '>='], ['<=', '<='], ['=', '==']] },
                   { type: 'field_number', name: 'GOOD', value: 3, min: 0 },
                   { type: 'field_dropdown', name: 'BAD_OP',
-                    options: [['≥', '>='], ['≤', '<='], ['=', '==']] },
+                    options: [['>=', '>='], ['<=', '<='], ['=', '==']] },
                   { type: 'field_number', name: 'BAD', value: 0, min: 0 }],
           output: 'Cond', colour: 20,
           tooltip: 'Organ status (good/bad organs plugged into the skin). '
@@ -419,7 +419,7 @@
           message0: 'robot is %1',
           args0: [{ type: 'field_dropdown', name: 'ROBOT', options: ROBOTS }],
           output: 'Cond', colour: 20,
-          tooltip: 'True when the session robot is the chosen kind — lets a '
+          tooltip: 'True when the session robot is the chosen kind - lets a '
                  + 'phase transition fire only on one robot.' },
 
         { type: 'se_always',
@@ -433,8 +433,8 @@
 
     // ---- behaviour root: declares the target skin condition -------------
     // The "for skin" dropdown is the activity's target (spec.target.skin).
-    // One behaviour covers every robot — robot-specific parts go inside
-    // "if robot is …" blocks — and the session pre-selects the activity that
+    // One behaviour covers every robot - robot-specific parts go inside
+    // "if robot is ..." blocks - and the session pre-selects the activity that
     // matches the skins the robots are dressed in. 'any' = target-less.
     function defineBehaviourBlock() {
       Blockly.Blocks['se_behaviour'] = {
@@ -449,15 +449,15 @@
             ]), 'SKIN');
           this.appendStatementInput('STATES')
             .setCheck('State')
-            .appendField('— starts at the first phase');
+            .appendField('- starts at the first phase');
           this.setColour(290);
           this.setTooltip(
             'Root of a behaviour. Stack phases inside. "for skin" declares '
             + 'which skin set the activity is written for (Natural / Wrinkles '
             + '/ Organs); the session pre-selects the matching activity and '
             + 'warns when a robot wears different skins. The behaviour runs '
-            + 'on ANY robot — wrap robot-specific parts (e.g. the Thymio '
-            + 'wheels) in "if robot is …" blocks.');
+            + 'on ANY robot - wrap robot-specific parts (e.g. the Thymio '
+            + 'wheels) in "if robot is ..." blocks.');
         },
       };
     }
@@ -470,7 +470,7 @@
       var skin = (spec && spec.target && spec.target.skin) || 'any';
       if (spec && spec.target && spec.target.kind && !spec.target.skin) {
         console.warn('legacy robot-kind target', spec.target.kind,
-                     '— re-save to convert to a skin target');
+                     '- re-save to convert to a skin target');
       }
       try { roots[0].setFieldValue(skin, 'SKIN'); }
       catch (e) { console.warn('target skin', skin, e); }
@@ -485,7 +485,7 @@
         init: function () {
           var self = this;
           this.appendDummyInput()
-            .appendField('beat —')
+            .appendField('beat -')
             .appendField(new Blockly.FieldDropdown([
               ['all chambers together', 'sync'],
               ['one chamber at a time', 'sequential'],
@@ -510,7 +510,7 @@
           this.setNextStatement(true, 'Step');
           this.setColour(30);
           this.setTooltip(
-            'One heartbeat cycle across the chambers — wrap it in '
+            'One heartbeat cycle across the chambers - wrap it in '
             + '"repeat forever" for a continuous beat. "strength" is the peak '
             + 'fill %. Only "some strong, the rest soft" uses the soft-chamber '
             + 'row (those chambers beat to the soft %, the rest to strength). '
@@ -578,7 +578,7 @@
     function num(b, f) { return Number(b.getFieldValue(f)); }
 
     // The 1-5 "power" dial. 5 (full) is the default and means "no explicit duty
-    // — full speed, letting any 'over ms' slow-fill act", so omit it to keep
+    // - full speed, letting any 'over ms' slow-fill act", so omit it to keep
     // specs clean and back-compatible. 1-4 carry an explicit gentler power the
     // runtime maps onto the skin type's calibrated duty range.
     function withPower(obj, b) {
@@ -776,7 +776,7 @@
     }
 
     // Set the 1-5 power dropdown from a spec: an explicit 'power', or a legacy
-    // raw 'duty' converted to the nearest level (floor ~190 → 1, 255 → 5), else
+    // raw 'duty' converted to the nearest level (floor ~190 -> 1, 255 -> 5), else
     // the default 5 (full).
     function setPower(b, p) {
       if (!p) return;

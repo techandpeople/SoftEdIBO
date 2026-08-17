@@ -30,7 +30,7 @@
    </item>
    <item>
     <widget class="QCheckBox" name="rgbw_check">
-     <property name="whatsThis"><string>Fallback RGBW LED-ring choice, used only for nodes whose LED column shows "?" — offline nodes, or nodes running firmware that predates LED self-reporting. Nodes that report their build (LED column shows rgb/rgbw) ignore this and are flashed with their matching bin automatically. Tick it for an RGBW NeoPixel ring (SK6812, e.g. Adafruit 2862, 4 colour channels) rather than a plain RGB ring (WS2812, e.g. Adafruit 1586); the two pixel formats differ, so the wrong build drives the ring with shifted colours.</string></property>
+     <property name="whatsThis"><string>Fallback RGBW LED-ring choice, used only for nodes whose LED column shows "?" - offline nodes, or nodes running firmware that predates LED self-reporting. Nodes that report their build (LED column shows rgb/rgbw) ignore this and are flashed with their matching bin automatically. Tick it for an RGBW NeoPixel ring (SK6812, e.g. Adafruit 2862, 4 colour channels) rather than a plain RGB ring (WS2812, e.g. Adafruit 1586); the two pixel formats differ, so the wrong build drives the ring with shifted colours.</string></property>
      <property name="text"><string>RGBW LED ring (fallback for nodes that don't report it yet)</string></property>
     </widget>
    </item>
@@ -56,7 +56,7 @@
      </item>
      <item>
       <widget class="QLineEdit" name="ap_ssid_edit">
-       <property name="whatsThis"><string>Name (SSID) of the gateway's WiFi access point — stored on the gateway itself and auto-filled from it. The updating node joins this network; the PC does not. Edit it and click Save AP to rename the network on the gateway.</string></property>
+       <property name="whatsThis"><string>Name (SSID) of the gateway's WiFi access point - stored on the gateway itself and auto-filled from it. The updating node joins this network; the PC does not. Edit it and click Save AP to rename the network on the gateway.</string></property>
       </widget>
      </item>
      <item>
@@ -66,7 +66,7 @@
      </item>
      <item>
       <widget class="QLineEdit" name="ap_pass_edit">
-       <property name="whatsThis"><string>Only to CHANGE the access point's password (WPA2, at least 8 characters) — leave blank to keep the current one. The stored password never leaves the gateway: during an update the gateway hands it to the node itself.</string></property>
+       <property name="whatsThis"><string>Only to CHANGE the access point's password (WPA2, at least 8 characters) - leave blank to keep the current one. The stored password never leaves the gateway: during an update the gateway hands it to the node itself.</string></property>
        <property name="echoMode"><enum>QLineEdit::Password</enum></property>
        <property name="placeholderText"><string>unchanged</string></property>
       </widget>
@@ -74,7 +74,7 @@
      <item>
       <widget class="QPushButton" name="save_ap_btn">
        <property name="text"><string>Save AP</string></property>
-       <property name="whatsThis"><string>Write the edited network name/password to the gateway (persisted on it, survives reboots). Updates use whatever is stored there — no need to retype anything here afterwards.</string></property>
+       <property name="whatsThis"><string>Write the edited network name/password to the gateway (persisted on it, survives reboots). Updates use whatever is stored there - no need to retype anything here afterwards.</string></property>
       </widget>
      </item>
     </layout>
@@ -82,7 +82,7 @@
    <item>
     <widget class="QLabel" name="wifi_hint_label">
      <property name="wordWrap"><bool>true</bool></property>
-     <property name="text"><string>WiFi OTA (fast): the PC streams the image to the gateway over USB and the node downloads it from the gateway's access point. The AP name/password live on the gateway — it hands them to the node itself, so normally there is nothing to fill in here.</string></property>
+     <property name="text"><string>WiFi OTA (fast): the PC streams the image to the gateway over USB and the node downloads it from the gateway's access point. The AP name/password live on the gateway - it hands them to the node itself, so normally there is nothing to fill in here.</string></property>
     </widget>
    </item>
    <item>
@@ -113,7 +113,7 @@
      </item>
      <item>
       <widget class="QPushButton" name="flash_btn">
-       <property name="whatsThis"><string>Start the over-the-air update for the ticked nodes. Keep the gateway connected and the nodes powered until it finishes — interrupting a flash can brick a node.</string></property>
+       <property name="whatsThis"><string>Start the over-the-air update for the ticked nodes. Keep the gateway connected and the nodes powered until it finishes - interrupting a flash can brick a node.</string></property>
        <property name="text"><string>Flash selected</string></property>
       </widget>
      </item>

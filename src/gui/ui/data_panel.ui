@@ -71,7 +71,7 @@
      <item>
       <widget class="QPushButton" name="trash_btn">
        <property name="whatsThis"><string>Open the trash: sessions you deleted are kept there so nothing is lost by accident. From it you can restore a session or delete it permanently.</string></property>
-       <property name="text"><string>Trash…</string></property>
+       <property name="text"><string>Trash...</string></property>
       </widget>
      </item>
      <item>

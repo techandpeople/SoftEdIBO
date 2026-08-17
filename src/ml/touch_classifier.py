@@ -1,8 +1,8 @@
-"""TouchGestureClassifier — per-skin-type touch-gesture inference.
+"""TouchGestureClassifier - per-skin-type touch-gesture inference.
 
 Loads a trained model for a given ``skin_type`` (``models/touch_<type>.joblib``)
 and predicts a gesture label from a :class:`TouchSegment`. scikit-learn / joblib
-are imported **lazily**, so importing this module — and running the app — never
+are imported **lazily**, so importing this module - and running the app - never
 requires them. With no model (or no ML libs) the classifier is inert and returns
 ``unknown``, so wiring it in is always safe.
 
@@ -33,7 +33,7 @@ class TouchGestureClassifier:
     """Predicts a gesture label for a segment, using a per-type model if present.
 
     Args:
-        skin_type: Selects the model. Empty / unknown type → always ``unknown``.
+        skin_type: Selects the model. Empty / unknown type -> always ``unknown``.
         path: Optional explicit model path (defaults to :func:`model_path`).
     """
 
@@ -58,11 +58,11 @@ class TouchGestureClassifier:
         if not self.skin_type or not self._path.exists():
             return
         try:
-            import joblib  # lazy — only needed when a model actually exists
+            import joblib  # lazy - only needed when a model actually exists
             self._model = joblib.load(self._path)
             logger.info("Loaded touch model for %s from %s",
                         self.skin_type, self._path)
-        except Exception:   # noqa: BLE001 — missing lib / bad file → stay inert
+        except Exception:   # noqa: BLE001 - missing lib / bad file -> stay inert
             logger.warning("No usable touch model for %s (%s); classifier inert",
                            self.skin_type, self._path)
             self._model = None
@@ -76,7 +76,7 @@ class TouchGestureClassifier:
             pred = self._model.predict(
                 [full_feature_vector(seg, self.skin_variant)])[0]
             return str(pred)
-        except Exception:   # noqa: BLE001 — never break a session on inference
+        except Exception:   # noqa: BLE001 - never break a session on inference
             logger.exception("Touch inference failed for %s", self.skin_type)
             return tax.UNKNOWN
 
@@ -100,7 +100,7 @@ class LiveTouchClassifier:
             skin_variant=getattr(skin, "skin_variant", ""))
         self._seg = TouchSegmenter()
         # Group a run of presses (a compressions bout) into one gesture before
-        # classifying — training merges them over the same BOUT_GAP_MS silence
+        # classifying - training merges them over the same BOUT_GAP_MS silence
         # window, so inference must too (train/serve parity).
         self._merger = PulseMerger(tax.BOUT_GAP_MS)
         self._t0: float | None = None

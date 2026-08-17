@@ -13,7 +13,7 @@ class ParticipantPanel(QWidget, Ui_ParticipantPanel):
     """Panel for creating, editing and deleting participants.
 
     Participants are stored in the SQLite database and their auto-generated
-    IDs (P001, P002, …) are shown in the table alongside alias and age.
+    IDs (P001, P002, ...) are shown in the table alongside alias and age.
     """
 
     def __init__(self, db: Database):
@@ -48,7 +48,7 @@ class ParticipantPanel(QWidget, Ui_ParticipantPanel):
             id_item.setData(Qt.ItemDataRole.UserRole, record)
             self.participants_table.setItem(row, 0, id_item)
             self.participants_table.setItem(row, 1, QTableWidgetItem(record.alias))
-            age_text = str(record.age) if record.age is not None else "—"
+            age_text = str(record.age) if record.age is not None else "-"
             self.participants_table.setItem(row, 2, QTableWidgetItem(age_text))
 
     def _selected_record(self) -> ParticipantRecord | None:

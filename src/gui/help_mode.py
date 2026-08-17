@@ -1,4 +1,4 @@
-"""Reusable "?" help mode — Windows "What's This?", but better.
+"""Reusable "?" help mode - Windows "What's This?", but better.
 
 Drop a :class:`HelpButton` into any window (toolbar, menu-bar corner, layout).
 When the user toggles it on, the whole window enters *help mode*:
@@ -14,12 +14,12 @@ can sweep the mouse around purely to discover what each control does.
 
 The three classes split cleanly by responsibility:
 
-* :class:`HelpProvider` — *model/policy*: where help text comes from and which
+* :class:`HelpProvider` - *model/policy*: where help text comes from and which
   widgets carry it. Default policy is ``whatsThis`` first, then ``toolTip``;
   subclass and override :meth:`HelpProvider.text_for` to source it elsewhere.
-* :class:`_HelpOverlay` — *view*: renders highlights and shows the help popup.
+* :class:`_HelpOverlay` - *view*: renders highlights and shows the help popup.
   It depends only on the :class:`HelpProvider` abstraction, never on the button.
-* :class:`HelpButton` — *controller*: owns the overlay and toggles help mode.
+* :class:`HelpButton` - *controller*: owns the overlay and toggles help mode.
 
 Help text being read from ``whatsThis``/``toolTip`` means it lives in the
 ``.ui`` files alongside the layout (see the project's "GUI must be .ui files"
@@ -74,7 +74,7 @@ class _HelpOverlay(QWidget):
     grabs mouse-move events (so interaction with the controls underneath is
     paused) and, on each move, asks its :class:`HelpProvider` which widget sits
     under the cursor and what its help text is. It owns no knowledge of what
-    toggled it on — when the user dismisses it (Escape) it emits
+    toggled it on - when the user dismisses it (Escape) it emits
     :attr:`dismissed` and lets the owner react.
     """
 
@@ -124,7 +124,7 @@ class _HelpOverlay(QWidget):
         """Innermost help-bearing widget at overlay-local *pos*.
 
         Hit-tests by geometry against the help widgets (not ``childAt``), so the
-        overlay itself — which sits on top of everything — is never picked.
+        overlay itself - which sits on top of everything - is never picked.
         """
         best: QWidget | None = None
         best_area = 0
@@ -219,9 +219,9 @@ class HelpButton(QToolButton):
         self.setCheckable(True)
         self.setAutoRaise(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setToolTip("Help mode — hover any field to see what it does")
+        self.setToolTip("Help mode - hover any field to see what it does")
         self.setWhatsThis(
-            "Toggle help mode. While on, the pointer becomes a “?” and "
+            'Toggle help mode. While on, the pointer becomes a "?" and '
             "hovering any highlighted control shows what it does."
         )
         self.toggled.connect(self._on_toggled)

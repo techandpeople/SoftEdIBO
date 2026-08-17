@@ -1,6 +1,6 @@
 #pragma once
 /**
- * SoftEdIBO — shared ESP-NOW link layer.
+ * SoftEdIBO - shared ESP-NOW link layer.
  *
  * Single source of truth for the ESP-NOW / MAC / radio plumbing used by every
  * firmware in this repo. Compiles under BOTH frameworks:
@@ -35,7 +35,7 @@
 
 namespace se {
 
-// Uniform receive callback the firmwares implement — the SDK-specific first
+// Uniform receive callback the firmwares implement - the SDK-specific first
 // argument is hidden behind the shim below.
 using RecvFn = void (*)(const uint8_t mac[6], const uint8_t* data, int len);
 
@@ -45,7 +45,7 @@ inline uint32_t txFail    = 0;   // ESP-NOW sends that failed
 
 // Signalled by the send callback when a frame finishes transmitting (success or
 // fail). sendPaced() waits on it so we never call esp_now_send() while the radio
-// still has a frame in flight — the WiFi TX path only buffers a couple of frames,
+// still has a frame in flight - the WiFi TX path only buffers a couple of frames,
 // and a too-soon esp_now_send returns ESP_ERR_ESPNOW_NO_MEM and silently drops the
 // frame. Created + pre-given in begin(); a binary semaphore caps at 1 so the extra
 // gives from fire-and-forget send()/broadcast() are harmless.
@@ -110,7 +110,7 @@ inline bool ensurePeer(const uint8_t* mac) {
 }
 
 // ---------------------------------------------------------------------------
-// Radio bring-up — the only framework-specific code in this file
+// Radio bring-up - the only framework-specific code in this file
 // ---------------------------------------------------------------------------
 
 inline void radioInit() {
@@ -173,7 +173,7 @@ inline void broadcast(const char* s) { send(BROADCAST, s); }
 inline void sendPaced(const uint8_t* mac, const uint8_t* data, size_t len) {
     if (_txDone) xSemaphoreTake(_txDone, pdMS_TO_TICKS(20));   // prior send drained
     if (esp_now_send(mac, data, len) != ESP_OK && _txDone)
-        xSemaphoreGive(_txDone);   // no TX callback will come — free the slot
+        xSemaphoreGive(_txDone);   // no TX callback will come - free the slot
 }
 
 // Own STA MAC as a string (>=18 byte buffer).

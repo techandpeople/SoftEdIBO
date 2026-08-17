@@ -1,8 +1,8 @@
 """Dialog for configuring a new session before it starts.
 
 Activities are authored per SKIN condition (Natural / Wrinkles / Organs) and
-run on any robot — robot-specific steps live in the behaviour's ``if robot
-is…`` blocks — so this dialog lists every configured robot with a LIVE
+run on any robot - robot-specific steps live in the behaviour's ``if robot
+is...`` blocks - so this dialog lists every configured robot with a LIVE
 online/offline status instead of filtering by robot class:
 
 * On open it triggers a gateway node scan and repaints each robot's status as
@@ -10,7 +10,7 @@ online/offline status instead of filtering by robot class:
   **Partial** (some did), **Ready** (a node-less wireless Thymio whose
   transport is up) or **Offline**. Ticking is entirely up to the user.
 * When a ticked robot's configured skin variants don't match the selected
-  activity's target skin, a warning shows under the list — the session can
+  activity's target skin, a warning shows under the list - the session can
   still start (useful when the physical skins were swapped without updating
   the config).
 """
@@ -54,7 +54,7 @@ class SessionSetupDialog(BaseDialog, Ui_SessionSetupDialog):
         robots: All currently configured robots across all kinds.
         db: Database instance used to load the participant roster.
         gateway: Shared SoftEdIBO gateway (scanned for live node status);
-            may be ``None`` (e.g. tests) — every ESP robot then reads Offline.
+            may be ``None`` (e.g. tests) - every ESP robot then reads Offline.
         parent: Optional parent widget.
     """
 
@@ -78,7 +78,7 @@ class SessionSetupDialog(BaseDialog, Ui_SessionSetupDialog):
         for activity in available_activities(self._db):
             self.activity_combo.addItem(activity.name, userData=activity)
 
-        # Simulation-mode checkbox — added programmatically right under the
+        # Simulation-mode checkbox - added programmatically right under the
         # activity dropdown in the form layout (parent form is the .ui file's
         # ``formLayout``). Toggling it just stores intent; the value is read
         # via ``simulation_mode`` after accept().
@@ -91,7 +91,7 @@ class SessionSetupDialog(BaseDialog, Ui_SessionSetupDialog):
             "behaviors without the physical robots."
         )
 
-        # Record-sensor-streams checkbox — same programmatic pattern. Records
+        # Record-sensor-streams checkbox - same programmatic pattern. Records
         # every gateway message of the session to a JSONL file (no video); read
         # via ``record_streams`` after accept(). On by default; no effect in
         # simulation (no real gateway traffic).
@@ -178,7 +178,7 @@ class SessionSetupDialog(BaseDialog, Ui_SessionSetupDialog):
         return result
 
     # ------------------------------------------------------------------
-    # Activity → target skin + mismatch warning
+    # Activity -> target skin + mismatch warning
     # ------------------------------------------------------------------
 
     def _on_activity_changed(self, index: int) -> None:
@@ -199,9 +199,9 @@ class SessionSetupDialog(BaseDialog, Ui_SessionSetupDialog):
             for robot in self.selected_robots:
                 mismatches = skin_condition.skin_mismatches(
                     skin, getattr(robot, "skins", {}).values())
-                lines += [f"{robot.robot_id} — {m}" for m in mismatches]
+                lines += [f"{robot.robot_id} - {m}" for m in mismatches]
             if lines:
-                lines.insert(0, "⚠ Skins don't match the activity's target "
+                lines.insert(0, "WARNING: Skins don't match the activity's target "
                                 f"({skin_condition.label(skin)}):")
         # Legacy robot-kind-targeted behaviours only run on one robot class;
         # ticking another would fail at start, so call it out here instead.
@@ -211,7 +211,7 @@ class SessionSetupDialog(BaseDialog, Ui_SessionSetupDialog):
                      if not isinstance(r, robot_type)]
             if wrong:
                 lines.append(
-                    f"⚠ This activity only runs on {robot_type.__name__}: "
+                    f"WARNING: This activity only runs on {robot_type.__name__}: "
                     + ", ".join(wrong))
         self.skin_warning_label.setText("\n".join(lines))
         self.skin_warning_label.setVisible(bool(lines))
@@ -262,10 +262,10 @@ class SessionSetupDialog(BaseDialog, Ui_SessionSetupDialog):
             if robot is None:
                 continue
             status, detail = self._robot_status(robot)
-            dot = "●" if status in ("online", "ready", "partial") else "○"
+            dot = "*" if status in ("online", "ready", "partial") else "o"
             kind = getattr(robot, "robot_kind", "") or "?"
             item.setText(f"{dot} {robot.robot_id}  [{kind.capitalize()}]"
-                         f"  —  {detail}")
+                         f"  -  {detail}")
             item.setForeground(_STATUS_COLORS.get(status, QColor("#cc2222")))
 
     def _robot_status(self, robot: BaseRobot) -> tuple[str, str]:

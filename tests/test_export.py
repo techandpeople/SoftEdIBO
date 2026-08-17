@@ -1,4 +1,4 @@
-"""Tests for SessionExporter — CSV flattening + participant attribution."""
+"""Tests for SessionExporter - CSV flattening + participant attribution."""
 
 import csv
 from datetime import datetime
@@ -65,7 +65,7 @@ def test_export_attributes_branch_events_to_participants(db, tmp_path):
 
 def test_export_attributes_whole_robot_event_to_single_participant(db, tmp_path):
     _seed_session(db)
-    # Thymio: one robot, one child → bare robot-id target resolves to them.
+    # Thymio: one robot, one child -> bare robot-id target resolves to them.
     db.save_assignment(SessionAssignment("S001", "thymio-1", "P1", ["belly"]))
     db.log_event(InteractionEvent(
         session_id="S001", participant_id="system", type="organ",

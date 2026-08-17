@@ -79,7 +79,7 @@ class ESP32Controller:
         """Deflate a chamber by delta % of its max pressure (0-100).
 
         When ``ms`` is given it becomes the chamber's open-time budget on the
-        node — the closing authority for a target the gauge can't see (below the
+        node - the closing authority for a target the gauge can't see (below the
         sensor floor), timed from the calibrated deflate curve. The firmware
         still caps it and holds the HARD limits.
 
@@ -99,11 +99,11 @@ class ESP32Controller:
         return self._sensor_floor_kpa
 
     def hold(self, chamber: int) -> bool:
-        """Hold pressure — stop pump, close inflate and deflate valves for this chamber."""
+        """Hold pressure - stop pump, close inflate and deflate valves for this chamber."""
         return self.send_command("hold", chamber=chamber)
 
     def emergency_stop(self) -> bool:
-        """Latch every actuator on this node OFF — all pumps off, all valves closed.
+        """Latch every actuator on this node OFF - all pumps off, all valves closed.
 
         The node stays stopped (ignoring inflate/deflate/etc.) until ``resume()``
         re-arms it, so the firmware holds the safe state even if the app crashes
@@ -149,7 +149,7 @@ class ESP32Controller:
 
         Returns ``False`` if the node never confirms (a stale ceiling risks
         over-inflation, so the caller should warn) or rejects it. Blocks the
-        calling thread up to ~0.8 s — run it off the GUI/actuation thread
+        calling thread up to ~0.8 s - run it off the GUI/actuation thread
         (:meth:`confirm_limits` does that)."""
         return self._confirmer.confirm("set_max_pressure",
                                        chamber=int(chamber), value=float(value))
@@ -180,7 +180,7 @@ class ESP32Controller:
             if not ok:
                 logger.warning(
                     "Couldn't confirm limits on %s chamber %d (max ok=%s, "
-                    "min ok=%s) — node may be unreachable; the pre-actuation "
+                    "min ok=%s) - node may be unreachable; the pre-actuation "
                     "re-push still self-heals", self.mac_address, chamber,
                     ok_max, ok_min)
             if on_result is not None:
@@ -243,14 +243,14 @@ class ESP32Controller:
         color2:  second colour for the "fade" pattern; ignored by the others. The
                  node runs the interpolation, so a continuous fade is one frame per
                  cycle instead of a per-step colour stream over ESP-NOW.
-        period_ms/count: animation timing — pulse/blink/fade cycle or comet revolution.
+        period_ms/count: animation timing - pulse/blink/fade cycle or comet revolution.
         index:   when given, set just that pixel (solid); otherwise the whole
                  ring. Per-pixel is used by the LED test panel.
-        ring:    multi-ring nodes (node_multiplexed: 4 rings) only — selects ring
+        ring:    multi-ring nodes (node_multiplexed: 4 rings) only - selects ring
                  0..3; omitted addresses all rings. Single-ring nodes ignore it.
         fade_ms: cross-fade time for this change. Every change cross-fades; the
                  node's default (~250 ms) applies when omitted, 0 snaps instantly.
-        angle:   0-360° rotation of the split/comet around the ring (0 = default
+        angle:   0-360 deg rotation of the split/comet around the ring (0 = default
                  orientation). Lets a comet start elsewhere; more useful on halves.
         """
         kwargs: dict[str, Any] = {"color": color, "pattern": pattern,
@@ -282,14 +282,14 @@ class ESP32Controller:
         splits the ring across its own LED count and renders one frame from
         loop(). ``pattern`` / ``period_ms`` animate the whole split ring together;
         ``pattern="comet"`` paints one rotating comet per colour (so two colours
-        give two comets 180° apart). ``ring`` selects one of the multiplexed
+        give two comets 180 deg apart). ``ring`` selects one of the multiplexed
         board's four rings (0..3); omitted addresses all rings, and single-ring
         boards ignore it. ``fade_ms`` is the cross-fade time for this change
-        (node default ~250 ms when omitted, 0 snaps). ``angle`` (0-360°) rotates
+        (node default ~250 ms when omitted, 0 snaps). ``angle`` (0-360 deg) rotates
         the split around the ring, so e.g. halves can sit top/bottom instead of
         left/right.
 
-        This used to loop one ``set_led(index=…)`` per LED — a 24-frame burst
+        This used to loop one ``set_led(index=...)`` per LED - a 24-frame burst
         that reset the node, because the firmware calls ``strip.show()`` (which
         disables interrupts) once per pixel from the ESP-NOW receive task. The
         single-frame command does one ``show()`` off that task instead.
@@ -386,12 +386,12 @@ class ESP32Controller:
         """Expand a batched status frame into per-chamber dispatches.
 
         New actuator firmware sends every chamber in ONE ESP-NOW frame as parallel
-        arrays — ``{"type":"status","kpa":[..],"st":[..],"vi":[..],"vd":[..]}`` — to cut
+        arrays - ``{"type":"status","kpa":[..],"st":[..],"vi":[..],"vd":[..]}`` - to cut
         the per-chamber frame count (less ESP-NOW airtime, which the Thymio's co-channel
         802.15.4 shares). The per-chamber ``pressure`` % is not sent: it's redundant, so
         we pass 0 and the consumer recomputes it from the authoritative ``kpa`` (see
         :meth:`_dispatch_chamber_pressure`). Older nodes still send one scalar frame per
-        chamber, handled there directly — both wire forms stay supported.
+        chamber, handled there directly - both wire forms stay supported.
         """
         kpa = data.get("kpa") or []
         st = data.get("st") or []
@@ -413,7 +413,7 @@ class ESP32Controller:
         chamber_id = int(data["chamber"])
         pressure = int(data["pressure"])
         # ``st`` is the firmware-reported actuation state (0 idle, 1 inflating,
-        # 2 deflating); absent on older firmware → None (the consumer then
+        # 2 deflating); absent on older firmware -> None (the consumer then
         # infers state from pressure vs target).
         st = data.get("st")
         state = int(st) if isinstance(st, (int, float)) else None
@@ -453,7 +453,7 @@ class ESP32Controller:
             elif (ready := touch_profiles.for_ready_status(data.get("status"))) is not None:
                 # A touch board announced itself at boot. Cache the geometry it
                 # self-describes (per its profile) so subscribers (skin grid
-                # panels, calibration UI, …) can read it later.
+                # panels, calibration UI, ...) can read it later.
                 self._magnet_geometry = {
                     k: data[k] for k in ready.geometry_keys if k in data}
                 logger.info("%s sensor ready from %s: %s",

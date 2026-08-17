@@ -11,13 +11,13 @@ from src.hardware.fill_scaling import (
 
 
 def test_single_chamber_reproduces_base():
-    # One chamber, one pump → measured-alone time, scaled only by fill %.
+    # One chamber, one pump -> measured-alone time, scaled only by fill %.
     assert effective_fill_ms(1000, 100, active_chambers=1, pump_count=1) == 1000
     assert effective_fill_ms(1000, 50, active_chambers=1, pump_count=1) == 500
 
 
 def test_concurrent_chambers_slow_each_other():
-    # Two chambers sharing one pump → each fills ~twice as slow.
+    # Two chambers sharing one pump -> each fills ~twice as slow.
     assert effective_fill_ms(1000, 100, active_chambers=2, pump_count=1) == 2000
     assert effective_fill_ms(1000, 100, active_chambers=3, pump_count=1) == 3000
 
@@ -29,35 +29,35 @@ def test_duty_model_empty_below_two_points():
 
 
 def test_duty_model_picks_duty_for_requested_stretch():
-    # At full duty a fill takes 1000 ms; at 128 it takes 2000 (2× slower); at 64,
-    # 4000 (4×). So to stretch a natural 1000 ms fill to 2000 ms, use ~duty 128.
+    # At full duty a fill takes 1000 ms; at 128 it takes 2000 (2x slower); at 64,
+    # 4000 (4x). So to stretch a natural 1000 ms fill to 2000 ms, use ~duty 128.
     m = DutyModel([[255, 1000], [128, 2000], [64, 4000]])
     assert not m.is_empty
     assert m.duty_for_period(1000, 2000) == 128        # exact measured point
-    assert m.duty_for_period(1000, 1000) == FULL_DUTY   # no stretch → full
+    assert m.duty_for_period(1000, 1000) == FULL_DUTY   # no stretch -> full
     assert m.duty_for_period(1000, 500) == FULL_DUTY    # can't go faster than full
     # A stretch between measured factors interpolates the duty.
-    d = m.duty_for_period(1000, 3000)                   # 3× slowdown, between 64 and 128
+    d = m.duty_for_period(1000, 3000)                   # 3x slowdown, between 64 and 128
     assert 64 < d < 128
 
 
 def test_duty_model_clamps_beyond_measured_range():
     m = DutyModel([[255, 1000], [128, 2000]])
-    # Slower than the slowest measured duty → clamp to that slowest duty.
+    # Slower than the slowest measured duty -> clamp to that slowest duty.
     assert m.duty_for_period(1000, 9000) == 128
 
 
 def test_duty_model_fixes_non_monotone_sweep_noise():
     # Sweep noise: duty 128 read faster (900) than full duty (1000). Forced monotone
-    # so higher duty is never modelled as slower — both collapse to the fast time.
+    # so higher duty is never modelled as slower - both collapse to the fast time.
     m = DutyModel([[255, 1000], [128, 900], [64, 3000]])
     assert m.duty_for_period(1000, 1000) == FULL_DUTY
 
 
 def test_more_pumps_share_the_load():
-    # Two pumps absorb two concurrent chambers → still base time each.
+    # Two pumps absorb two concurrent chambers -> still base time each.
     assert effective_fill_ms(1000, 100, active_chambers=2, pump_count=2) == 1000
-    # Three chambers on two pumps → 1.5x.
+    # Three chambers on two pumps -> 1.5x.
     assert effective_fill_ms(1000, 100, active_chambers=3, pump_count=2) == 1500
 
 
@@ -114,7 +114,7 @@ def test_tracker_drives_scaling_for_concurrent_fills():
     ms1 = effective_fill_ms(1000, 100, t.active_count() + 1, t.pump_count)
     t.note_inflate(0, ms1)
     assert ms1 == 1000
-    # Second starts while the first is still filling → sees 2 active.
+    # Second starts while the first is still filling -> sees 2 active.
     ms2 = effective_fill_ms(1000, 100, t.active_count() + 1, t.pump_count)
     assert ms2 == 2000
 

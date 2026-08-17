@@ -1,18 +1,18 @@
-"""SkinGridView — read-only spatial view of a skin during activities.
+"""SkinGridView - read-only spatial view of a skin during activities.
 
-Renders the skin's ``chamber_grid`` (rows × cols of local chamber indices)
-as one merged region per chamber — adjacent cells with the same chamber
+Renders the skin's ``chamber_grid`` (rows x cols of local chamber indices)
+as one merged region per chamber - adjacent cells with the same chamber
 index are grouped into a single connected component, filled with the
 chamber's palette colour at an opacity proportional to its current pressure,
 and labelled once (``Cn / NN%``) in the centre of the component.
 
 The widget supports **per-layer grid dimensions** (chamber and sensor
-grids can be different resolutions, e.g. 3×3 chambers + 8×4 sensors) and
+grids can be different resolutions, e.g. 3x3 chambers + 8x4 sensors) and
 both **rectangular** and **round** skin shapes. For round skins, cells
 whose centroid falls outside the inscribed circle are masked out (drawn
 muted), matching the editor's behaviour.
 
-The widget is read-only — it does not handle clicks; activities still use
+The widget is read-only - it does not handle clicks; activities still use
 ChamberWidget for inflate / deflate / touch controls. SkinGridView is purely
 to give the user a visual map of where each chamber sits and how full it is.
 """
@@ -90,8 +90,8 @@ class SkinGridView(QWidget):
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
         # Sensor highlight source. The node's own ``act`` set (raw) fires on
-        # actuation coupling too — an inflating chamber shifts the magnet and
-        # fakes a touch — so by default we render the skin's COMPENSATED stream
+        # actuation coupling too - an inflating chamber shifts the magnet and
+        # fakes a touch - so by default we render the skin's COMPENSATED stream
         # (``skin.on_magnet`` recomputes ``act`` from the residual), matching what
         # the activities actually react to. We also subscribe to the raw stream so
         # the toggle (set_compensated) can show the uncompensated field for
@@ -116,7 +116,7 @@ class SkinGridView(QWidget):
                     skin, lambda d: self._magnet_msg.emit("comp", d))
 
         self._sensor_buttons: dict[int, QPushButton] = {}
-        # T-buttons only make sense in simulation — on real hardware the
+        # T-buttons only make sense in simulation - on real hardware the
         # magnet sensor board fires the touches, so an in-app simulate button would
         # be misleading. Detect sim mode via the controller class.
         if self._is_simulation():
@@ -159,7 +159,7 @@ class SkinGridView(QWidget):
 
     def resizeEvent(self, ev):
         """Sensor T buttons are positioned in pixel coords that depend on
-        the widget's actual size — reposition them whenever Qt lays us out
+        the widget's actual size - reposition them whenever Qt lays us out
         (or resizes us). Without this they stay at the (0,0)-ish positions
         computed during ``__init__`` when the widget had no real size yet."""
         super().resizeEvent(ev)
@@ -212,7 +212,7 @@ class SkinGridView(QWidget):
                       cells: list[tuple[int, int]]) -> None:
         """Fill the region and draw its outline once.
 
-        No text label is drawn — the region simply fills with the chamber's
+        No text label is drawn - the region simply fills with the chamber's
         colour as it pressurises, mirroring the same chamber's fill bar in the
         ChamberWidget below. This keeps the shape clear of the simulation
         T-buttons, and the pressure % lives on the fill bar."""
@@ -232,7 +232,7 @@ class SkinGridView(QWidget):
     # Sensor T buttons (simulation aid)
     # ------------------------------------------------------------------
 
-    # Small fixed-size simulate button — bigger sensor regions previously
+    # Small fixed-size simulate button - bigger sensor regions previously
     # made the T-button huge enough to swallow the skin.
     _SENSOR_BTN_SIZE = 24
 
@@ -251,7 +251,7 @@ class SkinGridView(QWidget):
                 "QPushButton:pressed { background: rgba(241, 196, 15, 255); }"
             )
             btn.setToolTip(
-                f"Simulate sensor {sensor_idx} touch — same code path as a "
+                f"Simulate sensor {sensor_idx} touch - same code path as a "
                 "real magnet sensor `act` event."
             )
             btn.pressed.connect(lambda idx=sensor_idx: self._simulate_sensor_press(idx))
@@ -262,7 +262,7 @@ class SkinGridView(QWidget):
 
     def _reposition_sensor_buttons(self) -> None:
         """Re-centre each T button on its sensor region using the widget's
-        current pixel size. Safe to call before / during layout — if the
+        current pixel size. Safe to call before / during layout - if the
         widget has no size yet, positions get set to 0 and corrected on
         the next ``resizeEvent``."""
         side = self._SENSOR_BTN_SIZE
@@ -303,7 +303,7 @@ class SkinGridView(QWidget):
                 (tl.y() + br.y() + br.height()) // 2)
 
     def _simulate_sensor_press(self, sensor_idx: int) -> None:
-        """T button pressed — light the sensor yellow and broadcast the new set
+        """T button pressed - light the sensor yellow and broadcast the new set
         of held sensors as an magnet sensor event. The running activity decides whether
         (and how) to drive a chamber, exactly as for a real hardware touch."""
         self._held_sensors.add(sensor_idx)
@@ -314,7 +314,7 @@ class SkinGridView(QWidget):
         self._fire_magnet_act()
 
     def _simulate_sensor_release(self, sensor_idx: int) -> None:
-        """T button released — drop the sensor from the held set and broadcast
+        """T button released - drop the sensor from the held set and broadcast
         the updated set. The activity sees the sensor leave ``act`` (the
         release) and starts its deflate countdown. Yellow starts fading."""
         self._held_sensors.discard(sensor_idx)
@@ -322,7 +322,7 @@ class SkinGridView(QWidget):
 
     def _fire_magnet_act(self) -> None:
         """Broadcast the current held-sensor set as an ``magnet`` event on the
-        skin's touch controller — a ``SimulatedMagnetSensor`` in simulation, a real magnet sensor
+        skin's touch controller - a ``SimulatedMagnetSensor`` in simulation, a real magnet sensor
         ``ESP32Controller`` on hardware. The activity reacts to the same
         ``on_magnet`` event either way, so behaviour is identical when the real
         board is plugged in. Falls back to the local visual handler if there is
@@ -352,7 +352,7 @@ class SkinGridView(QWidget):
 
     def _is_simulation(self) -> bool:
         """True when the skin is backed by simulated hardware (the session was
-        launched with ``simulation_mode`` on) — a SimulatedController for the
+        launched with ``simulation_mode`` on) - a SimulatedController for the
         chambers or a SimulatedMagnetSensor for touch. Gates the T-button input."""
         from src.hardware.simulated_controller import SimulatedController
         from src.hardware.simulated_magnet_sensor import SimulatedMagnetSensor
@@ -410,7 +410,7 @@ class SkinGridView(QWidget):
 
     def set_compensated(self, on: bool) -> None:
         """Switch the sensor highlight between the compensated detection stream
-        (the default — what the activities react to) and the raw sensor field.
+        (the default - what the activities react to) and the raw sensor field.
 
         No-op when this skin has no calibrated coupling: the two streams are then
         identical, so there is nothing to switch (the toggle stays hidden)."""
@@ -468,7 +468,7 @@ class SkinGridView(QWidget):
 
     def _cell_rect(self, r: int, c: int,
                    cols: int, rows: int) -> QRect:
-        """Pixel rect for the (r, c) cell of a grid sized ``cols × rows``,
+        """Pixel rect for the (r, c) cell of a grid sized ``cols x rows``,
         proportionally filling the widget."""
         w, h = self.width(), self.height()
         cw = w / max(1, cols)
@@ -555,7 +555,7 @@ class SkinGridView(QWidget):
     def _read_sensor_layout(skin: Skin, fallback_cols: int, fallback_rows: int
                             ) -> tuple[int, int, list[list[int]]]:
         """Sensor placement. A skin only has touch sensing when it is wired to a
-        touch node (``touch.node_mac`` — the config dialog's Touch-node dropdown);
+        touch node (``touch.node_mac`` - the config dialog's Touch-node dropdown);
         with none configured it has NO sensors regardless of its type, so the
         grid stays empty (no T-buttons, no sensor highlights). When it IS wired,
         typed skins take the sensor COORDINATES from the geometry registry (the
@@ -568,9 +568,9 @@ class SkinGridView(QWidget):
                     _normalise_grid([], fallback_rows, fallback_cols))
         geo = getattr(skin, "geometry", None)
         if geo is not None and geo.sensor_count:
-            # Size the grid to the actual sensor arrangement (e.g. 2×2 for a
+            # Size the grid to the actual sensor arrangement (e.g. 2x2 for a
             # quadrant layout) so each sensor's touch highlight fills its whole
-            # region instead of a single cell of an oversized 4×4 grid.
+            # region instead of a single cell of an oversized 4x4 grid.
             return geo.natural_sensor_grid()
         grid_cfg = touch.get("grid") or {}
         cols = max(1, int(grid_cfg.get("cols", fallback_cols)))

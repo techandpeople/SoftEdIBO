@@ -19,7 +19,7 @@ def _grid(states, n=4):
 
 def _comp(states=None, n=4, **kw):
     # Chamber 0 strongly moves sensors 0 and 1 (irregular: different amounts);
-    # chamber 1 moves sensor 2 — each measured alone at full inflation.
+    # chamber 1 moves sensor 2 - each measured alone at full inflation.
     if states is None:
         states = [
             ((0,), {0: 100.0}, [200.0, 80.0, 0.0, 0.0], None),
@@ -38,10 +38,10 @@ def test_no_inflation_passes_through():
 
 def test_offset_scales_with_level_and_clamps_at_zero():
     comp = _comp()
-    # Chamber 0 at 50 %: interpolated from the origin → half the full delta.
+    # Chamber 0 at 50 %: interpolated from the origin -> half the full delta.
     mag, _ = comp.compensate([120, 50, 5, 5], {0: 50.0, 1: 0.0})
-    assert mag[0] == 120 - 100   # offset 200 * 0.5 = 100 → residual 20
-    assert mag[1] == 10.0        # offset 80 * 0.5 = 40 → residual 10
+    assert mag[0] == 120 - 100   # offset 200 * 0.5 = 100 -> residual 20
+    assert mag[1] == 10.0        # offset 80 * 0.5 = 40 -> residual 10
     assert mag[2] == 5.0         # untouched by chamber 0
 
 
@@ -92,7 +92,7 @@ def test_apply_replaces_mag_and_act():
 
 def test_combination_is_non_additive():
     # Each chamber alone moves one sensor by 100; together they move it by 300
-    # (silicone deforms non-additively) — the measured combo must win over sum.
+    # (silicone deforms non-additively) - the measured combo must win over sum.
     comp = _comp(states=[
         ((0,), {0: 100.0}, [100.0, 0.0, 0.0, 0.0], None),
         ((1,), {1: 100.0}, [0.0, 100.0, 0.0, 0.0], None),
@@ -125,7 +125,7 @@ def test_combo_without_its_singles_does_not_recurse():
     ])
     # exact measured combo corner
     assert comp.expected_offset({1: 24.0, 2: 100.0})[2] == 3.0
-    # a single chamber that was never measured alone → no data → zero, no crash
+    # a single chamber that was never measured alone -> no data -> zero, no crash
     assert comp.expected_offset({2: 100.0}) == [0.0, 0.0, 0.0, 0.0]
     assert comp.expected_offset({1: 24.0, 2: 50.0})[2] >= 0.0   # interpolates, no crash
 
@@ -166,7 +166,7 @@ def test_curve_interpolates_between_measured_levels():
         ((0,), {0: 50.0}, [100.0], None),
         ((0,), {0: 100.0}, [120.0], None),
     ])
-    assert comp.expected_offset({0: 25.0})[0] == 50.0     # origin → first point
+    assert comp.expected_offset({0: 25.0})[0] == 50.0     # origin -> first point
     assert comp.expected_offset({0: 50.0})[0] == 100.0
     assert comp.expected_offset({0: 75.0})[0] == 110.0    # between points
     assert comp.expected_offset({0: 100.0})[0] == 120.0

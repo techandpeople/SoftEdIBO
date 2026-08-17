@@ -1,5 +1,5 @@
 /**
- * SoftEdIBO — node_direct firmware
+ * SoftEdIBO - node_direct firmware
  *
  * 3-chamber air controller with onboard pumps. Valves through ULN2803A
  * (logic-level), pumps through DRV3297 (PWM). See pins.h for details.
@@ -9,13 +9,13 @@
  *   pio run -e debug    -> debug (Serial logs + "debug" command)
  *
  * Module breakdown:
- *   pins.h       — GPIO assignments
- *   pressure.h   — XGZP6847A ADC -> kPa conversion
- *   units.h      — kPa <-> percent helpers
- *   chambers.h   — per-chamber state machine + valve/pump control
- *   cmd_queue.h  — lock-free SPSC command ring buffer
- *   commands.h   — command parsing + processing + status broadcasts
- *   dbg.h        — DBG_PRINT macros
+ *   pins.h       - GPIO assignments
+ *   pressure.h   - XGZP6847A ADC -> kPa conversion
+ *   units.h      - kPa <-> percent helpers
+ *   chambers.h   - per-chamber state machine + valve/pump control
+ *   cmd_queue.h  - lock-free SPSC command ring buffer
+ *   commands.h   - command parsing + processing + status broadcasts
+ *   dbg.h        - DBG_PRINT macros
  *
  * Protocol: ESP-NOW JSON commands, 500 ms status broadcasts.
  *   {"cmd":"inflate|deflate|set_pressure|set_max_pressure|hold","chamber":N,...}
@@ -41,7 +41,7 @@
 // How often the gauges are refreshed for telemetry and the command-time
 // "below/above target?" guards. The actual closed-loop cutoff lives in the
 // coupled-fill engine (chambers::controlTick), which does its own fresh
-// median-filtered reads while a round is filling/measuring — so this cadence only
+// median-filtered reads while a round is filling/measuring - so this cadence only
 // keeps cachedKpa warm for idle telemetry and is cheap (3 dedicated ADC pins).
 constexpr uint32_t PRESSURE_CHECK_MS = 20;
 // The status broadcast cadence is runtime-adjustable (commands::statusReportMs):
@@ -113,7 +113,7 @@ void setup() {
 
     LOG("%s\n", ready_msg);
 
-    // Magnet board ready — broadcast only now that ESP-NOW is up (announce() is a
+    // Magnet board ready - broadcast only now that ESP-NOW is up (announce() is a
     // no-op if no MLX90393 sensors are wired). Doing this inside magnet's
     // hardware_init(), before se::begin(), is what made the node disappear
     // whenever the sensors were connected.
@@ -157,10 +157,10 @@ void loop() {
         // arrives in time (dialog gone, USB/ESP-NOW link dropped) end the run and
         // fall through to normal (now-idle) control rather than inflate forever.
         // SIGNED diff: testHeartbeatMs is set (millis()) in the command drain, after
-        // loop() cached `now`, so it can be a hair ahead — unsigned would underflow
+        // loop() cached `now`, so it can be a hair ahead - unsigned would underflow
         // and kill the run the instant it started.
         if ((int32_t)(now - chambers::testHeartbeatMs) >= (int32_t)chambers::TEST_RUN_TIMEOUT_MS) {
-            DBG_PRINT("TEST_RUN dead-man fired (no keepalive) — stopping\n");
+            DBG_PRINT("TEST_RUN dead-man fired (no keepalive) - stopping\n");
             chambers::testStop();
         } else {
             if (now - lastStatusMs >= commands::statusReportMs(now)) {
@@ -184,8 +184,8 @@ void loop() {
             chambers::cachedKpa[i] = chambers::readKpaMedian(i);   // ambient-zeroed
     }
 
-    // ---- Coupled-fill engines: open the group together → fill to the lowest open
-    //      target → close → settle → measure each isolated → repeat. Drives single
+    // ---- Coupled-fill engines: open the group together -> fill to the lowest open
+    //      target -> close -> settle -> measure each isolated -> repeat. Drives single
     //      and multi-chamber inflate/deflate uniformly (the manifold is shared). ----
     chambers::controlTick(now);
 
@@ -210,7 +210,7 @@ void loop() {
     // they add little traffic but expose the real valve/pump timeline.
     {
         // Signature per chamber = actuation state + BOTH valve outputs, so a frame
-        // is emitted the instant ANY of them changes — including a valve that opens
+        // is emitted the instant ANY of them changes - including a valve that opens
         // and closes without the chamber state settling differently, and a manual
         // valve toggle. This is what makes vi/vd precise enough to see a brief pulse.
         static uint8_t  prevSig[NUM_CHAMBERS] = {0xFF, 0xFF, 0xFF};
@@ -226,7 +226,7 @@ void loop() {
             }
         }
         // One batched frame the instant ANY chamber's state/valves change (all chambers'
-        // fresh state rides along — harmless, and captures a co-changing group in one go).
+        // fresh state rides along - harmless, and captures a co-changing group in one go).
         if (sigChanged) commands::sendStatusAll();
         uint32_t inf = ledcRead(chambers::PUMP1_LEDC_CH);
         uint32_t def = ledcRead(chambers::PUMP2_LEDC_CH);

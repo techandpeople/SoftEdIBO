@@ -2,26 +2,26 @@
 #include <Arduino.h>
 
 // ---------------------------------------------------------------------------
-// Coupled-fill supervisor — shared by node_direct and node_multiplexed.
+// Coupled-fill supervisor - shared by node_direct and node_multiplexed.
 //
 // THE HARDWARE PROBLEM THIS SOLVES
 // Both actuator boards put every chamber of one direction on a SINGLE shared
 // pneumatic line: the inflate valves all tap a common pressure manifold (1 pump
 // on direct, 3 on multiplexed), the deflate valves a common vacuum manifold.
 // There are NO check valves. So while two or more valves of the same direction
-// are open, all those chambers EQUALISE — and each chamber's in-line gauge reads
+// are open, all those chambers EQUALISE - and each chamber's in-line gauge reads
 // the shared line, not its own chamber. Per-chamber closed-loop cutoff therefore
 // fires on the wrong pressure (one chamber's gauge briefly seeing the line trips
 // the others' cutoff). That is why "inflate the whole skin" never settled right.
 //
 // THE ALGORITHM ("actuate coupled, close progressively, verify isolated")
-//   GROUPING — a chamber requested in this direction starts a short coalescing
+//   GROUPING - a chamber requested in this direction starts a short coalescing
 //              window so sibling per-chamber frames (the runtime sends one frame
 //              PER chamber, not a broadcast) are batched and OPEN TOGETHER.
-//   FILLING  — open every chamber in the group at once + run the pumps. While
+//   FILLING  - open every chamber in the group at once + run the pumps. While
 //              coupled every open chamber EQUALISES with the line, so when the
 //              line reaches the LOWEST open target that chamber holds exactly
-//              its target — close JUST IT (progressive close) and keep pumping
+//              its target - close JUST IT (progressive close) and keep pumping
 //              the rest without stopping. The line keeps moving to the next
 //              target; chambers close one by one in target order (inflate:
 //              lowest max first; deflate: highest min first, since the line
@@ -30,17 +30,17 @@
 //              the gauge cannot see (deflate below the sensor floor) closes on
 //              its per-chamber time budget (capMs, from the PC's calibrated
 //              deflate curve) instead.
-//   SETTLING — entered once, after the LAST open valve closes. Every gauge now
+//   SETTLING - entered once, after the LAST open valve closes. Every gauge now
 //              reads its OWN chamber, so after SETTLE_MS each requested chamber
-//              is verified isolated (±tol); whatever is short re-opens for a
+//              is verified isolated (+/-tol); whatever is short re-opens for a
 //              correction round. One settle per sequence instead of one per
-//              round — the pumps only ever stop when everything has closed.
+//              round - the pumps only ever stop when everything has closed.
 //
 // One Engine instance drives ONE direction. A board owns two (inflate, deflate);
 // they are independent because the two manifolds are independent. The board
 // supplies the actuation (open/close a valve, recalc pumps) and a median-filtered
 // gauge read through a small Ops bundle, plus a per-board Tuning (the multiplexed
-// board is slower — I2C PCA9685 writes + a 16-channel mux scan — so its timings
+// board is slower - I2C PCA9685 writes + a 16-channel mux scan - so its timings
 // are looser). Pump COUNT scaling (multiplexed: ceil(open/3) pumps) is the board's
 // recalc job; the engine only opens/closes valves and asks the board to recalc.
 // ---------------------------------------------------------------------------
@@ -76,7 +76,7 @@ enum Event : uint8_t {
 };
 
 // Bundle of board callbacks. Built at the call site with ops(...) so the lambda
-// types are deduced (no std::function, no heap — everything inlines).
+// types are deduced (no std::function, no heap - everything inlines).
 //   readKpa(i)  -> median-filtered gauge for chamber i (also refreshes telemetry)
 //   open(i,dir) -> open chamber i's valve for `dir` (0 inflate / 1 deflate)
 //   close(i)    -> close chamber i (both valves), set it IDLE
@@ -141,7 +141,7 @@ struct Engine {
     // actually needs to move (it has already checked current-vs-target), so a
     // request always means "open this chamber for at least one round". A request
     // while IDLE starts the coalescing window; mid-cycle it joins the next round.
-    // ``cap_ms`` (optional) bounds this chamber's total open time — the closing
+    // ``cap_ms`` (optional) bounds this chamber's total open time - the closing
     // authority for a target below the gauge floor; 0 keeps the tuning backstop.
     void request(int i, float target_kpa, float range_kpa, uint32_t cap_ms = 0) {
         if (i < 0 || i >= count) return;
@@ -157,7 +157,7 @@ struct Engine {
             seqStartMs = phaseMs;
         } else if (wasEmpty) {
             // pendingMask was emptied by the last measure but the phase had not
-            // settled to IDLE yet — restart the sequence clock.
+            // settled to IDLE yet - restart the sequence clock.
             seqStartMs = millis();
         }
     }
@@ -199,7 +199,7 @@ struct Engine {
         o.dbg(EV_ROUND_OPEN, openMask);
     }
 
-    // ---- internal: progressive close — one chamber reached its target (or its
+    // ---- internal: progressive close - one chamber reached its target (or its
     // time budget) while the rest keep filling. Closing while coupled is exact:
     // the chamber equalised with the line, so it traps the line's pressure. The
     // pumps re-scale to the remaining open valves; when the last one closes the
@@ -234,7 +234,7 @@ struct Engine {
         phaseMs  = now;
     }
 
-    // Drive the round → settle → measure cycle. Call every control tick with a
+    // Drive the round -> settle -> measure cycle. Call every control tick with a
     // fresh Ops bundle. Cheap when idle.
     template <class O>
     void tick(uint32_t now, O& o) {
@@ -257,9 +257,9 @@ struct Engine {
             break;
 
         case FILLING: {
-            // Safety paths that end the WHOLE round (close everything → settle):
+            // Safety paths that end the WHOLE round (close everything -> settle):
             // the inflate hard ceiling (immediate, no debounce) and the round cap
-            // (nobody progressing — leak or a pump problem).
+            // (nobody progressing - leak or a pump problem).
             bool endAll = ((int32_t)(now - phaseMs) >= (int32_t)tune.round_max_ms);
             // Ignore target cutoffs until the pump-start transient on the shared
             // line has passed; a single-chamber round was never coupled so it only
@@ -279,7 +279,7 @@ struct Engine {
                 }
                 // Progressive close: every open chamber equalises with the line,
                 // so this chamber reading its own target means the line got there
-                // — it is done. Debounced per chamber so a spike can't close it.
+                // - it is done. Debounced per chamber so a spike can't close it.
                 if (reached(k, i, 0.0f)) {
                     if (gateOpen && ++overCnt[i] >= tune.cutoff_debounce)
                         closeOne(i, now, o);
@@ -294,7 +294,7 @@ struct Engine {
         case SETTLING: {
             if ((int32_t)(now - phaseMs) < (int32_t)tune.settle_ms) {
                 // A round that opened a single chamber was never coupled, so its
-                // fill reading was already trustworthy — no need to wait the full
+                // fill reading was already trustworthy - no need to wait the full
                 // settle before measuring it.
                 if (roundCount > 1) break;
             }
@@ -303,7 +303,7 @@ struct Engine {
                 float tol = tune.tol_frac * range[i];
                 float k   = o.readKpa(i);
                 // A chamber that spent its time budget counts as done even when
-                // its gauge disagrees — for a target below the sensor floor the
+                // its gauge disagrees - for a target below the sensor floor the
                 // budget IS the closing authority, and re-opening it would loop.
                 bool done = reached(k, i, tol)
                          || accumMs[i] >= capOf(i);

@@ -67,7 +67,7 @@ def test_real_touch_still_registers_while_inflated():
 
 def test_offset_scales_with_chamber_level():
     skin, node = _skin(enabled=True)
-    skin._on_pressure(0, 50)             # half inflated → half the offset
+    skin._on_pressure(0, 50)             # half inflated -> half the offset
     seen: list = []
     skin.on_magnet(seen.append)
     node.emit_magnet({"type": "magnet", "mag": [205.0, 8.0], "act": [0]})
@@ -76,7 +76,7 @@ def test_offset_scales_with_chamber_level():
 
 def test_disabled_compensation_is_passthrough():
     skin, node = _skin(enabled=False)
-    # No CompensatedMagnetSource → touch_source is the raw controller.
+    # No CompensatedMagnetSource -> touch_source is the raw controller.
     assert skin.touch_source is node
     seen: list = []
     skin.on_magnet(seen.append)

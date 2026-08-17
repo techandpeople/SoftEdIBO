@@ -1,12 +1,12 @@
 /**
- * SoftEdIBO — Gateway Firmware (ESP-IDF)
+ * SoftEdIBO - Gateway Firmware (ESP-IDF)
  * Target: Seeed XIAO ESP32-S3, USB-Serial/JTAG to the PC.
  *
  * Bridges JSON commands from the PC (USB serial) to remote ESP32 nodes via
  * ESP-NOW, and forwards replies from nodes back to the PC.
  *
  * The ESP-NOW / MAC / radio plumbing lives in the shared se_espnow.h, which
- * also backs the Arduino node firmwares — change ESP-NOW behaviour there once.
+ * also backs the Arduino node firmwares - change ESP-NOW behaviour there once.
  *
  * PC => Gateway (serial, newline-terminated JSON):
  *   {"target":"AA:BB:CC:DD:EE:01","cmd":"inflate","chamber":0,"delta":20}
@@ -141,8 +141,8 @@ static void apStart(void) {
     apApply();
 }
 
-// The AP credentials live on THIS gateway (NVS, Tools → Gateway WiFi AP…), so
-// inject them into any forwarded ota_wifi that doesn't carry its own — the PC
+// The AP credentials live on THIS gateway (NVS, Tools -> Gateway WiFi AP...), so
+// inject them into any forwarded ota_wifi that doesn't carry its own - the PC
 // then never needs to know or store them, and a renamed AP can't break OTA.
 static void apInjectCreds(cJSON* doc) {
     cJSON* cmd = cJSON_GetObjectItemCaseSensitive(doc, "cmd");
@@ -230,7 +230,7 @@ static void rxTask(void*) {
         // Nodes send JSON; forward with a "source" field added.
         cJSON* doc = cJSON_ParseWithLength(reinterpret_cast<const char*>(m.data), m.len);
         if (!doc) {
-            // Non-JSON payload — wrap it in a generic envelope.
+            // Non-JSON payload - wrap it in a generic envelope.
             doc = cJSON_CreateObject();
             cJSON_AddStringToObject(doc, "source", mac);
             cJSON_AddStringToObject(doc, "raw", reinterpret_cast<const char*>(m.data));
@@ -254,7 +254,7 @@ static void rxTask(void*) {
 // A third route alongside gateway-local and ESP-NOW: PC lines with
 // {"target":"thymio",...} are forwarded verbatim (minus "target") to the C6 over
 // UART; lines the C6 sends back are tagged {"source":"thymio",...} so the PC can
-// route/filter them. The gateway stays a transparent pipe — no Thymio-data
+// route/filter them. The gateway stays a transparent pipe - no Thymio-data
 // filtering here; that belongs in the C6 (source) or the PC (sink) once the data
 // shape is known. See docs/THYMIO_WIRELESS_CONTROL.md.
 // ---------------------------------------------------------------------------
@@ -315,7 +315,7 @@ static void thymioRxTask(void*) {
                 cJSON_Delete(doc);
                 llen = 0;
             } else if (llen == 0 && ch != '{') {
-                // Skip leading garbage before the JSON — e.g. a stray byte glitched
+                // Skip leading garbage before the JSON - e.g. a stray byte glitched
                 // onto the C6's UART TX while it resets after a WiFi-OTA, which would
                 // otherwise corrupt the rcp_ready "done" line.
             } else if (llen < sizeof(line) - 1) {
@@ -579,7 +579,7 @@ static void handleGatewayCmd(cJSON* doc) {
 static void processLine(const char* line, size_t len) {
     cJSON* doc = cJSON_ParseWithLength(line, len);
     if (!doc) {
-        // A PC command arrived unparseable — almost always serial byte loss /
+        // A PC command arrived unparseable - almost always serial byte loss /
         // truncation on the USB link. Report it instead of silently dropping it,
         // so a swallowed command (e.g. a missed "stop") is visible on the PC.
         cJSON* err = cJSON_CreateObject();
@@ -598,11 +598,11 @@ static void processLine(const char* line, size_t len) {
     cJSON* target = cJSON_GetObjectItemCaseSensitive(doc, "target");
     uint8_t mac[6];
     if (!cJSON_IsString(target)) {
-        // No target → command for the gateway itself.
+        // No target -> command for the gateway itself.
         handleGatewayCmd(doc);
 #ifdef GATEWAY_THYMIO
     } else if (strcmp(target->valuestring, "thymio") == 0) {
-        // Thymio route → forward to the C6 radio co-processor over UART.
+        // Thymio route -> forward to the C6 radio co-processor over UART.
         apInjectCreds(doc);
         thymioForward(doc);
 #endif
@@ -631,7 +631,7 @@ static void processLine(const char* line, size_t len) {
 
 extern "C" void app_main(void) {
     // The USB-Serial/JTAG port IS the JSON protocol channel, so keep IDF's own logs
-    // (WiFi/lwIP driver chatter, loud during SoftAP OTA) off it — they show up on the
+    // (WiFi/lwIP driver chatter, loud during SoftAP OTA) off it - they show up on the
     // PC as "Invalid JSON" noise. Safe now that the PC read-loop no longer relies on
     // that stream to resync (see ESPNowGateway._read_loop). Rebuild without this to
     // debug at the console.

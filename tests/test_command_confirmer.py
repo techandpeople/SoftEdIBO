@@ -22,7 +22,7 @@ class FakeGateway:
 
     ``drop`` sends are swallowed (no ack) to force retransmits; after that each
     send is acked synchronously on the caller's thread (so the confirmer's wait
-    returns immediately — the tests need no real sleeping). ``ok`` toggles
+    returns immediately - the tests need no real sleeping). ``ok`` toggles
     ack/NACK; ``ack=False`` never acks at all (timeout path)."""
 
     def __init__(self, *, drop: int = 0, ok: bool = True, ack: bool = True):
@@ -71,7 +71,7 @@ def test_nack_fails_fast_without_retry():
     gw = FakeGateway(ok=False)   # node rejects (e.g. bad chamber)
     c = CommandConfirmer(cast(Gateway, gw), MAC)
     assert c.confirm("set_max_pressure", chamber=9, value=20.0) is False
-    assert len(gw.sends) == 1    # a NACK is final — no retransmit
+    assert len(gw.sends) == 1    # a NACK is final - no retransmit
 
 
 def test_timeout_after_exhausting_retries():
@@ -128,7 +128,7 @@ def test_controller_confirms_limits_off_thread():
 
 
 def test_controller_actuation_stays_fire_and_forget():
-    """inflate/deflate are non-idempotent — they must never carry a confirm seq
+    """inflate/deflate are non-idempotent - they must never carry a confirm seq
     (a retransmit would stack a second pulse)."""
     gw = FakeGateway()
     ctrl = ESP32Controller(MAC, cast(Gateway, gw))

@@ -7,7 +7,7 @@
    <item>
     <widget class="QLabel" name="welcome_label">
      <property name="wordWrap"><bool>true</bool></property>
-     <property name="text"><string>&lt;p&gt;This wizard flashes firmware over USB. Choose what you want to flash:&lt;/p&gt;&lt;p&gt;You can re-run this wizard at any time from &lt;b&gt;Tools =&gt; Flash Firmware…&lt;/b&gt;&lt;/p&gt;</string></property>
+     <property name="text"><string>&lt;p&gt;This wizard flashes firmware over USB. Choose what you want to flash:&lt;/p&gt;&lt;p&gt;You can re-run this wizard at any time from &lt;b&gt;Tools =&gt; Flash Firmware...&lt;/b&gt;&lt;/p&gt;</string></property>
     </widget>
    </item>
    <item>

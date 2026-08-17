@@ -12,19 +12,19 @@ os.environ.setdefault("QT_LOGGING_RULES", "qt.qpa.wayland.textinput=false")
 
 # QtWebEngine (Behaviour Editor's block canvas) runs a Chromium process that
 # hard-crashes on some Linux GPU drivers / Wayland-via-xcb setups. Force the
-# web view to render in software — plenty for a block editor — which avoids the
+# web view to render in software - plenty for a block editor - which avoids the
 # driver-dependent GPU crash. Override by exporting QTWEBENGINE_CHROMIUM_FLAGS.
 os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", "--disable-gpu")
 
 # Run via XWayland (xcb) instead of native Wayland. On GNOME/Wayland, creating a
 # new top-level window (a config dialog) occasionally costs ~120 ms in native Qt
-# surface setup — compositor roundtrips whose latency varies — which makes GNOME
+# surface setup - compositor roundtrips whose latency varies - which makes GNOME
 # flash the "busy" spinner cursor (the app never actually blocks; verified with
 # the loop watchdog). Under XWayland that cost disappears. Override by exporting
 # QT_QPA_PLATFORM=wayland to go back to native Wayland.
 #
 # Linux only: xcb does not exist on Windows (whose plugins are direct2d/windows)
-# or macOS (cocoa), and naming a missing platform plugin is fatal — Qt aborts
+# or macOS (cocoa), and naming a missing platform plugin is fatal - Qt aborts
 # with "no Qt platform plugin could be initialized" before any window appears.
 # Leaving QT_QPA_PLATFORM unset lets Qt pick the right one per platform.
 if sys.platform.startswith("linux"):
@@ -48,7 +48,7 @@ try:
     if _stderr is not None:
         faulthandler.enable(_stderr)
 except (RuntimeError, ValueError, AttributeError, io.UnsupportedOperation):
-    pass    # no dumpable stream — Python-level crash handling still works
+    pass    # no dumpable stream - Python-level crash handling still works
 
 from src.log import setup as setup_logging
 from src.crash_handler import install_exception_hooks
@@ -64,16 +64,16 @@ from src.gui.setup_wizard import SetupWizard, mark_setup_done, needs_setup
 
 
 def _fatal(msg: str) -> None:
-    """Show a graphical error dialog and exit — works even without a console."""
-    QMessageBox.critical(None, "SoftEdIBO — Startup Error", msg)
+    """Show a graphical error dialog and exit - works even without a console."""
+    QMessageBox.critical(None, "SoftEdIBO - Startup Error", msg)
     sys.exit(1)
 
 
 def main():
     # Both required BEFORE the QApplication exists for the Behaviour Editor's
-    # QWebEngineView (Tools => Behaviour Editor…):
+    # QWebEngineView (Tools => Behaviour Editor...):
     #  1. shared OpenGL contexts (Qt requirement for the WebEngine widget);
-    #  2. importing QtWebEngine itself — on PySide6/Linux, importing it AFTER
+    #  2. importing QtWebEngine itself - on PySide6/Linux, importing it AFTER
     #     the QApplication is created makes the web view segfault on open. The
     #     import only loads the libraries; the Chromium subprocess still starts
     #     lazily when the editor is actually opened, so sessions are unaffected.
@@ -87,14 +87,14 @@ def main():
     app = QApplication(sys.argv)
     install_exception_hooks("SoftEdIBO")
 
-    # Diagnostic only — off unless SOFTEDIBO_WATCHDOG is set. Dumps the GUI
+    # Diagnostic only - off unless SOFTEDIBO_WATCHDOG is set. Dumps the GUI
     # thread's stack to stderr whenever the event loop stalls (busy cursor).
     from src.gui.loop_watchdog import install_loop_watchdog
     install_loop_watchdog(app)
 
     if needs_setup():
         try:
-            # Cancelling/skipping the wizard is a valid choice — the hardware
+            # Cancelling/skipping the wizard is a valid choice - the hardware
             # may have been flashed on a previous run. Start the app normally
             # instead of quitting, and mark setup done so it does not nag on
             # every launch (the wizard stays reachable from the Tools menu).

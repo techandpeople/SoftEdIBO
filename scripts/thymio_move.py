@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Drive the Thymio's motors + LEDs with NO dongle — the gateway's C6 forges a Thymio
+"""Drive the Thymio's motors + LEDs with NO dongle - the gateway's C6 forges a Thymio
 Aseba SET_VARIABLES frame and transmits it over 802.15.4.
 
 Proven on hardware 2026-07-02: the C6 (`tx` command) transmits the frame, the Thymio obeys.
-This replaces hand-crafted hex — give motor/LED values, it builds the frame(s) with a fresh
+This replaces hand-crafted hex - give motor/LED values, it builds the frame(s) with a fresh
 incrementing sequence number (so the Thymio doesn't reject repeats) and sends them.
 
     python scripts/thymio_move.py --ch 25 --gateway /dev/ttyACM0 --left 150 --right 150   # forward
@@ -13,7 +13,7 @@ incrementing sequence number (so the Thymio doesn't reject repeats) and sends th
 
 --gateway is the port of the C6 running our RCP (`tx` command). The Thymio's channel, PAN
 and addresses below were read off the air; if you re-pair to a different network, re-capture
-and update them (only the channel usually changes — set it with --ch).
+and update them (only the channel usually changes - set it with --ch).
 """
 from __future__ import annotations
 
@@ -88,7 +88,7 @@ def main() -> int:
     if args.led is not None:
         jobs.append((_LEDS_TOP, args.led))
     if not jobs:
-        print("nothing to do — give --left/--right, --stop, or --led")
+        print("nothing to do - give --left/--right, --stop, or --led")
         return 1
 
     port = find_gateway(args.gateway)
@@ -107,7 +107,7 @@ def main() -> int:
             ser.write((json.dumps({"target": "thymio", "cmd": "tx",
                                    "ch": args.ch, "data": data}) + "\n").encode())
             time.sleep(0.08)
-    print(f"sent {args.repeat}× {[(hex(a), v) for a, v in jobs]} on ch{args.ch}")
+    print(f"sent {args.repeat}x {[(hex(a), v) for a, v in jobs]} on ch{args.ch}")
 
     deadline = time.time() + 1.5      # show the C6's tx replies
     while time.time() < deadline:

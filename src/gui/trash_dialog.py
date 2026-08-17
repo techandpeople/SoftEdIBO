@@ -1,4 +1,4 @@
-"""Trash dialog — restore or permanently delete soft-deleted sessions."""
+"""Trash dialog - restore or permanently delete soft-deleted sessions."""
 
 from PySide6.QtWidgets import (
     QDialog,

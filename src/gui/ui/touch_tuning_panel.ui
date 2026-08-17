@@ -6,7 +6,7 @@
    <string>Touch tuning</string>
   </property>
   <property name="whatsThis">
-   <string>Live tuning for this skin's 4-sensor quadrant touch detection. Adjust per-quadrant thresholds and hysteresis, re-zero the sensors, or enable the node's adaptive baseline. Changes are runtime-only — copy good values into the skin's touch: block to keep them.</string>
+   <string>Live tuning for this skin's 4-sensor quadrant touch detection. Adjust per-quadrant thresholds and hysteresis, re-zero the sensors, or enable the node's adaptive baseline. Changes are runtime-only - copy good values into the skin's touch: block to keep them.</string>
   </property>
   <property name="styleSheet">
    <string notr="true">QDoubleSpinBox { min-width: 56px; }</string>
@@ -44,46 +44,46 @@
    </item>
    <item row="1" column="0">
     <widget class="QDoubleSpinBox" name="thr0">
-     <property name="toolTip"><string>Activation threshold for Q1 (TL) in μT.
+     <property name="toolTip"><string>Activation threshold for Q1 (TL) in uT.
 Set above resting value and below touch peak.
 Re-zero sensors first so rest values are near 0.</string></property>
      <property name="decimals"><number>0</number></property>
      <property name="maximum"><double>2000.000000000000000</double></property>
      <property name="singleStep"><double>10.000000000000000</double></property>
-     <property name="suffix"><string> μT</string></property>
+     <property name="suffix"><string> uT</string></property>
     </widget>
    </item>
    <item row="1" column="1">
     <widget class="QDoubleSpinBox" name="thr1">
-     <property name="toolTip"><string>Activation threshold for Q2 (TR) in μT.
+     <property name="toolTip"><string>Activation threshold for Q2 (TR) in uT.
 Set above resting value and below touch peak.
 Re-zero sensors first so rest values are near 0.</string></property>
      <property name="decimals"><number>0</number></property>
      <property name="maximum"><double>2000.000000000000000</double></property>
      <property name="singleStep"><double>10.000000000000000</double></property>
-     <property name="suffix"><string> μT</string></property>
+     <property name="suffix"><string> uT</string></property>
     </widget>
    </item>
    <item row="1" column="2">
     <widget class="QDoubleSpinBox" name="thr2">
-     <property name="toolTip"><string>Activation threshold for Q3 (BL) in μT.
+     <property name="toolTip"><string>Activation threshold for Q3 (BL) in uT.
 Set above resting value and below touch peak.
 Re-zero sensors first so rest values are near 0.</string></property>
      <property name="decimals"><number>0</number></property>
      <property name="maximum"><double>2000.000000000000000</double></property>
      <property name="singleStep"><double>10.000000000000000</double></property>
-     <property name="suffix"><string> μT</string></property>
+     <property name="suffix"><string> uT</string></property>
     </widget>
    </item>
    <item row="1" column="3">
     <widget class="QDoubleSpinBox" name="thr3">
-     <property name="toolTip"><string>Activation threshold for Q4 (BR) in μT.
+     <property name="toolTip"><string>Activation threshold for Q4 (BR) in uT.
 Set above resting value and below touch peak.
 Re-zero sensors first so rest values are near 0.</string></property>
      <property name="decimals"><number>0</number></property>
      <property name="maximum"><double>2000.000000000000000</double></property>
      <property name="singleStep"><double>10.000000000000000</double></property>
-     <property name="suffix"><string> μT</string></property>
+     <property name="suffix"><string> uT</string></property>
     </widget>
    </item>
    <item row="2" column="0" colspan="4">
@@ -96,12 +96,12 @@ Re-zero sensors first so rest values are near 0.</string></property>
      </item>
      <item>
       <widget class="QDoubleSpinBox" name="hyst_spin">
-       <property name="toolTip"><string>Schmitt-trigger drop-out margin (μT).
-A sensor deactivates at (threshold − hysteresis), preventing flicker.</string></property>
+       <property name="toolTip"><string>Schmitt-trigger drop-out margin (uT).
+A sensor deactivates at (threshold - hysteresis), preventing flicker.</string></property>
        <property name="decimals"><number>0</number></property>
        <property name="maximum"><double>500.000000000000000</double></property>
        <property name="singleStep"><double>5.000000000000000</double></property>
-       <property name="suffix"><string> μT</string></property>
+       <property name="suffix"><string> uT</string></property>
       </widget>
      </item>
      <item>
@@ -113,7 +113,7 @@ A sensor deactivates at (threshold − hysteresis), preventing flicker.</string>
      <item>
       <widget class="QPushButton" name="apply_btn">
        <property name="toolTip"><string>Send configure to the touch node
-(this skin type's saved sensitivity, or 300 µT if none saved)</string></property>
+(this skin type's saved sensitivity, or 300 uT if none saved)</string></property>
        <property name="text"><string>Apply to node</string></property>
       </widget>
      </item>
@@ -130,7 +130,7 @@ A sensor deactivates at (threshold − hysteresis), preventing flicker.</string>
      <property name="spacing"><number>4</number></property>
      <item>
       <widget class="QCheckBox" name="adaptive_chk">
-       <property name="whatsThis"><string>Lets the touch node keep tracking slow drift in the magnetic field — e.g. a chamber inflating under the magnet — so it does not read as a false touch. Frozen per-sensor while that sensor is active, so real touches survive. Leave off until actuation contamination is confirmed.</string></property>
+       <property name="whatsThis"><string>Lets the touch node keep tracking slow drift in the magnetic field - e.g. a chamber inflating under the magnet - so it does not read as a false touch. Frozen per-sensor while that sensor is active, so real touches survive. Leave off until actuation contamination is confirmed.</string></property>
        <property name="toolTip"><string>Send configure adaptive_baseline to the touch node.
 Frozen per-sensor while that sensor is active, so touches survive.
 tau is the drift time constant in ms (larger = slower tracking).</string></property>

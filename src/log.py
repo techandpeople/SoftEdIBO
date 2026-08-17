@@ -2,9 +2,9 @@
 
 Call ``setup()`` once at startup (before any other imports that use logging).
 Logs go to:
-  - **console** (stderr): WARNING and above — skipped when there is no console.
+  - **console** (stderr): WARNING and above - skipped when there is no console.
   - **file** (``<app state dir>/softedibo.log``): DEBUG and above, rotated at
-    2 MB × 3 backups.
+    2 MB x 3 backups.
 """
 
 import logging
@@ -29,7 +29,7 @@ def setup(*, console_level: int = logging.WARNING, file_level: int = logging.DEB
 
     root.setLevel(logging.DEBUG)
 
-    # Console handler — terse, warnings+ only. Skipped when there is no console
+    # Console handler - terse, warnings+ only. Skipped when there is no console
     # at all (windowed frozen build): StreamHandler(None) would raise on emit.
     if sys.stderr is not None:
         console = logging.StreamHandler(sys.stderr)
@@ -37,7 +37,7 @@ def setup(*, console_level: int = logging.WARNING, file_level: int = logging.DEB
         console.setFormatter(logging.Formatter(_FMT, datefmt=_DATE_FMT))
         root.addHandler(console)
 
-    # File handler — verbose, rotating
+    # File handler - verbose, rotating
     log_dir = app_state_dir()
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / "softedibo.log"

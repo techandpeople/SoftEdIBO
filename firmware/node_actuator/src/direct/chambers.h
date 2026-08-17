@@ -9,11 +9,11 @@
 // Per-chamber state + valve/pump coordination for node_direct.
 //
 // The 3 chambers share ONE inflate manifold (PUMP1) and ONE deflate manifold
-// (PUMP2), with no check valves — so while two or more valves of the same
+// (PUMP2), with no check valves - so while two or more valves of the same
 // direction are open the chambers equalise and every in-line gauge reads the
 // shared line, not its own chamber. The actual fill targeting therefore runs in
-// the board-agnostic coupled_fill::Engine (open the group together → fill to the
-// lowest open target → close → settle → measure each isolated → repeat). This
+// the board-agnostic coupled_fill::Engine (open the group together -> fill to the
+// lowest open target -> close -> settle -> measure each isolated -> repeat). This
 // file supplies the direct board's actuation (setValve / recalcPumps) and the two
 // per-direction engine instances; the manual, bench-test and emergency-stop paths
 // are unchanged and bypass the engine.
@@ -23,10 +23,10 @@ namespace chambers {
 constexpr float DEFAULT_MAX_KPA = 8.0f;
 constexpr float DEFAULT_MIN_KPA = 0.0f;
 // Effectively uncapped (the unreliable gauge must not gate fills): over-pressure
-// is bounded by TIME — the engine's chamber_max_ms, the manual dead-man, and the
-// actuation watchdog — not by this ceiling. Kept in sync with skin_config.
+// is bounded by TIME - the engine's chamber_max_ms, the manual dead-man, and the
+// actuation watchdog - not by this ceiling. Kept in sync with skin_config.
 constexpr float HARD_MAX_KPA    =  100.0f;
-// Deepest vacuum a chamber may hold — valve-safe, derived from the sensor floor
+// Deepest vacuum a chamber may hold - valve-safe, derived from the sensor floor
 // (pressure.h): -100 (inert) with the blind 0..100 gauge, -40 with the -40..40
 // vacuum sensor so the FA0520E always re-opens. Bounds set_min + the manual cutoff.
 constexpr float HARD_MIN_KPA    = pressure::VACUUM_HOLD_FLOOR_KPA;
@@ -88,7 +88,7 @@ inline void saveTare() {
 
 // Capture each chamber's current RAW reading as its ambient zero and persist it.
 // The caller must have vented every chamber to atmosphere first (valves open, no
-// pump) — the reading is taken raw (bypassing zeroKpa) so re-taring is idempotent.
+// pump) - the reading is taken raw (bypassing zeroKpa) so re-taring is idempotent.
 inline void tare() {
     for (int i = 0; i < NUM_CHAMBERS; i++) {
         float s = 0.0f;
@@ -104,7 +104,7 @@ inline void tare() {
 
 // Mirror of the actual valve outputs, kept in sync by every setValve() call
 // (engine, manual and bench-test paths all route through it). recalcPumps()
-// drives the shared pumps from this — never from chamber state — so a pump can
+// drives the shared pumps from this - never from chamber state - so a pump can
 // only run while it has an open flow path.
 inline bool valveOpen[NUM_CHAMBERS * 2] = {};
 
@@ -118,7 +118,7 @@ inline void setValve(int ch, int side, bool open) {
 // Drive the shared pumps PURELY from the ACTUAL open valves, never from chamber
 // state: each pump runs (full duty) as long as ANY valve of its direction is
 // open, and stops only once they are all closed. So a pump can never dead-head
-// (no open valve of its direction ⇒ it is off — that is the "running dry" guard)
+// (no open valve of its direction => it is off - that is the "running dry" guard)
 // and across the engine's round hand-offs it never drops out from under an open
 // valve. Direct has one pump per direction, so it is on/off (no count scaling).
 inline void recalcPumps() {
@@ -179,12 +179,12 @@ inline constexpr coupled_fill::Tuning TUNE_INFLATE {
     /* round_max_ms      */ 6000,   // per-round cap (leak / can't reach)
     /* seq_max_ms        */ 25000,  // whole-sequence safety cap
     /* chamber_max_ms    */ 5000,   // per-chamber cumulative open cap (stuck sensor)
-    /* cutoff_debounce   */ 3,      // 3 over-target reads @ ~20 ms control tick ≈ 60 ms
+    /* cutoff_debounce   */ 3,      // 3 over-target reads @ ~20 ms control tick ~= 60 ms
     /* tol_frac          */ 0.10f,
     /* hard_max_kpa      */ HARD_MAX_KPA,
 };
 // Deflate drives the vacuum manifold; the gauge is blind below atmosphere, so a
-// negative target finishes on chamber_max_ms (time), targets ≥ 0 finish on gauge.
+// negative target finishes on chamber_max_ms (time), targets >= 0 finish on gauge.
 inline constexpr coupled_fill::Tuning TUNE_DEFLATE {
     50, 40, 220, 150, 6000, 25000, 5000, 3, 0.10f, HARD_MAX_KPA,
 };
@@ -216,7 +216,7 @@ inline void engOpen(int i, uint8_t dir) {
 // ---------------------------------------------------------------------------
 
 // ``cap_ms`` (optional) is the per-chamber open-time budget forwarded to the
-// engine — the closing authority for a target the gauge can't see (a deflate
+// engine - the closing authority for a target the gauge can't see (a deflate
 // below the sensor floor, timed by the PC's calibrated deflate curve).
 
 inline void requestInflate(int n, float target, uint8_t duty, uint32_t cap_ms = 0) {
@@ -289,7 +289,7 @@ inline void controlTick(uint32_t now) {
 inline bool seqActive() { return inflateEng.active() || deflateEng.active(); }
 
 // Force-stop any chamber actuating past ACTUATION_TIMEOUT_MS (sensor failure
-// safety net — see constant above). Call periodically from loop().
+// safety net - see constant above). Call periodically from loop().
 inline void actuationWatchdog(uint32_t now) {
     for (int i = 0; i < NUM_CHAMBERS; i++) {
         if (state[i].state == IDLE) continue;
@@ -307,7 +307,7 @@ inline void actuationWatchdog(uint32_t now) {
 }
 
 // ---------------------------------------------------------------------------
-// Manual (dev/test) actuation — bypasses the engine, so it needs its own safety
+// Manual (dev/test) actuation - bypasses the engine, so it needs its own safety
 // net. Two guards, enforced by manualSafetyTick() from loop():
 //   1. Dead-man: any manual actuator auto-offs after MANUAL_MAX_ON_MS, so a lost
 //      "off" command or a distracted operator can't leave a pump running.
@@ -353,7 +353,7 @@ inline void manualSafetyTick(uint32_t now) {
     //    millis() inside the command drain, which runs AFTER loop() cached `now`,
     //    so the timestamp is a hair AHEAD of `now`. An unsigned `now - ts` would
     //    underflow on that first tick (~4e9 >= 5000) and slam the just-opened
-    //    valve/pump shut — the "manual valve sometimes closes itself" bug.
+    //    valve/pump shut - the "manual valve sometimes closes itself" bug.
     for (int i = 0; i < 2; i++)
         if (manualPumpOn[i] && (int32_t)(now - manualPumpTs[i]) >= (int32_t)MANUAL_MAX_ON_MS)
             setManualPump(i, false);
@@ -366,7 +366,7 @@ inline void manualSafetyTick(uint32_t now) {
     // A manual-open valve counts into recalcPumps(), so an engine round can leave
     // a pump running for it after the engine itself finished. When the dead-man
     // closes that valve the pump must be recomputed or it dead-heads. Skipped
-    // while a manual pump is on — that is operator-owned (own dead-man above).
+    // while a manual pump is on - that is operator-owned (own dead-man above).
     if (deadmanClosed && !manualPumpOn[0] && !manualPumpOn[1]) recalcPumps();
 
     // 2. HARD limit cutoff, both directions:
@@ -391,7 +391,7 @@ inline void manualSafetyTick(uint32_t now) {
 }
 
 // ---------------------------------------------------------------------------
-// Continuous bench test — latch ONE pump + all of its valves wide open,
+// Continuous bench test - latch ONE pump + all of its valves wide open,
 // INDEFINITELY, ignoring pressure and the manual dead-man. For verifying pump
 // and valve wiring at the bench when the pressure sensor reads wrong; never used
 // in normal operation or exposed to children.
@@ -430,7 +430,7 @@ inline void testRun(int dir, int chamber = -1, uint8_t duty = 0) {
     if (dir != 0 && dir != 1) return;
     testHeartbeatMs = millis();          // every (re)send refreshes the dead-man
     int newChamber  = (chamber >= 0 && chamber < NUM_CHAMBERS) ? chamber : -1;
-    if (testDir == dir && testChamber == newChamber) return;  // already running → just refreshed
+    if (testDir == dir && testChamber == newChamber) return;  // already running -> just refreshed
     testDir     = dir;
     testChamber = newChamber;
     // duty 0 (unset) -> full speed. The duty-curve calibration sweep drives this
@@ -448,7 +448,7 @@ inline void testRun(int dir, int chamber = -1, uint8_t duty = 0) {
 }
 
 // ---------------------------------------------------------------------------
-// Emergency stop — latch every actuator OFF until explicitly re-armed.
+// Emergency stop - latch every actuator OFF until explicitly re-armed.
 // ---------------------------------------------------------------------------
 
 inline bool stopped = false;

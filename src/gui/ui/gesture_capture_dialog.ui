@@ -10,7 +10,7 @@
    <item>
     <widget class="QLabel" name="source_label">
      <property name="toolTip"><string>Locks onto the first touch node that streams data. Touch the skin to connect it.</string></property>
-     <property name="text"><string>Waiting for a touch node… (touch the skin once)</string></property>
+     <property name="text"><string>Waiting for a touch node... (touch the skin once)</string></property>
     </widget>
    </item>
    <item>
@@ -39,7 +39,7 @@
          <item row="1" column="1">
           <widget class="QComboBox" name="variant_combo">
            <property name="editable"><bool>true</bool></property>
-           <property name="toolTip"><string>Optional silicone format — used as a touch feature so one model can adapt across formats. Leave blank if unsure.</string></property>
+           <property name="toolTip"><string>Optional silicone format - used as a touch feature so one model can adapt across formats. Leave blank if unsure.</string></property>
           </widget>
          </item>
          <item row="2" column="0">
@@ -110,7 +110,7 @@
         <widget class="QLabel" name="prompt_label">
          <property name="alignment"><set>Qt::AlignCenter</set></property>
          <property name="styleSheet"><string>font-size: 30pt; font-weight: bold;</string></property>
-         <property name="text"><string>—</string></property>
+         <property name="text"><string>-</string></property>
         </widget>
        </item>
        <item>
@@ -145,8 +145,8 @@
         <widget class="QLabel" name="last_capture_label">
          <property name="alignment"><set>Qt::AlignCenter</set></property>
          <property name="styleSheet"><string>color: #566573;</string></property>
-         <property name="toolTip"><string>What the last captured gesture looked like on the stream: duration, pulses, peak field and — for slides — the direction of travel.</string></property>
-         <property name="whatsThis"><string>Summary of the most recent captured gesture: its label, duration in milliseconds, number of pulses (multi-taps), peak magnetic field, the sensors involved and, when the touch travelled across the skin, its direction (e.g. S1→S0 ← left).</string></property>
+         <property name="toolTip"><string>What the last captured gesture looked like on the stream: duration, pulses, peak field and - for slides - the direction of travel.</string></property>
+         <property name="whatsThis"><string>Summary of the most recent captured gesture: its label, duration in milliseconds, number of pulses (multi-taps), peak magnetic field, the sensors involved and, when the touch travelled across the skin, its direction (e.g. S1-&gt;S0 &lt;- left).</string></property>
          <property name="text"><string/></property>
         </widget>
        </item>
@@ -184,7 +184,7 @@
        <item>
         <widget class="QLabel" name="result_label">
          <property name="styleSheet"><string>font-size: 16pt; font-weight: bold;</string></property>
-         <property name="text"><string>Training…</string></property>
+         <property name="text"><string>Training...</string></property>
         </widget>
        </item>
        <item>

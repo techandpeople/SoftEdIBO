@@ -2,7 +2,7 @@
 
 Qt slots/callbacks run on the main thread, so any blocking call made from one
 (opening a serial port, enumerating ports, training a model, parsing a big
-recording) freezes the event loop — the window stops repainting and the cursor
+recording) freezes the event loop - the window stops repainting and the cursor
 shows the OS "busy" spinner. ``run_async`` moves that call to a worker thread
 from the global :class:`QThreadPool` and emits the result via a signal, which
 Qt delivers as a queued connection on the GUI thread.
@@ -38,10 +38,10 @@ class _Task(QRunnable):
         self._fn = fn
         self._signals = signals
 
-    def run(self) -> None:  # noqa: D401 — QRunnable entry point
+    def run(self) -> None:  # noqa: D401 - QRunnable entry point
         try:
             result = self._fn()
-        except Exception as exc:  # noqa: BLE001 — surface, don't crash the worker
+        except Exception as exc:  # noqa: BLE001 - surface, don't crash the worker
             self._signals.error.emit(exc)
         else:
             self._signals.done.emit(result)

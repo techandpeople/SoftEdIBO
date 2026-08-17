@@ -1,11 +1,11 @@
-"""BehaviorEditorPanel — block-based activity authoring (Visual Editor tab).
+"""BehaviorEditorPanel - block-based activity authoring (Visual Editor tab).
 
 A Scratch-like block editor for authoring activity behaviours without writing
 Python. The blocks are hosted by Blockly inside a ``QWebEngineView``; on Save
 they are compiled to the declarative spec interpreted by
 :class:`~src.activities.scripted_activity.ScriptedActivity` and stored in the
 ``declarative_activities`` table. The saved behaviour then appears in the
-session activity list and runs **without** this editor — Blockly / QtWebEngine
+session activity list and runs **without** this editor - Blockly / QtWebEngine
 are only ever imported here, never during a session.
 
 This is a plain :class:`QWidget` so it can be embedded as the "Visual Editor"
@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_NEW_LABEL = "(New behaviour…)"
+_NEW_LABEL = "(New behaviour...)"
 _FILE_FILTER = "SoftEdIBO activity (*.json);;All files (*)"
 _DEFAULT_DESCRIPTION = "Authored in the block editor."
 _DEFAULT_COLOUR = "#8e44ad"
@@ -79,11 +79,11 @@ class _LedPreview:
             try:
                 ctrl.set_led(color, pattern="solid", period_ms=0)
                 self._on = True
-            except Exception:   # noqa: BLE001 — preview is best-effort
+            except Exception:   # noqa: BLE001 - preview is best-effort
                 logger.exception("LED preview set_led failed")
 
     def clear(self) -> None:
-        """Turn the rings off again — called when the editor closes so robots
+        """Turn the rings off again - called when the editor closes so robots
         are not left lit on the last previewed colour."""
         if not self._on:
             return
@@ -123,7 +123,7 @@ class BehaviorEditorPanel(QWidget, Ui_BehaviorEditorPanel):
         # the selection changes (New / pick another behaviour).
         self._pending_description: str | None = None
 
-        # QtWebEngine is heavy — import it only now (the dialog hosting this
+        # QtWebEngine is heavy - import it only now (the dialog hosting this
         # panel is itself lazy-imported from the Tools menu), so a session
         # never pays for it.
         from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -159,7 +159,7 @@ class BehaviorEditorPanel(QWidget, Ui_BehaviorEditorPanel):
         self._ready = bool(ok)
         self._set_buttons_enabled(ok)
         if not ok:
-            self._status("Editor failed to load — see the editor message.")
+            self._status("Editor failed to load - see the editor message.")
 
     def _set_buttons_enabled(self, on: bool) -> None:
         for w in (self.newButton, self.deleteButton, self.saveButton,
@@ -203,7 +203,7 @@ class BehaviorEditorPanel(QWidget, Ui_BehaviorEditorPanel):
             self._web.page().runJavaScript("newWorkspace()")
         else:
             self.nameEdit.setText(rec.name)
-            payload = json.dumps(json.dumps(rec.spec))   # → a JS string literal
+            payload = json.dumps(json.dumps(rec.spec))   # -> a JS string literal
             self._web.page().runJavaScript(f"loadSpec({payload})")
 
     # ------------------------------------------------------------------
@@ -211,7 +211,7 @@ class BehaviorEditorPanel(QWidget, Ui_BehaviorEditorPanel):
     # ------------------------------------------------------------------
 
     def _on_new(self) -> None:
-        self.behaviorCombo.setCurrentIndex(0)   # fires _on_select → newWorkspace
+        self.behaviorCombo.setCurrentIndex(0)   # fires _on_select -> newWorkspace
         if self.behaviorCombo.currentIndex() == 0:
             self._on_select()
         self.nameEdit.setFocus()
@@ -268,7 +268,7 @@ class BehaviorEditorPanel(QWidget, Ui_BehaviorEditorPanel):
         self._db.save_declarative_activity(rec)
         self._pending_description = None
         self._reload_combo(select_id=rec.activity_id)
-        self._status(f"Saved {rec.activity_id} — '{name}'.")
+        self._status(f"Saved {rec.activity_id} - '{name}'.")
 
     # ------------------------------------------------------------------
     # Import / export (portable .json files)
@@ -319,7 +319,7 @@ class BehaviorEditorPanel(QWidget, Ui_BehaviorEditorPanel):
             QMessageBox.critical(self, "Export failed",
                                  f"Could not write the file:\n\n{exc}")
             return
-        self._status(f"Exported '{name}' → {Path(path).name}.")
+        self._status(f"Exported '{name}' -> {Path(path).name}.")
 
     def _on_import(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -333,16 +333,16 @@ class BehaviorEditorPanel(QWidget, Ui_BehaviorEditorPanel):
             QMessageBox.critical(self, "Import failed",
                                  f"Could not import this file:\n\n{exc}")
             return
-        # Land it as a new, unsaved behaviour for review — Save then creates a
+        # Land it as a new, unsaved behaviour for review - Save then creates a
         # fresh record (new DA id), so importing never clobbers an existing one.
         self.behaviorCombo.blockSignals(True)
-        self.behaviorCombo.setCurrentIndex(0)          # "(New behaviour…)"
+        self.behaviorCombo.setCurrentIndex(0)          # "(New behaviour...)"
         self.behaviorCombo.blockSignals(False)
         self.nameEdit.setText(name or Path(path).stem)
         self._pending_description = description or _DEFAULT_DESCRIPTION
-        payload = json.dumps(json.dumps(spec))         # → a JS string literal
+        payload = json.dumps(json.dumps(spec))         # -> a JS string literal
         self._web.page().runJavaScript(f"loadSpec({payload})")
-        self._status(f"Imported '{name or Path(path).stem}' — "
+        self._status(f"Imported '{name or Path(path).stem}' - "
                      "review and Save to keep it.")
 
     def _status(self, text: str) -> None:
@@ -384,7 +384,7 @@ class BehaviorEditorPanel(QWidget, Ui_BehaviorEditorPanel):
 
     def _on_copy_hex(self) -> None:
         QApplication.clipboard().setText(self._current_colour)
-        self._status(f"Copied {self._current_colour} — "
+        self._status(f"Copied {self._current_colour} - "
                      "paste it into a block's colour field.")
 
     def clear_preview(self) -> None:

@@ -50,7 +50,7 @@ class _FakeCtrl:
 
 class _FakeSkin:
     # Organ-sensing extras: only set by tests that exercise organ conditions
-    # (annotations only — no runtime attribute unless a test assigns them).
+    # (annotations only - no runtime attribute unless a test assigns them).
     organ: dict
     organs: list[dict]
 
@@ -189,7 +189,7 @@ def test_legacy_spec_without_target_runs_on_any_robot():
 
 
 # ---------------------------------------------------------------------------
-# State machine — on enter, time + touch transitions
+# State machine - on enter, time + touch transitions
 # ---------------------------------------------------------------------------
 
 def _condition_a():
@@ -256,7 +256,7 @@ def test_advance_phase_skips_timer_and_stops_at_terminal(clock):
     assert ctrl.led is not None
     assert ctrl.led[0] == "#f1c40f"               # yellow
 
-    # phase3 is terminal (no transitions) → nothing left to advance.
+    # phase3 is terminal (no transitions) -> nothing left to advance.
     assert activity.can_advance_phase() is False
     assert activity.advance_phase() is None
     assert activity.unit_state(uid) == "phase3"
@@ -267,8 +267,8 @@ def test_rewind_phase_goes_back_and_stops_at_initial(clock):
     _start(activity, robot)
     uid = _unit(activity).unit_id
 
-    activity.advance_phase()                       # phase1 → phase2
-    activity.advance_phase()                       # phase2 → phase3
+    activity.advance_phase()                       # phase1 -> phase2
+    activity.advance_phase()                       # phase2 -> phase3
     assert activity.unit_state(uid) == "phase3"
 
     assert activity.can_rewind_phase() is True
@@ -277,7 +277,7 @@ def test_rewind_phase_goes_back_and_stops_at_initial(clock):
     assert activity.rewind_phase() == "phase1"
     assert activity.unit_state(uid) == "phase1"
 
-    # Back at the initial phase → nothing earlier to rewind to.
+    # Back at the initial phase -> nothing earlier to rewind to.
     assert activity.can_rewind_phase() is False
     assert activity.rewind_phase() is None
     assert activity.unit_state(uid) == "phase1"
@@ -289,11 +289,11 @@ def test_phase_listener_fires_on_timed_and_manual_moves(clock):
     seen: list[bool] = []
     activity.add_phase_listener(lambda: seen.append(True))
 
-    clock.advance(121)                             # timed transition phase1→2
+    clock.advance(121)                             # timed transition phase1->2
     activity._on_tick()
     assert len(seen) == 1
 
-    activity.advance_phase()                       # manual transition phase2→3
+    activity.advance_phase()                       # manual transition phase2->3
     assert len(seen) == 2
 
 
@@ -310,7 +310,7 @@ def test_single_phase_spec_has_no_phases(clock):
 
 
 # ---------------------------------------------------------------------------
-# Sequence scheduler — inflate / wait / deflate plays out over time
+# Sequence scheduler - inflate / wait / deflate plays out over time
 # ---------------------------------------------------------------------------
 
 def test_sequence_inflate_wait_deflate(clock):
@@ -331,7 +331,7 @@ def test_sequence_inflate_wait_deflate(clock):
     assert skin.pressures == [(0, 60)]
 
     clock.advance(1.0)
-    activity._on_tick()                  # wait satisfied → deflate runs
+    activity._on_tick()                  # wait satisfied -> deflate runs
     assert skin.pressures == [(0, 60), (0, 0)]
 
 
@@ -400,7 +400,7 @@ def test_fade_emits_one_firmware_fade_frame(clock):
 
 
 # ---------------------------------------------------------------------------
-# LED ring selection — multiplexed board's four independent rings
+# LED ring selection - multiplexed board's four independent rings
 # ---------------------------------------------------------------------------
 
 def _ring_activity(do_steps):
@@ -420,7 +420,7 @@ def test_set_led_ring_passes_through(clock):
 
 
 def test_set_led_without_ring_means_all(clock):
-    # Omitted ring → None (every ring), matching the prior whole-ring behaviour.
+    # Omitted ring -> None (every ring), matching the prior whole-ring behaviour.
     ctrl = _ring_activity([{"set_led": {"color": "#ff0000"}}])
     assert ctrl.led_ring is None
 
@@ -507,9 +507,9 @@ def test_organs_all_good_transition(clock):
     unit = _unit(activity)
 
     activity._on_tick()
-    assert unit.state == "sick"                  # no reading yet → not cured
+    assert unit.state == "sick"                  # no reading yet -> not cured
 
-    ctrl.fire_organ(500.0)                        # two 1000Ω good organs ‖ = 500Ω
+    ctrl.fire_organ(500.0)                        # two 1000ohm good organs || = 500ohm
     assert unit.organ_verdicts == {"1": "good", "2": "good"}
     activity._on_tick()
     assert unit.state == "cured"
@@ -524,7 +524,7 @@ def test_organs_count_requires_no_bad(clock):
                     "bad_op": "<=", "bad": 0}})), robot)
     unit = _unit(activity)
 
-    # One good (1000Ω) ‖ one bad (3000Ω) = 750Ω: a bad organ is still plugged.
+    # One good (1000ohm) || one bad (3000ohm) = 750ohm: a bad organ is still plugged.
     ctrl.fire_organ(750.0)
     activity._on_tick()
     assert unit.state == "sick"                  # bad_op <= 0 fails
@@ -543,7 +543,7 @@ def test_organs_cover_off_marks_absent(clock):
 
     ctrl.fire_organ(500.0)
     assert unit.organ_verdicts == {"1": "good", "2": "good"}
-    ctrl.fire_organ(float("inf"))                 # cover lifted → open circuit
+    ctrl.fire_organ(float("inf"))                 # cover lifted -> open circuit
     assert set(unit.organ_verdicts.values()) == {"absent"}
 
 
@@ -573,7 +573,7 @@ def test_available_activities_includes_db_behaviour(db):
 
     names = [a.name for a in available_activities(db)]
     assert "My Saved Behaviour" in names
-    # No code-defined activities ship anymore — only the DB behaviour is offered.
+    # No code-defined activities ship anymore - only the DB behaviour is offered.
     assert names == ["My Saved Behaviour"]
     assert available_activities() == []        # nothing without a database
 
@@ -618,7 +618,7 @@ def test_declarative_activity_round_trip(db):
 
 
 # ---------------------------------------------------------------------------
-# Thymio verbs (thymio_drive / thymio_leds) — wheeled base
+# Thymio verbs (thymio_drive / thymio_leds) - wheeled base
 # ---------------------------------------------------------------------------
 
 class _FakeThymioBase(_FakeRobot):
@@ -726,7 +726,7 @@ def test_thymio_leds_scaled_to_aseba_0_32():
     act = ScriptedActivity("t", "d", _thymio_spec(
         [{"thymio_leds": {"color": "#ff0080"}}]))
     _start(act, robot)
-    assert robot.leds == [(32, 0, 16)]     # 255→32, 0→0, 128→16
+    assert robot.leds == [(32, 0, 16)]     # 255->32, 0->0, 128->16
 
 
 def test_thymio_sound_system_tone_and_track():
@@ -734,19 +734,19 @@ def test_thymio_sound_system_tone_and_track():
     act = ScriptedActivity("t", "d", _thymio_spec(
         [{"thymio_sound": {"sys": 3, "freq": 0, "dur": 200, "track": -1}}]))
     _start(act, robot)
-    assert robot.sounds == [(3, None, 500, None)]     # freq 0, track <0 → system
+    assert robot.sounds == [(3, None, 500, None)]     # freq 0, track <0 -> system
 
     robot2 = _FakeThymioBase()
     act2 = ScriptedActivity("t", "d", _thymio_spec(
         [{"thymio_sound": {"sys": 2, "freq": 700, "dur": 250}}]))
     _start(act2, robot2)
-    assert robot2.sounds == [(None, 700, 250, None)]  # freq set → tone path
+    assert robot2.sounds == [(None, 700, 250, None)]  # freq set -> tone path
 
     robot3 = _FakeThymioBase()
     act3 = ScriptedActivity("t", "d", _thymio_spec(
         [{"thymio_sound": {"sys": 2, "freq": 700, "track": 5}}]))
     _start(act3, robot3)
-    assert robot3.sounds == [(None, None, 500, 5)]    # track ≥0 wins over tone/system
+    assert robot3.sounds == [(None, None, 500, 5)]    # track >=0 wins over tone/system
 
 
 def test_thymio_sound_noop_on_non_thymio_robot():
@@ -755,7 +755,7 @@ def test_thymio_sound_noop_on_non_thymio_robot():
     act = ScriptedActivity("t", "d",
                            {"initial": "s",
                             "states": {"s": {"do": [{"thymio_sound": {"sys": 1}}]}}})
-    _start(act, robot)          # must not raise — duck-typed no-op
+    _start(act, robot)          # must not raise - duck-typed no-op
 
 
 def _impact_spec(min_impacts):
@@ -775,11 +775,11 @@ def test_on_impact_condition_advances_after_enough_knocks(clock):
 
     robot.fire_impact()
     act._on_tick()
-    assert act.unit_state(uid) == "p1"      # one knock < 2 → still here
+    assert act.unit_state(uid) == "p1"      # one knock < 2 -> still here
 
     robot.fire_impact()
     act._on_tick()
-    assert act.unit_state(uid) == "p2"      # second knock → advance
+    assert act.unit_state(uid) == "p2"      # second knock -> advance
 
 
 def test_impact_count_resets_on_state_enter(clock):
@@ -803,7 +803,7 @@ def test_impact_listener_removed_on_stop():
 
 
 def test_on_impact_condition_filters_by_level(clock):
-    # Needs 1 hit at level ≥ 3 (slap). A touch/knock must not satisfy it.
+    # Needs 1 hit at level >= 3 (slap). A touch/knock must not satisfy it.
     spec = {"initial": "p1",
             "states": {
                 "p1": {"transitions": [
@@ -818,7 +818,7 @@ def test_on_impact_condition_filters_by_level(clock):
     robot.fire_impact(level=1)               # a touch
     robot.fire_impact(level=2)               # a knock
     act._on_tick()
-    assert act.unit_state(uid) == "p1"       # neither is a slap → stay
+    assert act.unit_state(uid) == "p1"       # neither is a slap -> stay
     robot.fire_impact(level=3)               # a slap
     act._on_tick()
     assert act.unit_state(uid) == "p2"
@@ -845,7 +845,7 @@ def test_on_lifted_condition_advances(clock):
     assert act.unit_state(uid) == "p1"       # one lift < 2
     robot.fire_lifted(True)
     act._on_tick()
-    assert act.unit_state(uid) == "p2"       # second lift → advance
+    assert act.unit_state(uid) == "p2"       # second lift -> advance
 
 
 def test_lifted_listener_removed_on_stop():
@@ -879,7 +879,7 @@ def test_thymio_verbs_noop_on_robot_without_base(clock):
 
 
 # ---------------------------------------------------------------------------
-# if_robot / robot_is — one behaviour, per-robot branches
+# if_robot / robot_is - one behaviour, per-robot branches
 # ---------------------------------------------------------------------------
 
 def _if_robot_spec(robot="thymio", do=None, els=None):

@@ -6,7 +6,7 @@
 #include "pins.h"
 #include "dbg.h"
 
-// Two PCA9685 PWM expanders drive 3× ULN2803A → 24 valve outputs (UNL1..24).
+// Two PCA9685 PWM expanders drive 3x ULN2803A -> 24 valve outputs (UNL1..24).
 //
 // Mapping (verified from netlist):
 //   PCA #1 (8 chambers): UNL[i+1] = pca1.LED[i]   for i = 0..15        (sequential)
@@ -16,8 +16,8 @@
 //   chamber c (0..11): inflate = UNL[c*2 + 1], deflate = UNL[c*2 + 2]
 //
 // On the firmware's PCA channels:
-//   c < 8    → pca1 channels (c*2)   inflate, (c*2 + 1) deflate
-//   c >= 8   → pca2 channels (23-2c) inflate, (22-2c)   deflate    (REVERSED)
+//   c < 8    -> pca1 channels (c*2)   inflate, (c*2 + 1) deflate
+//   c >= 8   -> pca2 channels (23-2c) inflate, (22-2c)   deflate    (REVERSED)
 
 namespace pca_valves {
 
@@ -34,7 +34,7 @@ inline bool    initialized = false;
 
 // Software mirror of the actual valve outputs, kept in sync by every write path
 // (setChamberValve / closeAllValves). There is no readback from the PCA9685, so
-// this is the single source of truth for "is this valve open" — reported in the
+// this is the single source of truth for "is this valve open" - reported in the
 // status broadcast so the PC reflects the real valve state. Index: chamber*2 +
 // side, side 0 = inflate, 1 = deflate.
 inline bool valveOpen[MAX_CHAMBERS * 2] = {};
@@ -66,14 +66,14 @@ inline bool init() {
     uint8_t addrs[16];
     int n = scanI2C(addrs, 16);
     if (n < 2) {
-        LOG("ERROR: PCA9685 address conflict — only %d chip(s) found, "
+        LOG("ERROR: PCA9685 address conflict - only %d chip(s) found, "
             "need 2 distinct addresses (check A0..A5 pins).\n", n);
         return false;
     }
 
     pca1_addr = addrs[0];
     pca2_addr = addrs[1];
-    LOG("TODO: PCA9685 #1 at 0x%02X, #2 at 0x%02X — confirm against PCB\n",
+    LOG("TODO: PCA9685 #1 at 0x%02X, #2 at 0x%02X - confirm against PCB\n",
         pca1_addr, pca2_addr);
 
     pca1 = Adafruit_PWMServoDriver(pca1_addr);
@@ -100,7 +100,7 @@ inline void setBinary(Adafruit_PWMServoDriver& chip, int ch, bool on) {
 }
 
 // Per-chamber valve control. Closes both before opening one if the side
-// changes — caller is responsible for the settle delay between close-then-open.
+// changes - caller is responsible for the settle delay between close-then-open.
 inline void setChamberValve(int chamber, bool inflate_open, bool deflate_open) {
     if (!initialized) return;
     DBG_PRINT("VALVE ch=%d inflate=%s deflate=%s\n",

@@ -1,4 +1,4 @@
-"""Tests for StreamRecorder — JSONL capture of gateway messages."""
+"""Tests for StreamRecorder - JSONL capture of gateway messages."""
 
 import json
 

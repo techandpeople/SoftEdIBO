@@ -17,7 +17,7 @@ robots:
 #           max_slots: 12
 #       skins:
 #         - skin_id: belly
-#           # Skin type — picks the hardcoded geometry (shape + sensor
+#           # Skin type - picks the hardcoded geometry (shape + sensor
 #           # coordinates) from src/hardware/skin_geometry.py and the per-type
 #           # touch-gesture model. Offered (filtered by robot) in the skin
 #           # dialog. When set, it supersedes the legacy per-skin shape/grids.
@@ -35,7 +35,7 @@ robots:
 #           # ``grid`` is the CHAMBER grid resolution; the sensor grid below
 #           # can override its dimensions independently.
 #           grid: {cols: 8, rows: 4}
-#           chamber_grid:    # rows × cols, cell = chamber index in `chambers` (-1 = empty)
+#           chamber_grid:    # rows x cols, cell = chamber index in `chambers` (-1 = empty)
 #             - [-1, -1,  0,  0,  0,  0, -1, -1]
 #             - [-1,  0,  0,  0,  0,  0,  0, -1]
 #             - [-1, -1,  1,  1,  1,  1, -1, -1]
@@ -47,18 +47,18 @@ robots:
 #             # Optional separate sensor-grid dimensions. If omitted, the
 #             # sensor grid uses the same dims as ``grid`` above.
 #             grid: {cols: 8, rows: 4}
-#             sensor_grid:                    # rows × cols of touch.grid, cell = sensor index (-1 = none)
+#             sensor_grid:                    # rows x cols of touch.grid, cell = sensor index (-1 = none)
 #               - [0, 0, 1, 1, 1, 1, 2, 2]
 #               - [0, 0, 1, 1, 1, 1, 2, 2]
 #               - [0, 0, 1, 1, 1, 1, 2, 2]
 #               - [0, 0, 1, 1, 1, 1, 2, 2]
-#             # Optional sensor → chamber mapping (keys are sensor indices).
+#             # Optional sensor -> chamber mapping (keys are sensor indices).
 #             # Used by activities (and the SkinGridView in simulation) to
 #             # route touches into chamber actions. Edited from the same
-#             # Skin dialog ("Sensor → Chamber mapping" table).
+#             # Skin dialog ("Sensor -> Chamber mapping" table).
 #             sensor_to_chamber: {"0": 0, "1": 0, "2": 1}
 # Example Thymio entry (wheeled robot; may also carry air-chamber skins on top).
-# Easiest to set from Robot Config → Thymio (the "Drive wheels wirelessly" box);
+# Easiest to set from Robot Config -> Thymio (the "Drive wheels wirelessly" box);
 # this is just what it writes:
 # robots:
 #   thymios:
@@ -69,12 +69,12 @@ robots:
 #       wireless: true
 #       # Transport: "dongle" (thymiodirect straight to the RF dongle's serial
 #       # port) or "gateway" (the gateway's C6 impersonates the dongle over
-#       # 802.15.4 — no dongle at all; see docs/THYMIO_WIRELESS_CONTROL.md).
+#       # 802.15.4 - no dongle at all; see docs/THYMIO_WIRELESS_CONTROL.md).
 #       wireless_via: gateway
 #       node_id: 0        # dongle only: which paired Thymio (0 = first)
 #       channel: 25       # gateway only: 802.15.4 channel
 #       thymio_addr: 6a25 # gateway only: this Thymio's short address (hex);
-#                         # blank = C6 default. Robot Config → Discover… fills it.
+#                         # blank = C6 default. Robot Config -> Discover... fills it.
 #       # Optional air-chamber skin(s) on top, same shape as turtle_trees above
 #       # (nodes are added from the robot panel's "+ Node"):
 #       # nodes: [...]
@@ -90,7 +90,7 @@ database:
 
 data:
   # Folder for per-session sensor-stream JSONL recordings (absolute, or relative
-  # to the app data root). Also editable in Settings → Recordings.
+  # to the app data root). Also editable in Settings -> Recordings.
   recordings_dir: data/recordings
 
 # Example OrganSwap activity configuration (saved as DB preset, not YAML):

@@ -1,9 +1,9 @@
-"""Rule-based touch-gesture classifier — a baseline, not the product.
+"""Rule-based touch-gesture classifier - a baseline, not the product.
 
 Implements the operational definitions in ``gesture_taxonomy`` directly on the
 features. Used by the training script as a comparison point ("does the learned
 model actually beat simple rules?"). With only ~4 sparse sensors per skin, pure
-rules are not expected to be enough — that's the whole reason for the ML path —
+rules are not expected to be enough - that's the whole reason for the ML path -
 so this is deliberately simple.
 """
 
@@ -20,7 +20,7 @@ def classify(seg: TouchSegment) -> str:
     if f["n_samples"] == 0:
         return tax.UNKNOWN
 
-    # Compressions: a bout of several press→release pulses in a row — the
+    # Compressions: a bout of several press->release pulses in a row - the
     # merged gesture carries the pulse count.
     pulses = int(f.get("n_pulses", 1))
     if pulses >= tax.COMPRESSIONS_MIN_PULSES:

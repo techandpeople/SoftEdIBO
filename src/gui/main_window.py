@@ -95,35 +95,39 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.actionCheckForUpdates.triggered.connect(self._check_updates_manual)
         self.actionAbout.triggered.connect(self._show_about)
 
-        # Tools => Activity Editor… — added programmatically so we don't have
+        # Tools => Activity Editor... - added programmatically so we don't have
         # to regenerate the .ui every time we ship a new managed entity. The
         # menuTools handle comes from ui_main_window.py.
         from PySide6.QtGui import QAction
-        self.actionActivityEditor = QAction("Activity Editor…", self)
+        self.actionActivityEditor = QAction("Activity Editor...", self)
         self.actionActivityEditor.triggered.connect(self._open_activity_editor)
         self.menuTools.addAction(self.actionActivityEditor)
 
-        self.actionUpdateNodesOTA = QAction("Update Nodes (OTA)…", self)
+        self.actionUpdateNodesOTA = QAction("Update Nodes (OTA)...", self)
         self.actionUpdateNodesOTA.triggered.connect(self._open_ota_dialog)
         self.menuTools.addAction(self.actionUpdateNodesOTA)
 
-        self.actionTrainTouch = QAction("Touch Gestures…", self)
+        self.actionTrainTouch = QAction("Touch Gestures...", self)
         self.actionTrainTouch.triggered.connect(self._open_train_touch)
         self.menuTools.addAction(self.actionTrainTouch)
 
-        self.actionCalibrateFill = QAction("Calibrate Fill Times…", self)
+        self.actionPositionBench = QAction("Touch Position Bench...", self)
+        self.actionPositionBench.triggered.connect(self._open_position_bench)
+        self.menuTools.addAction(self.actionPositionBench)
+
+        self.actionCalibrateFill = QAction("Calibrate Fill Times...", self)
         self.actionCalibrateFill.triggered.connect(self._open_fill_calibration)
         self.menuTools.addAction(self.actionCalibrateFill)
 
-        self.actionCalibrateTouch = QAction("Calibrate Touch Coupling…", self)
+        self.actionCalibrateTouch = QAction("Calibrate Touch Coupling...", self)
         self.actionCalibrateTouch.triggered.connect(self._open_touch_calibration)
         self.menuTools.addAction(self.actionCalibrateTouch)
 
-        self.actionEmergencyFlash = QAction("Emergency Flash (dead USB)…", self)
+        self.actionEmergencyFlash = QAction("Emergency Flash (dead USB)...", self)
         self.actionEmergencyFlash.triggered.connect(self._open_emergency_flash)
         self.menuTools.addAction(self.actionEmergencyFlash)
 
-        # "?" help-mode toggle in the menu-bar corner — hover any field to see
+        # "?" help-mode toggle in the menu-bar corner - hover any field to see
         # what it does. Reusable across windows (see src/gui/help_mode.py).
         self._help_button = HelpButton(self)
         self.menubar.setCornerWidget(self._help_button, Qt.Corner.TopRightCorner)
@@ -157,7 +161,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                 parent=self,
             )
 
-        # OTA updater — silent background check 5 s after startup
+        # OTA updater - silent background check 5 s after startup
         self._updater = AppUpdater(self)
         self._updater.update_available.connect(self._on_update_available)
         self._updater.error.connect(
@@ -183,7 +187,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         robots: list[BaseRobot] = []
         robot_data = self._settings.data.get("robots", {})
 
-        # Turtle / Tree robots — same node hardware, each its own robot kind.
+        # Turtle / Tree robots - same node hardware, each its own robot kind.
         for yaml_key, robot_cls in (("turtles", TurtleRobot), ("trees", TreeRobot)):
             for cfg in robot_data.get(yaml_key, []):
                 if cfg.get("skins"):
@@ -196,7 +200,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                         skin_configs=resolve_fill_profiles(self._settings.data, cfg["skins"]),
                     ))
 
-        # Thymios — one RF dongle relays to several at once (each a node id), so all
+        # Thymios - one RF dongle relays to several at once (each a node id), so all
         # the wireless ones share a single ThymioDongle owned by the window.
         thymios = robot_data.get("thymios", [])
         self._rebuild_thymio_dongle(thymios)
@@ -227,7 +231,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         Two wireless transports exist: the RF dongle (thymiodirect, shared across
         robots by node id) or the gateway's C6 (802.15.4, dongle-free);
         ``wireless_via: "gateway"`` picks the C6, anything else the dongle. Only
-        ONE shared dongle is supported — differing ``dongle_port`` values are
+        ONE shared dongle is supported - differing ``dongle_port`` values are
         logged and the first (sorted) wins."""
         dongle_users = [t for t in thymios if t.get("wireless")
                         and t.get("wireless_via", "dongle") != "gateway"]
@@ -237,12 +241,12 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         if not dongle_users:
             return
         from src.robots.thymio.thymio_dongle import ThymioDongle
-        # dongle_port omitted → auto-detect; first robot that names one wins.
+        # dongle_port omitted -> auto-detect; first robot that names one wins.
         ports = {p for t in dongle_users if (p := t.get("dongle_port"))}
         port = next(iter(sorted(ports)), None)
         if len(ports) > 1:
             logger.warning(
-                "Thymio dongle: %d different dongle_port values configured %s — "
+                "Thymio dongle: %d different dongle_port values configured %s - "
                 "only one shared dongle is supported, using %s; robots paired "
                 "to another dongle will not connect", len(ports), sorted(ports), port)
         self._thymio_dongle = ThymioDongle(serial_port=port)
@@ -250,7 +254,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
     def _build_thymio_link(self, thymio_cfg: dict, gateway_idx: int):
         """The wheeled-base link a wireless Thymio config asks for: the gateway's
         C6 (``wireless_via: "gateway"``, one slot per robot) or the shared RF
-        dongle (this robot picked out by ``node_id``; blank/0 → first)."""
+        dongle (this robot picked out by ``node_id``; blank/0 -> first)."""
         if thymio_cfg.get("wireless_via") == "gateway":
             from src.robots.thymio.thymio_gateway_link import (
                 DEFAULT_IMPACT_THRESHOLD, ThymioGatewayLink)
@@ -304,7 +308,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         wizard.exec()
 
     def _open_ota_dialog(self) -> None:
-        """Tools => Update Nodes (OTA)… — flash node firmware over ESP-NOW."""
+        """Tools => Update Nodes (OTA)... - flash node firmware over ESP-NOW."""
         from src.gui.ota_update_dialog import OTAUpdateDialog
         dlg = OTAUpdateDialog(
             self._gateway, self._settings,
@@ -313,23 +317,29 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         dlg.exec()
 
     def _open_train_touch(self) -> None:
-        """Tools => Train Touch Models… — train per-skin-type gesture models
+        """Tools => Train Touch Models... - train per-skin-type gesture models
         from recorded sessions + their label CSVs."""
         from src.gui.train_touch_dialog import TrainTouchDialog
-        # Skins of all configured robots — the guided capture binds to the one
+        # Skins of all configured robots - the guided capture binds to the one
         # owning the streaming node (compensated stream during inflation).
         skins = [s for r in self._robots
                  for s in (getattr(r, "skins", None) or {}).values()]
         TrainTouchDialog(parent=self, gateway=self._gateway,
                          skins=skins).exec()
 
+    def _open_position_bench(self) -> None:
+        """Tools => Touch Position Bench... - measure how finely a skin can
+        locate a touch, beyond quadrants (docs/TOUCH_POSITION_ML_PLAN.md)."""
+        from src.gui.position_bench_dialog import PositionBenchDialog
+        PositionBenchDialog(self._gateway, parent=self).exec()
+
     def _open_fill_calibration(self) -> None:
-        """Tools => Calibrate Fill Times… — measure each chamber's inflate time
+        """Tools => Calibrate Fill Times... - measure each chamber's inflate time
         against the pressure sensor and store it as ``fill_time_ms``."""
         if self._session_active:
             QMessageBox.warning(
                 self, "Calibrate Fill Times",
-                "Stop the running session before calibrating — calibration "
+                "Stop the running session before calibrating - calibration "
                 "drives the pumps directly.")
             return
         from src.gui.fill_calibration_dialog import FillCalibrationDialog
@@ -338,12 +348,12 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         dlg.exec()
 
     def _open_touch_calibration(self) -> None:
-        """Tools => Calibrate Touch Coupling… — measure how each chamber shifts
+        """Tools => Calibrate Touch Coupling... - measure how each chamber shifts
         the magnet sensors and store the per-skin compensation matrix."""
         if self._session_active:
             QMessageBox.warning(
                 self, "Calibrate Touch Coupling",
-                "Stop the running session before calibrating — calibration "
+                "Stop the running session before calibrating - calibration "
                 "drives the pumps directly.")
             return
         from src.gui.touch_calibration_dialog import TouchCalibrationDialog
@@ -352,7 +362,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         dlg.exec()
 
     def _open_emergency_flash(self) -> None:
-        """Tools => Emergency Flash… — cable-flash a node whose USB is dead,
+        """Tools => Emergency Flash... - cable-flash a node whose USB is dead,
         through a second ESP32 used as a USB-serial bridge (recovers a node that
         is too bricked for OTA over ESP-NOW)."""
         from src.gui.emergency_flash_dialog import EmergencyFlashDialog
@@ -364,7 +374,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         dlg.exec()
 
     def _open_activity_editor(self) -> None:
-        """Tools => Activity Editor… — author block-based behaviours in the
+        """Tools => Activity Editor... - author block-based behaviours in the
         Visual Editor. Imported lazily so QtWebEngine is only loaded when the
         editor is actually opened. The connected robots are passed in so the
         editor can preview picked LED colours on them live.
@@ -373,7 +383,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         editor's lifetime: PySide6 crashes marshalling QtWebEngine's internal
         QtQuick objects through a Python global event filter (hover events over
         the web view). The editor drives no chambers and clears its LED preview
-        on close, so losing the panic key while it is open is harmless — the
+        on close, so losing the panic key while it is open is harmless - the
         modal already blocks the rest of the UI anyway."""
         from src.gui.activity_editor_dialog import ActivityEditorDialog
         app = QApplication.instance()
@@ -421,13 +431,13 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.statusBar().addPermanentWidget(btn)
 
     def _check_updates_manual(self) -> None:
-        """Triggered from Tools => Check for Updates…"""
-        self.statusBar().showMessage("Checking for updates…", 4000)
+        """Triggered from Tools => Check for Updates..."""
+        self.statusBar().showMessage("Checking for updates...", 4000)
         self._updater.check()
 
     def _start_update(self, version: str, url: str) -> None:
         dlg = QProgressDialog(
-            f"Downloading SoftEdIBO {version}…", "Cancel", 0, 100, self
+            f"Downloading SoftEdIBO {version}...", "Cancel", 0, 100, self
         )
         dlg.setWindowTitle("Updating SoftEdIBO")
         dlg.setMinimumDuration(0)
@@ -463,7 +473,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         exe = sys.executable
         pid = os.getpid()
 
-        # zip_path is next to SoftEdIBO.exe — extract to its own directory
+        # zip_path is next to SoftEdIBO.exe - extract to its own directory
         # so files are replaced in-place without needing a separate install_dir.
         ps_script = (
             f"Wait-Process -Id {pid} -Timeout 30 -ErrorAction SilentlyContinue\n"
@@ -526,7 +536,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             f"chmod +x {quoted_target}\n"
             f"echo '[update] relaunching' >> {update_log}\n"
             # setsid creates a new session so the new process is fully detached
-            # from this script. Do NOT redirect AppImage stdout/stderr — Qt needs
+            # from this script. Do NOT redirect AppImage stdout/stderr - Qt needs
             # an open stderr to connect to the display on some compositors.
             f"setsid env APPIMAGE={quoted_target} {quoted_target} {quoted_args} &\n"
             f"echo '[update] done PID=$!' >> {update_log}\n"
@@ -566,7 +576,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             f"Version: {__version__}"
             f"{build_line}<br><br>"
             f"Soft-based robot for inclusive education .<br><br>"
-            f"LASIGE, Faculdade de Ciências, Universidade de Lisboa",
+            f"LASIGE, Faculdade de Ciencias, Universidade de Lisboa",
         )
 
     # ------------------------------------------------------------------
@@ -603,7 +613,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
     def _emergency_stop(self) -> None:
         """Halt everything: pumps off + valves closed on all nodes, session frozen.
 
-        Idempotent — pressing the panic key repeatedly just re-issues the stop.
+        Idempotent - pressing the panic key repeatedly just re-issues the stop.
         """
         for robot in self._robots:
             try:
@@ -613,7 +623,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self._session_panel.emergency_stop()
         self._estop_button.set_stopped(True)
         self.statusBar().showMessage(
-            "EMERGENCY STOP — all pumps off, valves closed. Click the button to re-arm.")
+            "EMERGENCY STOP - all pumps off, valves closed. Click the button to re-arm.")
         logger.warning("EMERGENCY STOP triggered")
 
     def _rearm(self) -> None:
@@ -654,7 +664,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 def create_app() -> tuple[QApplication, MainWindow]:
     """Create and return the application and main window."""
     app = QApplication(sys.argv)
-    # Diagnostic only — off unless SOFTEDIBO_WATCHDOG is set. Dumps the GUI
+    # Diagnostic only - off unless SOFTEDIBO_WATCHDOG is set. Dumps the GUI
     # thread's stack to stderr whenever the event loop stalls (busy cursor).
     from src.gui.loop_watchdog import install_loop_watchdog
     install_loop_watchdog(app)

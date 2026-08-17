@@ -1,8 +1,8 @@
-"""OrganResolver — decide each organ's status from one resistance reading.
+"""OrganResolver - decide each organ's status from one resistance reading.
 
 Pure domain logic, no hardware or Qt. The Turtle's organs share a single
 sensing circuit, so the firmware reports **one** total resistance for the whole
-network (organs in parallel, cover in series — see ``docs/STUDY_PLAN.md``). To
+network (organs in parallel, cover in series - see ``docs/STUDY_PLAN.md``). To
 colour each organ shape individually in the GUI we must infer, per organ,
 whether the **good** organ, the **bad** organ, or **nothing** is plugged in.
 
@@ -67,7 +67,7 @@ class OrganResolver:
     def resolve(self, total_ohm: float) -> dict[str, str]:
         """Return ``{organ_id: GOOD|BAD|ABSENT}`` for the reading.
 
-        ``inf`` (open circuit / cover off) → every organ absent. Otherwise the
+        ``inf`` (open circuit / cover off) -> every organ absent. Otherwise the
         best-matching combination is returned; if even the closest combination
         is further than ``tolerance_ohm`` from the reading, all organs are
         reported absent (we cannot trust the decomposition)."""

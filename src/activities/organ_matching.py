@@ -1,4 +1,4 @@
-"""OrganMatcher — decides whether a measured resistance means "cured".
+"""OrganMatcher - decides whether a measured resistance means "cured".
 
 Pure domain logic, no hardware or Qt: given the activity preset's parameters
 (mode, target, tolerance, catalogue) and a total resistance reading, answer
@@ -22,7 +22,7 @@ class OrganMatcher:
     Args:
         mode: ``"aggregate"`` (compare total against ``target_ohm``) or
             ``"per_organ"`` (decompose against the catalogue via
-            1/Rtot = Σ 1/Ri and require exactly the ``*_good`` organs).
+            1/Rtot = sum 1/Ri and require exactly the ``*_good`` organs).
         target_ohm: Expected total resistance when cured (aggregate mode).
         tolerance_ohm: Acceptable drift around the match in both modes.
         catalogue: ``{organ_id: resistance_ohm}`` of every organ the operator
@@ -90,7 +90,7 @@ class OrganMatcher:
 
     @staticmethod
     def parallel_resistance(values: list[float]) -> float:
-        """1 / Rtot = Σ 1 / Ri (parallel circuit). Ignores non-positive
+        """1 / Rtot = sum 1 / Ri (parallel circuit). Ignores non-positive
         values; returns +inf for an empty (or all-zero) input."""
         inv_sum = sum(1.0 / v for v in values if v > 0)
         return 1.0 / inv_sum if inv_sum > 0 else float("inf")

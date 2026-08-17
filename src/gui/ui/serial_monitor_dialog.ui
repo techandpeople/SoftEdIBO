@@ -6,11 +6,11 @@
    <rect><x>0</x><y>0</y><width>640</width><height>460</height></rect>
   </property>
   <property name="windowTitle"><string>Serial Monitor</string></property>
-  <property name="whatsThis"><string>Live view of the raw serial traffic to and from the SoftEdIBO gateway. Incoming gateway lines are shown as received; lines you send are echoed with a » marker. Type a raw line below and press Enter to send it — useful for poking the gateway with commands the structured UI can't express.</string></property>
+  <property name="whatsThis"><string>Live view of the raw serial traffic to and from the SoftEdIBO gateway. Incoming gateway lines are shown as received; lines you send are echoed with a >> marker. Type a raw line below and press Enter to send it - useful for poking the gateway with commands the structured UI can't express.</string></property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>
     <widget class="QPlainTextEdit" name="output">
-     <property name="whatsThis"><string>Raw serial log. « lines come from the gateway, » lines were sent by this app.</string></property>
+     <property name="whatsThis"><string>Raw serial log. &lt;&lt; lines come from the gateway, >> lines were sent by this app.</string></property>
      <property name="readOnly"><bool>true</bool></property>
      <property name="lineWrapMode"><enum>QPlainTextEdit::NoWrap</enum></property>
      <property name="maximumBlockCount"><number>5000</number></property>
@@ -21,7 +21,7 @@
      <item>
       <widget class="QLineEdit" name="input_edit">
        <property name="whatsThis"><string>Raw line to send to the gateway. A newline is appended automatically. Example: {"target":"FF:FF:FF:FF:FF:FF","cmd":"ping"}</string></property>
-       <property name="placeholderText"><string>Type a raw line and press Enter…</string></property>
+       <property name="placeholderText"><string>Type a raw line and press Enter...</string></property>
       </widget>
      </item>
      <item>

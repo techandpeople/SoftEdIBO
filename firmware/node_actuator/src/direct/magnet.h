@@ -14,17 +14,17 @@
 // the standalone node_magnet_sensor firmware runs), wiring it to this board's
 // I2C pins and cadence. The module is auto-detecting and self-disabling: if no
 // MLX90393 answers on the bus at boot (no sensors wired), it stays inert and
-// the board runs exactly as a plain node_direct — no announce, no stream, no
+// the board runs exactly as a plain node_direct - no announce, no stream, no
 // I2C traffic. Commands (rebaseline / configure, incl. "stream_vec" for 3-axis
 // streaming) are dispatched from commands.h.
 // ---------------------------------------------------------------------------
 
 namespace magnet {
 
-constexpr size_t  NUM_SENSORS = 4;                        // S0..S3 → Q1..Q4
+constexpr size_t  NUM_SENSORS = 4;                        // S0..S3 -> Q1..Q4
 constexpr uint8_t ADDR[NUM_SENSORS] = {0x18, 0x19, 0x1A, 0x1B};
 
-constexpr uint32_t STREAM_INTERVAL_MS = 100;   // ~10 Hz (was 35/28 Hz — the
+constexpr uint32_t STREAM_INTERVAL_MS = 100;   // ~10 Hz (was 35/28 Hz - the
                                                // flood was crowding the radio
                                                // and dropping actuation commands)
 

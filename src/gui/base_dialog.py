@@ -1,4 +1,4 @@
-"""BaseDialog — a QDialog tied to its parent window, with maximize/minimize hints.
+"""BaseDialog - a QDialog tied to its parent window, with maximize/minimize hints.
 
 Every secondary window in the app subclasses this instead of :class:`QDialog`.
 
@@ -6,7 +6,7 @@ A previous version declared these as a plain top-level ``Qt.Window`` (not a
 dialog) so that GNOME/mutter would draw the maximize/minimize title-bar buttons,
 which it deliberately omits for "dialog" windows. That backfired: for a
 ``Qt.Window`` the Qt xcb backend never writes the ``WM_TRANSIENT_FOR`` hint, so
-the window manager treated each dialog as an *independent* top-level window —
+the window manager treated each dialog as an *independent* top-level window -
 decoupled from the main window, with its own task-bar entry. Opening one let the
 main window fall behind it (and behind other windows), so the user had to hunt
 for it.
@@ -14,7 +14,7 @@ for it.
 Declaring the window as ``Qt.Dialog`` restores ``WM_TRANSIENT_FOR`` (the dialog
 stays bound to and above the main window) and ``_NET_WM_STATE_SKIP_TASKBAR`` (no
 stray task-bar entry), which is what actually keeps the main window reachable.
-The maximize/minimize button hints are kept as a best effort — window managers
+The maximize/minimize button hints are kept as a best effort - window managers
 that honour them (most non-GNOME ones) still show the buttons; GNOME ignores
 them, but the dialog stays freely resizable (drag the edges, or double-click the
 title bar to maximize) and, crucially, no longer hides the main window. Modality

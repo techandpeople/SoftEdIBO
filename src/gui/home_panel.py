@@ -27,7 +27,7 @@ class HomePanel(QWidget, Ui_HomePanel):
     def set_session_status(self, session_id: str | None) -> None:
         """Update the session status label."""
         if session_id:
-            self.session_status_label.setText(f"Running — {session_id}")
+            self.session_status_label.setText(f"Running - {session_id}")
             self.session_status_label.setStyleSheet("color: #4caf50; font-weight: bold;")
         else:
             self.session_status_label.setText("No active session")

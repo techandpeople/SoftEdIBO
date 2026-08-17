@@ -1,5 +1,5 @@
 /**
- * SoftEdIBO — node_magnet_sensor firmware
+ * SoftEdIBO - node_magnet_sensor firmware
  *
  * 4x MLX90393 magnetometers (+1 optional 5th on a second I2C bus) acting as a
  * touch-sensing board for a soft skin. All the sensing/streaming logic lives in
@@ -41,7 +41,7 @@ constexpr size_t  NUM_PRIMARY = 4;
 constexpr uint8_t PRIMARY_ADDR[NUM_PRIMARY] = {0x18, 0x19, 0x1A, 0x1B};
 constexpr uint8_t EXTRA_ADDR  = 0x1A;
 
-constexpr uint32_t STREAM_INTERVAL_MS = 35;   // ~28 Hz (dedicated board — no
+constexpr uint32_t STREAM_INTERVAL_MS = 35;   // ~28 Hz (dedicated board - no
                                               // actuation commands to crowd out)
 
 TwoWire extraWire = TwoWire(1);
@@ -80,7 +80,7 @@ void setup() {
     delay(800);   // let the sensors power up before the first transaction
 
     // TODO(scale): supporting ~12 sensors needs more I2C than the MLX90393's
-    // 4 addresses/bus allow — add a TCA9548A I2C mux and a {channel,address}
+    // 4 addresses/bus allow - add a TCA9548A I2C mux and a {channel,address}
     // sensor table. See README.md "Planned / TODO" before adding.
 
     for (size_t i = 0; i < NUM_PRIMARY; ++i) {
@@ -99,14 +99,14 @@ void setup() {
     }
 
     // Announce a WiFi OTA that just completed (no actuators here, so no shutdown
-    // hook — see se_ota.h).
+    // hook - see se_ota.h).
     se::ota::checkBootDone();
 
     se::magnet::announce();
 }
 
 void loop() {
-    // Run a pending WiFi OTA from the main task (never returns if it starts —
+    // Run a pending WiFi OTA from the main task (never returns if it starts -
     // the node reboots into the new firmware).
     se::ota::pollWifi();
 

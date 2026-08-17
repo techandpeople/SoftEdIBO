@@ -6,11 +6,11 @@ from the robot's configured nodes.
 
 Layout:
     Skin ID / Name fields
-    ┌─────────────────────────────────────┐
-    │ Chamber 1: [MAC ▾] Slot [0] Max [8.0 kPa] [✕] │
-    │ Chamber 2: [MAC ▾] Slot [1] Max [8.0 kPa] [✕] │
-    │ [+ Add Chamber]                               │
-    └─────────────────────────────────────┘
+    +-------------------------------------+
+    | Chamber 1: [MAC v] Slot [0] Max [8.0 kPa] [x] |
+    | Chamber 2: [MAC v] Slot [1] Max [8.0 kPa] [x] |
+    | [+ Add Chamber]                               |
+    +-------------------------------------+
     [Test] [Delete] [Cancel] [Save]
 """
 
@@ -114,7 +114,7 @@ class _ChamberRow(QWidget):
         self._max_spin.setFixedWidth(75)
         self._max_spin.setWhatsThis(
             "Highest pressure this chamber inflates to (100% maps here). "
-            "Effectively uncapped — the gauge sensor is unreliable, so runaway "
+            "Effectively uncapped - the gauge sensor is unreliable, so runaway "
             "fills are bounded by TIME (fill window / watchdog), not by a "
             "pressure ceiling. Set a value the chamber and pump can physically "
             "take.")
@@ -128,11 +128,11 @@ class _ChamberRow(QWidget):
         self._mode_combo.setWhatsThis(
             "How this chamber decides when to stop inflating. Time: open the "
             "valve for a calibrated time window (needs Calibrate Fill; ignores "
-            "the laggy pressure sensor). Pressure: classic closed loop — inflate "
+            "the laggy pressure sensor). Pressure: classic closed loop - inflate "
             "until the gauge sensor reaches the target. Deflate is always "
             "pressure-based (the sensor cannot read vacuum).")
 
-        self._remove_btn = QPushButton("✕")
+        self._remove_btn = QPushButton("x")
         self._remove_btn.setFixedWidth(24)
         self._remove_btn.setFixedHeight(24)
 
@@ -182,15 +182,15 @@ class _OrganRow(QWidget):
         hbox.setContentsMargins(0, 0, 0, 0)
         self._num_label = QLabel()
         hbox.addWidget(self._num_label)
-        hbox.addWidget(QLabel("Good Ω:"))
+        hbox.addWidget(QLabel("Good ohm:"))
         self._good_spin = self._ohm_spin(
             good_ohm, "Resistance when the GOOD variant of this organ is on.")
         hbox.addWidget(self._good_spin)
-        hbox.addWidget(QLabel("Bad Ω:"))
+        hbox.addWidget(QLabel("Bad ohm:"))
         self._bad_spin = self._ohm_spin(
             bad_ohm, "Resistance when the BAD variant of this organ is on.")
         hbox.addWidget(self._bad_spin)
-        self._remove_btn = QPushButton("✕")
+        self._remove_btn = QPushButton("x")
         self._remove_btn.setFixedSize(24, 24)
         self._remove_btn.clicked.connect(lambda: self.removed.emit(self))
         hbox.addWidget(self._remove_btn)
@@ -242,11 +242,11 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         self._robot_index = robot_index
         self._skin_index  = skin_index
         self._settings    = settings
-        self._led_angles: dict[int, float] = {}   # ring → mounting angle (deg)
+        self._led_angles: dict[int, float] = {}   # ring -> mounting angle (deg)
         self._gateway     = gateway
         self._db          = db
         self._rows: list[_ChamberRow] = []
-        # Track if user manually edited the skin_id — if so, stop auto-filling
+        # Track if user manually edited the skin_id - if so, stop auto-filling
         # it on template changes so we don't clobber their typing.
         self._skin_id_user_edited = False
 
@@ -261,10 +261,10 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         # layout-grid editor) are built here and inserted into the columns.
         self.skin_id_edit.textEdited.connect(self._on_skin_id_edited)
 
-        # Skin type — indexes the hardcoded geometry registry (shape + sensor
+        # Skin type - indexes the hardcoded geometry registry (shape + sensor
         # coordinates) and the per-type touch-gesture model. Only the types of
         # THIS robot kind are offered. When the robot has exactly one type
-        # (Tree, Thymio) there is nothing to choose — preselect it, hide the row.
+        # (Tree, Thymio) there is nothing to choose - preselect it, hide the row.
         from src.hardware.skin_geometry import skin_types_for
         types = skin_types_for(self._robot_type)
         single_type = len(types) == 1
@@ -273,7 +273,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         for st in types:
             self.skin_type_combo.addItem(st, st)
         self.skin_type_combo.currentIndexChanged.connect(self._on_skin_type_changed)
-        # Silicone variant — orthogonal to the shape (same shape, different
+        # Silicone variant - orthogonal to the shape (same shape, different
         # silicone format / chamber sizes), but the set of formats a shape is
         # cast in is hardcoded per skin TYPE (geometry registry). The combo is
         # rebuilt from the selected type; organs are gated on organ-bearing
@@ -287,7 +287,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
                 self.skin_type_combo.setVisible(False)
 
         # ---- LEFT COLUMN dynamic groups ----
-        # Template row — pick a saved layout to auto-fill, or save the current
+        # Template row - pick a saved layout to auto-fill, or save the current
         # configuration as a new template. Inserted above the metadata form.
         if self._db is not None:
             self.left_layout.insertLayout(0, self._build_template_row())
@@ -296,7 +296,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         self.left_layout.addStretch()
 
         # ---- RIGHT COLUMN ----
-        # Layout / grid editor — tallest piece, gets its own column.
+        # Layout / grid editor - tallest piece, gets its own column.
         self.right_layout.addWidget(self._build_layout_group(), stretch=1)
         self._organ_group = self._build_organ_group()
         self.right_layout.addWidget(self._organ_group)
@@ -347,7 +347,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         self._load_organs(skin_cfg.get("organs"))
         self._sync_organ_geometry()
         self._on_variant_changed()
-        # Per-ring LED mounting angles (ring index → degrees). Edited from the Test
+        # Per-ring LED mounting angles (ring index -> degrees). Edited from the Test
         # Actuators dialog's ring handle; persisted with the skin entry.
         self._led_angles = {int(k): float(v)
                             for k, v in (skin_cfg.get("led_angles") or {}).items()}
@@ -384,7 +384,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         """Apply per-layer dimensions from YAML. Chamber dims come from
         ``grid``; sensor dims from ``touch.grid`` (falling back to chamber
         dims for legacy skins without a separate sensor grid). A brand-new skin
-        (no saved grid) starts at 3×3."""
+        (no saved grid) starts at 3x3."""
         d_cols, d_rows = (3, 3) if self._skin_index < 0 else (8, 4)
         ch_cols = int(grid_cfg.get("cols", d_cols))
         ch_rows = int(grid_cfg.get("rows", d_rows))
@@ -421,7 +421,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         self._apply_tpl_btn.clicked.connect(self._on_apply_template)
         row.addWidget(self._apply_tpl_btn)
 
-        self._save_tpl_btn = QPushButton("Save as template…")
+        self._save_tpl_btn = QPushButton("Save as template...")
         self._save_tpl_btn.clicked.connect(self._on_save_template)
         row.addWidget(self._save_tpl_btn)
         return row
@@ -448,7 +448,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         """Fill the dialog widgets from a template.
 
         Chamber rows are recreated empty (no MAC) with the template's pressure
-        defaults — the user still has to pick MACs for the chambers since those
+        defaults - the user still has to pick MACs for the chambers since those
         are per-instance. Skin ID auto-fills as ``{template_name}-{N}`` (e.g.
         ``belly-3``) unless the user has already typed something.
         """
@@ -619,10 +619,10 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         self._sensor_count_spin.valueChanged.connect(self._on_sensor_count_changed)
         form.addRow("Sensors:", self._sensor_count_spin)
 
-        # Note: Sensor → Chamber routing follows the skin's order by default;
+        # Note: Sensor -> Chamber routing follows the skin's order by default;
         # behaviours that need a different mapping address chambers explicitly.
         outer.addWidget(QLabel(
-            "Note: Sensor → Chamber routing defaults to the skin's chamber order"))
+            "Note: Sensor -> Chamber routing defaults to the skin's chamber order"))
 
         return group
 
@@ -634,7 +634,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         v = QVBoxLayout(group)
 
         # Shape is now DERIVED from the chosen skin_type (geometry registry),
-        # not freely selectable — so this robot only ever shows its own shapes.
+        # not freely selectable - so this robot only ever shows its own shapes.
         # The radios are kept (other code reads/writes them + the grid mask)
         # but hidden; ``_on_skin_type_changed`` drives them from the registry.
         shape_row = QHBoxLayout()
@@ -654,15 +654,15 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         self._shape_row_widget.setVisible(False)
         v.addWidget(self._shape_row_widget)
 
-        # Per-layer dimensions — the Mode buttons come FIRST so the user
+        # Per-layer dimensions - the Mode buttons come FIRST so the user
         # picks what they're editing, then sees the dims for that layer.
         # Switching mode swaps the spinboxes in and out so chamber and
         # sensor grids can have different resolutions on the same skin
-        # (e.g. 4×2 chambers, 8×4 sensors). Separate QButtonGroup so it
+        # (e.g. 4x2 chambers, 8x4 sensors). Separate QButtonGroup so it
         # doesn't fight the Shape radios.
         size_row = QHBoxLayout()
 
-        # Sensors are hardcoded per skin_type in the geometry registry — they
+        # Sensors are hardcoded per skin_type in the geometry registry - they
         # are NOT painted here. The grid editor is chamber-only, so the
         # layer-switch ("Mode") is built (other code reads the radios) but
         # hidden; the chamber layer is always active.
@@ -692,7 +692,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         self._rows_spin.setValue(4)
         self._rows_spin.setSuffix(" rows")
         size_row.addWidget(self._cols_spin)
-        size_row.addWidget(QLabel("×"))
+        size_row.addWidget(QLabel("x"))
         size_row.addWidget(self._rows_spin)
         size_row.addStretch()
         v.addLayout(size_row)
@@ -713,7 +713,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         self._grid = SkinGridEditor(cols=8, rows=4)
         v.addWidget(self._grid, stretch=1)
 
-        # Hook up — spinboxes always edit the ACTIVE layer's dims.
+        # Hook up - spinboxes always edit the ACTIVE layer's dims.
         self._cols_spin.valueChanged.connect(self._on_dims_changed)
         self._rows_spin.valueChanged.connect(self._on_dims_changed)
         self._mode_chamber.toggled.connect(self._on_mode_changed)
@@ -729,7 +729,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         skin grid. Only organ-bearing silicone variants have organs."""
         group = QGroupBox("Organs (optional)")
         group.setWhatsThis(
-            "List the pluggable organs on this skin — one row per organ with the "
+            "List the pluggable organs on this skin - one row per organ with the "
             "resistance of its good and bad variants. In the monitor each organ "
             "shows as a numbered dot (green = good, red = bad, empty = absent), "
             "inferred from the skin's organ-circuit resistance. Choose good/bad "
@@ -813,7 +813,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         self._on_variant_changed()
 
     def _on_variant_changed(self, _index: int = 0) -> None:
-        """Organs only exist on organ-bearing silicone variants — enable the
+        """Organs only exist on organ-bearing silicone variants - enable the
         organ list only then. No-op until the organ group is built."""
         if not hasattr(self, "_organ_group"):
             return
@@ -824,7 +824,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
             else "Organs are only available on organ silicone variants.")
 
     def _on_dims_changed(self, _value: int) -> None:
-        """Spinbox edited → resize the layer currently being edited."""
+        """Spinbox edited -> resize the layer currently being edited."""
         layer = "chamber" if self._mode_chamber.isChecked() else "sensor"
         self._grid.set_dimensions(self._cols_spin.value(),
                                   self._rows_spin.value(),
@@ -869,7 +869,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
             self._sync_organ_geometry()
             return
         self._grid.set_geometry(geo.shape, geo.size_mm)
-        # Sensor count is a registry constant for this type — show it, read-only.
+        # Sensor count is a registry constant for this type - show it, read-only.
         self._sensor_count_spin.setValue(geo.sensor_count)
         self._sensor_count_spin.setEnabled(False)
         self._sensor_count_spin.setToolTip(
@@ -914,7 +914,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
             skin_entry["chamber_grid"] = chamber_grid
 
         touch_mac = self._touch_mac_combo.currentData() or ""
-        # Touch wiring only — which magnet node feeds this skin. Sensor LAYOUT
+        # Touch wiring only - which magnet node feeds this skin. Sensor LAYOUT
         # (count + positions) comes from the skin_type geometry registry, not a
         # drawn sensor_grid. We persist node_mac (+ sensor_count for skins
         # without a type); the sensor_grid is no longer written.
@@ -934,7 +934,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
     def _rebuild_palette(self) -> None:
         """Refresh the paint-target buttons for the active layer."""
         # Remove all palette buttons from both the layout and the button group.
-        # Widgets must be hidden immediately after takeAt — deleteLater() defers
+        # Widgets must be hidden immediately after takeAt - deleteLater() defers
         # actual destruction, so an orphaned (still-visible) old button would
         # overlap the newly-added one with the same label.
         while self._palette_row.count() > 1:
@@ -962,7 +962,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         self._palette_row.addStretch()
 
         # Auto-select the first palette button so a click on the grid always
-        # paints something. Use setChecked + set_paint_target directly — calling
+        # paints something. Use setChecked + set_paint_target directly - calling
         # btn.click() on a checkable button toggles its state and would undo
         # the setChecked.
         first_btn = self._palette_group.button(0)
@@ -984,7 +984,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         skin_id = self.skin_id_edit.text().strip() or "preview"
         mac = macs[0]
         # Fill calibration (fill_profile/fill_time_ms) is not edited in the rows,
-        # so carry it over from the saved skin, keyed by (mac, slot) — the test
+        # so carry it over from the saved skin, keyed by (mac, slot) - the test
         # dialog needs it to inflate time-mode chambers by their time window.
         prev = {(c.get("mac"), int(c.get("slot", 0))): c
                 for c in self._load_skin_cfg().get("chambers", [])}
@@ -1002,10 +1002,10 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
                     cfg["fill_time_ms"] = saved["fill_time_ms"]
             chambers.append(cfg)
         # Touch config (coupling matrix + compensation tuning) isn't edited in
-        # the chamber rows — it comes from the touch-coupling calibration tool —
+        # the chamber rows - it comes from the touch-coupling calibration tool -
         # so carry it over from the saved skin. The test dialog uses it to
         # subtract actuation coupling from the live sensor readout (an inflated
-        # chamber otherwise fakes a touch); absent/uncalibrated → raw, unchanged.
+        # chamber otherwise fakes a touch); absent/uncalibrated -> raw, unchanged.
         skin_cfgs = [{"skin_id": skin_id, "chambers": chambers,
                       "skin_type": self.skin_type_combo.currentData() or "",
                       "touch": self._load_skin_cfg().get("touch")}]
@@ -1041,7 +1041,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
 
         Builds the chamber list from the current (possibly unsaved) rows so the
         user can calibrate before committing the skin. Only actuator-typed nodes
-        are included — magnet/sensor nodes have nothing to inflate."""
+        are included - magnet/sensor nodes have nothing to inflate."""
         node_types = {n.get("mac"): n.get("node_type")
                       for n in self._robot_nodes()}
         skin_id = self.skin_id_edit.text().strip() or "(unsaved)"
@@ -1082,7 +1082,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
 
     def _on_zero_sensors(self) -> None:
         """Zero the pressure sensors at ambient: vent every chamber to atmosphere
-        (no pump — alternating the deflate/inflate valve so both inflated and
+        (no pump - alternating the deflate/inflate valve so both inflated and
         vacuumed chambers reach ambient), then tell the node to capture that as
         its per-chamber zero (persisted). Fixes the sensor's few-kPa offset so a
         vented chamber reads 0 kPa system-wide."""
@@ -1096,9 +1096,9 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         # chamber bleed OUT (through the off vacuum pump); INFLATE (side 0) lets a
         # vacuumed one draw air IN (through the off inflate pump). With the pumps
         # off each manifold's path to atmosphere is one-way, so a single side
-        # can't vent both cases — and this board only allows one side open at once
+        # can't vent both cases - and this board only allows one side open at once
         # (opening one closes the other), hence the alternation. No pump runs, so
-        # nothing is pressurised — safe with the actuation watchdog and the 5 s
+        # nothing is pressurised - safe with the actuation watchdog and the 5 s
         # manual dead-man.
         side = [1]
 
@@ -1111,7 +1111,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
 
         _vent()
         self.zero_btn.setEnabled(False)
-        self.zero_btn.setText("Venting…")
+        self.zero_btn.setText("Venting...")
         # Alternate + refresh every 2 s (well within the 5 s manual dead-man).
         keepalive = QTimer(self)
         keepalive.setInterval(2000)
@@ -1133,7 +1133,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
                 self, "Zero Sensors",
                 "Sensors zeroed at atmosphere. Ambient now reads 0 kPa.\n\n"
                 "Targets are now true gauge pressure, so chambers reach a few "
-                "kPa higher for the same setpoint — re-check max pressures if "
+                "kPa higher for the same setpoint - re-check max pressures if "
                 "needed.")
 
         # Let the chambers settle at atmosphere (~4 deflate/inflate alternations,
@@ -1148,8 +1148,8 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         """Read each chamber row into a list of dicts. Returns None and
         warns if any row is missing its MAC.
 
-        Fill calibration (``fill_profile``/``fill_time_ms``) is not edited here —
-        it is written by the Calibrate Fill dialog — so it is carried over from
+        Fill calibration (``fill_profile``/``fill_time_ms``) is not edited here -
+        it is written by the Calibrate Fill dialog - so it is carried over from
         the saved skin, keyed by (mac, slot), instead of being dropped on save."""
         prev = {(c.get("mac"), int(c.get("slot", 0))): c
                 for c in self._load_skin_cfg().get("chambers", [])}
@@ -1202,7 +1202,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         changes = skincfg.large_pressure_changes(chambers, prev_chambers)
         if not changes:
             return True
-        big_changes = [f"{c.mac} #{c.slot}: {c.old_kpa:.1f} → {c.new_kpa:.1f} kPa"
+        big_changes = [f"{c.mac} #{c.slot}: {c.old_kpa:.1f} -> {c.new_kpa:.1f} kPa"
                        for c in changes]
         reply = QMessageBox.question(
             self, "Confirm Large Pressure Change",
@@ -1251,7 +1251,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
             skin_entry["led_angles"] = {
                 str(k): float(v) for k, v in self._led_angles.items()}
 
-        # save_skin_entry returns the written index — for a brand-new skin this
+        # save_skin_entry returns the written index - for a brand-new skin this
         # is the appended slot. Adopt it so a second Apply replaces the entry
         # instead of appending a duplicate, and flip the dialog into edit mode.
         self._skin_index = skincfg.save_skin_entry(

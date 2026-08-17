@@ -1,8 +1,8 @@
-"""Calibrated time→pressure fill curve for one chamber.
+"""Calibrated time->pressure fill curve for one chamber.
 
 A chamber does not fill linearly: pressure climbs fast at first and then creeps
 asymptotically toward the chamber max. A single ``fill_time_ms`` (time to reach
-full) therefore can't say how long to inflate to a *partial* target — assuming
+full) therefore can't say how long to inflate to a *partial* target - assuming
 linearity over-/under-shoots. :class:`FillProfile` stores the measured curve as a
 list of ``(cumulative_ms, pct_of_max)`` samples, taken from the ambient (empty)
 state up toward full, and interpolates between them.
@@ -26,7 +26,7 @@ class FillProfile:
     """A monotone ``(ms, pct)`` fill curve from ambient toward the chamber max.
 
     Points are normalised on construction: sorted by time, pressures clamped to
-    0–100 and forced monotone non-decreasing (sensor noise can make a later
+    0-100 and forced monotone non-decreasing (sensor noise can make a later
     reading dip), an ``(0, 0)`` ambient anchor prepended, and duplicate
     timestamps collapsed. An empty/degenerate input yields an empty profile
     (:attr:`is_empty`)."""
@@ -109,7 +109,7 @@ class FillProfile:
 
     @property
     def full_time_ms(self) -> float:
-        """Time of the last (highest-pressure) sample — the measured fill time."""
+        """Time of the last (highest-pressure) sample - the measured fill time."""
         return self._pts[-1][0] if self._pts else 0.0
 
     @property
@@ -120,8 +120,8 @@ class FillProfile:
     def time_for_pct(self, pct: float) -> float:
         """Open-valve time (ms) to reach ``pct`` % of max from ambient.
 
-        Linearly interpolates the curve. Clamped: at or below 0 % → 0 ms; at or
-        above the highest measured pressure → the full measured time (we never
+        Linearly interpolates the curve. Clamped: at or below 0 % -> 0 ms; at or
+        above the highest measured pressure -> the full measured time (we never
         extrapolate past what was measured)."""
         if self.is_empty:
             return 0.0
@@ -131,7 +131,7 @@ class FillProfile:
         prev_t, prev_p = self._pts[0]
         for t, p in self._pts[1:]:
             if p >= target:
-                if p == prev_p:          # flat segment — reached at its start
+                if p == prev_p:          # flat segment - reached at its start
                     return prev_t
                 frac = (target - prev_p) / (p - prev_p)
                 return prev_t + frac * (t - prev_t)
@@ -156,11 +156,11 @@ class DeflateProfile:
     Mirror of :class:`FillProfile` for the vacuum side: the calibration sweep
     holds the deflate valve open from a full chamber and timestamps the falling
     pressure until it plateaus at the lowest level the gauge can see (the sensor
-    floor — ambient on today's 0..100 kPa sensors, real vacuum once the -40 kPa
+    floor - ambient on today's 0..100 kPa sensors, real vacuum once the -40 kPa
     parts arrive; nothing here assumes where the floor is, it is **measured**).
 
     Points are normalised on construction: sorted by time, pressures clamped to
-    0–100 and forced monotone non-increasing (sensor noise can make a later
+    0-100 and forced monotone non-increasing (sensor noise can make a later
     reading bounce up), a ``(0, start)`` anchor prepended, and duplicate
     timestamps collapsed. An empty/degenerate input yields an empty profile.
 
@@ -234,12 +234,12 @@ class DeflateProfile:
 
     @property
     def floor_pct(self) -> float:
-        """Lowest level the sweep reached — the gauge's measured floor."""
+        """Lowest level the sweep reached - the gauge's measured floor."""
         return self._pts[-1][1] if self._pts else 0.0
 
     @property
     def full_time_ms(self) -> float:
-        """Time of the last sample — the measured full-deflate time."""
+        """Time of the last sample - the measured full-deflate time."""
         return self._pts[-1][0] if self._pts else 0.0
 
     def _first_time_at(self, pct: float) -> float:
@@ -248,7 +248,7 @@ class DeflateProfile:
         prev_t, prev_p = self._pts[0]
         for t, q in self._pts[1:]:
             if q <= p:
-                if prev_p == q:          # flat segment — reached at its start
+                if prev_p == q:          # flat segment - reached at its start
                     return prev_t
                 frac = (prev_p - p) / (prev_p - q)
                 return prev_t + frac * (t - prev_t)
@@ -256,7 +256,7 @@ class DeflateProfile:
         return self._pts[-1][0]
 
     def _last_time_at(self, pct: float) -> float:
-        """Latest time the curve is still AT/ABOVE ``pct`` — where the fall
+        """Latest time the curve is still AT/ABOVE ``pct`` - where the fall
         below it begins. Differs from :meth:`_first_time_at` on flat segments
         (notably the ``(0, start)`` anchor): timing a deflate "from" a level
         must not count time spent sitting at that level."""
@@ -274,7 +274,7 @@ class DeflateProfile:
     def time_from_to(self, hi_pct: float, lo_pct: float) -> float:
         """Open-valve time (ms) to fall from ``hi_pct`` to ``lo_pct``.
 
-        Uses the tight bounds — from where the curve leaves ``hi_pct`` to where
+        Uses the tight bounds - from where the curve leaves ``hi_pct`` to where
         it first reaches ``lo_pct``. Both levels are clamped to the measured
         span (use :meth:`extrapolate_ms` for a target below the floor). A
         non-falling request returns 0."""
@@ -286,7 +286,7 @@ class DeflateProfile:
                        cap_ms: float = MAX_DEFLATE_MS) -> float:
         """Open-valve time to fall from ``from_pct`` to a target possibly BELOW
         the measured floor (the gauge can't see past its floor, so the tail
-        slope of the curve is extended linearly). Always capped at ``cap_ms`` —
+        slope of the curve is extended linearly). Always capped at ``cap_ms`` -
         the sensor-independent safety bound for an unsupervised vacuum pull."""
         if self.is_empty:
             return 0.0
@@ -299,7 +299,7 @@ class DeflateProfile:
         if slope > 0:
             ms += (self.floor_pct - target) * slope
         else:
-            ms = float(cap_ms)            # flat tail — no basis, use the cap
+            ms = float(cap_ms)            # flat tail - no basis, use the cap
         return min(float(cap_ms), ms)
 
     def _tail_slope_ms_per_pct(self) -> float:

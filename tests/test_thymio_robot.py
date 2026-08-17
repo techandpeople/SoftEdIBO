@@ -103,7 +103,7 @@ def test_thymio_no_link_movement_is_noop():
     thymio.connect()
     assert thymio.set_motors(100, 100) is True
     assert thymio.send_command("motors", left=1, right=2) is True
-    assert thymio.play_sound(system=2) is True   # no link → no-op, still True
+    assert thymio.play_sound(system=2) is True   # no link -> no-op, still True
 
 
 # --- the link itself, without the dongle / thymiodirect --------------------
@@ -111,7 +111,7 @@ def test_thymio_no_link_movement_is_noop():
 def test_thymio_link_construct_without_dongle():
     link = ThymioLink()          # must not import thymiodirect or raise
     assert link.connected is False
-    assert link.set_motors(10, 20) is False  # not connected → no-op
+    assert link.set_motors(10, 20) is False  # not connected -> no-op
     assert link.set_leds(1, 2, 3) is False
     link.close()                 # safe even if never connected
 
@@ -120,7 +120,7 @@ def test_thymio_dongle_construct_without_hardware():
     d = ThymioDongle()           # must not import thymiodirect or raise
     assert d.connected is False
     assert d.nodes == []
-    assert d.write(1, {"motor.left.target": 100}) is False  # not connected → no-op
+    assert d.write(1, {"motor.left.target": 100}) is False  # not connected -> no-op
     d.close()                    # safe even if never connected
 
 
@@ -176,7 +176,7 @@ def test_link_fails_when_configured_node_absent():
     link = ThymioLink(dongle=cast(ThymioDongle, d), node_id=99)
     assert link.connect(timeout=0.2) is False
     assert link.connected is False
-    assert link.set_motors(1, 1) is False   # unbound → no-op
+    assert link.set_motors(1, 1) is False   # unbound -> no-op
 
 
 def test_shared_dongle_two_links_isolated_and_survive_link_close():
@@ -230,7 +230,7 @@ def test_gateway_link_connect_starts_c6_link():
     assert link.connect() is True
     assert link.connected
     assert ("thymio", "thymio_link", {"on": True, "ch": 25}) in gw.sent
-    # address-less slot 0 rides the C6 default — no thymio_set is sent
+    # address-less slot 0 rides the C6 default - no thymio_set is sent
     assert not any(cmd == "thymio_set" for _, cmd, _ in gw.sent)
 
 
@@ -252,7 +252,7 @@ def test_gateway_link_play_sound():
     link.connect()
     assert link.play_sound(system=2) is True
     assert ("thymio", "thymio_sound", {"idx": 0, "sys": 2}) in gw.sent
-    # 500 ms tone → Thymio duration unit is 1/60 s → 30
+    # 500 ms tone -> Thymio duration unit is 1/60 s -> 30
     assert link.play_sound(freq=700, duration_ms=500) is True
     assert ("thymio", "thymio_sound", {"idx": 0, "freq": 700, "dur": 30}) in gw.sent
 
@@ -279,7 +279,7 @@ def test_gateway_link_close_zeros_this_robot():
     # close zeros THIS robot's motors (the shared poller stays up for the others)
     assert ("thymio", "thymio_drive", {"idx": 2, "left": 0, "right": 0}) in gw.sent
     assert link.connected is False
-    assert link.set_motors(1, 1) is False    # not active → no-op
+    assert link.set_motors(1, 1) is False    # not active -> no-op
 
 
 def test_gateway_link_fails_when_gateway_down():
@@ -326,12 +326,12 @@ def test_gateway_link_impact_edge_triggers_once_with_hysteresis():
     link.on_impact(lambda level: fires.append(level))
     feed = gw.callbacks[0]
 
-    feed(_sensor_frame(acc=(0, 0, 20)))   # dev 0 → no impact
-    feed(_sensor_frame(acc=(0, 0, 60)))   # dev 40 ≥ 20 → one impact (2× → knock)
-    feed(_sensor_frame(acc=(0, 0, 58)))   # still high → no re-fire
+    feed(_sensor_frame(acc=(0, 0, 20)))   # dev 0 -> no impact
+    feed(_sensor_frame(acc=(0, 0, 60)))   # dev 40 >= 20 -> one impact (2x -> knock)
+    feed(_sensor_frame(acc=(0, 0, 58)))   # still high -> no re-fire
     assert fires == [2]
-    feed(_sensor_frame(acc=(0, 0, 25)))   # dev 5 < 12 (0.6×thr) → re-arm
-    feed(_sensor_frame(acc=(0, 0, 45)))   # dev 25 ≥ 20 → second impact (1.25× → touch)
+    feed(_sensor_frame(acc=(0, 0, 25)))   # dev 5 < 12 (0.6xthr) -> re-arm
+    feed(_sensor_frame(acc=(0, 0, 45)))   # dev 25 >= 20 -> second impact (1.25x -> touch)
     assert fires == [2, 1]
     assert link.impact_count == 2
 
@@ -339,7 +339,7 @@ def test_gateway_link_impact_edge_triggers_once_with_hysteresis():
 def test_gateway_link_classifies_touch_knock_slap():
     gw = _FakeGateway()
     link = _gateway_link(gw, channel=25, impact_threshold=20)
-    # thresholds: touch ≥20, knock ≥40 (2×), slap ≥70 (3.5×)
+    # thresholds: touch >=20, knock >=40 (2x), slap >=70 (3.5x)
     assert link.impact_level(10) == 0            # below touch
     assert link.impact_level(25) == 1            # touch
     assert link.impact_level(50) == 2            # knock
@@ -353,10 +353,10 @@ def test_gateway_link_threshold_live_tunable():
     fires = []
     link.on_impact(lambda level: fires.append(level))
     feed = gw.callbacks[0]
-    feed(_sensor_frame(acc=(0, 0, 50)))   # dev 30 < 100 → nothing
+    feed(_sensor_frame(acc=(0, 0, 50)))   # dev 30 < 100 -> nothing
     assert fires == []
     link.impact_threshold = 20            # more sensitive now
-    feed(_sensor_frame(acc=(0, 0, 51)))   # dev 31 ≥ 20 → fires (touch)
+    feed(_sensor_frame(acc=(0, 0, 51)))   # dev 31 >= 20 -> fires (touch)
     assert fires == [1]
 
 
@@ -367,12 +367,12 @@ def test_gateway_link_lifted_edge():
     events = []
     link.on_lifted(lambda lifted: events.append(lifted))
     feed = gw.callbacks[0]
-    feed(_sensor_frame(ground=(1000, 1000)))   # on table → nothing
-    feed(_sensor_frame(ground=(20, 30)))       # both low → lifted
-    feed(_sensor_frame(ground=(10, 40)))       # still lifted → no re-fire
+    feed(_sensor_frame(ground=(1000, 1000)))   # on table -> nothing
+    feed(_sensor_frame(ground=(20, 30)))       # both low -> lifted
+    feed(_sensor_frame(ground=(10, 40)))       # still lifted -> no re-fire
     assert events == [True]
     assert link.is_lifted and link.lifted_count == 1
-    feed(_sensor_frame(ground=(1000, 1000)))   # back on table → set down
+    feed(_sensor_frame(ground=(1000, 1000)))   # back on table -> set down
     assert events == [True, False]
     assert not link.is_lifted
 
@@ -398,7 +398,7 @@ def test_robot_status_and_impact_via_gateway():
     knocks = []
     robot.on_impact(lambda level: knocks.append(level))
     gw.callbacks[0](_sensor_frame(acc=(0, 0, 60), mic=30, ground=(800, 820)))
-    assert knocks == [2]                       # dev 40 = 2× → knock
+    assert knocks == [2]                       # dev 40 = 2x -> knock
     sensors = robot.get_status_data()["sensors"]
     assert sensors["acc"] == [0, 0, 60]
     assert sensors["mic"] == 30
@@ -419,6 +419,6 @@ def test_gateway_link_plays_sd_track():
 def test_robot_without_link_has_empty_sensors_and_noop_impact():
     robot = ThymioRobot("t1")
     robot.connect()
-    robot.on_impact(lambda: None)            # no link → silently ignored
+    robot.on_impact(lambda: None)            # no link -> silently ignored
     assert robot.get_status_data()["sensors"] == {}
     assert robot.impact_threshold == 0.0

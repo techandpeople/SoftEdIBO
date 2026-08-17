@@ -1,4 +1,4 @@
-"""Tree robot — each child has their own skin/branch and can share it.
+"""Tree robot - each child has their own skin/branch and can share it.
 
 Same ESP-NOW hardware as the Turtle (nodes driving inflatable skins); what
 makes it a Tree is its own hardware set and the round branch skins fitted on

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """USB isolation test for the sensor-PUSH Aseba program.
 
-Loads the EXACT bytecode the C6 loads onto a Thymio — over its micro-USB cable
-(Aseba's own transport, no wireless RF module involved) — and counts the emitted
+Loads the EXACT bytecode the C6 loads onto a Thymio - over its micro-USB cable
+(Aseba's own transport, no wireless RF module involved) - and counts the emitted
 acc/ground events for 30 s. This decides where the "emits die after ~1 s" fault is:
 
   * emits SUSTAIN over USB  -> the Aseba program is correct; the fault is the
@@ -35,7 +35,7 @@ BYTECODE = [
 
 def find_port():
     """The Thymio's own USB port (Mobsya VID 0x0617). NOT the gateway (Espressif
-    0x303a) — so this never grabs the C6 gateway by mistake."""
+    0x303a) - so this never grabs the C6 gateway by mistake."""
     import serial.tools.list_ports as lp
     for p in lp.comports():
         if p.vid == 0x0617:
@@ -104,7 +104,7 @@ def main():
 
     conn.on_user_event = on_ev
 
-    print("Loading the push program (SET_BYTECODE + RUN + timer.period=100)…")
+    print("Loading the push program (SET_BYTECODE + RUN + timer.period=100)...")
     conn.set_bytecode(nid, BYTECODE)
     conn.run(nid)
     time.sleep(0.1)
@@ -121,12 +121,12 @@ def main():
 
     print("\n=== VERDICT ===")
     if counts["acc"] >= 200:
-        print("Emits SUSTAINED over USB → the Aseba program is CORRECT.")
-        print("→ The fault is the WIRELESS path (Thymio RF association / C6 radio), not the program.")
+        print("Emits SUSTAINED over USB -> the Aseba program is CORRECT.")
+        print("-> The fault is the WIRELESS path (Thymio RF association / C6 radio), not the program.")
     elif counts["acc"] > 0:
-        print("Emits STARTED then DIED even over USB → the Thymio VM stops. The bytecode/program needs fixing.")
+        print("Emits STARTED then DIED even over USB -> the Thymio VM stops. The bytecode/program needs fixing.")
     else:
-        print("NO emits over USB → the program didn't load/run (or the event ids differ). Check the setup.")
+        print("NO emits over USB -> the program didn't load/run (or the event ids differ). Check the setup.")
     try:
         # Not part of thymiodirect's public API on every version; the except
         # already swallows the AttributeError when it is missing.

@@ -1,4 +1,4 @@
-"""Test actuators dialog — inflate/deflate individual chambers via the gateway."""
+"""Test actuators dialog - inflate/deflate individual chambers via the gateway."""
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
@@ -36,7 +36,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
             ``min_pressure``, ``fill_mode`` and optional ``fill_time_ms`` /
             ``fill_profile``). The limits are pushed to the node before each
             actuation, and time-mode chambers inflate by their calibrated time
-            window — mirroring how :class:`~src.hardware.skin.Skin` drives them.
+            window - mirroring how :class:`~src.hardware.skin.Skin` drives them.
         gateway: Connected SoftEdIBO gateway.
         led_count: LED count for a single-ring node (back-compat fallback when
             ``led_rings`` is None).
@@ -55,12 +55,12 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
     _valves_received = Signal(int, int, int)       # chamber, inflate_open, deflate_open
     # Emitted from the gateway read thread with the node's ACTUAL pump outputs, so
     # a pump greens whoever runs it (manual toggle, an inflate/deflate, the
-    # closed-loop control) — the visible "action" of a fill. Main thread.
+    # closed-loop control) - the visible "action" of a fill. Main thread.
     _pumps_received = Signal(int, int)             # inflate_pwm, deflate_pwm
     # Emitted from the gateway read thread with the node's magnet-sensor stream
-    # (per-sensor µT). Connected to _on_magnet_data on the main thread, which
+    # (per-sensor uT). Connected to _on_magnet_data on the main thread, which
     # lazily builds the sensor tester the first time a node actually streams it.
-    _magnet_received = Signal(list, object)        # per-sensor µT, optional vec
+    _magnet_received = Signal(list, object)        # per-sensor uT, optional vec
 
     # Monospace valve/pump button base; the open variant adds a green fill so an
     # actually-open valve is obvious at a glance.
@@ -83,7 +83,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         super().__init__(parent)
         self._mac = mac
         self._gateway = gateway
-        # Saved per-ring LED mounting angles (ring index → degrees), shown as each
+        # Saved per-ring LED mounting angles (ring index -> degrees), shown as each
         # ring tester's starting angle. ``on_save_angle(ring, deg)`` persists a new
         # one to the skin config (None = saving unavailable, hides the Save button).
         self._led_angles = {int(k): float(v) for k, v in (led_angles or {}).items()}
@@ -109,12 +109,12 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         # slot => chamber config dict (max/min pressure, fill mode + calibration).
         # Used to push the configured limits to the node before actuating and to
         # inflate time-mode chambers by their calibrated time window instead of
-        # closing the loop on the laggy gauge sensor — matching Skin in production.
+        # closing the loop on the laggy gauge sensor - matching Skin in production.
         self._chamber_cfgs: dict[int, dict] = {}
         # Live magnet-sensor readout. Built lazily the first time the node streams
         # a ``magnet`` frame, so nodes without touch sensors show nothing extra.
         self._sensor_tester: SensorTester | None = None
-        # Spatial touch grid (2×2 for the Thymio's 4 sensors, in its 'D' shape),
+        # Spatial touch grid (2x2 for the Thymio's 4 sensors, in its 'D' shape),
         # driven by the same magnet stream. Its skin type selects the geometry.
         self._sensor_grid = None
         self._skin_type: str = (skin_cfgs[0].get("skin_type", "")
@@ -125,7 +125,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         # this skin has a calibrated + enabled coupling matrix we subtract the
         # expected actuation offset (mirroring the live detection path); a toggle
         # in the sensor panel flips back to the raw field for hardware diagnosis.
-        # ``None`` when no coupling is configured → the panel stays raw, unchanged.
+        # ``None`` when no coupling is configured -> the panel stays raw, unchanged.
         self._compensator = self._build_compensator(skin_cfgs)
         # Live inflation level (% of configured range) per node slot, folded from
         # each chamber ``status``. This is the signal the compensator scales the
@@ -137,7 +137,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         self._last_vec = None
 
         self.setupUi(self)
-        self.setWindowTitle(f"Test Actuators — {mac}")
+        self.setWindowTitle(f"Test Actuators - {mac}")
         self.close_btn.clicked.connect(self.accept)
 
         # The "Ignore max pressure" checkbox (cont_cb), pump group and continuous
@@ -159,7 +159,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         # LED ring tester(s). Inserted into the left column just above the pump
         # group (its count/size is only known from the node config, so it can't be
         # authored in the .ui). node_direct has a single ring; node_multiplexed
-        # drives four independently-addressable rings — one tester tab each, so the
+        # drives four independently-addressable rings - one tester tab each, so the
         # user can assign colours to each ring (and each LED) separately.
         rings = led_rings if led_rings is not None else (
             [led_count] if led_count > 0 else [])
@@ -182,7 +182,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
                         self._send_led(r, idx, cols, pat, fade, angle),
                     initial_angle=self._led_angles.get(k, 0.0),
                     on_save_angle=self._angle_saver(k))
-                self._led_tabs.addTab(tester, f"Ring {k} · {size} LEDs")
+                self._led_tabs.addTab(tester, f"Ring {k} | {size} LEDs")
             self.left_col.insertWidget(
                 self.left_col.indexOf(self.pump_group), self._led_tabs)
 
@@ -205,7 +205,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         # keeps cutting out. Mutually exclusive; closing the dialog stops it.
         # Active continuous run as (direction, chamber): direction 0=inflate,
         # 1=deflate; chamber -1 = all chambers (global run), else a single
-        # chamber. None = no run. One firmware latch → at most one run at a time.
+        # chamber. None = no run. One firmware latch -> at most one run at a time.
         self._run: tuple[int, int] | None = None
         # Dead-man keepalive for the node_direct continuous run. That run bypasses
         # every firmware safety, so the node ends it if these keepalives stop
@@ -229,7 +229,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
 
         # Vent alternator: while venting, flip the open valve side every 2 s so an
         # inflated chamber bleeds out (deflate) AND a vacuumed one draws air in
-        # (inflate) — this board only allows one side open at a time. No pump, so
+        # (inflate) - this board only allows one side open at a time. No pump, so
         # nothing is pressurised; the 2 s tick also refreshes the manual dead-man.
         self._vent_side = 1
         self._vent_timer = QTimer(self)
@@ -245,7 +245,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
 
         # The LED ring tester is inserted into the left column at runtime (its ring
         # count is only known from the node config), so the .ui's static height was
-        # sized without it and opens too short — the tester ends up squeezed below
+        # sized without it and opens too short - the tester ends up squeezed below
         # its minimum and its rows overlap. Grow to the real preferred size now, the
         # same way _on_magnet_data does once the sensor panel arrives (which is why
         # the squeeze only showed when no magnet sensor was streaming).
@@ -257,7 +257,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         The sensor panel only ever shows readings from ``self._mac`` (the panel
         is filtered to this node in :meth:`_on_gateway_message`), so it applies
         only to a node that folds sensing into its actuator board (node_direct),
-        where the coupling matrix — keyed by chamber slot — matches the slots this
+        where the coupling matrix - keyed by chamber slot - matches the slots this
         dialog already tracks. Prefer the skin whose ``touch.node_mac`` is this
         node; fall back to any coupling that yields a compensator. Returns ``None``
         when no skin has a calibrated + enabled coupling (see
@@ -280,7 +280,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
     # ------------------------------------------------------------------
 
     def _build_chamber_group(self, skin_cfg: dict) -> QGroupBox:
-        skin_id = skin_cfg.get("skin_id", "—")
+        skin_id = skin_cfg.get("skin_id", "-")
         chamber_cfgs: list[dict] = skin_cfg.get("chambers", [])
         for cfg in chamber_cfgs:
             self._chamber_cfgs[int(cfg["slot"])] = cfg
@@ -320,9 +320,9 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
             valve_help = (
                 "Toggle this valve's manual override. The OPEN/CLOSED label flips "
                 "as soon as you click, but the GREEN fill only appears when the "
-                "node reports the valve ACTUALLY open (~2×/s). So a plain 'OPEN' "
+                "node reports the valve ACTUALLY open (~2x/s). So a plain 'OPEN' "
                 "means the command was sent but not yet confirmed (or the firmware "
-                "won't open it); green means the hardware really has it open — "
+                "won't open it); green means the hardware really has it open - "
                 "whoever opened it (a click here, an inflate/deflate, or the "
                 "closed-loop control). While held open the dialog re-asserts it so "
                 "the firmware dead-man doesn't close it after ~5 s; closing the "
@@ -344,7 +344,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
             self._valve_states[(slot, 1)] = (False, val_def_btn)
             slot_row.addWidget(val_def_btn)
 
-            pressure_lbl = QLabel("—")
+            pressure_lbl = QLabel("-")
             pressure_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             pressure_lbl.setMinimumWidth(110)
             slot_row.addWidget(pressure_lbl)
@@ -370,7 +370,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
             return
         if msg_type == "pumps":
             # Actual pump PWM outputs (0 = off). Greens the pump buttons whoever
-            # runs them — so an inflate/deflate visibly lights its pump.
+            # runs them - so an inflate/deflate visibly lights its pump.
             inf, dfl = data.get("inf"), data.get("def")
             if isinstance(inf, int) and isinstance(dfl, int):
                 self._pumps_received.emit(inf, dfl)
@@ -403,7 +403,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         if self._sensor_tester is None:
             self._sensor_tester = SensorTester(
                 len(mag), self._rezero_sensors, self._configure_sensors)
-            # Offer the raw↔compensated toggle only when this skin has a
+            # Offer the raw<->compensated toggle only when this skin has a
             # calibrated + enabled coupling to apply; re-render on toggle so it
             # feels instant instead of waiting for the next magnet frame.
             self._sensor_tester.set_compensation_available(
@@ -416,10 +416,10 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
             self.right_col.insertWidget(0, self._sensor_tester)
             # Show it now so the layout accounts for it immediately: a widget
             # inserted into an already-shown dialog is otherwise only shown on the
-            # next event loop pass, and until then the layout treats it as zero —
+            # next event loop pass, and until then the layout treats it as zero -
             # so _grow_to_fit would read a too-small hint and not make room.
             self._sensor_tester.show()
-            # A spatial grid above the bars: shows *where* each touch lands (2×2
+            # A spatial grid above the bars: shows *where* each touch lands (2x2
             # in the skin's shape), highlighted at the tester's live threshold.
             from src.gui.sensor_grid_view import SensorGridView
             from src.hardware.skin_geometry import geometry_for
@@ -441,7 +441,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         self._render_sensors()
 
     def _render_sensors(self) -> None:
-        """Feed the sensor panel + grid with the last reading — compensated for
+        """Feed the sensor panel + grid with the last reading - compensated for
         actuation coupling when available and toggled on, else the raw field.
 
         Compensation subtracts each chamber's expected offset (scaled by its live
@@ -485,9 +485,9 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         self._gateway.send(self._mac, "rebaseline")
 
     def _configure_sensors(self, threshold_ut: float) -> None:
-        """Push the tester's µT threshold to the node so its own touch detection
+        """Push the tester's uT threshold to the node so its own touch detection
         (the ``act`` set the activities and monitor consume) flips a sensor active
-        at exactly this µT."""
+        at exactly this uT."""
         if threshold_ut <= 0:
             return
         self._gateway.send(self._mac, "configure", repeat=2,
@@ -499,12 +499,12 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         The percentage is derived here from the chamber's *configured* min/max
         (kPa), not from the node's ``pressure`` field. The node computes its
         percent against the limits it currently holds, which lag the config until
-        ``set_max_pressure`` actually lands — a dropped frame or a continuous
+        ``set_max_pressure`` actually lands - a dropped frame or a continuous
         "ignore max" run leaves it on the 8 kPa boot default, so every reading
         above that clamps to 100 %. Recomputing from the config the dialog already
         holds keeps the readout honest regardless of what the node holds."""
         # Track this chamber's inflation level (%) for the touch compensator on
-        # the same basis the live Skin uses — % against the configured kPa range
+        # the same basis the live Skin uses - % against the configured kPa range
         # when the firmware reports kPa, else its raw percentage. Kept even when
         # there is no pressure label so a slot without a row still feeds coupling.
         self._levels[chamber] = (float(self._pct_for_kpa(chamber, kpa))
@@ -512,7 +512,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         lbl = self._pressure_labels.get(chamber)
         if not lbl:
             return
-        if kpa == kpa:   # not NaN → firmware reported real kPa
+        if kpa == kpa:   # not NaN -> firmware reported real kPa
             lbl.setText(f"{kpa:.2f} kPa  ({self._pct_for_kpa(chamber, kpa)}%)")
         else:
             lbl.setText(f"{pressure}%")
@@ -533,7 +533,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         """Reflect the node's ACTUAL valve outputs on the per-chamber buttons.
 
         Called in the main thread via Signal from each status broadcast. This is
-        display only — it never sends a command — so a valve shows open whoever
+        display only - it never sends a command - so a valve shows open whoever
         opened it (a manual toggle, an inflate/deflate, the closed-loop control,
         or the firmware's own dead-man closing it again)."""
         self._set_valve_button((chamber, 0), bool(inflate_open))
@@ -544,10 +544,10 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         """Set one valve button's label and colour.
 
         The label flips to OPEN/CLOSED immediately, but the **green fill appears
-        only when ``confirmed``** — i.e. only from the node's reported valve state
+        only when ``confirmed``** - i.e. only from the node's reported valve state
         (:meth:`_update_valves`), never from an optimistic click. So a click shows
         a plain "OPEN" and the button greens only once the node actually reports
-        the valve open (~2×/s); if the firmware never opens it (or its dead-man
+        the valve open (~2x/s); if the firmware never opens it (or its dead-man
         closes it), the green never appears, making the real hardware state
         obvious. Display only: never sends a command, never touches
         ``_valve_intent`` (the user's hold)."""
@@ -568,7 +568,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         self._manual_keepalive.stop()
         self._vent_timer.stop()   # the dead-man closes the last-opened vent valve
         # A continuous run ignores the firmware dead-man, so it would keep going
-        # after the dialog closes — always stop it on the way out.
+        # after the dialog closes - always stop it on the way out.
         self._stop_run()
         # If we left the node latched off via STOP ALL, re-arm it so the rest of
         # the app can drive it again (everything is already off, so this is safe).
@@ -600,7 +600,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         per colour when ``pattern`` is "comet"). ``ring`` selects one of a
         multi-ring node's rings (node_multiplexed); None addresses the node's
         single ring (and is omitted from the frame for node_direct back-compat).
-        ``fade_ms`` is the cross-fade time; ``angle`` (0-360°) rotates the split."""
+        ``fade_ms`` is the cross-fade time; ``angle`` (0-360 deg) rotates the split."""
         payload: dict = {} if ring is None else {"ring": ring}
         if fade_ms is not None:
             payload["fade_ms"] = int(fade_ms)
@@ -635,7 +635,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         actuating, so a one-shot inflate/deflate targets the configured limits.
 
         The dialog drives the node directly (it never builds a Skin), so unlike a
-        live session nothing has applied these limits — without this the firmware
+        live session nothing has applied these limits - without this the firmware
         uses its boot defaults (8 kPa / 0 kPa), so deflate toward 0 kPa stops at
         once and inflate stops at the default cap, never reaching what was set.
         Order matches Skin._push_pressure_limits (max first, then min)."""
@@ -701,7 +701,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
     def _inflate_slots(self, slots: list[int]) -> None:
         """Inflate several chambers at once.
 
-        When ``slots`` is the whole node (the common case — node_direct is one
+        When ``slots`` is the whole node (the common case - node_direct is one
         skin of 3 chambers), send a SINGLE broadcast frame (``chamber=-1``) the
         node fans out to every chamber, so all inflate valves open together: the
         shared pump then runs continuously while ANY valve is open and each
@@ -709,7 +709,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         ``recalcPumps``). One frame also can't be dropped per-chamber, so we never
         get "only one inflating" from a lost ESP-NOW frame (no command-level
         retry). The fill is closed-loop to each chamber's configured max (a shared
-        frame can't carry per-chamber calibrated fill windows — fine for a bench
+        frame can't carry per-chamber calibrated fill windows - fine for a bench
         "fill all"). A partial selection still falls back to per-slot."""
         if set(slots) == set(self._chamber_cfgs):
             self._broadcast_actuate("inflate", slots)
@@ -718,7 +718,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
                 self._inflate_slot(slot)
 
     def _deflate_slots(self, slots: list[int]) -> None:
-        """Deflate several chambers — one broadcast frame for the whole node
+        """Deflate several chambers - one broadcast frame for the whole node
         (see :meth:`_inflate_slots`), else per-slot. Deflate has no calibrated
         time window, so the whole-node case can always go single-frame."""
         if set(slots) == set(self._chamber_cfgs):
@@ -729,7 +729,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
 
     def _broadcast_actuate(self, command: str, slots: list[int]) -> None:
         """Re-push every chamber's configured limits, then send ONE
-        ``chamber=-1`` inflate/deflate (delta=100 → toward each chamber's
+        ``chamber=-1`` inflate/deflate (delta=100 -> toward each chamber's
         configured max/min) that the node fans out to all chambers. A single
         frame can't be partially dropped, fixing the "only one chamber actuates"
         burst-loss."""
@@ -816,7 +816,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         """Set one pump button's label and colour, mirroring _set_valve_button.
 
         The label flips to ON/OFF immediately, but the **green fill appears only
-        when ``confirmed``** — i.e. only from the node's reported pump output
+        when ``confirmed``** - i.e. only from the node's reported pump output
         (:meth:`_update_pumps`), never from an optimistic click. So green means
         the pump really is running (whoever started it: a click, an inflate/
         deflate, the closed-loop control); a plain 'ON' means the command was
@@ -882,7 +882,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         """Start a continuous open-loop run, ignoring pressure and the dead-man.
 
         ``test_run`` makes the firmware drive the inflate/deflate pump plus the
-        matching valve(s) wide open until stopped — every chamber when
+        matching valve(s) wide open until stopped - every chamber when
         ``chamber`` is -1, else just that one. There's a single firmware latch,
         so any run replaces the previous one; ``_refresh_run_buttons`` reverts
         the old button. ``testRun`` clears manual overrides, so reset those too."""
@@ -912,7 +912,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         node_direct's ``test_run`` short-circuits every firmware safety (pressure
         cutoff, dead-man, watchdog), so the node force-stops the run if these
         keepalives stop arriving. Re-sending the same dir/chamber only refreshes
-        the node's dead-man timer — it does not re-assert the hardware. No-op on
+        the node's dead-man timer - it does not re-assert the hardware. No-op on
         boards without ``test_run`` (node_multiplexed)."""
         run = self._run
         if run is None:
@@ -952,12 +952,12 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
     def _refresh_run_buttons(self) -> None:
         run = self._run
         self.run_inf_btn.setText(
-            f"Run Inflate ∞: {'ON ' if run == (0, -1) else 'OFF'}")
+            f"Run Inflate inf: {'ON ' if run == (0, -1) else 'OFF'}")
         self.run_def_btn.setText(
-            f"Run Deflate ∞: {'ON ' if run == (1, -1) else 'OFF'}")
+            f"Run Deflate inf: {'ON ' if run == (1, -1) else 'OFF'}")
         for (slot, direction), btn in self._chamber_btns.items():
             default = "Inflate" if direction == 0 else "Deflate"
-            btn.setText("⏹ Stop" if run == (direction, slot) else default)
+            btn.setText("Stop" if run == (direction, slot) else default)
 
     def _reset_manual_ui(self) -> None:
         """Reset the manual valve/pump toggle buttons + intent to OFF/CLOSED.
@@ -979,7 +979,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         valve, clears manual overrides AND resets every chamber to IDLE. Crucially
         we do NOT immediately ``resume``: the firmware keeps re-asserting the
         all-off state every loop *while latched*, so a single delivered ``stop``
-        frame holds everything off permanently — even if a later frame drops. The
+        frame holds everything off permanently - even if a later frame drops. The
         previous code resumed in the same breath, which discarded that continuous
         enforcement; if the lone ``stop`` frame was lost over ESP-NOW the actuator
         kept running until its own 5 s safety timeout (the reported bug).

@@ -1,7 +1,7 @@
 """Guarantee that ``sys.stdout`` / ``sys.stderr`` are usable.
 
 A windowed frozen build (PyInstaller ``console=False``) starts with both set to
-``None`` — there is no terminal to write to. Anything that touches them then
+``None`` - there is no terminal to write to. Anything that touches them then
 blows up: ``faulthandler.enable()`` raises ``RuntimeError: sys.stderr is None``
 before the app can even show a dialog, and ``logging``'s console handler and the
 loop watchdog would fail the same way later.

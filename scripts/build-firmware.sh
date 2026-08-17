@@ -10,8 +10,8 @@
 #   firmware/node_actuator/firmware-multiplexed-rgbw-release.bin   (RGBW LED rings)
 #   firmware/node_actuator/firmware-multiplexed-rgbw-debug.bin
 #   firmware/node_magnet_sensor/firmware-release.bin
-#   firmware/thymio_rcp/firmware.bin           (XIAO ESP32-C6 RCP — APP image, WiFi-OTA)
-#   firmware/thymio_rcp/firmware-c6.bin        (XIAO ESP32-C6 RCP — MERGED image, first USB flash)
+#   firmware/thymio_rcp/firmware.bin           (XIAO ESP32-C6 RCP - APP image, WiFi-OTA)
+#   firmware/thymio_rcp/firmware-c6.bin        (XIAO ESP32-C6 RCP - MERGED image, first USB flash)
 #
 # Every board's main .bin is a MERGED image (bootloader + partitions + app) that the setup
 # wizard flashes at offset 0x0. The Thymio RCP (C6) ships BOTH: firmware.bin is the bare
@@ -47,18 +47,18 @@ if ! command -v pio >/dev/null && ! python -m platformio --version >/dev/null 2>
 fi
 
 if ! python -m esptool version >/dev/null 2>&1; then
-    echo "esptool not available — installing into the current Python env…"
+    echo "esptool not available - installing into the current Python env..."
     pip install esptool
 fi
 
 PIO=(python -m platformio)
 
-# ensure_pioarduino_core <env> — call from inside a project dir right before `pio run`.
+# ensure_pioarduino_core <env> - call from inside a project dir right before `pio run`.
 # The pioarduino projects (gateway/thymio_rcp) and the stock-espressif32 node projects
 # both install a package literally named `framework-arduinoespressif32`, but need
 # incompatible arduino-esp32 cores (pioarduino 3.3.9 vs stock 3.0.17). PlatformIO keeps
 # only ONE folder by that name in the shared package pool, so a full build (this script's
-# order — and CI's — builds the stock nodes before the pioarduino RCP) leaves the stock
+# order - and CI's - builds the stock nodes before the pioarduino RCP) leaves the stock
 # core in place. The stock resolver quietly reinstalls its own core; the pioarduino one
 # instead CRASHES with `FRAMEWORK_DIR None`.
 #
@@ -66,9 +66,9 @@ PIO=(python -m platformio)
 # treat the wrong-version core as "satisfying" the requirement and skip it (the framework
 # is `optional: true` in the platform). So we must EVICT it, then FORCE a reinstall with an
 # explicit `pkg install` (a bare `pio run` won't re-fetch the evicted optional framework once
-# a stock build has touched the pool — verified). Disk-neutral (no duplicate pools; ~76 MB
-# re-fetch), version-agnostic (pioarduino core installs from a release URL → .piopm spec.uri
-# set; the stock core from the registry → spec.uri null), and a no-op for stock node builds.
+# a stock build has touched the pool - verified). Disk-neutral (no duplicate pools; ~76 MB
+# re-fetch), version-agnostic (pioarduino core installs from a release URL -> .piopm spec.uri
+# set; the stock core from the registry -> spec.uri null), and a no-op for stock node builds.
 ensure_pioarduino_core() {
     grep -q 'pioarduino/platform-espressif32' platformio.ini 2>/dev/null || return 0
     local core_dir="${PLATFORMIO_CORE_DIR:-$HOME/.platformio}"
@@ -93,7 +93,7 @@ merge_node() {
     # Skip when the merged bundle already exists and is newer than every source it
     # can depend on: this env's src/, the shared firmware/common/ headers, the
     # board's platformio.ini and any sdkconfig. A re-run then rebuilds only the
-    # envs that actually changed (e.g. edit a node → the gateway/magnet bundles are
+    # envs that actually changed (e.g. edit a node -> the gateway/magnet bundles are
     # left untouched). Pass REBUILD=1 to force a full rebuild.
     local deps=("$dir/src" firmware/common "$dir/platformio.ini")
     local f
@@ -140,12 +140,12 @@ build_app() {
     ( cd "$dir"; ensure_pioarduino_core "$env"; "${PIO[@]}" run -e "$env"; cp ".pio/build/${env}/firmware.bin" "$out" )
 }
 
-# Gateway — XIAO ESP32-S3 (plain ESP-NOW + a SoftAP build, -DGATEWAY_AP).
+# Gateway - XIAO ESP32-S3 (plain ESP-NOW + a SoftAP build, -DGATEWAY_AP).
 if want gateway; then
     merge_node firmware/gateway seeed_xiao_esp32s3 firmware-s3.bin esp32s3 0x0 80m
 fi
 
-# Actuator node — direct + multiplexed, each release/debug. Both boards also
+# Actuator node - direct + multiplexed, each release/debug. Both boards also
 # ship RGBW-ring variants (-DLED_RGBW); same source, different NeoPixel pixel
 # type (SK6812 RGBW vs WS2812 RGB). See firmware/node_actuator/src/*/leds.h.
 if want actuator; then
@@ -164,11 +164,11 @@ if want magnet; then
     merge_node firmware/node_magnet_sensor release firmware-release.bin
 fi
 
-# Thymio RCP (XIAO ESP32-C6) — TWO images from the one `rcp_c6` build:
+# Thymio RCP (XIAO ESP32-C6) - TWO images from the one `rcp_c6` build:
 #   firmware.bin     app-only, for WiFi-OTA (Tools -> Update Nodes -> C6 row / ota_c6_wifi.py)
 #   firmware-c6.bin  merged bundle, for the C6's FIRST flash over USB via the setup wizard
 # The merge params match the C6 bootloader exactly (esp32c6, boot @ 0x0, 80m/dio/4MB), so
-# the wizard can write it at 0x0 like any node bin. A merged image is required here — an
+# the wizard can write it at 0x0 like any node bin. A merged image is required here - an
 # app-only bin at 0x0 bricks the C6 (`invalid header`).
 if want thymio; then
     build_app  firmware/thymio_rcp rcp_c6 firmware.bin

@@ -13,13 +13,13 @@
      <layout class="QHBoxLayout" name="gateway_layout">
       <item>
        <widget class="QComboBox" name="port_combo">
-        <property name="whatsThis"><string>Serial port the gateway board is plugged into. Use the ↺ button to rescan if it is missing.</string></property>
+        <property name="whatsThis"><string>Serial port the gateway board is plugged into. Use the (re) button to rescan if it is missing.</string></property>
         <property name="minimumWidth"><number>140</number></property>
        </widget>
       </item>
       <item>
        <widget class="QPushButton" name="refresh_ports_btn">
-        <property name="text"><string>↺</string></property>
+        <property name="text"><string>(re)</string></property>
         <property name="maximumWidth"><number>28</number></property>
         <property name="toolTip"><string>Refresh serial port list</string></property>
        </widget>
@@ -60,7 +60,7 @@
       <item>
        <widget class="QPushButton" name="serial_monitor_btn">
         <property name="whatsThis"><string>Open a raw serial debugging terminal showing live traffic to and from the gateway, with an input box for sending arbitrary lines.</string></property>
-        <property name="text"><string>Serial Monitor…</string></property>
+        <property name="text"><string>Serial Monitor...</string></property>
        </widget>
       </item>
      </layout>

@@ -8,15 +8,15 @@ It runs the two sides at once and writes ONE correlated, timestamped timeline:
     We send it `{"target":"thymio","cmd":"sniff_start"}` and log every relayed
     `{"type":"frame",...}` line (the C6's promiscuous 802.15.4 frames).
   * the **RF dongle** (USB) drives the real Thymio through `ThymioLink`, running a
-    scripted sequence of well-separated moves/LEDs — each logged with a timestamp.
+    scripted sequence of well-separated moves/LEDs - each logged with a timestamp.
 
 Diffing the frames that appear right after each distinct command reveals which bytes
-carry the motor/LED Aseba SetVariables → the payload format to reimplement on the C6.
+carry the motor/LED Aseba SetVariables -> the payload format to reimplement on the C6.
 
     # 1) find the channel: sweep 11..26 while jittering the robot; the Thymio's
     #    channel is the one where frames appear *because we drive* (a Thread/Matter
     #    neighbour shows steady weak traffic and would fool a plain "busiest channel"
-    #    — the sweep drives on each channel so it can't).
+    #    - the sweep drives on each channel so it can't).
     python scripts/thymio_sniff_capture.py --scan
     # 2) lock that channel for a clean capture
     python scripts/thymio_sniff_capture.py --ch 15 --out cap_ch15.jsonl
@@ -134,9 +134,9 @@ class Capture:
 
 def _connect_dongle(args) -> ThymioLink | None:
     link = ThymioLink(serial_port=args.dongle, node_id=args.node)
-    print("connecting to the Thymio via the dongle…")
+    print("connecting to the Thymio via the dongle...")
     if not link.connect():
-        print("dongle connect failed — is a Thymio powered ON + paired?")
+        print("dongle connect failed - is a Thymio powered ON + paired?")
         return None
     return link
 
@@ -187,7 +187,7 @@ def main() -> int:
         if kind == "cmd":
             print(f"[{rec['t']:7.2f}] CMD {fields.get('action')}")
 
-    print(f"gateway {gw_port}  →  capturing to {out_path}"
+    print(f"gateway {gw_port}  ->  capturing to {out_path}"
           f"  (ch={'hop' if not args.ch else args.ch})")
     cap = Capture(gw_port, log, debug=args.debug)
     time.sleep(0.5)
@@ -196,12 +196,12 @@ def main() -> int:
     try:
         if args.no_drive:
             _arm_sniffer(cap, args.ch, log)
-            print("sniffing… drive the Thymio yourself; Ctrl-C to stop.")
+            print("sniffing... drive the Thymio yourself; Ctrl-C to stop.")
             while True:
                 time.sleep(1)
         # Connect the dongle FIRST (its connect handshake is slow), THEN arm the sniffer
         # and drive immediately: the C6 RX goes idle a few seconds after arming, so the
-        # driving must land inside that fresh window — not 5 s later once RX has stalled.
+        # driving must land inside that fresh window - not 5 s later once RX has stalled.
         link = _connect_dongle(args)
         if link is None:
             return 1
@@ -232,7 +232,7 @@ def main() -> int:
 _MOTOR_STATES = [
     ("forward",    (150, 150)),
     ("backward",   (-150, -150)),
-    ("left_only",  (150, 0)),      # asymmetric → pins motor.left vs motor.right
+    ("left_only",  (150, 0)),      # asymmetric -> pins motor.left vs motor.right
     ("right_only", (0, 150)),
     ("spin_left",  (-150, 150)),
     ("spin_right", (150, -150)),
@@ -247,7 +247,7 @@ _LED_STATES = [
 
 
 def run_sequence(link: ThymioLink, log, secs: float) -> None:
-    """Cycle through distinct, labelled states — each transition transmits a frame.
+    """Cycle through distinct, labelled states - each transition transmits a frame.
 
     thymiodirect only sends on a value CHANGE, so holding one value re-sends nothing;
     cycling distinct states keeps it transmitting. At weak signal we rely on many
@@ -255,9 +255,9 @@ def run_sequence(link: ThymioLink, log, secs: float) -> None:
     """
     # ~4 changes/second: slow enough that thymiodirect actually transmits each distinct
     # value (spamming ~12/s let it coalesce and send almost nothing), fast enough to hit
-    # the short fresh-RX window. Motors first — they're what we're mapping.
+    # the short fresh-RX window. Motors first - they're what we're mapping.
     reps = max(8, int(secs * 4))
-    log("cmd", action="baseline")             # idle — ambient / keep-alives only
+    log("cmd", action="baseline")             # idle - ambient / keep-alives only
     time.sleep(1.0)
     for _ in range(reps):
         for name, (left, right) in _MOTOR_STATES:
@@ -276,10 +276,10 @@ def run_sequence(link: ThymioLink, log, secs: float) -> None:
 def run_scan(cap: "Capture", link: ThymioLink, log, secs: float) -> None:
     """Sweep 11..26, jittering the robot on each, and count drive-correlated frames.
 
-    The Thymio's channel is the one that lights up *because we drive* — a steady
+    The Thymio's channel is the one that lights up *because we drive* - a steady
     Thread/Matter neighbour can't fake that (we're actively generating the traffic).
     """
-    print("scanning channels 11..26 while driving (the Thymio's channel lights up)…")
+    print("scanning channels 11..26 while driving (the Thymio's channel lights up)...")
     results: dict[int, int] = {}
     for ch in range(11, 27):
         cap.send({"target": "thymio", "cmd": "sniff_ch", "n": ch})
@@ -288,7 +288,7 @@ def run_scan(cap: "Capture", link: ThymioLink, log, secs: float) -> None:
         start = cap.ch_frames[ch]
         deadline = time.monotonic() + secs
         toggle = False
-        while time.monotonic() < deadline:    # jitter in place → SetVariable frames
+        while time.monotonic() < deadline:    # jitter in place -> SetVariable frames
             link.set_motors(200 if toggle else -200, -200 if toggle else 200)
             toggle = not toggle
             time.sleep(0.25)
@@ -296,14 +296,14 @@ def run_scan(cap: "Capture", link: ThymioLink, log, secs: float) -> None:
         results[ch] = cap.ch_frames[ch] - start
         rssi = cap.ch_rssi.get(ch)
         print(f"  ch{ch:2d}: {results[ch]:4d} frames while driving"
-              + (f"  (rssi≤{rssi})" if rssi is not None else ""))
+              + (f"  (rssi<={rssi})" if rssi is not None else ""))
     hits = {c: n for c, n in results.items() if n > 0}
     if not hits:
-        print("\nno frames on ANY channel while driving — is the Thymio moving? "
+        print("\nno frames on ANY channel while driving - is the Thymio moving? "
               "(dongle paired, robot powered ON, close to the gateway box?)")
         return
     best = max(hits, key=lambda c: hits[c])
-    print(f"\n→ Thymio channel = {best}  ({hits[best]} frames, rssi≤{cap.ch_rssi.get(best)})")
+    print(f"\n-> Thymio channel = {best}  ({hits[best]} frames, rssi<={cap.ch_rssi.get(best)})")
     print(f"  next: python scripts/thymio_sniff_capture.py --ch {best} --out cap.jsonl")
 
 

@@ -1,12 +1,12 @@
-"""Touch↔chamber coupling calibration dialog (Tools → Calibrate Touch Coupling…).
+"""Touch<->chamber coupling calibration dialog (Tools -> Calibrate Touch Coupling...).
 
 Measures, per skin, how much inflating each chamber shifts every magnet/touch
-sensor (in µT) — at several inflation levels — and stores it as the skin's
+sensor (in uT) - at several inflation levels - and stores it as the skin's
 ``touch.coupling`` curves so the runtime can subtract that actuation offset and
 stop a chamber faking a touch (see :mod:`src.core.touch_compensation`).
 
-The sweep sequence itself is a pure :class:`SweepProgram` (rest → per chamber
-an ascending staircase of levels → deflate); this dialog only executes its
+The sweep sequence itself is a pure :class:`SweepProgram` (rest -> per chamber
+an ascending staircase of levels -> deflate); this dialog only executes its
 steps against the gateway, holds fast telemetry on the chamber node for dense
 level tracking, collects the ``magnet`` samples (including the 3-axis ``vec``
 deltas when the node streams them), and previews/saves the result. Sample
@@ -41,14 +41,14 @@ _TICK_MS = 100
 # whether a chamber that should be vented actually vented.
 _SETTLE_MARGIN_MS = 1500
 # A non-target chamber reading above this % during a measurement is "not vented"
-# — it contaminates the state (and would fake a co-inflation combination).
+# - it contaminates the state (and would fake a co-inflation combination).
 _VENT_MAX = 15.0
 
 
 class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
-    """Measure and store the per-skin touch↔chamber coupling matrix."""
+    """Measure and store the per-skin touch<->chamber coupling matrix."""
 
-    # gateway read thread → GUI thread (so samples are collected single-threaded)
+    # gateway read thread -> GUI thread (so samples are collected single-threaded)
     _msg = Signal(object)
     # Emitted after a matrix is saved, so the app can rebuild robots to apply it.
     saved = Signal()
@@ -79,7 +79,7 @@ class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
         self._elapsed = 0
         self._telemetry: FastTelemetry | None = None
         # Per-state target chambers, and the worst level a *non-target* chamber
-        # held while measuring (a chamber that will not vent — see _finish).
+        # held while measuring (a chamber that will not vent - see _finish).
         self._targets: set[int] = set()
         self._measuring = False
         self._contam: dict[int, float] = {}
@@ -131,7 +131,7 @@ class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
         prog = SweepProgram(skin["slots"], step_pct=self.step_spin.value())
         secs = prog.est_seconds
         span = f"{secs:.0f} s" if secs < 90 else f"~{secs / 60:.0f} min"
-        self.est_label.setText(f"≈ {prog.n_states} states, {span}")
+        self.est_label.setText(f"~= {prog.n_states} states, {span}")
 
     def _run(self) -> None:
         skin = self._current_skin()
@@ -163,7 +163,7 @@ class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
 
     def _rest_all(self, skin: dict) -> None:
         """Passively vent every chamber to ambient by opening the **DEFLATE**
-        valve (side 1), no pump — the natural release path, so even a still-
+        valve (side 1), no pump - the natural release path, so even a still-
         inflated chamber bleeds down to atmosphere (the inflate side pushes air
         back into the dead-ended pressure manifold and wouldn't vent). One frame
         per chamber; it holds for the manual dead-man (5 s), longer than a rest
@@ -220,7 +220,7 @@ class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
 
     def _check_vented(self) -> None:
         """While measuring a state (past the pump-settle margin), record the
-        worst level of any chamber that should be vented but is not — a chamber
+        worst level of any chamber that should be vented but is not - a chamber
         whose valve/deflate is stuck, which would fake a co-inflation."""
         if not self._measuring or self._elapsed < _SETTLE_MARGIN_MS:
             return
@@ -239,8 +239,8 @@ class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
             list(self._samples), skin["sensor_count"])
         self._result = cfg
         preview = self._format_matrix(model, skin)
-        # Diagnose whenever a *swept* slot is missing from the model — not only
-        # the fully-empty case — so a single dropped chamber says why instead of
+        # Diagnose whenever a *swept* slot is missing from the model - not only
+        # the fully-empty case - so a single dropped chamber says why instead of
         # silently reporting fewer chambers than were swept.
         if len(model.chambers) < len(skin["slots"]):
             preview += "\n\n" + sweep_diagnostics(
@@ -248,7 +248,7 @@ class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
         if self._contam:
             stuck = ", ".join(f"chamber {c} (up to {lvl:.0f}%)"
                               for c, lvl in sorted(self._contam.items()))
-            preview = (f"⚠ Did not vent while other chambers were measured: "
+            preview = (f"WARNING: Did not vent while other chambers were measured: "
                        f"{stuck}. Its valve/deflate is likely stuck, so those "
                        f"states are contaminated (spurious combinations). Fix "
                        f"venting, then re-run.\n\n") + preview
@@ -257,7 +257,7 @@ class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
         combos = len(model.combos())
         combo_note = f" {combos} combination(s)." if combos else ""
         self.status_label.setText(
-            f"Done — {len(self._samples)} samples over "
+            f"Done - {len(self._samples)} samples over "
             f"{len(model.chambers)} chamber(s).{combo_note}{vec_note} "
             "Review, then Save.")
         self._set_save_enabled(True)
@@ -279,24 +279,24 @@ class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
     @staticmethod
     def _format_matrix(model: Any, skin: dict) -> str:
         n = skin["sensor_count"]
-        lines = ["Coupling (µT shift per sensor at the strongest level):",
-                 "chamber │ " + "  ".join(f"S{s}" for s in range(n))]
+        lines = ["Coupling (uT shift per sensor at the strongest level):",
+                 "chamber | " + "  ".join(f"S{s}" for s in range(n))]
         singles = model.singles()
         deltas = model.deltas()
         if not singles:
-            lines.append("(no coupling measured — sensors may be away from "
+            lines.append("(no coupling measured - sensors may be away from "
                          "the chambers, or the sweep collected no samples)")
         for chamber in sorted(singles):
             row = deltas.get(chamber, [])
             cells = TouchCalibrationDialog._cells(row, n)
-            lines.append(f"slot {chamber:<3}│ {cells}   @{singles[chamber].levels[chamber]:.0f}%")
+            lines.append(f"slot {chamber:<3}| {cells}   @{singles[chamber].levels[chamber]:.0f}%")
         combos = model.combos()
         if combos:
             lines.append("")
-            lines.append("Combinations (µT shift, non-additive):")
+            lines.append("Combinations (uT shift, non-additive):")
             for st in combos:
                 who = "+".join(f"{c}@{st.levels[c]:.0f}%" for c in sorted(st.chambers))
-                lines.append(f"{who:<14}│ {TouchCalibrationDialog._cells(st.mag, n)}")
+                lines.append(f"{who:<14}| {TouchCalibrationDialog._cells(st.mag, n)}")
         return "\n".join(lines)
 
     @staticmethod
@@ -339,7 +339,7 @@ class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
                            skin["skin_id"], self._result)
         suppress = (float(self.suppress_spin.value())
                     if self.suppress_check.isChecked() else None)
-        # Threshold is set from the sensor tester (act_threshold_ut) — the single
+        # Threshold is set from the sensor tester (act_threshold_ut) - the single
         # source; clear any stale compensation.threshold_ut so it falls back there.
         set_compensation(
             self._settings.data, skin["robot_id"], skin["skin_id"],
@@ -362,7 +362,7 @@ class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
             self.accept()
 
     # ------------------------------------------------------------------
-    # Gateway plumbing (read thread → Signal → GUI thread)
+    # Gateway plumbing (read thread -> Signal -> GUI thread)
     # ------------------------------------------------------------------
 
     def _on_gateway_message(self, data: dict) -> None:
@@ -391,7 +391,7 @@ class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
         Recomputes % from the measured ``kpa`` against the *configured* range
         (the firmware ``pressure`` % lags the limits the node holds), minus a
         per-chamber **atmospheric tare**. The XGZP6847A has no zero calibration,
-        so at true ambient it reads a few kPa of offset — without taring, a
+        so at true ambient it reads a few kPa of offset - without taring, a
         *vented* chamber would read ~20 % and be misclassified as inflated (the
         false 'residual' that faked co-inflation combinations). The running
         minimum kPa is that chamber's ambient floor; because the magnet baseline
@@ -407,7 +407,7 @@ class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
             # Reference ATMOSPHERE (0 kPa) as 0 %, NOT the chamber's configured
             # min: a vacuum-capable chamber has min < 0 (e.g. -5), so against it a
             # *vented* chamber at atmosphere reads ~20-25 % and would look inflated
-            # — turning every state into a spurious triple and firing a false
+            # - turning every state into a spurious triple and firing a false
             # "did not vent" warning. Coupling cares about inflation above ambient.
             _lo, hi = skin["limits"].get(ch, (0.0, 8.0))
             self._pressures[ch] = float(kpa_to_pct(kpa - self._tare[ch], 0.0, hi))

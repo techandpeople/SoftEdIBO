@@ -110,7 +110,7 @@ def test_inflate_still_fires_when_below_target():
 
 
 def test_repeated_inflate_repushes_every_time():
-    """Each step re-asserts the cap — that is what stops a stale max from letting
+    """Each step re-asserts the cap - that is what stops a stale max from letting
     repeated + clicks climb past the configured limit."""
     node = _RecordingNode()
     skin = _skin(node)

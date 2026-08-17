@@ -1,9 +1,9 @@
-"""Test Thymio dialog — jog the wheels, colour the LED, play sounds and watch the
+"""Test Thymio dialog - jog the wheels, colour the LED, play sounds and watch the
 live accelerometer/mic + impact readout for one Thymio.
 
 The dialog drives the **live robot's link** (dongle or gateway/C6), so it exercises
 exactly the transport a session uses. The sensor readout only fills when the robot
-is on the gateway/C6 path — that link streams ``thymio_sensors`` (acc/mic) which the
+is on the gateway/C6 path - that link streams ``thymio_sensors`` (acc/mic) which the
 :class:`~src.robots.thymio.thymio_gateway_link.ThymioGatewayLink` turns into
 ``on_sensors`` / ``on_impact`` callbacks. Those fire on the gateway's serial read
 thread, so we marshal them to the GUI thread through Qt signals (same pattern as the
@@ -31,7 +31,7 @@ _LED_MAX = 32
 class TestThymioDialog(BaseDialog, Ui_TestThymioDialog):
     """Interactive tester for one Thymio's wheels, LED, sound and sensors."""
 
-    # Gateway read-thread → GUI-thread bridges (the link's callbacks fire off-thread).
+    # Gateway read-thread -> GUI-thread bridges (the link's callbacks fire off-thread).
     _sensors_received = Signal(object, int, object)   # (acc tuple, mic, ground tuple|None)
     _impact_received = Signal(int)                     # intensity level (1/2/3)
     _lifted_received = Signal(bool)                    # lifted off / set back down
@@ -50,7 +50,7 @@ class TestThymioDialog(BaseDialog, Ui_TestThymioDialog):
         self._lifted = False              # last-seen lift state (from the lift stream)
         self._we_connected = False        # did WE open the link (so we close it)?
 
-        self.setWindowTitle(f"Test Thymio — {robot.name}")
+        self.setWindowTitle(f"Test Thymio - {robot.name}")
         self.intro_label.setText(f"<b>{robot.name}</b>")
         self.dev_bar.setStyleSheet(self._IDLE_CHUNK)
 
@@ -61,7 +61,7 @@ class TestThymioDialog(BaseDialog, Ui_TestThymioDialog):
         self._wire_controls()
 
         # Subscribe to the robot's sensor/impact/lift streams (no-op on a dongle/link-less
-        # robot). The callbacks run on the read thread → emit signals to the GUI thread.
+        # robot). The callbacks run on the read thread -> emit signals to the GUI thread.
         self._sensors_received.connect(self._on_sensors_ui)
         self._impact_received.connect(self._on_impact_ui)
         self._lifted_received.connect(self._on_lifted_ui)
@@ -72,7 +72,7 @@ class TestThymioDialog(BaseDialog, Ui_TestThymioDialog):
         self.finished.connect(self._on_closed)
 
         # Robots are built at startup but their wheeled-base link is only opened by
-        # connect() — which nothing calls outside a session — so bring the link up
+        # connect() - which nothing calls outside a session - so bring the link up
         # here (off-thread; the dongle path can block on discovery) or nothing moves
         # and no sensor stream arrives.
         self._ensure_connected()
@@ -85,7 +85,7 @@ class TestThymioDialog(BaseDialog, Ui_TestThymioDialog):
         if self._robot.status == RobotStatus.CONNECTED:
             self.status_label.setText("Connected.")
             return
-        self.status_label.setText("Connecting to the Thymio…")
+        self.status_label.setText("Connecting to the Thymio...")
         self._set_controls_enabled(False)
         run_async(self._robot.connect, on_done=self._on_connected,
                   on_error=self._on_connect_failed, parent=self)
@@ -162,7 +162,7 @@ class TestThymioDialog(BaseDialog, Ui_TestThymioDialog):
         self.dev_bar.setMaximum(max(10, int(value * 3)))
 
     # ------------------------------------------------------------------
-    # Sensor stream (read thread → signal → GUI thread)
+    # Sensor stream (read thread -> signal -> GUI thread)
     # ------------------------------------------------------------------
 
     def _sensors_cb(self, acc, mic: int, ground) -> None:
@@ -199,7 +199,7 @@ class TestThymioDialog(BaseDialog, Ui_TestThymioDialog):
     def _on_impact_ui(self, level: int) -> None:
         self._knocks += 1
         name = self._LEVEL_NAMES.get(level, "hit")
-        self.impact_label.setText(f"knocks: {self._knocks}  ● {name}")
+        self.impact_label.setText(f"knocks: {self._knocks}  * {name}")
 
     def _on_lifted_ui(self, lifted: bool) -> None:
         self._lifted = lifted   # remembered so the next sensor frame keeps showing it

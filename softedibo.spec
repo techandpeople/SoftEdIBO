@@ -7,9 +7,9 @@
 #   pyinstaller softedibo.spec
 #
 # Output: dist/SoftEdIBO/
-#   SoftEdIBO           — main GUI (no console)
-#   esptool             — standalone flash tool (console)
-#   _internal/          — bundled Python libs + assets
+#   SoftEdIBO           - main GUI (no console)
+#   esptool             - standalone flash tool (console)
+#   _internal/          - bundled Python libs + assets
 #     config/
 #       settings.yaml
 #     firmware/                                      (see scripts/build-firmware.sh)
@@ -28,7 +28,7 @@ block_cipher = None
 # ---------------------------------------------------------------------------
 # Excludes
 # ---------------------------------------------------------------------------
-# Shared by both Analysis calls — pure bloat neither executable ever needs.
+# Shared by both Analysis calls - pure bloat neither executable ever needs.
 COMMON_EXCLUDES = [
     "tkinter",
     "matplotlib",
@@ -41,7 +41,7 @@ COMMON_EXCLUDES = [
     "psycopg2",    # PostgreSQL backend (not installed in the frozen bundle)
 ]
 
-# The standalone esptool executable does no ML — keep it lean by stripping the
+# The standalone esptool executable does no ML - keep it lean by stripping the
 # numeric stack there. The main app DOES use it (touch-gesture classifier:
 # numpy / scipy / scikit-learn / joblib), so those must NOT be excluded from it.
 ESPTOOL_EXCLUDES = COMMON_EXCLUDES + ["numpy", "scipy", "pandas"]
@@ -55,7 +55,7 @@ main_a = Analysis(
     binaries=[],
     datas=[
         ("config/", "config/"),
-        # Block editor assets (Tools => Behaviour Editor…). HTML + any vendored
+        # Block editor assets (Tools => Behaviour Editor...). HTML + any vendored
         # Blockly copy; loaded lazily, only when the editor is opened.
         ("src/gui/blockly/", "src/gui/blockly/"),
         ("firmware/gateway/firmware-s3.bin",                             "firmware/gateway"),
@@ -76,7 +76,7 @@ main_a = Analysis(
         "serial.tools.list_ports",
         "PySide6.QtSvg",
         "PySide6.QtXml",
-        # Block editor web view (Tools => Behaviour Editor…). PyInstaller's
+        # Block editor web view (Tools => Behaviour Editor...). PyInstaller's
         # PySide6 hook bundles the QtWebEngine process when these are imported.
         "PySide6.QtWebEngineWidgets",
         "PySide6.QtWebEngineCore",
@@ -108,7 +108,7 @@ main_exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=False,      # GUI app — no terminal window
+    console=False,      # GUI app - no terminal window
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
@@ -151,7 +151,7 @@ esptool_exe = EXE(
     debug=False,
     strip=False,
     upx=True,
-    console=True,       # CLI tool — keep the terminal
+    console=True,       # CLI tool - keep the terminal
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,

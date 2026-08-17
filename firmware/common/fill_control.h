@@ -2,7 +2,7 @@
 #include <Arduino.h>
 
 // Shared chamber fill-control POLICY for both actuator variants (direct &
-// multiplexed). The *actuation* — which valves/pumps to drive — is genuinely
+// multiplexed). The *actuation* - which valves/pumps to drive - is genuinely
 // board-specific and stays in each node's chambers.h. This header owns the
 // board-agnostic policy so the safety constants and behaviour can't drift
 // between the two boards:
@@ -26,7 +26,7 @@ constexpr uint32_t MAX_FILL_MS = 5000;
 
 // Hard ceiling for a single deflate. Deflate drives an ACTIVE vacuum pump and
 // the gauge pressure sensor is blind below atmosphere (reads 0), so on the
-// vacuum side there is no closed-loop cutoff — this time cap is the only
+// vacuum side there is no closed-loop cutoff - this time cap is the only
 // sensor-independent backstop. Armed on every beginDeflate (see deflateUntil).
 constexpr uint32_t MAX_DEFLATE_MS = 5000;
 
@@ -81,7 +81,7 @@ void deflateTimeTick(Chamber* st, int n, uint32_t now,
 
 // Idle leak maintenance. A held chamber is topped back up when its pressure
 // droops past LEAK_MARGIN_KPA for DROOP_DEBOUNCE consecutive checks. The droop
-// test is one-directional, so a touch — which *raises* pressure — never triggers
+// test is one-directional, so a touch - which *raises* pressure - never triggers
 // a top-up and actually suppresses maintenance; the debounce ignores the brief
 // dip a release can cause. `lastCheck` is the node-owned throttle timestamp.
 // `isIdle(ch)` is the node's state predicate; `topUp(i, holdKpa)` opens a
@@ -103,7 +103,7 @@ void maintainTick(Chamber* st, const float* kpa, int n, uint32_t now,
                 topUp(i, ch.hold_kpa);
             }
         } else {
-            ch.droop_count = 0;   // recovered (or being touched → pressure up)
+            ch.droop_count = 0;   // recovered (or being touched -> pressure up)
         }
     }
 }

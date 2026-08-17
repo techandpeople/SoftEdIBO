@@ -59,7 +59,7 @@ def main() -> int:
     for i in range(args.repeat):
         ser.write((json.dumps({"target": "thymio", "cmd": "tx",
                                "ch": args.ch, "data": frame}) + "\n").encode())
-        print(f"→ tx #{i + 1}/{args.repeat} on ch{args.ch} ({len(frame) // 2} bytes)")
+        print(f"-> tx #{i + 1}/{args.repeat} on ch{args.ch} ({len(frame) // 2} bytes)")
         time.sleep(args.gap)
 
     # Print the C6's tx replies (err code) + anything it tags from the Thymio side.

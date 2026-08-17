@@ -1,20 +1,20 @@
-"""Skin condition — the silicone skin set an activity is written for.
+"""Skin condition - the silicone skin set an activity is written for.
 
 The study dresses each robot in one of three skin conditions, and the activity
-to run is picked by the CONDITION, not by the robot — robot-specific parts of
-a behaviour live in ``if robot is …`` blocks inside the spec:
+to run is picked by the CONDITION, not by the robot - robot-specific parts of
+a behaviour live in ``if robot is ...`` blocks inside the spec:
 
-  * ``natural``  — plain smooth skins.
-  * ``wrinkles`` — wrinkled skins (the vacuum look).
-  * ``organs``   — organ-bearing skins: each Thymio carries one organ shape
+  * ``natural``  - plain smooth skins.
+  * ``wrinkles`` - wrinkled skins (the vacuum look).
+  * ``organs``   - organ-bearing skins: each Thymio carries one organ shape
     (rectangle / triangle / ellipse spread across the three robots), each Tree
     branch carries one pluggable organ, and the Turtle's central square
     carries three.
 
-An activity declares its condition in its spec ``target`` (``{"skin": …}``,
+An activity declares its condition in its spec ``target`` (``{"skin": ...}``,
 see :mod:`src.activities.catalog`). The session setup uses it to pre-select
 the matching activity and to warn when a chosen robot's configured skin
-variants don't match the condition. Pure data + helpers — Qt-free.
+variants don't match the condition. Pure data + helpers - Qt-free.
 """
 
 from __future__ import annotations
@@ -30,8 +30,8 @@ _LABELS: dict[str, str] = {
     NATURAL: "Natural", WRINKLES: "Wrinkles", ORGANS: "Organs"}
 
 # Organ-bearing variant(s) each skin TYPE is cast in (mirrors
-# skin_geometry.VARIANTS_BY_TYPE). A type absent here has no organ cast —
-# e.g. the Turtle sides — so it is EXEMPT from the organs-condition check.
+# skin_geometry.VARIANTS_BY_TYPE). A type absent here has no organ cast -
+# e.g. the Turtle sides - so it is EXEMPT from the organs-condition check.
 _ORGAN_VARIANTS_BY_TYPE: dict[str, frozenset[str]] = {
     "thymio": frozenset({"organ_rectangle", "organ_triangle", "organ_ellipse"}),
     "tree_round": frozenset({"organ"}),

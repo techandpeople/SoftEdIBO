@@ -1,14 +1,14 @@
-"""Observer quick-tag panel — live behavioral coding during a session.
+"""Observer quick-tag panel - live behavioral coding during a session.
 
 The researcher chose to run the study **without video recording** (decision in
-docs/STUDY_PLAN.md), so behaviors the sensors can't see — a child watching,
-pointing, helping a peer, talking — are coded live instead. This floating panel
+docs/STUDY_PLAN.md), so behaviors the sensors can't see - a child watching,
+pointing, helping a peer, talking - are coded live instead. This floating panel
 gives the observer one button per behavior code, per participant: a click logs
 a timestamped ``observer`` event into the same ``interaction_events`` timeline
 as the sensor events, so everything lines up for analysis.
 
 It also carries a **Marker** button that logs a ``marker`` event (with an
-optional note) — a single clapperboard click to align the event log with the
+optional note) - a single clapperboard click to align the event log with the
 observer's paper notes or any external clock.
 
 The static frame (intro label + marker button) lives in ``ui/observer_panel.ui``;
@@ -85,7 +85,7 @@ class ObserverPanel(QWidget, Ui_ObserverPanel):
                 grid.addWidget(btn, i // 3, i % 3)
             self.content_layout.addWidget(box)
 
-        # Touch-gesture labelling row — tags the touch happening *now* with a
+        # Touch-gesture labelling row - tags the touch happening *now* with a
         # gesture class, for the offline labeller (scripts/label_touches.py) to
         # align with the recorded stream and build a training set. Logged as a
         # ``gesture_label`` event; the offline tool resolves the exact segment.
@@ -112,7 +112,7 @@ class ObserverPanel(QWidget, Ui_ObserverPanel):
         self.observed.emit("observer", code, participant_id, "")
 
     def _emit_gesture(self, code: str) -> None:
-        # target left empty — the offline labeller aligns this timestamp to the
+        # target left empty - the offline labeller aligns this timestamp to the
         # active touch segment (and thus its skin) in the recorded stream.
         self.observed.emit("gesture_label", code, "", "")
 

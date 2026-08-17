@@ -8,12 +8,12 @@ from src.robots.thymio.thymio_discovery import parse_thymio_addr, discover_thymi
 # --- frame parsing ---------------------------------------------------------
 
 def test_parse_host_to_thymio_frame():
-    # FCF|seq|PAN 8144|dst 256a(=0x6a25)|src 3732(=host)|…  → the robot is the dst
+    # FCF|seq|PAN 8144|dst 256a(=0x6a25)|src 3732(=host)|...  -> the robot is the dst
     assert parse_thymio_addr("6188388144256a373283006a25") == 0x6A25
 
 
 def test_parse_thymio_to_host_frame():
-    # dst 3732(=host)|src 256a(=0x6a25) → the robot is the src
+    # dst 3732(=host)|src 256a(=0x6a25) -> the robot is the src
     assert parse_thymio_addr("61888081443732256a8300") == 0x6A25
 
 
@@ -23,7 +23,7 @@ def test_parse_second_thymio_address():
 
 
 def test_parse_ignores_ack_and_other_pans():
-    assert parse_thymio_addr("020025c80a") is None          # 5-byte ACK — no addresses
+    assert parse_thymio_addr("020025c80a") is None          # 5-byte ACK - no addresses
     assert parse_thymio_addr("6188018144c2f4") is None       # too short after PAN
     assert parse_thymio_addr("618801f4c2256a373283ff") is None  # PAN 0xf4c2, not the Thymio net
     assert parse_thymio_addr("nothex") is None
@@ -76,7 +76,7 @@ class _FakeDiscoverGateway:
 
 class _FakeLegacyFrameGateway(_FakeDiscoverGateway):
     """An old C6 that answers discovery by streaming raw ``frame`` lines instead
-    of ``thymio_found`` — exercises the passive fallback parse."""
+    of ``thymio_found`` - exercises the passive fallback parse."""
 
     def send(self, target, cmd, **kwargs):
         self.sent.append((target, cmd, kwargs))
@@ -125,7 +125,7 @@ def test_discover_legacy_frame_fallback():
     frames = [
         "6188388144256a373283006a25",   # host -> Thymio 6a25
         "6188018144317b373283ff",       # host -> Thymio 7b31
-        "020025c80a",                   # ACK — ignored
+        "020025c80a",                   # ACK - ignored
     ]
     addrs = discover_thymios(_FakeLegacyFrameGateway(frames), channel=25, secs=0.01)
     assert addrs == ["6a25", "7b31"]

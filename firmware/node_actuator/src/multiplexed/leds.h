@@ -6,14 +6,14 @@
 #include "pins.h"
 
 // LED ring control for node_multiplexed. Four independent rings (one 24-LED +
-// three 16-LED, see LED_PINS in pins.h) — each on its own data pin, so each is a
+// three 16-LED, see LED_PINS in pins.h) - each on its own data pin, so each is a
 // separate Adafruit_NeoPixel strip with its own animation state. Driven by the
 // "set_led" / "set_led_halves" ESP-NOW commands (see main.cpp); the "ring" field
 // selects one, omitted / -1 addresses all four at once. Rendering is non-blocking
 // AND fully deferred: the recv callback only updates each ring's per-pixel target
 // buffer plus its animation state, and loop()'s update() is the ONLY place show()
 // runs. show() bit-bangs a strip with interrupts disabled, so driving it from the
-// ESP-NOW receive task — once per pixel for a split-ring repaint — starved the
+// ESP-NOW receive task - once per pixel for a split-ring repaint - starved the
 // radio and reset the node. One show() per ring per loop, off the receive task,
 // keeps the link up.
 //
@@ -30,7 +30,7 @@ namespace leds {
 enum Pattern : uint8_t { STATIC, BLINK, PULSE, COMET, FADE };
 
 // Max arcs/colours a "set_led_halves" command may carry (also the max comet count),
-// and the largest ring (the 24-LED one) — sizes the per-ring colour buffers.
+// and the largest ring (the 24-LED one) - sizes the per-ring colour buffers.
 constexpr int MAX_SEGMENTS  = 8;
 constexpr int MAX_RING_LEDS = 24;
 
@@ -39,7 +39,7 @@ constexpr uint32_t DEFAULT_FADE_MS = 250;
 
 // Pixel type is chosen at flash time. RGB rings (e.g. Adafruit 1586) send 3
 // bytes/pixel; RGBW rings (e.g. Adafruit 2862, SK6812) send 4. Build the matching
-// env (-DLED_RGBW) for the rings that are actually wired — the byte count differs,
+// env (-DLED_RGBW) for the rings that are actually wired - the byte count differs,
 // so an RGB build drives an RGBW ring with shifted colours and vice versa. The
 // colour code below is unchanged: Color() leaves W at 0.
 #ifdef LED_RGBW
@@ -98,7 +98,7 @@ constexpr uint32_t REFRESH_MS = 25;
 // *linear* PWM, so without correction mid-tones look too bright and hues drift from
 // the picker. gamma8() maps each channel back to the perceived value. Color() packs
 // into a fixed format regardless of a strip's NEO_GRB(W) order, so any instance
-// gives the same value — mirrors node_direct.
+// gives the same value - mirrors node_direct.
 inline uint32_t srgbColor(uint8_t r, uint8_t g, uint8_t b) {
     return Adafruit_NeoPixel::Color(Adafruit_NeoPixel::gamma8(r),
                                     Adafruit_NeoPixel::gamma8(g),
@@ -175,7 +175,7 @@ inline void computeAnimated_(const Ring& R, int n,
         uint32_t t = (now - R.start) % R.period;
         if (R.pattern == BLINK) {
             scale = (t < R.period / 2) ? 1.0f : 0.0f;
-        } else {                               // PULSE — triangle ramp 0 -> 1 -> 0
+        } else {                               // PULSE - triangle ramp 0 -> 1 -> 0
             float frac = (float)t / R.period;
             scale = frac < 0.5f ? frac * 2.0f : (1.0f - frac) * 2.0f;
         }
@@ -217,7 +217,7 @@ inline void hardware_init() {
     for (int k = 0; k < NUM_RINGS; k++) {
         strips[k].begin();
         strips[k].setBrightness(255);
-        renderRing_(k, now);   // setup() context — the one show() outside update()
+        renderRing_(k, now);   // setup() context - the one show() outside update()
         rings[k].dirty = false;
     }
 }
@@ -267,7 +267,7 @@ inline void set(int ring, uint8_t r, uint8_t g, uint8_t b,
 // Whole ring(s) cross-fading between two colours: base (c1) <-> fadeTo (c2) as a
 // triangle 0->1->0 over `period` (one c1->c2->c1 cycle). count<=0 = run forever;
 // a bounded fade rests on c1 when done (see update()). ring < 0 = all rings.
-// Moves the PC's old per-frame colour stream onto the node — one frame/cycle.
+// Moves the PC's old per-frame colour stream onto the node - one frame/cycle.
 inline void setFade(int ring, uint8_t r, uint8_t g, uint8_t b,
                     uint8_t r2, uint8_t g2, uint8_t b2,
                     uint32_t period, int32_t count,

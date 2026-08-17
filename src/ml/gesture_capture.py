@@ -1,4 +1,4 @@
-"""GestureCaptureSession — guided, prompt-driven collection of labelled touches.
+"""GestureCaptureSession - guided, prompt-driven collection of labelled touches.
 
 The Train Touch dialog can only build a dataset as a *byproduct* of a study
 session (record + tag afterwards). This drives the opposite, deliberate flow: the
@@ -12,8 +12,8 @@ replaced by the current prompt: feed the magnet stream through a
 :class:`~src.ml.touch_segmenter.PulseMerger`, and each merged gesture that comes
 out is captured under the gesture being prompted. Because ``PulseMerger`` groups
 a run of presses (a ``compressions`` bout) exactly as the trainer's
-``merge_segments`` does — using the same :data:`~src.ml.gesture_taxonomy.BOUT_GAP_MS`
-silence window — a captured bout is already one segment, the same thing inference
+``merge_segments`` does - using the same :data:`~src.ml.gesture_taxonomy.BOUT_GAP_MS`
+silence window - a captured bout is already one segment, the same thing inference
 sees (train/serve parity), with no ``group_id`` bookkeeping.
 
 Pure Python and Qt-free (the dialog owns the gateway subscription and the
@@ -144,7 +144,7 @@ class GestureCaptureSession:
             return None
         c = self.captured.pop()
         self._counts[c.idx] -= 1
-        self._idx = c.idx   # that slot is free again — prompt it next
+        self._idx = c.idx   # that slot is free again - prompt it next
         return c
 
     # ------------------------------------------------------------------

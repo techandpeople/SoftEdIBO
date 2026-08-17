@@ -5,7 +5,7 @@
   <property name="geometry">
    <rect><x>0</x><y>0</y><width>840</width><height>620</height></rect>
   </property>
-  <property name="windowTitle"><string>Touch Gestures — label &amp; train</string></property>
+  <property name="windowTitle"><string>Touch Gestures - label &amp; train</string></property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>
     <widget class="QLabel" name="intro_label">
@@ -28,7 +28,7 @@
        </item>
        <item>
         <widget class="QPushButton" name="add_btn">
-         <property name="text"><string>Add recording…</string></property>
+         <property name="text"><string>Add recording...</string></property>
         </widget>
        </item>
       </layout>
@@ -89,12 +89,12 @@
         <layout class="QHBoxLayout" name="csv_row">
          <item>
           <widget class="QPushButton" name="import_csv_btn">
-           <property name="text"><string>Import CSV…</string></property>
+           <property name="text"><string>Import CSV...</string></property>
           </widget>
          </item>
          <item>
           <widget class="QPushButton" name="export_csv_btn">
-           <property name="text"><string>Export CSV…</string></property>
+           <property name="text"><string>Export CSV...</string></property>
           </widget>
          </item>
          <item>
@@ -106,13 +106,13 @@
          <item>
           <widget class="QPushButton" name="import_model_btn">
            <property name="toolTip"><string>Copy a trained .joblib into this skin type's model slot.</string></property>
-           <property name="text"><string>Import model…</string></property>
+           <property name="text"><string>Import model...</string></property>
           </widget>
          </item>
          <item>
           <widget class="QPushButton" name="export_model_btn">
            <property name="toolTip"><string>Save the trained model for the selected skin type to a file.</string></property>
-           <property name="text"><string>Export model…</string></property>
+           <property name="text"><string>Export model...</string></property>
           </widget>
          </item>
         </layout>
@@ -126,7 +126,7 @@
      <item>
       <widget class="QPushButton" name="capture_btn">
        <property name="toolTip"><string>Collect a fresh training set live: the app prompts each gesture and you perform it a few times, then trains and shows the accuracy. Needs a connected gateway with a touch node.</string></property>
-       <property name="text"><string>Guided live capture…</string></property>
+       <property name="text"><string>Guided live capture...</string></property>
       </widget>
      </item>
      <item>

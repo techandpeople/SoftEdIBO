@@ -5,7 +5,7 @@
   <property name="geometry">
    <rect><x>0</x><y>0</y><width>600</width><height>480</height></rect>
   </property>
-  <property name="windowTitle"><string>Calibrate Touch ↔ Chamber Coupling</string></property>
+  <property name="windowTitle"><string>Calibrate Touch &lt;-&gt; Chamber Coupling</string></property>
   <property name="minimumSize">
    <size><width>560</width><height>0</height></size>
   </property>
@@ -16,7 +16,7 @@
    <item>
     <widget class="QLabel" name="intro_label">
      <property name="wordWrap"><bool>true</bool></property>
-     <property name="text"><string>Inflating chambers shifts the magnet over each touch sensor, which can fake a touch — and two chambers together deform the silicone non-additively. This sweep drives every chamber combination through a grid of pressure levels, measures how much each moves every sensor (µT), and stores it so the live reading can be corrected. Run once per skin, without touching it, and keep hands clear. A finer grid step and a higher max combo are more accurate but take longer — watch the estimate.</string></property>
+     <property name="text"><string>Inflating chambers shifts the magnet over each touch sensor, which can fake a touch - and two chambers together deform the silicone non-additively. This sweep drives every chamber combination through a grid of pressure levels, measures how much each moves every sensor (uT), and stores it so the live reading can be corrected. Run once per skin, without touching it, and keep hands clear. A finer grid step and a higher max combo are more accurate but take longer - watch the estimate.</string></property>
     </widget>
    </item>
    <item>
@@ -54,8 +54,8 @@
    <item>
     <widget class="QPlainTextEdit" name="preview">
      <property name="readOnly"><bool>true</bool></property>
-     <property name="toolTip"><string>Measured coupling: per chamber (and per combination), the µT shift on each sensor. Bigger = stronger contamination.</string></property>
-     <property name="whatsThis"><string>Measured coupling: for each chamber, and for each measured combination of chambers, the µT shift it causes on every sensor. Larger numbers mean stronger contamination. If a swept chamber is missing, a diagnostic explains why (e.g. a neighbour that would not vent).</string></property>
+     <property name="toolTip"><string>Measured coupling: per chamber (and per combination), the uT shift on each sensor. Bigger = stronger contamination.</string></property>
+     <property name="whatsThis"><string>Measured coupling: for each chamber, and for each measured combination of chambers, the uT shift it causes on every sensor. Larger numbers mean stronger contamination. If a swept chamber is missing, a diagnostic explains why (e.g. a neighbour that would not vent).</string></property>
     </widget>
    </item>
    <item>
@@ -90,8 +90,8 @@
        <property name="singleStep"><number>5</number></property>
        <property name="value"><number>20</number></property>
        <property name="suffix"><string> %</string></property>
-       <property name="toolTip"><string>Pressure grid spacing each chamber is held at (e.g. 20 % → 20/40/60/80/100 %). Smaller = finer = more accurate, but a much longer sweep.</string></property>
-       <property name="whatsThis"><string>How far apart the pressure levels are that each chamber is held at during the sweep — e.g. 20 % measures 20/40/60/80/100 %. A finer step captures the nonlinear silicone response more precisely, so compensation is accurate at partial inflation too, but multiplies the number of states (and the time) sharply. Levels below the inflated threshold are skipped; the rest point (0 %) is always included.</string></property>
+       <property name="toolTip"><string>Pressure grid spacing each chamber is held at (e.g. 20 % -> 20/40/60/80/100 %). Smaller = finer = more accurate, but a much longer sweep.</string></property>
+       <property name="whatsThis"><string>How far apart the pressure levels are that each chamber is held at during the sweep - e.g. 20 % measures 20/40/60/80/100 %. A finer step captures the nonlinear silicone response more precisely, so compensation is accurate at partial inflation too, but multiplies the number of states (and the time) sharply. Levels below the inflated threshold are skipped; the rest point (0 %) is always included.</string></property>
       </widget>
      </item>
      <item>
@@ -145,8 +145,8 @@
        <property name="value"><number>800</number></property>
        <property name="suffix"><string> ms</string></property>
        <property name="specialValueText"><string>off</string></property>
-       <property name="toolTip"><string>After a chamber's level changes, harden the coupled sensors' thresholds for this long — the moment ghost touches are most likely. 0 turns it off.</string></property>
-       <property name="whatsThis"><string>For this long after a chamber's level changes, harden the threshold of the sensors coupled to it (by that chamber's strongest measured offset). The calibration only measures steady state, so during transitions — pump running, pressure readings lagging — the compensation is least reliable and ghost touches are most likely. 0 turns the guard off.</string></property>
+       <property name="toolTip"><string>After a chamber's level changes, harden the coupled sensors' thresholds for this long - the moment ghost touches are most likely. 0 turns it off.</string></property>
+       <property name="whatsThis"><string>For this long after a chamber's level changes, harden the threshold of the sensors coupled to it (by that chamber's strongest measured offset). The calibration only measures steady state, so during transitions - pump running, pressure readings lagging - the compensation is least reliable and ghost touches are most likely. 0 turns the guard off.</string></property>
       </widget>
      </item>
      <item>
@@ -193,7 +193,7 @@
      </item>
      <item>
       <widget class="QPushButton" name="stop_btn">
-       <property name="text"><string>⏹ Stop</string></property>
+       <property name="text"><string> Stop</string></property>
        <property name="whatsThis"><string>Abort the sweep and halt every chamber (close valves, pumps off).</string></property>
       </widget>
      </item>

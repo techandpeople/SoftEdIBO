@@ -1,10 +1,10 @@
 """Import / export of authored behaviours as portable JSON files.
 
 The Activity Editor persists behaviours in the local ``declarative_activities``
-table, keyed by a DB-local id (``DA001`` …). To move a behaviour between
+table, keyed by a DB-local id (``DA001`` ...). To move a behaviour between
 machines, back one up, or share it, the editor can write it to a self-contained
 ``.json`` file and read one back. This module is the pure, GUI-free serialiser
-for that file — :mod:`src.gui.behavior_editor_panel` only drives the file
+for that file - :mod:`src.gui.behavior_editor_panel` only drives the file
 dialogs.
 
 File shape::
@@ -12,7 +12,7 @@ File shape::
     {
       "format": "softedibo.activity",
       "version": 1,
-      "name": "Hospital — gentle heartbeat",
+      "name": "Hospital - gentle heartbeat",
       "description": "...",
       "spec": { "initial": ..., "states": {...}, "_blockly": {...} }
     }
@@ -62,7 +62,7 @@ def serialize_activity(name: str, description: str,
 
 
 def deserialize_activity(text: str) -> tuple[str, str, dict[str, Any]]:
-    """Parse activity-file ``text`` → ``(name, description, spec)``.
+    """Parse activity-file ``text`` -> ``(name, description, spec)``.
 
     Accepts both the wrapped export format above and a bare behaviour spec (a
     dict with ``states``), so hand-written specs import too. Raises

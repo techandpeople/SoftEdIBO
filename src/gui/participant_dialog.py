@@ -59,7 +59,7 @@ class ParticipantDialog(BaseDialog, Ui_ParticipantDialog):
                 age=age,
             )
         )
-        # Now persisted — a further Apply re-saves the same record (upsert).
+        # Now persisted - a further Apply re-saves the same record (upsert).
         self.setWindowTitle("Edit Participant")
         return True
 

@@ -4,8 +4,8 @@
 #include "pressure.h"
 
 // 74HC4067 16-channel analog mux. S0..S3 select the channel; SIG is read by
-// a single ADC1 pin (input-only). SMUX_SETTLE_US is conservative (10 µs is
-// enough for the chip; we use 50 µs to also let the sensor opamp settle).
+// a single ADC1 pin (input-only). SMUX_SETTLE_US is conservative (10 us is
+// enough for the chip; we use 50 us to also let the sensor opamp settle).
 
 namespace mux {
 

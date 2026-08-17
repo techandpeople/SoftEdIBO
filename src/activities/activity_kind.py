@@ -1,19 +1,19 @@
-"""Activity kind — the robot/skin profile an activity targets.
+"""Activity kind - the robot/skin profile an activity targets.
 
 The study runs three activity kinds, each bound to one robot topology and the
 skin shapes it is built from:
 
-  * ``thymio`` — 3 robots (one per child), skin shape ``thymio``; the study is the
+  * ``thymio`` - 3 robots (one per child), skin shape ``thymio``; the study is the
     interaction between the children.
-  * ``turtle`` — 1 robot, shapes ``turtle_square/side/triangle``, chambers shared
+  * ``turtle`` - 1 robot, shapes ``turtle_square/side/triangle``, chambers shared
     by the ~3 children; the study is their interaction.
-  * ``tree``   — 1 robot, ``tree_round`` branches (one per child); the study is
+  * ``tree``   - 1 robot, ``tree_round`` branches (one per child); the study is
     cross-touch (a child touching another child's branch).
 
 An activity declares its ``kind`` (plus a skin variant) in its spec ``target``
 (see :mod:`src.activities.catalog`). The session setup uses this to derive which
 robots/skins are valid, how many are expected, and whether each child maps to their
-own skin. Pure data + helpers — Qt-free and with no robot-class imports — so it
+own skin. Pure data + helpers - Qt-free and with no robot-class imports - so it
 unit-tests trivially; callers that need the concrete robot_type CLASS resolve the
 kind's :func:`robot_type_name` themselves.
 """

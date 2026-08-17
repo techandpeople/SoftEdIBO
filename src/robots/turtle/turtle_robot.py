@@ -1,4 +1,4 @@
-"""Turtle robot — one shared body, chambers used by the whole group.
+"""Turtle robot - one shared body, chambers used by the whole group.
 
 Same ESP-NOW hardware as the Tree (nodes driving inflatable skins); what makes
 it a Turtle is its own hardware set and the turtle skins fitted on top

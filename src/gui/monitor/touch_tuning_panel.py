@@ -1,4 +1,4 @@
-"""TouchTuningPanel — live tuning for a skin's quadrant touch detection.
+"""TouchTuningPanel - live tuning for a skin's quadrant touch detection.
 
 Shown under the SkinGridView when a skin has 4-sensor touch tracking. Lets the
 operator adjust the per-quadrant detection thresholds + hysteresis while the
@@ -8,7 +8,7 @@ baseline.
 
 The layout lives in ``src/gui/ui/touch_tuning_panel.ui`` (edit it in Qt Designer
 and recompile with ``scripts/compile_ui.sh``). This module keeps only the wiring
-+ behaviour. Changes are runtime-only — they tune the live detector but are not
++ behaviour. Changes are runtime-only - they tune the live detector but are not
 written back to ``settings.yaml``; copy good values into the skin's ``touch:``
 block to keep them.
 """
@@ -75,7 +75,7 @@ class TouchTuningPanel(QGroupBox, Ui_TouchTuningPanel):
 
     def _apply_node_config(self) -> None:
         """Send configure to the firmware to set the node's activation threshold
-        (the µT at/above which it reports a sensor in ``act``) to this skin
+        (the uT at/above which it reports a sensor in ``act``) to this skin
         type's saved sensitivity (calibrated in the guided gesture capture /
         Test Actuators), falling back to the firmware default."""
         ctrl = getattr(self._skin, "touch_controller", None)

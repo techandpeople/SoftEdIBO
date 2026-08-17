@@ -1,8 +1,8 @@
-"""SensorGridView — a live, geometry-driven spatial map of a skin's touch sensors.
+"""SensorGridView - a live, geometry-driven spatial map of a skin's touch sensors.
 
-Draws one cell per sensor in the skin's *natural* sensor grid (2×2 for the
-Thymio's four magnetic sensors), clipped to the skin outline — the 'D' for the
-``thymio`` shape — so a touch lights up where it physically happens. Unlike
+Draws one cell per sensor in the skin's *natural* sensor grid (2x2 for the
+Thymio's four magnetic sensors), clipped to the skin outline - the 'D' for the
+``thymio`` shape - so a touch lights up where it physically happens. Unlike
 :class:`~src.gui.monitor.skin_grid_view.SkinGridView` this needs no live ``Skin``
 (no chambers/pressure): it takes a :class:`~src.hardware.skin_geometry.SkinGeometry`
 and is fed raw ``mag`` arrays, so it drops into any dialog that sees the magnet
@@ -10,11 +10,11 @@ stream (guided gesture capture, Test Actuators).
 
 A sensor is highlighted when its magnitude reaches the current **threshold**
 (read live from a provider callable), so dragging a sensitivity control changes
-what lights up immediately — no round-trip to the node needed to *see* the
+what lights up immediately - no round-trip to the node needed to *see* the
 effect. A fading **motion trail** follows the magnitude-weighted touch centroid,
 so a slide draws its own arrow across the skin. Capacitive touch later: a skin
 with more sensors just yields a finer grid from its geometry (or pass an
-explicit grid) — no change here. See ``CAPACITIVE_GRID_EXAMPLE`` for the ready
+explicit grid) - no change here. See ``CAPACITIVE_GRID_EXAMPLE`` for the ready
 bigger-grid hypothesis.
 """
 
@@ -43,7 +43,7 @@ _LABEL = QColor("#1c2833")
 _TRAIL = QColor(230, 126, 34)      # motion trail (orange), fades with age
 
 # Motion trail: centroid samples older than this fade out completely; the
-# centroid only registers while some sensor is at ≥ this fraction of the
+# centroid only registers while some sensor is at >= this fraction of the
 # threshold (so idle noise doesn't wander the trail around).
 _TRAIL_MS = 900.0
 _TRAIL_FLOOR_FRAC = 0.3
@@ -51,15 +51,15 @@ _ARROW_LEN_PX = 10.0
 _ARROW_MIN_TRAVEL_PX = 12.0
 # A contact gap longer than this breaks the trail: only CONTINUOUS contact
 # draws a path, so touching one spot and then another does not fake a slide.
-# Short enough that separate taps (≥ ~200 ms apart) never bridge; long enough
+# Short enough that separate taps (>= ~200 ms apart) never bridge; long enough
 # that a mid-slide dip between sensors (a few frames at ~28 Hz) survives.
 _TRAIL_BREAK_MS = 150.0
 
-# 4-sensor fallback when a skin type has no registry geometry: a plain 2×2.
+# 4-sensor fallback when a skin type has no registry geometry: a plain 2x2.
 _FALLBACK_GRID = (2, 2, [[0, 1], [2, 3]])
 
 # Ready hypothesis for capacitive touch: a denser hardcoded grid. Pass this (or a
-# geometry with more sensors) as ``grid=`` and the same widget renders it — the
+# geometry with more sensors) as ``grid=`` and the same widget renders it - the
 # sensor count and layout are the only things that change.
 CAPACITIVE_GRID_EXAMPLE = (4, 4, [[r * 4 + c for c in range(4)] for r in range(4)])
 
@@ -97,7 +97,7 @@ class SensorGridView(QWidget):
         self._cell_px = max(16, int(cell_px))
         self._mag: list[float] = []
         self._peaks: dict[int, float] = {}
-        # Per-sensor position as a (0..1, 0..1) fraction of the widget — real
+        # Per-sensor position as a (0..1, 0..1) fraction of the widget - real
         # coordinates when the geometry has them, cell centres otherwise. Drives
         # the motion trail (centroid path of the current touch).
         self._pos_frac = self._position_fractions(geometry)
@@ -122,9 +122,9 @@ class SensorGridView(QWidget):
     # ------------------------------------------------------------------
 
     def feed(self, mag, vec=None) -> None:
-        """Render the latest per-sensor magnitudes (µT, baseline-subtracted).
+        """Render the latest per-sensor magnitudes (uT, baseline-subtracted).
 
-        ``vec`` is the message's optional per-sensor 3-axis deltas — when
+        ``vec`` is the message's optional per-sensor 3-axis deltas - when
         present, the trail's arrow only shows for lateral (x/y) drags, not for
         vertical pushes that happen to migrate sensors."""
         self._mag = [float(v) for v in mag]
@@ -149,7 +149,7 @@ class SensorGridView(QWidget):
         c = weighted_centroid(self._mag, positions, floor=floor)
         if c is not None:
             if self._trail and now - self._trail[-1][2] > _TRAIL_BREAK_MS:
-                self._trail = []          # contact was released — new touch
+                self._trail = []          # contact was released - new touch
                 self._trail_z = []
             self._trail.append((c[0], c[1], now))
             z = frame_z_frac(self._mag, vec)
@@ -161,14 +161,14 @@ class SensorGridView(QWidget):
         """True when the current trail behaves like a real slide.
 
         A finger drags in a roughly straight line; an inflating chamber shifts
-        the magnet so the centroid wanders/circles between coupled sensors — so
-        require the path to be reasonably STRAIGHT (net travel ÷ path length).
+        the magnet so the centroid wanders/circles between coupled sensors - so
+        require the path to be reasonably STRAIGHT (net travel / path length).
         With vec data the contact must also show lateral shear (not a vertical
         push). Same rules as :func:`src.ml.touch_motion.segment_direction`."""
         if len(self._trail) >= 3:
             pts = [(fx, fy) for fx, fy, _t in self._trail]
             if path_straightness(pts) < SLIDE_MIN_STRAIGHTNESS:
-                return False             # wandered/circled — e.g. inflation
+                return False             # wandered/circled - e.g. inflation
         if self._trail_z:
             mean_z = sum(self._trail_z) / len(self._trail_z)
             if mean_z >= SLIDE_MAX_Z_FRAC:
@@ -190,7 +190,7 @@ class SensorGridView(QWidget):
     # ------------------------------------------------------------------
 
     def sizeHint(self) -> QSize:
-        # Keep the skin's real aspect ratio (e.g. the Thymio 'D' is 134×120, a
+        # Keep the skin's real aspect ratio (e.g. the Thymio 'D' is 134x120, a
         # touch wider than tall) so the outline isn't squashed into the grid's
         # cell squares; fall back to square cells when the size is unknown.
         h = self._rows * self._cell_px
@@ -247,8 +247,8 @@ class SensorGridView(QWidget):
         if hypot(end.x() - start.x(), end.y() - start.y()) < _ARROW_MIN_TRAVEL_PX:
             return
         if not self._trail_is_slide():
-            return                        # vertical push / wander — no arrow
-        # Point along the NET travel (start→end), not the last two samples, so
+            return                        # vertical push / wander - no arrow
+        # Point along the NET travel (start->end), not the last two samples, so
         # the head stays steady instead of jittering frame to frame.
         angle = atan2(end.y() - start.y(), end.x() - start.x())
         p.setPen(QPen(_TRAIL, 3, Qt.PenStyle.SolidLine,
@@ -264,7 +264,7 @@ class SensorGridView(QWidget):
 
     def _draw_label(self, p: QPainter, rect: QRect, idx: int) -> None:
         mag = self._mag[idx] if idx < len(self._mag) else 0.0
-        text = f"S{idx}\n{mag:.0f} µT"
+        text = f"S{idx}\n{mag:.0f} uT"
         p.setPen(_LABEL)
         p.drawText(rect, Qt.AlignmentFlag.AlignCenter, text)
 

@@ -15,7 +15,7 @@ def test_send_fails_when_not_connected():
 
 
 class _Sink:
-    def cb(self, data):  # bound method — on_message stores a weakref.WeakMethod
+    def cb(self, data):  # bound method - on_message stores a weakref.WeakMethod
         pass
 
 
@@ -73,7 +73,7 @@ def test_node_rgbw_captured_from_reported_frames():
 def test_is_online_judged_against_last_scan_reference():
     """``is_online``/``online_macs`` reflect the most recent scan, so a node
     powered off between scans drops offline even though ``known_macs`` (which
-    only grows) still remembers it — the "offline node still shows online" bug.
+    only grows) still remembers it - the "offline node still shows online" bug.
     """
     gateway = Gateway("/dev/ttyUSB0")
     mac = "AA:BB:CC:DD:EE:01"

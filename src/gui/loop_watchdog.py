@@ -1,13 +1,13 @@
 """Diagnostic watchdog for GUI-thread stalls.
 
 When the Qt event loop is blocked (a synchronous serial open, a slow query, a
-layout feedback loop, a repaint storm…) the window stops repainting and the OS
+layout feedback loop, a repaint storm...) the window stops repainting and the OS
 shows the "busy" cursor. This watchdog pinpoints *what* is blocking it.
 
 How it works: a QTimer on the GUI thread updates a heartbeat every ``poll_ms``.
 A separate daemon thread checks that heartbeat; if it goes stale for longer than
 ``stall_ms`` the GUI thread is stuck, so the watchdog dumps the traceback of
-every thread (via :mod:`faulthandler`) — including the main thread, showing the
+every thread (via :mod:`faulthandler`) - including the main thread, showing the
 exact line it's stuck on.
 
 Off by default. Enable by launching with ``SOFTEDIBO_WATCHDOG=1`` (optionally
@@ -45,7 +45,7 @@ def install_loop_watchdog(
     # Heartbeat shared between the GUI thread (writer) and the watchdog (reader).
     # A plain assignment is atomic enough for this purpose. Starts as None so the
     # watchdog ignores the one-time startup window (MainWindow construction runs
-    # before app.exec(), i.e. before the event loop — and the heartbeat — start);
+    # before app.exec(), i.e. before the event loop - and the heartbeat - start);
     # measuring only begins once the first tick fires inside the running loop.
     heartbeat: dict[str, float | None] = {"t": None}
 
@@ -60,7 +60,7 @@ def install_loop_watchdog(
             time.sleep(poll_ms / 2000.0)
             last = heartbeat["t"]
             if last is None:
-                continue  # event loop not running yet — don't measure startup
+                continue  # event loop not running yet - don't measure startup
             stalled_for = time.monotonic() - last
             if stalled_for > stall_s:
                 if not reported:
@@ -74,11 +74,11 @@ def install_loop_watchdog(
                     print("=== end stall dump ===\n", file=sys.stderr, flush=True)
                     reported = True
             else:
-                reported = False  # loop recovered — re-arm for the next stall
+                reported = False  # loop recovered - re-arm for the next stall
 
     threading.Thread(target=_watch, name="loop-watchdog", daemon=True).start()
     print(
-        f"[loop-watchdog] enabled (stall threshold {stall_ms} ms) — "
+        f"[loop-watchdog] enabled (stall threshold {stall_ms} ms) - "
         "stack dumps go to stderr",
         file=sys.stderr,
         flush=True,

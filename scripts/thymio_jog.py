@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Standalone Thymio smoke-test / jog tool over the wireless RF dongle (thymiodirect).
 
-No Thymio Suite / TDM needed — thymiodirect talks to the dongle's serial port directly.
+No Thymio Suite / TDM needed - thymiodirect talks to the dongle's serial port directly.
 One dongle relays to several Thymios at once (each a wireless *node id*). Plug in the RF
 dongle (paired with a powered Thymio) and:
 
@@ -12,7 +12,7 @@ dongle (paired with a powered Thymio) and:
     python scripts/thymio_jog.py --drive 150 150 --secs 1.5
 
 Use --list to learn which node id is which robot (blink/drive one to tell them apart),
-then set those ids in Robot Config → Thymio. Reuses ThymioLink / ThymioDongle (the same
+then set those ids in Robot Config -> Thymio. Reuses ThymioLink / ThymioDongle (the same
 transport the app uses) and always stops the motors on exit. Needs: pip install
 thymiodirect. Thymio native vars: motor.{left,right}.target (~ -500..500), leds.top =
 [r, g, b] (0..32).
@@ -89,18 +89,18 @@ def main() -> int:
 
     if args.list:
         dongle = ThymioDongle(serial_port=args.port)
-        print("connecting to the dongle…")
+        print("connecting to the dongle...")
         if not dongle.connect():
-            print("could not connect — dongle plugged in and a Thymio powered ON + paired?")
+            print("could not connect - dongle plugged in and a Thymio powered ON + paired?")
             return 1
         print("node ids seen:", dongle.nodes or "(none)")
         dongle.close()
         return 0
 
     link = ThymioLink(serial_port=args.port, node_id=args.node)
-    print("connecting to the Thymio via the dongle…")
+    print("connecting to the Thymio via the dongle...")
     if not link.connect():
-        print("could not connect — is the dongle plugged in and paired with a powered "
+        print("could not connect - is the dongle plugged in and paired with a powered "
               "Thymio? (and: pip install thymiodirect)")
         return 1
     try:

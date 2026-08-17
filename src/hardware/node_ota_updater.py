@@ -3,7 +3,7 @@
 The PC drives the whole transfer; the node only writes flash and ACKs (see the
 firmware side in ``firmware/common/se_ota.h``). The firmware image is read from
 disk, split into small chunks, base64-encoded and streamed as ordinary JSON
-ESP-NOW messages through the existing :class:`Gateway` pipe — no WiFi/AP
+ESP-NOW messages through the existing :class:`Gateway` pipe - no WiFi/AP
 involved, so it works anywhere the gateway can reach the node.
 
 Protocol::
@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 
 # Chunk sizing: although ESP-NOW's nominal payload cap is 250 bytes, in practice
 # the gateway->node relay silently drops frames once the JSON payload grows past
-# ~190 bytes — a 144-byte chunk (~232 byte payload) never reaches the node, while
+# ~190 bytes - a 144-byte chunk (~232 byte payload) never reaches the node, while
 # a 96-byte chunk (~164 byte payload) gets through reliably. So keep chunks small.
 # The data message ``{"cmd":"ota_data","seq":NNNNN,"data":"<base64>"}`` adds ~40
 # bytes of envelope; 96 raw bytes -> 128 base64 chars (multiple of 3, no padding).
@@ -89,7 +89,7 @@ class NodeOTAUpdater:
     # and only the freshly-booted new firmware confirms (ota_done broadcast / a
     # not_active reply to a resent ota_end). That proves the image really boots,
     # so an image that passes MD5 but bricks never confirms and we time out here
-    # — a real failure, not a false success. A reboot plus ESP-NOW re-init takes a
+    # - a real failure, not a false success. A reboot plus ESP-NOW re-init takes a
     # few seconds; a healthy node confirms in ~2-3 s, so this window only fully
     # elapses on an actual failure.
     DONE_TIMEOUT = 20.0  # seconds to wait for the rebooted node to confirm
@@ -158,7 +158,7 @@ class NodeOTAUpdater:
         logging when a merged image is sliced."""
         img = extract_app_image(data)
         if img and data and data[0] != _ESP_APP_MAGIC:
-            self._log(f"merged flash image — extracting app at 0x{_APP_OFFSET:x}")
+            self._log(f"merged flash image - extracting app at 0x{_APP_OFFSET:x}")
         return img
 
     # ------------------------------------------------------------------
@@ -231,7 +231,7 @@ class NodeOTAUpdater:
             return False, msg
         if self._on_progress:
             self._on_progress(100)
-        return True, "Update complete — node rebooting"
+        return True, "Update complete - node rebooting"
 
     def _send_chunk(self, seq: int, data: str) -> None:
         self._gateway.send(self._mac, "ota_data", seq=seq, data=data)
@@ -246,12 +246,12 @@ class NodeOTAUpdater:
 
         The node does NOT confirm before rebooting: ``ota_end`` makes it verify
         the MD5 and reboot, and only the freshly-booted *new* firmware reports
-        back. So both success tokens prove the new image actually boots — an
+        back. So both success tokens prove the new image actually boots - an
         image that passes MD5 but bricks produces neither and we time out (a real
         failure) rather than reporting a false success:
-          * ``ota_done`` — broadcast by the new firmware from ``checkBootDone()``
+          * ``ota_done`` - broadcast by the new firmware from ``checkBootDone()``
             on its first boot (normal case);
-          * ``not_active`` — a resent ``ota_end`` reached the rebooted node,
+          * ``not_active`` - a resent ``ota_end`` reached the rebooted node,
             whose new firmware has no transfer in progress. Only a running new
             firmware can reply this, so it is a genuine boot confirmation too
             (it covers a lost ``ota_done`` broadcast).
@@ -265,7 +265,7 @@ class NodeOTAUpdater:
             if term == "done":
                 return True, "ok"
             if term == "not_active":
-                self._log("ota_end: node already finalized (ota_done lost) — "
+                self._log("ota_end: node already finalized (ota_done lost) - "
                           "treating as success")
                 return True, "ok"
             if term is not None and term != "ready":

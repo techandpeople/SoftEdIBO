@@ -60,7 +60,7 @@ class Gateway:
         # time.monotonic() captured when scan() last broadcast its ping. A node
         # is "online" if it answered since then; because scan() moves this
         # forward, a node that stops responding (powered off) drops offline on
-        # the next scan — unlike known_macs, which only ever grows. None until
+        # the next scan - unlike known_macs, which only ever grows. None until
         # the first scan (reachability unknown).
         self._scan_ref: float | None = None
         # RGBW LED-ring variant self-reported by each node in its ready/pong frame
@@ -70,7 +70,7 @@ class Gateway:
         self._node_rgbw: dict[str, bool] = {}
         # Strong refs to "the link dropped on its own" listeners (e.g. the panel
         # repainting itself as disconnected). Fired only on an *unexpected* loss
-        # — the gateway unplugged or reset (e.g. just after a flash) — not on a
+        # - the gateway unplugged or reset (e.g. just after a flash) - not on a
         # caller-initiated :meth:`disconnect`.
         self._disconnect_callbacks: list[Callable[[], None]] = []
 
@@ -88,7 +88,7 @@ class Gateway:
         return self._last_seen.get(mac)
 
     def is_online(self, mac: str) -> bool:
-        """True if ``mac`` answered the most recent :meth:`scan` — reachable now.
+        """True if ``mac`` answered the most recent :meth:`scan` - reachable now.
 
         Unlike :attr:`known_macs` (which only ever grows), this drops back to
         False for a node that stops responding, because ``scan`` moves the
@@ -112,7 +112,7 @@ class Gateway:
         """RGBW LED-ring variant a node reported (True/False), or None if unknown.
 
         Populated from the ``rgbw`` field in a node's ready/pong frame (a scan or
-        boot refreshes it). None means the node hasn't reported it yet — offline,
+        boot refreshes it). None means the node hasn't reported it yet - offline,
         or running firmware from before the field existed.
         """
         return self._node_rgbw.get(mac)
@@ -126,7 +126,7 @@ class Gateway:
         """Open serial connection to the gateway.
 
         Opening a serial port succeeds for *any* device that enumerates on it
-        — a node flashed over USB, an unrelated dev board, etc. ``verify``
+        - a node flashed over USB, an unrelated dev board, etc. ``verify``
         (default) therefore runs a short handshake and only reports success if
         the peer actually identifies itself as a SoftEdIBO gateway, so we never
         mistake some other serial device for the gateway. Pass ``verify=False``
@@ -145,7 +145,7 @@ class Gateway:
 
         if verify and not self._verify_is_gateway():
             logger.warning(
-                "Device on %s did not identify as a SoftEdIBO gateway — "
+                "Device on %s did not identify as a SoftEdIBO gateway - "
                 "not connecting", self._port,
             )
             self._serial.close()
@@ -259,7 +259,7 @@ class Gateway:
 
         ``repeat`` writes the same frame more than once. ESP-NOW delivery is
         best-effort and the node's radio competes with its own telemetry, so an
-        occasional command frame is dropped — the "didn't go on the first try"
+        occasional command frame is dropped - the "didn't go on the first try"
         symptom. Sending an *idempotent* command a few times makes it very likely
         one lands without the node acting on it twice: setting limits is
         idempotent, inflate/deflate target a level (the firmware no-ops once it is
@@ -268,7 +268,7 @@ class Gateway:
         """
         if not self.is_connected:
             if not self._logged_disconnected:
-                logger.debug("Gateway not connected — commands will be dropped")
+                logger.debug("Gateway not connected - commands will be dropped")
                 self._logged_disconnected = True
             return False
         self._logged_disconnected = False
@@ -379,7 +379,7 @@ class Gateway:
         """Register a listener for an *unexpected* loss of the gateway link.
 
         Fired from the serial read thread when the port dies on its own (the
-        gateway unplugged or reset — e.g. right after flashing). Not fired on a
+        gateway unplugged or reset - e.g. right after flashing). Not fired on a
         caller-initiated :meth:`disconnect`. Consumers that touch the GUI must
         marshal to the GUI thread (e.g. via a Qt signal).
         """
@@ -410,11 +410,11 @@ class Gateway:
             logger.warning("Invalid JSON from gateway: %s", raw)
             return
         source = data.get("source")
-        # "thymio" is the 802.15.4/C6 route tag, not an ESP-NOW node — keep it out of the
+        # "thymio" is the 802.15.4/C6 route tag, not an ESP-NOW node - keep it out of the
         # node list so it doesn't show up in Discover Nodes / the Add Node picker.
         if source == "thymio":
             # The C6 return path (sensor replies, discovery, link acks) is otherwise
-            # invisible in the log — surface every C6 frame so a missing thymio_sensors
+            # invisible in the log - surface every C6 frame so a missing thymio_sensors
             # stream is diagnosable from softedibo.log.
             logger.debug("From C6 (thymio): %s", data)
         if source and source != "thymio":
@@ -449,7 +449,7 @@ class Gateway:
 
         The gateway streams continuously, so opening the port usually lands
         mid-message. The bytes before the first newline are therefore a partial
-        fragment — discard them to resync rather than dispatch a broken line.
+        fragment - discard them to resync rather than dispatch a broken line.
         """
         buf = bytearray()
         synced = False
@@ -474,7 +474,7 @@ class Gateway:
                             continue
                     self._dispatch_line(raw)
             except serial.SerialException:
-                logger.exception("Serial read error — gateway disconnected")
+                logger.exception("Serial read error - gateway disconnected")
                 if self._serial is not None:
                     self._serial.close()
                     self._serial = None

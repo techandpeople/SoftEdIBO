@@ -1,4 +1,4 @@
-"""LED ring tester — a circle of N clickable LEDs for testing a WS2812 ring.
+"""LED ring tester - a circle of N clickable LEDs for testing a WS2812 ring.
 
 Basic colours with pattern selection (solid, blink, pulse, comet) and a segment
 count (whole, halves, quarters). Each action calls back into the host (the Test
@@ -67,7 +67,7 @@ class LedRingWidget(QWidget):
     Renders the firmware's looks faithfully: solid/blink/pulse scale brightness,
     comet sweeps one rotating head per segment colour, split arcs are rotated by
     an angle, and every change cross-fades. The look's split/comet angle is set by
-    dragging the handle around the ring (an arc slider) — ``angleChanged`` fires
+    dragging the handle around the ring (an arc slider) - ``angleChanged`` fires
     live while dragging, ``angleReleased`` once when the drag ends.
     """
 
@@ -211,7 +211,7 @@ class LedRingWidget(QWidget):
         self._draw_handle(painter)
 
     def _draw_handle(self, painter: QPainter) -> None:
-        """A triangular grip pointing inwards at the current angle — drag it to
+        """A triangular grip pointing inwards at the current angle - drag it to
         rotate the split/comet around the ring."""
         c = self._handle_center()
         cx, cy, _ring_r, _led_r = self._center_radius()
@@ -268,7 +268,7 @@ class LedRingTester(QGroupBox, Ui_LedRingTester):
       - colors:  list of "#RRGGBB" arc colours (len 1/2/4), or None to turn off
       - pattern: "solid" | "blink" | "pulse" | "comet"
       - fade_ms: cross-fade time for this change (from the panel's spin box)
-      - angle:   0-360° rotation of the split/comet (from the ring's drag handle)
+      - angle:   0-360 deg rotation of the split/comet (from the ring's drag handle)
     """
 
     def __init__(self, count: int,
@@ -281,8 +281,8 @@ class LedRingTester(QGroupBox, Ui_LedRingTester):
         self._send = send_cb
         self._on_save_angle = on_save_angle
         # Clicked-colour queue: the last N clicks (N = segment count) are the arc
-        # colours, oldest → newest. One colour for the whole ring, two for halves,
-        # four for quarters — the user builds the split by clicking colours in a row.
+        # colours, oldest -> newest. One colour for the whole ring, two for halves,
+        # four for quarters - the user builds the split by clicking colours in a row.
         self._color_queue: list[str] = ["#ff0000"]
         self._pattern = "solid"
         self._segments = 1
@@ -290,7 +290,7 @@ class LedRingTester(QGroupBox, Ui_LedRingTester):
         self._pattern_buttons: dict[str, QPushButton] = {}
         self._segment_buttons: dict[str, QPushButton] = {}
 
-        # Colour buttons (data-driven) → into the .ui's color_row. Each button is
+        # Colour buttons (data-driven) -> into the .ui's color_row. Each button is
         # tinted its own colour so the row reads as a palette.
         for name, hex_color in _COLORS.items():
             btn = QPushButton(name)
@@ -299,7 +299,7 @@ class LedRingTester(QGroupBox, Ui_LedRingTester):
             self.color_row.addWidget(btn)
         self.color_row.addStretch()
 
-        # Pattern buttons (data-driven) → into the .ui's pattern_row.
+        # Pattern buttons (data-driven) -> into the .ui's pattern_row.
         for pattern in _PATTERNS:
             btn = QPushButton(pattern.capitalize())
             btn.setCheckable(True)
@@ -309,7 +309,7 @@ class LedRingTester(QGroupBox, Ui_LedRingTester):
         self._pattern_buttons["solid"].setChecked(True)
         self.pattern_row.addStretch()
 
-        # Segment buttons (data-driven) → into the .ui's segment_row.
+        # Segment buttons (data-driven) -> into the .ui's segment_row.
         for name, n in _SEGMENTS.items():
             btn = QPushButton(name)
             btn.setCheckable(True)
@@ -328,7 +328,7 @@ class LedRingTester(QGroupBox, Ui_LedRingTester):
         else:
             self.save_angle_btn.setVisible(False)
 
-        # Right side: LED ring — a live preview of the chosen look, with a
+        # Right side: LED ring - a live preview of the chosen look, with a
         # draggable handle to set the split/comet angle (count is a runtime arg so
         # it can't live in the .ui).
         self._ring = LedRingWidget(count)
@@ -359,7 +359,7 @@ class LedRingTester(QGroupBox, Ui_LedRingTester):
 
     def _arc_colors(self) -> list[str]:
         """The ``segments`` arc colours = the last ``segments`` clicked colours
-        (oldest → newest). Fewer clicks than needed cycle to fill the ring."""
+        (oldest -> newest). Fewer clicks than needed cycle to fill the ring."""
         n = self._segments
         q = self._color_queue or ["#ff0000"]
         if len(q) >= n:
@@ -379,7 +379,7 @@ class LedRingTester(QGroupBox, Ui_LedRingTester):
         return AnimationPattern(self._pattern)
 
     def _apply(self) -> None:
-        """Update the preview ring AND push the look to the node — every colour /
+        """Update the preview ring AND push the look to the node - every colour /
         pattern / segment change applies live, so there is no separate apply step."""
         arcs = [QColor(c) for c in self._arc_colors()]
         self._ring.set_look(arcs, self._pattern_enum(),

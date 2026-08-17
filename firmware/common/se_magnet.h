@@ -10,7 +10,7 @@
 #include "dbg.h"
 
 // ---------------------------------------------------------------------------
-// se_magnet.h — shared MLX90393 magnet/touch sensing module.
+// se_magnet.h - shared MLX90393 magnet/touch sensing module.
 //
 // One implementation of the node_magnet_sensor protocol, used by both boards
 // that carry touch sensors: the standalone node_magnet_sensor firmware and the
@@ -22,7 +22,7 @@
 //   stream: {"type":"magnet","mag":[uT..],"act":[idx..]}
 //
 // Callers wire it up with addSensor() per MLX90393 (any bus), then
-// finishInit(streamIntervalMs) — which only BUILDS the announce message; it is
+// finishInit(streamIntervalMs) - which only BUILDS the announce message; it is
 // broadcast by announce()/tick() AFTER se::begin(), because a broadcast on an
 // uninitialised radio is lost and can crash the stack (this once left a whole
 // node invisible whenever sensors were wired). If no sensor answers,
@@ -31,12 +31,12 @@
 //
 // Each sensor auto-zeros (baseline) over the first BASELINE_SAMPLES reads.
 // Re-zero at runtime with {"cmd":"rebaseline"}; tune the activation threshold
-// in µT (and opt into adaptive baseline) with {"cmd":"configure",...}.
+// in uT (and opt into adaptive baseline) with {"cmd":"configure",...}.
 //
 // 3-axis streaming: when `streamVec` is on, each stream message also carries
-// "vec":[[dx,dy,dz],...] — the per-sensor baseline-subtracted field delta in
-// whole µT (direction information the magnitude collapses away; enables
-// vector touch compensation, see docs/TOUCH_COUPLING.md) — and the announce
+// "vec":[[dx,dy,dz],...] - the per-sensor baseline-subtracted field delta in
+// whole uT (direction information the magnitude collapses away; enables
+// vector touch compensation, see docs/TOUCH_COUPLING.md) - and the announce
 // gains "vec":1. Off by default; the -DMAG_VECTOR build flag turns it on at
 // boot, and {"cmd":"configure","stream_vec":true|false} toggles it at runtime
 // (so any build can stream vectors during a calibration sweep, no reflash).
@@ -54,7 +54,7 @@ constexpr mlx90393_oversampling_t OSR    = MLX90393_OSR_2;
 constexpr mlx90393_filter_t       FILTER = MLX90393_FILTER_3;
 
 // Tunables (overridable at runtime via "configure")
-inline float actThresholdUt   = 300.0f;   // |field delta| µT at/above which a sensor is "active"
+inline float actThresholdUt   = 300.0f;   // |field delta| uT at/above which a sensor is "active"
 inline bool  adaptiveBaseline = false;    // continuously track slow drift (opt-in)
 inline float baselineTauMs    = 2000.0f;  // adaptive-baseline time constant (ms)
 #ifdef MAG_VECTOR
@@ -68,7 +68,7 @@ struct Vec3 { float x, y, z; };
 inline Adafruit_MLX90393 mlx[MAX_SENSORS];
 inline bool     ready[MAX_SENSORS] = {};
 inline size_t   count         = 0;        // slots wired via addSensor()
-inline bool     present       = false;    // any sensor detected → module active
+inline bool     present       = false;    // any sensor detected -> module active
 inline uint32_t streamIntervalMs = 35;    // set by finishInit()
 
 inline Vec3     baseline[MAX_SENSORS] = {};
@@ -80,9 +80,9 @@ inline char     announceMsg[96] = {};
 
 inline float vmag(const Vec3& v) { return sqrtf(v.x * v.x + v.y * v.y + v.z * v.z); }
 
-// Probe one MLX90393 and reserve its slot (S0.. in call order — order matters:
+// Probe one MLX90393 and reserve its slot (S0.. in call order - order matters:
 // the PC's QuadrantDetector maps the first 4 to quadrants). A missing sensor
-// still holds its slot so quadrant indices stay stable — unless `optional`
+// still holds its slot so quadrant indices stay stable - unless `optional`
 // (the standalone board's extra 5th sensor), which is only appended when it
 // actually responds.
 inline bool addSensor(uint8_t addr, TwoWire* bus, bool optional = false) {
@@ -111,13 +111,13 @@ inline void buildAnnounce() {
 }
 
 // Finish wiring: stream cadence + the announce message (built now, broadcast
-// later — see the header comment). `forcePresent` keeps a board with dead
+// later - see the header comment). `forcePresent` keeps a board with dead
 // sensors announcing (standalone magnet board: visible in scans for debugging).
 inline void finishInit(uint32_t intervalMs, bool forcePresent = false) {
     streamIntervalMs = intervalMs;
     present = present || forcePresent;
     buildAnnounce();
-    if (!present) DBG_PRINTLN("magnet: no MLX90393 found — module disabled");
+    if (!present) DBG_PRINTLN("magnet: no MLX90393 found - module disabled");
 }
 
 inline void resetBaseline() {
@@ -132,7 +132,7 @@ inline void applyConfigure(const JsonDocument& doc) {
         actThresholdUt = doc["act_threshold_ut"].as<float>();
     } else if (!doc["act_threshold"].isNull()) {
         // Back-compat: the old activation level was a fraction of a full-scale
-        // (default 1000 µT), so convert it to the µT it used to mean.
+        // (default 1000 uT), so convert it to the uT it used to mean.
         float fs = doc["fullscale_mt"].isNull() ? 1000.0f : doc["fullscale_mt"].as<float>();
         actThresholdUt = doc["act_threshold"].as<float>() * fs;
     }
@@ -189,7 +189,7 @@ inline void updateAdaptiveBaseline(const Vec3* samples, const bool* valid, float
         float m = vmag({samples[i].x - baseline[i].x,
                         samples[i].y - baseline[i].y,
                         samples[i].z - baseline[i].z});
-        if (m >= actThresholdUt) continue;   // touch in progress — freeze this sensor
+        if (m >= actThresholdUt) continue;   // touch in progress - freeze this sensor
         baseline[i].x += a * (samples[i].x - baseline[i].x);
         baseline[i].y += a * (samples[i].y - baseline[i].y);
         baseline[i].z += a * (samples[i].z - baseline[i].z);
@@ -197,7 +197,7 @@ inline void updateAdaptiveBaseline(const Vec3* samples, const bool* valid, float
 }
 
 // Build the stream message into buf: mag/act always; vec rows when streamVec
-// (whole µT — keeps the frame well under the 250-byte ESP-NOW payload limit
+// (whole uT - keeps the frame well under the 250-byte ESP-NOW payload limit
 // even with 5 sensors).
 inline void buildMessage(const Vec3* samples, const bool* valid, char* buf, size_t cap) {
     int pos = snprintf(buf, cap, "{\"type\":\"magnet\",\"mag\":[");
