@@ -129,6 +129,7 @@ def test_merge_segments_accumulates_pulses_and_samples():
         _tap_stream() + _tap_stream() + _tap_stream())
     assert len(taps) == 3                       # three separate touches
     merged = merge_segments(taps)
+    assert merged is not None
     assert merged.n_pulses == 3
     assert len(merged.mags) == sum(len(t.mags) for t in taps)
     # n_pulses surfaces as a feature.
@@ -148,6 +149,7 @@ def test_rule_baseline_labels_compressions_bout():
     bout = merge_segments(
         TouchSegmenter().segment_stream(
             _tap_stream() + _tap_stream() + _tap_stream()))
+    assert double is not None and bout is not None
     assert rule_baseline.classify(one) == tax.TAP
     assert double.n_pulses == 2                       # below the bout threshold
     assert rule_baseline.classify(double) != tax.COMPRESSIONS
@@ -184,8 +186,10 @@ def test_model_path_uses_skin_type():
 
 def test_skin_geometry_registry_and_filtering():
     from src.hardware.skin_geometry import geometry_for, skin_types_for
-    assert geometry_for("turtle_square").shape == "rect"
-    assert geometry_for("tree_round").shape == "round"
+    square = geometry_for("turtle_square")
+    assert square is not None and square.shape == "rect"
+    round_geo = geometry_for("tree_round")
+    assert round_geo is not None and round_geo.shape == "round"
     assert set(skin_types_for("turtle")) | set(skin_types_for("tree")) == {
         "turtle_square", "turtle_side", "turtle_triangle", "tree_round"}
     assert geometry_for("") is None

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import (
+    QAbstractButton,
     QButtonGroup,
     QComboBox,
     QDoubleSpinBox,
@@ -409,9 +410,10 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         row.addWidget(QLabel("Template:"))
         self._template_combo = QComboBox()
         self._template_combo.addItem(_NONE_LABEL, userData=None)
-        for tpl in self._db.get_all_skin_templates():
-            self._template_combo.addItem(f"{tpl.name} [{tpl.template_id}]",
-                                         userData=tpl.template_id)
+        if self._db is not None:
+            for tpl in self._db.get_all_skin_templates():
+                self._template_combo.addItem(f"{tpl.name} [{tpl.template_id}]",
+                                             userData=tpl.template_id)
         self._template_combo.setMinimumWidth(220)
         row.addWidget(self._template_combo, stretch=1)
 
@@ -434,6 +436,8 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
                 self, "Apply Template",
                 "Pick a template from the dropdown first.",
             )
+            return
+        if self._db is None:
             return
         tpl = self._db.get_skin_template(template_id)
         if tpl is None:
@@ -935,9 +939,10 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         # overlap the newly-added one with the same label.
         while self._palette_row.count() > 1:
             item = self._palette_row.takeAt(1)
-            w = item.widget()
+            w = item.widget() if item is not None else None
             if w is not None:
-                self._palette_group.removeButton(w)
+                if isinstance(w, QAbstractButton):
+                    self._palette_group.removeButton(w)
                 w.hide()
                 w.deleteLater()
 
@@ -1007,7 +1012,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         # LED ring layout for this node's type, so the dialog shows one tester per
         # ring (node_multiplexed has four). Defaults to a single ring if unknown.
         node_types = {n.get("mac"): n.get("node_type") for n in self._robot_nodes()}
-        led_rings = list(skincfg.NODE_LED_RINGS.get(node_types.get(mac), (24,)))
+        led_rings = list(skincfg.NODE_LED_RINGS.get(node_types.get(mac) or "", (24,)))
         dlg = TestActuatorsDialog(
             mac=mac,
             skin_cfgs=skin_cfgs,

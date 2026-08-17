@@ -302,7 +302,7 @@ def run_scan(cap: "Capture", link: ThymioLink, log, secs: float) -> None:
         print("\nno frames on ANY channel while driving — is the Thymio moving? "
               "(dongle paired, robot powered ON, close to the gateway box?)")
         return
-    best = max(hits, key=hits.get)
+    best = max(hits, key=lambda c: hits[c])
     print(f"\n→ Thymio channel = {best}  ({hits[best]} frames, rssi≤{cap.ch_rssi.get(best)})")
     print(f"  next: python scripts/thymio_sniff_capture.py --ch {best} --out cap.jsonl")
 

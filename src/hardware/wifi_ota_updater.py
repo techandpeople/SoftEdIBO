@@ -260,8 +260,9 @@ class WifiOTAUpdater:
                 # while forwarding, so the PC never has to know them. An
                 # explicit ssid overrides ("pass" is a Python keyword, so it
                 # can't be a kwarg name).
-                creds = ({"ssid": self._ssid, "pass": self._password}
-                         if self._ssid else {})
+                creds: dict[str, Any] = ({"ssid": self._ssid,
+                                          "pass": self._password}
+                                         if self._ssid else {})
                 self._gateway.send(self._mac, "ota_wifi", url=url, **creds)
                 next_send = now + self.START_RESEND
             self._event.wait(0.2)

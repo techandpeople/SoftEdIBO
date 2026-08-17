@@ -160,7 +160,8 @@ def _resolve_touch_ctrl(skin_cfg: dict[str, Any],
                         controllers: dict[str, Any]) -> Any:
     """Return the controller for the magnet sensor referenced by ``skin_cfg.touch``."""
     touch_cfg = skin_cfg.get("touch") or {}
-    return controllers.get(touch_cfg.get("node_mac")) if touch_cfg else None
+    mac = touch_cfg.get("node_mac")
+    return controllers.get(mac) if mac else None
 
 
 def _touch_with_saved_threshold(touch_cfg: dict[str, Any] | None,

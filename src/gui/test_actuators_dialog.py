@@ -423,9 +423,10 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
             # in the skin's shape), highlighted at the tester's live threshold.
             from src.gui.sensor_grid_view import SensorGridView
             from src.hardware.skin_geometry import geometry_for
+            tester = self._sensor_tester
             self._sensor_grid = SensorGridView(
                 geometry_for(self._skin_type),
-                lambda: self._sensor_tester.threshold_spin.value())
+                lambda: tester.threshold_spin.value())
             self._sensor_tester.threshold_spin.valueChanged.connect(
                 self._sensor_grid.refresh)
             self.right_col.insertWidget(0, self._sensor_grid,
@@ -450,10 +451,9 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         offset, so the stale raw ``vec`` is dropped from the grid's motion trail."""
         if self._sensor_tester is None:
             return
-        compensated = (self._compensator is not None
-                       and self._sensor_tester.compensation_enabled())
-        if compensated:
-            mag, _act = self._compensator.compensate(
+        compensator = self._compensator
+        if compensator is not None and self._sensor_tester.compensation_enabled():
+            mag, _act = compensator.compensate(
                 self._last_mag, self._levels, vec=self._last_vec)
             vec = None
         else:
@@ -468,7 +468,9 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         out) and again when the sensor panel is added, so runtime-inserted content
         isn't squeezed below its minimum. Grows width as well as height because the
         sensor tester is added as a new right-hand column."""
-        self.layout().activate()   # refresh the size hint after the insert
+        layout = self.layout()
+        if layout is not None:
+            layout.activate()   # refresh the size hint after the insert
         hint = self.sizeHint()
         target_w, target_h = hint.width(), hint.height()
         screen = self.screen()
@@ -579,12 +581,13 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
     def _angle_saver(self, ring: int):
         """A ``(angle) -> None`` callback that persists ``ring``'s mounting angle,
         or None when the host provided no save hook (hides the Save button)."""
-        if self._on_save_angle is None:
+        save_hook = self._on_save_angle
+        if save_hook is None:
             return None
 
         def _save(angle: float, r: int = ring) -> None:
             self._led_angles[r] = float(angle)
-            self._on_save_angle(r, float(angle))
+            save_hook(r, float(angle))
 
         return _save
 

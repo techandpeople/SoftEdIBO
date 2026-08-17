@@ -13,5 +13,7 @@ try:
     sys.exit(esptool.main())
 except AttributeError:
     # esptool 3.x
-    from esptool.__main__ import _main
+    # Private symbol that only exists in esptool 3.x, so the stubs for the
+    # installed (4.x) esptool don't know it.
+    from esptool.__main__ import _main  # pyright: ignore[reportAttributeAccessIssue]
     sys.exit(_main())

@@ -148,7 +148,11 @@ def main():
     print(f"Connected: node 0x{nid:04x}")
     time.sleep(1.0)                     # let the node description finish loading
 
-    conn = th.thymio_proxy.connection
+    proxy = th.thymio_proxy
+    if proxy is None:
+        print("Thymio connection thread never came up. Power-cycle it, retry.")
+        return 1
+    conn = proxy.connection
     rn = conn.remote_nodes[nid]
     print(f"local events: {rn.local_events}")
     for ev in ("timer0", "acc", "tap"):
@@ -199,7 +203,9 @@ def main():
     print("Expected: peak spikes when knocked, ~0 when still in ANY pose; taps increments on")
     print("sharp hits. If so, the program is good — bake the C array above into the C6.")
     try:
-        th.disconnect()
+        # Not part of thymiodirect's public API on every version; the except
+        # already swallows the AttributeError when it is missing.
+        th.disconnect()  # pyright: ignore[reportAttributeAccessIssue]
     except Exception:
         pass
     return 0

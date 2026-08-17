@@ -245,5 +245,6 @@ def test_config_without_new_keys_keeps_defaults():
     cfg = coupling_to_config(_model([((0,), {0: 100.0}, [200.0], None)], 1))
     comp = compensator_from_config(
         {"coupling": cfg, "compensation": {"enabled": True}})
+    assert comp is not None
     assert comp.margin_frac == 0.0 and comp.guard is None
     assert not comp.has_vector

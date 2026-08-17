@@ -612,6 +612,8 @@ def get_type_min_duty(settings_data: dict, skin_type: Any, skin_variant: Any,
     slug = type_slug(skin_type, skin_variant)
     by_type = settings_data.get(MIN_DUTY_BY_TYPE_KEY) or {}
     val = by_type.get(slug) if slug else None
+    if val is None:
+        val = default
     try:
         return max(1, min(FULL_DUTY, int(val)))
     except (TypeError, ValueError):

@@ -104,7 +104,7 @@ class OrganPanel(QGroupBox):
         # which legitimately follows the cure decision, is driven from here.
         if not self._sim_states:
             for i, organ in enumerate(self._organs):
-                verdict = verdicts.get(str(organ.get("id")))
+                verdict = verdicts.get(str(organ.get("id"))) or ""
                 colour = {"good": _GOOD, "bad": _BAD}.get(verdict, _ABSENT_BG)
                 self._style_dot(self._dots[i], colour)
         self._style_dot(self._led, led_color or _LED_UNKNOWN)

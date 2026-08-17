@@ -885,10 +885,11 @@ class ScriptedActivity(BaseActivity):
     def _fade_ms(params: dict) -> int | None:
         """Read an optional LED ``fade_ms`` (cross-fade time) from a step's params.
         Absent / invalid means 'send no fade_ms — use the node default (~250 ms)'."""
-        if "fade_ms" not in params:
+        val = params.get("fade_ms")
+        if val is None:
             return None
         try:
-            return max(0, int(params.get("fade_ms")))
+            return max(0, int(val))
         except (TypeError, ValueError):
             return None
 

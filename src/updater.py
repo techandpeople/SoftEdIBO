@@ -133,7 +133,7 @@ class AppUpdater(QObject):
             return
 
         try:
-            data = json.loads(reply.readAll().data())
+            data = json.loads(bytes(reply.readAll().data()))
             tag = data["tag_name"]
             assets = data.get("assets", [])
 
@@ -217,7 +217,7 @@ class AppUpdater(QObject):
 
     def _on_chunk(self) -> None:
         if self._download_file and self._download_reply:
-            self._download_file.write(bytes(self._download_reply.readAll()))
+            self._download_file.write(bytes(self._download_reply.readAll().data()))
 
     def _on_download_finished(self) -> None:
         reply = self._download_reply

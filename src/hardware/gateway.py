@@ -158,7 +158,7 @@ class Gateway:
         logger.info("Connected to SoftEdIBO gateway on %s", self._port)
         return True
 
-    def _is_gateway_line(self, raw: bytes) -> bool:
+    def _is_gateway_line(self, raw: bytes | bytearray) -> bool:
         """True if ``raw`` is a line only a gateway would emit.
 
         A gateway announces ``gateway_ready`` once at boot, always answers the
@@ -188,8 +188,11 @@ class Gateway:
         the old Arduino gateway ignores it but still streams ``gateway_ready``
         and forwarded node messages, which :meth:`_is_gateway_line` accepts.
         """
+        ser = self._serial
+        if ser is None:
+            return
         try:
-            self._serial.write(b'{"cmd":"get_ap"}\n')
+            ser.write(b'{"cmd":"get_ap"}\n')
         except serial.SerialException:
             pass
 
@@ -270,13 +273,16 @@ class Gateway:
             return False
         self._logged_disconnected = False
 
+        ser = self._serial
+        if ser is None:              # lost between the check and the write
+            return False
         message = {"target": target_mac, "cmd": command, **kwargs}
         try:
             line = json.dumps(message)
             payload = (line + "\n").encode("utf-8")
             with self._write_lock:
                 for _ in range(max(1, repeat)):
-                    self._serial.write(payload)
+                    ser.write(payload)
             logger.debug("Sent to %s: %s%s", target_mac, command,
                          f" (x{repeat})" if repeat > 1 else "")
             self._emit_raw("tx", line)
@@ -294,11 +300,14 @@ class Gateway:
         """
         if not self.is_connected:
             return False
+        ser = self._serial
+        if ser is None:              # lost between the check and the write
+            return False
         message = {"cmd": command, **kwargs}
         try:
             line = json.dumps(message)
             with self._write_lock:
-                self._serial.write((line + "\n").encode("utf-8"))
+                ser.write((line + "\n").encode("utf-8"))
             self._emit_raw("tx", line)
             return True
         except serial.SerialException:
@@ -313,10 +322,13 @@ class Gateway:
         """
         if not self.is_connected:
             return False
+        ser = self._serial
+        if ser is None:              # lost between the check and the write
+            return False
         line = text if text.endswith("\n") else text + "\n"
         try:
             with self._write_lock:
-                self._serial.write(line.encode("utf-8"))
+                ser.write(line.encode("utf-8"))
             self._emit_raw("tx", line.rstrip("\n"))
             return True
         except serial.SerialException:
@@ -387,7 +399,7 @@ class Gateway:
             except Exception:
                 logger.exception("Raw serial tap callback failed")
 
-    def _dispatch_line(self, raw: bytes) -> None:
+    def _dispatch_line(self, raw: bytes | bytearray) -> None:
         """Parse one complete line and fan it out to registered callbacks."""
         if not raw.strip():
             return

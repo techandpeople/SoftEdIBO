@@ -135,16 +135,18 @@ class ThymioGatewayLink:
     # ------------------------------------------------------------------
 
     def set_motors(self, left: int, right: int) -> bool:
-        if not self.connected:
+        gw = self._gateway
+        if gw is None or not self.connected:
             return False
-        return self._gateway.send("thymio", "thymio_drive", idx=self._index,
-                                  left=int(left), right=int(right))
+        return gw.send("thymio", "thymio_drive", idx=self._index,
+                       left=int(left), right=int(right))
 
     def set_leds(self, r: int, g: int, b: int) -> bool:
-        if not self.connected:
+        gw = self._gateway
+        if gw is None or not self.connected:
             return False
-        return self._gateway.send("thymio", "thymio_leds", idx=self._index,
-                                  r=int(r), g=int(g), b=int(b))
+        return gw.send("thymio", "thymio_leds", idx=self._index,
+                       r=int(r), g=int(g), b=int(b))
 
     # ------------------------------------------------------------------
     # Sensors & impact (the C6 streams thymio_sensors from its poll reply)
@@ -299,17 +301,18 @@ class ThymioGatewayLink:
         The C6 loads a tiny Aseba program that calls the sound native fn and runs it —
         the motor targets are untouched, so a driving robot keeps driving.
         """
-        if not self.connected:
+        gw = self._gateway
+        if gw is None or not self.connected:
             return False
         if track is not None:
-            return self._gateway.send("thymio", "thymio_sound", idx=self._index,
-                                      track=int(track))
+            return gw.send("thymio", "thymio_sound", idx=self._index,
+                           track=int(track))
         if freq is not None:
             dur60 = max(1, round(duration_ms * 60 / 1000))   # Thymio dur unit = 1/60 s
-            return self._gateway.send("thymio", "thymio_sound", idx=self._index,
-                                      freq=int(freq), dur=dur60)
-        return self._gateway.send("thymio", "thymio_sound", idx=self._index,
-                                  sys=int(system if system is not None else 0))
+            return gw.send("thymio", "thymio_sound", idx=self._index,
+                           freq=int(freq), dur=dur60)
+        return gw.send("thymio", "thymio_sound", idx=self._index,
+                       sys=int(system if system is not None else 0))
 
     def stop(self) -> bool:
         return self.set_motors(0, 0)

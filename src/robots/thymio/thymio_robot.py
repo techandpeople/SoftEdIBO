@@ -7,6 +7,7 @@ from src.hardware.gateway import Gateway
 from src.robots.esp_robot import EspRobot
 from src.robots.base_robot import RobotStatus
 from src.robots.thymio.thymio_link import ThymioLink
+from src.robots.thymio.thymio_gateway_link import ThymioGatewayLink
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ class ThymioRobot(EspRobot):
         gateway: Gateway | None = None,
         node_configs: list[dict[str, Any]] | None = None,
         skin_configs: list[dict[str, Any]] | None = None,
-        link: ThymioLink | None = None,
+        link: ThymioLink | ThymioGatewayLink | None = None,
     ):
         super().__init__(
             robot_id, f"Thymio-{robot_id}",

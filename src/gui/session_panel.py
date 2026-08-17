@@ -559,7 +559,7 @@ class SessionPanel(QWidget, Ui_SessionPanel):
             return
         from src.gui.observer_panel import ObserverPanel
         panel = ObserverPanel(self._session_participants, parent=self)
-        panel.event.connect(self._on_observer_event)
+        panel.observed.connect(self._on_observer_event)
         panel.show()
         self._observer_panel = panel
 

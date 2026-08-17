@@ -345,7 +345,7 @@ class TouchCompensator:
         return boost
 
     def compensate(self, mag: list[float], levels: Mapping[int, float], *,
-                   vec: list[Any] | None = None,
+                   vec: Sequence[Any] | None = None,
                    now_ms: float | None = None
                    ) -> tuple[list[float], list[int]]:
         """Return ``(compensated_mag, active_sensors)`` for one reading.
@@ -361,7 +361,7 @@ class TouchCompensator:
         off_mag, off_vec = self._expected(levels)
         boost = self._guard_boost(levels, now_ms)
         suppressed = self._suppressed(levels)
-        use_vec = off_vec is not None and isinstance(vec, (list, tuple))
+        vec_seq = vec if off_vec is not None and isinstance(vec, (list, tuple)) else None
 
         comp: list[float] = []
         act: list[int] = []
@@ -369,7 +369,7 @@ class TouchCompensator:
             if s in suppressed:
                 comp.append(0.0)
                 continue
-            v = vec[s] if use_vec and s < len(vec) else None
+            v = vec_seq[s] if vec_seq is not None and s < len(vec_seq) else None
             residual, applied = self._residual(s, mag, v, off_mag, off_vec)
             comp.append(residual)
             if residual >= (self.threshold_ut
@@ -382,7 +382,7 @@ class TouchCompensator:
                   off_vec: list[Vec] | None) -> tuple[float, float]:
         """One sensor's (residual, applied-offset size) — vectorial when the
         message sample ``v`` carries 3-axis data, scalar otherwise."""
-        if isinstance(v, (list, tuple)) and len(v) >= 3:
+        if off_vec is not None and isinstance(v, (list, tuple)) and len(v) >= 3:
             return (_norm3([float(v[0]) - off_vec[s][0],
                             float(v[1]) - off_vec[s][1],
                             float(v[2]) - off_vec[s][2]]),

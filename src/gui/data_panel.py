@@ -76,6 +76,11 @@ class DataPanel(QWidget, Ui_DataPanel):
         """Rows the user has selected, in table order (one per selected row)."""
         return sorted({item.row() for item in self.sessions_table.selectedItems()})
 
+    def _cell_text(self, row: int, col: int) -> str:
+        """Text of a sessions-table cell (empty if the cell is unset)."""
+        item = self.sessions_table.item(row, col)
+        return item.text() if item is not None else ""
+
     def _update_export_label(self, count: int) -> None:
         """Reflect the number of selected sessions in the export button label."""
         suffix = f" ({count})" if count > 1 else ""
@@ -91,7 +96,7 @@ class DataPanel(QWidget, Ui_DataPanel):
             self.events_table.setRowCount(0)
             return
 
-        session_id = self.sessions_table.item(rows[0], 0).text()
+        session_id = self._cell_text(rows[0], 0)
         events = self._db.get_session_events(session_id)
 
         self.events_table.setRowCount(0)
@@ -114,10 +119,10 @@ class DataPanel(QWidget, Ui_DataPanel):
             QMessageBox.warning(self, "Export", "Select a session first.")
             return
 
-        session_ids = [self.sessions_table.item(r, 0).text() for r in rows]
+        session_ids = [self._cell_text(r, 0) for r in rows]
         docs = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DocumentsLocation)
         if len(rows) == 1:
-            activity = self.sessions_table.item(rows[0], 1).text()
+            activity = self._cell_text(rows[0], 1)
             default_name = f"SoftEdIBO_{session_ids[0]}_{activity.replace(' ', '_')}.csv"
         else:
             default_name = "SoftEdIBO_selected_sessions.csv"
@@ -156,9 +161,9 @@ class DataPanel(QWidget, Ui_DataPanel):
             QMessageBox.warning(self, "Delete", "Select a session first.")
             return
 
-        session_ids = [self.sessions_table.item(r, 0).text() for r in rows]
+        session_ids = [self._cell_text(r, 0) for r in rows]
         if len(rows) == 1:
-            activity = self.sessions_table.item(rows[0], 1).text()
+            activity = self._cell_text(rows[0], 1)
             text = f"Move session {session_ids[0]} ({activity}) to the trash?"
         else:
             text = f"Move {len(session_ids)} sessions to the trash?"

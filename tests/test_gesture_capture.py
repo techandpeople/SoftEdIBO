@@ -58,6 +58,7 @@ def test_prompt_advances_per_repetition():
     assert s.current_done == 0
 
     ev = d.gesture()
+    assert ev is not None
     assert ev.label == tax.PRESS
     assert s.is_complete and s.total_captured == 3
 

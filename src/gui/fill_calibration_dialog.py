@@ -130,7 +130,7 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
         # measured solo results: (mac, slot) → fill_profile list ([[ms, pct], ...])
         self._results: dict[tuple[str, int], list[list[float]]] = {}
         # measured duty→speed sweeps: (mac, slot) → [[duty, full_time_ms], ...]
-        self._duty_results: dict[tuple[str, int], list[list[int]]] = {}
+        self._duty_results: dict[tuple[str, int], list[list[float]]] = {}
         # measured falling deflate curves: (mac, slot) → [[ms, pct], ...]
         self._deflate_results: dict[tuple[str, int], list[list[float]]] = {}
         # currently-running calibration job, or None

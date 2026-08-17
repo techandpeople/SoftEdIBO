@@ -8,9 +8,11 @@ never routes non-idempotent actuation through the confirmer.
 """
 
 import threading
+from typing import cast
 
 from src.hardware.command_confirmer import CommandConfirmer
 from src.hardware.esp32_controller import ESP32Controller
+from src.hardware.gateway import Gateway
 
 MAC = "AA:BB:CC:DD:EE:01"
 
@@ -46,7 +48,7 @@ class FakeGateway:
 
 def test_acks_immediately_no_retry():
     gw = FakeGateway()
-    c = CommandConfirmer(gw, MAC)
+    c = CommandConfirmer(cast(Gateway, gw), MAC)
     assert c.confirm("set_max_pressure", chamber=0, value=20.0) is True
     assert len(gw.sends) == 1
     # The frame carried a seq the node can echo back.
@@ -56,7 +58,7 @@ def test_acks_immediately_no_retry():
 
 def test_retransmits_dropped_frames_then_succeeds():
     gw = FakeGateway(drop=2)   # first two sends vanish, third is acked
-    c = CommandConfirmer(gw, MAC)
+    c = CommandConfirmer(cast(Gateway, gw), MAC)
     assert c.confirm("set_min_pressure", chamber=1, value=-2.0,
                      timeout=0.05, retries=3) is True
     assert len(gw.sends) == 3
@@ -67,14 +69,14 @@ def test_retransmits_dropped_frames_then_succeeds():
 
 def test_nack_fails_fast_without_retry():
     gw = FakeGateway(ok=False)   # node rejects (e.g. bad chamber)
-    c = CommandConfirmer(gw, MAC)
+    c = CommandConfirmer(cast(Gateway, gw), MAC)
     assert c.confirm("set_max_pressure", chamber=9, value=20.0) is False
     assert len(gw.sends) == 1    # a NACK is final — no retransmit
 
 
 def test_timeout_after_exhausting_retries():
     gw = FakeGateway(ack=False)   # node never answers
-    c = CommandConfirmer(gw, MAC)
+    c = CommandConfirmer(cast(Gateway, gw), MAC)
     assert c.confirm("set_max_pressure", chamber=0, value=20.0,
                      timeout=0.01, retries=3) is False
     assert len(gw.sends) == 4     # first send + 3 retransmits
@@ -82,7 +84,7 @@ def test_timeout_after_exhausting_retries():
 
 def test_ignores_acks_for_other_nodes_and_seqs():
     gw = FakeGateway(ack=False)
-    c = CommandConfirmer(gw, MAC)
+    c = CommandConfirmer(cast(Gateway, gw), MAC)
 
     # Deliver an ack for a different node and a stale seq while a confirm waits.
     def _noise():
@@ -97,7 +99,7 @@ def test_ignores_acks_for_other_nodes_and_seqs():
 
 def test_seq_wraps_without_hitting_the_firmware_sentinel():
     gw = FakeGateway(ack=False)
-    c = CommandConfirmer(gw, MAC)
+    c = CommandConfirmer(cast(Gateway, gw), MAC)
     c._seq = 0xFFFE            # next allocation would wrap
     assert c._next_seq() == 0   # 0xFFFF (the NO_SEQ sentinel) is skipped
     assert c._next_seq() == 1
@@ -108,11 +110,15 @@ def test_seq_wraps_without_hitting_the_firmware_sentinel():
 
 def test_controller_confirms_limits_off_thread():
     gw = FakeGateway()
-    ctrl = ESP32Controller(MAC, gw)
+    ctrl = ESP32Controller(MAC, cast(Gateway, gw))
     done = threading.Event()
     results: list[bool] = []
-    ctrl.confirm_limits(2, 20.0, -2.0,
-                        on_result=lambda ok: (results.append(ok), done.set()))
+
+    def _on_result(ok: bool) -> None:
+        results.append(ok)
+        done.set()
+
+    ctrl.confirm_limits(2, 20.0, -2.0, on_result=_on_result)
     assert done.wait(2.0)
     assert results == [True]
     cmds = [(cmd, kw["chamber"], kw["value"]) for _, cmd, kw in gw.sends]
@@ -125,7 +131,7 @@ def test_controller_actuation_stays_fire_and_forget():
     """inflate/deflate are non-idempotent — they must never carry a confirm seq
     (a retransmit would stack a second pulse)."""
     gw = FakeGateway()
-    ctrl = ESP32Controller(MAC, gw)
+    ctrl = ESP32Controller(MAC, cast(Gateway, gw))
     ctrl.inflate(chamber=0, delta=10)
     ctrl.deflate(chamber=0, delta=10)
     assert gw.sends == [

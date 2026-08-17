@@ -127,13 +127,13 @@ class EmergencyFlashDialog(BaseDialog, Ui_EmergencyFlashDialog):
 
     def _on_output(self) -> None:
         if self._proc is not None:
-            self._parse_progress(
-                self._proc.readAllStandardOutput().data().decode(errors="replace"))
+            self._parse_progress(bytes(
+                self._proc.readAllStandardOutput().data()).decode(errors="replace"))
 
     def _on_error_output(self) -> None:
         if self._proc is not None:
-            self._parse_progress(
-                self._proc.readAllStandardError().data().decode(errors="replace"))
+            self._parse_progress(bytes(
+                self._proc.readAllStandardError().data()).decode(errors="replace"))
 
     def _on_finished(self, exit_code: int, _exit_status) -> None:
         if exit_code == 0:

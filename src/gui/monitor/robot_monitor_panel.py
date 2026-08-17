@@ -7,6 +7,7 @@ by reading directly from the model objects (no polling via get_status()).
 from __future__ import annotations
 
 from PySide6.QtCore import QEvent, QObject, QTimer, Signal
+from PySide6.QtGui import QWheelEvent
 from PySide6.QtWidgets import QScrollArea, QVBoxLayout, QWidget
 
 from src.gui.monitor.flow_layout import FlowLayout
@@ -22,7 +23,7 @@ class _WheelFilter(QObject):
         self._scroll = scroll_area
 
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:  # noqa: N802
-        if event.type() == QEvent.Type.Wheel:
+        if event.type() == QEvent.Type.Wheel and isinstance(event, QWheelEvent):
             self._scroll.wheelEvent(event)
             return True
         return False

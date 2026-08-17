@@ -47,7 +47,7 @@ def install_loop_watchdog(
     # watchdog ignores the one-time startup window (MainWindow construction runs
     # before app.exec(), i.e. before the event loop — and the heartbeat — start);
     # measuring only begins once the first tick fires inside the running loop.
-    heartbeat = {"t": None}
+    heartbeat: dict[str, float | None] = {"t": None}
 
     beat_timer = QTimer(app)
     beat_timer.setInterval(poll_ms)

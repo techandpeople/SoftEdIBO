@@ -148,7 +148,7 @@ def test_continuous_deflate_sweep_times_out():
 
 def test_set_deflate_profile_writes_and_clears():
     data = _settings()
-    curve = [[0, 95], [900, 40], [2000, 6]]
+    curve = [[0.0, 95.0], [900.0, 40.0], [2000.0, 6.0]]
     assert set_deflate_profile(data, "AA:01", 0, curve) == 1
     ch0 = data["robots"]["turtles"][0]["skins"][0]["chambers"][0]
     assert ch0["deflate_profile"] == curve
@@ -241,7 +241,7 @@ def test_iter_actuator_chambers_reports_calibration_state():
 
 def test_set_fill_profile_writes_and_drops_legacy_scalar():
     data = _settings()
-    curve = [[0, 0], [500, 30], [1200, 95]]
+    curve = [[0.0, 0.0], [500.0, 30.0], [1200.0, 95.0]]
     # Slot 1 had a legacy fill_time_ms — writing a profile must drop it.
     assert set_fill_profile(data, "AA:01", 1, curve) == 1
     ch1 = data["robots"]["turtles"][0]["skins"][0]["chambers"][1]
@@ -276,7 +276,7 @@ def test_iter_actuator_nodes_groups_chambers_by_mac():
 
 def test_set_fill_profiles_writes_combo_map_and_drops_legacy_scalar():
     data = _settings()
-    combos = {"0,1": [[0, 0], [600, 40], [1500, 92]]}
+    combos = {"0,1": [[0.0, 0.0], [600.0, 40.0], [1500.0, 92.0]]}
     # Slot 1 had a legacy fill_time_ms — writing a measured combo must drop it.
     assert set_fill_profiles(data, "AA:01", 1, combos) == 1
     ch1 = data["robots"]["turtles"][0]["skins"][0]["chambers"][1]

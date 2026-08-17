@@ -66,7 +66,9 @@ class Param:
 class BaseActivity(ABC):
     """Abstract base class for all study activities."""
 
-    robot_type: ClassVar[type[BaseRobot]]
+    # Usually declared once per subclass, but instance-overridable: a
+    # ScriptedActivity narrows it per instance from its legacy target.
+    robot_type: type[BaseRobot]
 
     # Simulation-only knobs — apply when ``simulation_mode`` is on. Subclasses
     # inherit these automatically (merged with their own ``PARAMS``) so every

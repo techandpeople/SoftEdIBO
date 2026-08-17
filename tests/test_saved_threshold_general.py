@@ -49,6 +49,7 @@ def test_compensator_threshold_falls_back_to_act_threshold():
         "coupling": _COUPLING,
         "compensation": {"enabled": True},          # no explicit threshold_ut
     })
+    assert comp is not None
     assert comp.threshold_ut == 130.0
 
 
@@ -58,6 +59,7 @@ def test_explicit_compensation_threshold_still_wins():
         "coupling": _COUPLING,
         "compensation": {"enabled": True, "threshold_ut": 90.0},
     })
+    assert comp is not None
     assert comp.threshold_ut == 90.0
 
 
@@ -66,6 +68,7 @@ def test_compensator_default_without_any_threshold():
         "coupling": _COUPLING,
         "compensation": {"enabled": True},
     })
+    assert comp is not None
     assert comp.threshold_ut == DEFAULT_THRESHOLD_UT
 
 
@@ -102,6 +105,7 @@ def _patched_saved(value):
 def test_builder_overlays_saved_threshold_per_type():
     with _patched_saved(120.0):
         out = _touch_with_saved_threshold({"node_mac": "AA:01"}, "thymio")
+    assert out is not None
     assert out["act_threshold_ut"] == 120.0
 
 
@@ -109,6 +113,7 @@ def test_builder_keeps_explicit_config_value():
     with _patched_saved(120.0):
         out = _touch_with_saved_threshold(
             {"node_mac": "AA:01", "act_threshold_ut": 80.0}, "thymio")
+    assert out is not None
     assert out["act_threshold_ut"] == 80.0
 
 

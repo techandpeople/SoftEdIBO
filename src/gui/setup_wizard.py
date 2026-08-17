@@ -316,13 +316,13 @@ class _FlashPage(QWizardPage, Ui_FlashPage):
     def _on_output(self) -> None:
         if self._proc is None:
             return
-        raw = self._proc.readAllStandardOutput().data().decode(errors="replace")
+        raw = bytes(self._proc.readAllStandardOutput().data()).decode(errors="replace")
         self._parse_progress(raw)
 
     def _on_error_output(self) -> None:
         if self._proc is None:
             return
-        raw = self._proc.readAllStandardError().data().decode(errors="replace")
+        raw = bytes(self._proc.readAllStandardError().data()).decode(errors="replace")
         self._parse_progress(raw)
 
     def _on_finished(self, exit_code: int, _exit_status) -> None:

@@ -153,8 +153,8 @@ def test_matcher_aggregate_within_tolerance():
 
 
 def test_matcher_per_organ_requires_exactly_good_set():
-    catalogue = {"liver_good": 1500, "heart_good": 2200, "lung_good": 3300,
-                 "liver_bad": 4700, "heart_bad": 5600, "lung_bad": 6800}
+    catalogue = {"liver_good": 1500.0, "heart_good": 2200.0, "lung_good": 3300.0,
+                 "liver_bad": 4700.0, "heart_bad": 5600.0, "lung_bad": 6800.0}
     matcher = OrganMatcher("per_organ", target_ohm=0.0, tolerance_ohm=80.0,
                            catalogue=catalogue)
     cured_r = OrganMatcher.parallel_resistance([1500, 2200, 3300])

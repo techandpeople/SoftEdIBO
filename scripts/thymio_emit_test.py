@@ -87,7 +87,11 @@ def main():
     print(f"Connected: node 0x{nid:04x}")
     time.sleep(0.5)                    # let the node description finish loading
 
-    conn = th.thymio_proxy.connection
+    proxy = th.thymio_proxy
+    if proxy is None:
+        print("Thymio connection thread never came up. Power-cycle it, retry.")
+        return
+    conn = proxy.connection
     counts = {"acc": 0, "gnd": 0, "other": 0}
 
     async def on_ev(source, ev_id, args):
@@ -124,7 +128,9 @@ def main():
     else:
         print("NO emits over USB → the program didn't load/run (or the event ids differ). Check the setup.")
     try:
-        th.disconnect()
+        # Not part of thymiodirect's public API on every version; the except
+        # already swallows the AttributeError when it is missing.
+        th.disconnect()  # pyright: ignore[reportAttributeAccessIssue]
     except Exception:
         pass
 

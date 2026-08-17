@@ -70,7 +70,8 @@ class SessionExporter:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _writer(f: TextIO) -> "csv._writer":
+    def _writer(f: TextIO):
+        # (csv writer objects have no public type to annotate with)
         writer = csv.writer(f)
         writer.writerow(COLUMNS)
         return writer

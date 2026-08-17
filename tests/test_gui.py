@@ -255,7 +255,9 @@ class TestTrashDialog:
         dlg = TrashDialog(trash)
         qtbot.addWidget(dlg)
         assert dlg.trash_table.rowCount() == 1
-        assert dlg.trash_table.item(0, 0).text() == "s01"
+        item = dlg.trash_table.item(0, 0)
+        assert item is not None
+        assert item.text() == "s01"
 
     def test_restore_puts_session_back(self, qtbot, db, tmp_path):
         db.save_session(SessionRecord("s01", "Group Touch", datetime(2026, 1, 1, 9, 0)))
@@ -296,14 +298,18 @@ class TestTrashDialog:
         panel = DataPanel(db)
         qtbot.addWidget(panel)
         assert panel.sessions_table.rowCount() == 1
-        assert panel.sessions_table.item(0, 0).text() == "s01"
+        item = panel.sessions_table.item(0, 0)
+        assert item is not None
+        assert item.text() == "s01"
 
     def test_refresh_shows_sessions_ordered_newest_first(self, qtbot, db):
         db.save_session(SessionRecord("s01", "Group Touch", datetime(2026, 1, 1, 9, 0)))
         db.save_session(SessionRecord("s02", "Group Touch", datetime(2026, 1, 1, 10, 0)))
         panel = DataPanel(db)
         qtbot.addWidget(panel)
-        assert panel.sessions_table.item(0, 0).text() == "s01"
+        item = panel.sessions_table.item(0, 0)
+        assert item is not None
+        assert item.text() == "s01"
 
 
 # ---------------------------------------------------------------------------
@@ -320,7 +326,7 @@ class TestObserverPanel:
         qtbot.addWidget(panel)
 
         captured = []
-        panel.event.connect(lambda *a: captured.append(a))
+        panel.observed.connect(lambda *a: captured.append(a))
         panel._emit_observation("P1", "watches")
         assert captured == [("observer", "watches", "P1", "")]
 
@@ -428,6 +434,7 @@ class TestActuatorsDialogSensors:
         dlg = self._dialog(qtbot, _RecordingGateway())
         dlg._on_magnet_data([10.0, 200.0, 0.0, 0.0])
         tester = dlg._sensor_tester
+        assert tester is not None
         tester.threshold_spin.setValue(100.0)
         tester.update_values([10.0, 200.0, 0.0, 0.0])
         # Only S1 (200 µT) clears the 100 µT threshold.
@@ -440,15 +447,19 @@ class TestActuatorsDialogSensors:
         gw = _RecordingGateway()
         dlg = self._dialog(qtbot, gw)
         dlg._on_magnet_data([0.0, 0.0, 0.0, 0.0])
-        dlg._sensor_tester.rezero_btn.click()
+        tester = dlg._sensor_tester
+        assert tester is not None
+        tester.rezero_btn.click()
         assert ("rebaseline", {}) in gw.sent
 
     def test_push_sends_threshold_uT_to_node(self, qtbot):
         gw = _RecordingGateway()
         dlg = self._dialog(qtbot, gw)
         dlg._on_magnet_data([0.0, 0.0, 0.0, 0.0])
-        dlg._sensor_tester.threshold_spin.setValue(120.0)
-        dlg._sensor_tester.push_btn.click()
+        tester = dlg._sensor_tester
+        assert tester is not None
+        tester.threshold_spin.setValue(120.0)
+        tester.push_btn.click()
         cfg = [kw for c, kw in gw.sent if c == "configure"]
         assert len(cfg) == 1
         # The µT threshold goes straight to the node — it flips a sensor active at

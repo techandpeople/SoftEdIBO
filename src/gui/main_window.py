@@ -126,7 +126,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         # "?" help-mode toggle in the menu-bar corner — hover any field to see
         # what it does. Reusable across windows (see src/gui/help_mode.py).
         self._help_button = HelpButton(self)
-        self.menubar.setCornerWidget(self._help_button, Qt.TopRightCorner)
+        self.menubar.setCornerWidget(self._help_button, Qt.Corner.TopRightCorner)
 
         # Always-visible emergency stop in the opposite corner. Kills every pump
         # and valve at once. Pressing the "0" key anywhere does the same (see the
@@ -134,8 +134,10 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self._estop_button = EmergencyStopButton(self)
         self._estop_button.stop_requested.connect(self._emergency_stop)
         self._estop_button.rearm_requested.connect(self._rearm)
-        self.menubar.setCornerWidget(self._estop_button, Qt.TopLeftCorner)
-        QApplication.instance().installEventFilter(self)
+        self.menubar.setCornerWidget(self._estop_button, Qt.Corner.TopLeftCorner)
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
 
         # Track whether a session is live so OTA can refuse mid-actuation.
         self._session_active = False
@@ -236,7 +238,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             return
         from src.robots.thymio.thymio_dongle import ThymioDongle
         # dongle_port omitted → auto-detect; first robot that names one wins.
-        ports = {t.get("dongle_port") for t in dongle_users if t.get("dongle_port")}
+        ports = {p for t in dongle_users if (p := t.get("dongle_port"))}
         port = next(iter(sorted(ports)), None)
         if len(ports) > 1:
             logger.warning(
@@ -375,12 +377,14 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         modal already blocks the rest of the UI anyway."""
         from src.gui.activity_editor_dialog import ActivityEditorDialog
         app = QApplication.instance()
-        app.removeEventFilter(self)
+        if app is not None:
+            app.removeEventFilter(self)
         try:
             ActivityEditorDialog(self._db, parent=self,
                                  robots=self._robots).exec()
         finally:
-            app.installEventFilter(self)
+            if app is not None:
+                app.installEventFilter(self)
 
     def _on_settings_saved(self) -> None:
         """Apply settings changes that don't require a restart."""
@@ -640,8 +644,9 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         """Disconnect hardware and close the database on exit."""
         if self._gateway.is_connected:
             self._gateway.disconnect()
-        if getattr(self, "_thymio_dongle", None) is not None:
-            self._thymio_dongle.close()   # stops thymiodirect's non-daemon threads
+        dongle = getattr(self, "_thymio_dongle", None)
+        if dongle is not None:
+            dongle.close()   # stops thymiodirect's non-daemon threads
         self._db.close()
         super().closeEvent(event)
 

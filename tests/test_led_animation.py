@@ -5,10 +5,13 @@ the frames the LED tester asks its host to send (whole / halves / quarters, the
 comet pattern, and the smooth-transition ``fade_ms``).
 """
 
+from typing import cast
+
 from PySide6.QtGui import QColor
 
 from src.gui.led_animation import (AnimationPattern, comet_pixels, lerp_color,
                                     pattern_scale)
+from src.hardware.gateway import Gateway
 
 
 class TestAnimationMaths:
@@ -118,7 +121,8 @@ class TestSendLedRouting:
                 pass
 
         gw = _Gw()
-        dlg = TestActuatorsDialog("AA:BB:CC:DD:EE:FF", [], gw, led_count=0)
+        dlg = TestActuatorsDialog("AA:BB:CC:DD:EE:FF", [], cast(Gateway, gw),
+                                  led_count=0)
         qtbot.addWidget(dlg)
         gw.sent.clear()
         return dlg, gw
@@ -201,7 +205,7 @@ class TestControllerBaseAngle:
                 return True
 
         gw = _Gw()
-        return ESP32Controller("AA:BB:CC:DD:EE:FF", gw), gw
+        return ESP32Controller("AA:BB:CC:DD:EE:FF", cast(Gateway, gw)), gw
 
     def test_no_offset_by_default(self):
         ctrl, gw = self._ctrl()

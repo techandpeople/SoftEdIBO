@@ -79,6 +79,8 @@ class LatencyMonitor:
         if data.get("type") != "pong":
             return
         mac = data.get("source")
+        if mac is None:
+            return
         sent = self._pending.pop(mac, None)
         if sent is None:
             return

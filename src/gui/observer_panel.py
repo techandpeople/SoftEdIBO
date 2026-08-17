@@ -51,13 +51,15 @@ class ObserverPanel(QWidget, Ui_ObserverPanel):
     """Floating panel of per-participant behavior-code buttons + a marker.
 
     Signals:
-        event(type, action, target, metadata): a coded observation. ``type`` is
-            ``"observer"`` (behavior codes) or ``"marker"``; ``action`` is the
-            behavior code or ``"mark"``; ``target`` is the participant_id (empty
-            for a session-wide marker); ``metadata`` carries an optional note.
+        observed(type, action, target, metadata): a coded observation. ``type``
+            is ``"observer"`` (behavior codes) or ``"marker"``; ``action`` is
+            the behavior code or ``"mark"``; ``target`` is the participant_id
+            (empty for a session-wide marker); ``metadata`` carries an optional
+            note.
     """
 
-    event = Signal(str, str, str, str)   # type, action, target, metadata
+    # Named ``observed`` (not ``event``) so it doesn't shadow QWidget.event().
+    observed = Signal(str, str, str, str)   # type, action, target, metadata
 
     def __init__(
         self,
@@ -107,16 +109,16 @@ class ObserverPanel(QWidget, Ui_ObserverPanel):
         return f"{alias}  [{participant.participant_id}]"
 
     def _emit_observation(self, participant_id: str, code: str) -> None:
-        self.event.emit("observer", code, participant_id, "")
+        self.observed.emit("observer", code, participant_id, "")
 
     def _emit_gesture(self, code: str) -> None:
         # target left empty — the offline labeller aligns this timestamp to the
         # active touch segment (and thus its skin) in the recorded stream.
-        self.event.emit("gesture_label", code, "", "")
+        self.observed.emit("gesture_label", code, "", "")
 
     def _emit_marker(self) -> None:
         note, ok = QInputDialog.getText(
             self, "Marker", "Optional note for this marker:")
         if not ok:
             return
-        self.event.emit("marker", "mark", "", note.strip())
+        self.observed.emit("marker", "mark", "", note.strip())

@@ -180,6 +180,8 @@ class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
         them cleanly), then drives its target chambers to their levels and *holds*
         (closes, pumps off) the others."""
         skin = self._skin
+        if skin is None:
+            return
         mac = skin["chamber_mac"]
         self.progress.setValue(step.progress)
         self.status_label.setText(step.label)

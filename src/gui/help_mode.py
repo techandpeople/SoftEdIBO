@@ -30,7 +30,7 @@ Usage::
     from src.gui.help_mode import HelpButton
 
     help_btn = HelpButton(self)          # target defaults to the button's window
-    self.menubar.setCornerWidget(help_btn, Qt.TopRightCorner)
+    self.menubar.setCornerWidget(help_btn, Qt.Corner.TopRightCorner)
 """
 
 from __future__ import annotations
@@ -97,7 +97,7 @@ class _HelpOverlay(QWidget):
         self._hover_text = ""
         self.setObjectName("_HelpOverlay")
         self.setMouseTracking(True)
-        self.setCursor(Qt.WhatsThisCursor)
+        self.setCursor(Qt.CursorShape.WhatsThisCursor)
         self.setGeometry(target.rect())
         target.installEventFilter(self)
 
@@ -110,7 +110,7 @@ class _HelpOverlay(QWidget):
 
     def eventFilter(self, obj, event):  # noqa: N802 (Qt signature)
         # Observe the target so the overlay stays glued to it as it resizes.
-        if obj is self._target and event.type() == QEvent.Resize:
+        if obj is self._target and event.type() == QEvent.Type.Resize:
             self.setGeometry(self._target.rect())
         return False
 
@@ -141,7 +141,7 @@ class _HelpOverlay(QWidget):
 
     def paintEvent(self, event):  # noqa: N802
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.fillRect(self.rect(), self.DIM)
         pen = QPen(self.HIGHLIGHT.darker(110))
         pen.setWidth(2)
@@ -161,7 +161,7 @@ class _HelpOverlay(QWidget):
         be hidden behind the window the way a separate QToolTip popup can.
         """
         metrics = painter.fontMetrics()
-        flags = Qt.TextWordWrap
+        flags = Qt.TextFlag.TextWordWrap
         text_rect = metrics.boundingRect(
             QRect(0, 0, self.BUBBLE_MAX_WIDTH, 1000), flags, text)
         pad = self.BUBBLE_PAD
@@ -193,7 +193,7 @@ class _HelpOverlay(QWidget):
             self.update()
 
     def keyPressEvent(self, event):  # noqa: N802
-        if event.key() == Qt.Key_Escape:
+        if event.key() == Qt.Key.Key_Escape:
             self.hide()
             self.dismissed.emit()
         else:
@@ -218,7 +218,7 @@ class HelpButton(QToolButton):
         self.setText("?")
         self.setCheckable(True)
         self.setAutoRaise(True)
-        self.setCursor(Qt.PointingHandCursor)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setToolTip("Help mode — hover any field to see what it does")
         self.setWhatsThis(
             "Toggle help mode. While on, the pointer becomes a “?” and "

@@ -6,6 +6,9 @@ stream to a node. The bundled node ``.bin`` files are *merged* flash images
 app partition, so the updater must extract it. See se_ota.h / build-firmware.sh.
 """
 
+from typing import cast
+
+from src.hardware.gateway import Gateway
 from src.hardware.node_ota_updater import (
     NodeOTAUpdater,
     _APP_OFFSET,
@@ -15,7 +18,8 @@ from src.hardware.node_ota_updater import (
 
 def _make_updater():
     # _app_image only needs the constructed object; the gateway is never touched.
-    return NodeOTAUpdater(gateway=object(), mac="AA:BB:CC:DD:EE:FF", firmware_path="x")
+    return NodeOTAUpdater(gateway=cast(Gateway, object()),
+                          mac="AA:BB:CC:DD:EE:FF", firmware_path="x")
 
 
 def test_bare_app_image_passes_through():

@@ -324,7 +324,7 @@ class GestureCaptureDialog(BaseDialog, Ui_GestureCaptureDialog):
         # Keep the bound skin's compensated stream in step: it rederives ``act``
         # at its own threshold, which must match the node's new sensitivity.
         src = getattr(self._bound_skin, "touch_source", None)
-        if hasattr(src, "set_threshold_ut"):
+        if src is not None and hasattr(src, "set_threshold_ut"):
             src.set_threshold_ut(threshold_ut)
         st = self.type_combo.currentData() or ""
         if st:
@@ -399,6 +399,8 @@ class GestureCaptureDialog(BaseDialog, Ui_GestureCaptureDialog):
 
     def _finish(self) -> None:
         session = self._session
+        if session is None:
+            return
         self._session = None            # stop feeding; capture is done
         self._stop_recording()
         self._write_labels()

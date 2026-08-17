@@ -61,7 +61,8 @@ class TrashDialog(QDialog, Ui_TrashDialog):
 
     def _selected_session_ids(self) -> list[str]:
         rows = sorted({item.row() for item in self.trash_table.selectedItems()})
-        return [self.trash_table.item(row, 0).text() for row in rows]
+        items = (self.trash_table.item(row, 0) for row in rows)
+        return [item.text() for item in items if item is not None]
 
     def _on_selection_changed(self) -> None:
         has_selection = bool(self.trash_table.selectedItems())

@@ -43,22 +43,20 @@ class ParticipantPanel(QWidget, Ui_ParticipantPanel):
         for record in records:
             row = self.participants_table.rowCount()
             self.participants_table.insertRow(row)
-            self.participants_table.setItem(row, 0, QTableWidgetItem(record.participant_id))
+            id_item = QTableWidgetItem(record.participant_id)
+            # Store the record for later retrieval
+            id_item.setData(Qt.ItemDataRole.UserRole, record)
+            self.participants_table.setItem(row, 0, id_item)
             self.participants_table.setItem(row, 1, QTableWidgetItem(record.alias))
             age_text = str(record.age) if record.age is not None else "—"
             self.participants_table.setItem(row, 2, QTableWidgetItem(age_text))
-            # Store the record for later retrieval
-            self.participants_table.item(row, 0).setData(
-                Qt.ItemDataRole.UserRole, record
-            )
 
     def _selected_record(self) -> ParticipantRecord | None:
         rows = self.participants_table.selectedItems()
         if not rows:
             return None
-        return self.participants_table.item(rows[0].row(), 0).data(
-            Qt.ItemDataRole.UserRole
-        )
+        item = self.participants_table.item(rows[0].row(), 0)
+        return item.data(Qt.ItemDataRole.UserRole) if item is not None else None
 
     def _on_table_key_press(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key.Key_Delete:

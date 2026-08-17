@@ -68,6 +68,7 @@ def test_trains_and_reports_accuracy_and_confusion(tmp_path):
     assert res.model_acc is not None and 0.0 <= res.model_acc <= 1.0
     # Square confusion matrix over the sorted label set.
     assert res.labels == sorted({tax.TAP, tax.PRESS, tax.COMPRESSIONS})
+    assert res.confusion is not None
     assert len(res.confusion) == len(res.labels) == 3
     assert all(len(row) == 3 for row in res.confusion)
     # Every captured sample is accounted for in the matrix.

@@ -104,16 +104,18 @@ class SessionSetupDialog(BaseDialog, Ui_SessionSetupDialog):
             "data/recordings/<session_id>.jsonl for later analysis and "
             "touch-gesture model training. No camera / video is involved."
         )
-        form = self.activity_combo.parentWidget().layout()
+        parent = self.activity_combo.parentWidget()
+        form = parent.layout() if parent is not None else None
         if isinstance(form, QFormLayout):
-            base = form.getWidgetPosition(self.activity_combo)[0]
+            # PySide6 stubs type getWidgetPosition's (row, role) tuple as object.
+            base = form.getWidgetPosition(self.activity_combo)[0]  # pyright: ignore[reportIndexIssue]
             form.insertRow(base + 1, "", self._sim_check)
             form.insertRow(base + 2, "", self._record_check)
-        else:
+        elif form is not None:
             # Fallback: stash below the activity combo if the parent layout
             # isn't a form (e.g. after .ui refactors).
-            self.activity_combo.parentWidget().layout().addWidget(self._sim_check)
-            self.activity_combo.parentWidget().layout().addWidget(self._record_check)
+            form.addWidget(self._sim_check)
+            form.addWidget(self._record_check)
 
         self.activity_combo.currentIndexChanged.connect(self._on_activity_changed)
         self.robots_list.itemChanged.connect(lambda _item: self._update_skin_warning())

@@ -1,5 +1,7 @@
 """Tests for the Thymio robot module."""
 
+from typing import cast
+
 from src.robots.thymio.thymio_robot import ThymioRobot
 from src.robots.thymio.thymio_link import ThymioLink
 from src.robots.thymio.thymio_dongle import ThymioDongle
@@ -56,7 +58,7 @@ class _FakeLink:
 
 def test_thymio_movement_delegates_to_link():
     link = _FakeLink()
-    thymio = ThymioRobot("t1", link=link)
+    thymio = ThymioRobot("t1", link=cast(ThymioLink, link))
     assert thymio.connect() is True
     assert link.connected
 
@@ -74,19 +76,19 @@ def test_thymio_movement_delegates_to_link():
 
 
 def test_thymio_connect_fails_when_link_fails():
-    thymio = ThymioRobot("t1", link=_FakeLink(connect_result=False))
+    thymio = ThymioRobot("t1", link=cast(ThymioLink, _FakeLink(connect_result=False)))
     assert thymio.connect() is False
     assert thymio.status.value == "error"
 
 
 def test_thymio_send_command_requires_connected():
-    thymio = ThymioRobot("t1", link=_FakeLink())
+    thymio = ThymioRobot("t1", link=cast(ThymioLink, _FakeLink()))
     assert thymio.send_command("motors", left=10, right=10) is False
 
 
 def test_thymio_sound_delegates_to_link():
     link = _FakeLink()
-    thymio = ThymioRobot("t1", link=link)
+    thymio = ThymioRobot("t1", link=cast(ThymioLink, link))
     thymio.connect()
     assert thymio.play_sound(system=2) is True
     assert ("sound", 2, None, 500, None) in link.calls
@@ -152,7 +154,7 @@ class _FakeDongle:
 
 def test_link_binds_configured_node_and_delegates():
     d = _FakeDongle(nodes=(10, 20, 30))
-    link = ThymioLink(dongle=d, node_id=20)
+    link = ThymioLink(dongle=cast(ThymioDongle, d), node_id=20)
     assert link.connect() is True
     assert link.connected
     assert link.set_motors(100, -100) is True
@@ -163,7 +165,7 @@ def test_link_binds_configured_node_and_delegates():
 
 def test_link_auto_binds_first_node_when_unset():
     d = _FakeDongle(nodes=(7, 8))
-    link = ThymioLink(dongle=d, node_id=None)
+    link = ThymioLink(dongle=cast(ThymioDongle, d), node_id=None)
     assert link.connect() is True
     link.set_motors(1, 2)
     assert d.writes[-1][0] == 7          # first node discovered
@@ -171,7 +173,7 @@ def test_link_auto_binds_first_node_when_unset():
 
 def test_link_fails_when_configured_node_absent():
     d = _FakeDongle(nodes=(1, 2))
-    link = ThymioLink(dongle=d, node_id=99)
+    link = ThymioLink(dongle=cast(ThymioDongle, d), node_id=99)
     assert link.connect(timeout=0.2) is False
     assert link.connected is False
     assert link.set_motors(1, 1) is False   # unbound → no-op
@@ -179,8 +181,8 @@ def test_link_fails_when_configured_node_absent():
 
 def test_shared_dongle_two_links_isolated_and_survive_link_close():
     d = _FakeDongle(nodes=(1, 2))
-    a = ThymioLink(dongle=d, node_id=1)
-    b = ThymioLink(dongle=d, node_id=2)
+    a = ThymioLink(dongle=cast(ThymioDongle, d), node_id=1)
+    b = ThymioLink(dongle=cast(ThymioDongle, d), node_id=2)
     assert a.connect() and b.connect()
     a.set_motors(50, 50)
     b.set_leds(0, 32, 0)

@@ -281,7 +281,18 @@ class OTAUpdateDialog(BaseDialog, Ui_OTAUpdateDialog):
         if item is not None:
             item.setText("online" if mac in online else "offline")
         if led is not None:
-            led.setText(self._led_text(mac, self.table.item(row, _COL_TYPE).text()))
+            led.setText(self._led_text(mac, self._cell_text(row, _COL_TYPE)))
+
+    def _cell_text(self, row: int, col: int) -> str:
+        """Text of a table cell (empty if the cell is unset)."""
+        item = self.table.item(row, col)
+        return item.text() if item is not None else ""
+
+    def _set_status(self, row: int, msg: str) -> None:
+        """Write ``msg`` into a row's status cell (no-op if the cell is unset)."""
+        item = self.table.item(row, _COL_STATUS)
+        if item is not None:
+            item.setText(msg)
 
     def _led_text(self, mac: str, ntype: str) -> str:
         """LED-ring variant to show for a node: 'rgb'/'rgbw' if reported, '?' if
@@ -345,25 +356,25 @@ class OTAUpdateDialog(BaseDialog, Ui_OTAUpdateDialog):
         fallback_rgbw = self.rgbw_check.isChecked()
         jobs: list[tuple[str, Path]] = []
         for mac, row in self._row_by_mac.items():
-            if self.table.item(row, _COL_SEL).checkState() != Qt.CheckState.Checked:
+            sel = self.table.item(row, _COL_SEL)
+            if sel is None or sel.checkState() != Qt.CheckState.Checked:
                 continue
             if mac == _C6_KEY:
                 fw = firmware_for_c6()
                 if not fw.exists():
-                    self.table.item(row, _COL_STATUS).setText(
+                    self._set_status(
+                        row,
                         "✗ firmware not found — build rcp_c6 first "
                         "(pio run -d firmware/thymio_rcp -e rcp_c6)")
                     continue
                 jobs.append((mac, fw))
                 continue
-            ntype = self.table.item(row, _COL_TYPE).text()
+            ntype = self._cell_text(row, _COL_TYPE)
             reported = self._gateway.node_rgbw(mac)
             rgbw = fallback_rgbw if reported is None else reported
             fw = firmware_for_node_type(ntype, debug, rgbw)
             if fw is None or not fw.exists():
-                self.table.item(row, _COL_STATUS).setText(
-                    f"✗ firmware not found: {fw}"
-                )
+                self._set_status(row, f"✗ firmware not found: {fw}")
                 continue
             jobs.append((mac, fw))
         return jobs
@@ -428,7 +439,7 @@ class OTAUpdateDialog(BaseDialog, Ui_OTAUpdateDialog):
     def _on_status(self, mac: str, msg: str) -> None:
         row = self._row_by_mac.get(mac)
         if row is not None:
-            self.table.item(row, _COL_STATUS).setText(msg)
+            self._set_status(row, msg)
 
     def _on_done(self) -> None:
         # Emitted from inside the worker's run(): the thread is still running

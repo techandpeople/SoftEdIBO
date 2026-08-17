@@ -103,9 +103,12 @@ def test_registering_a_new_technology_is_one_subclass():
     reg.register(_StubCapacitive())
 
     assert reg.for_config({"sensor": "capacitive"}).name == "capacitive"
-    assert reg.for_message_type("capacitive").name == "capacitive"
-    assert reg.for_ready_status("node_capacitive_sensor_ready").name == "capacitive"
-    assert reg.for_node_type("node_capacitive_sensor").name == "capacitive"
+    by_message = reg.for_message_type("capacitive")
+    assert by_message is not None and by_message.name == "capacitive"
+    by_ready = reg.for_ready_status("node_capacitive_sensor_ready")
+    assert by_ready is not None and by_ready.name == "capacitive"
+    by_node_type = reg.for_node_type("node_capacitive_sensor")
+    assert by_node_type is not None and by_node_type.name == "capacitive"
     assert "node_capacitive_sensor" in reg.node_types()
     # Default is still magnet; a capacitive skin has no pressure coupling.
     assert reg.for_config(None).name == "magnet"

@@ -45,7 +45,8 @@ _stderr = ensure_std_streams()
 # kills the process without one, so this is the only trace we get for those.
 # It is dormant until a fatal signal fires, so there is no runtime cost.
 try:
-    faulthandler.enable(_stderr)
+    if _stderr is not None:
+        faulthandler.enable(_stderr)
 except (RuntimeError, ValueError, AttributeError, io.UnsupportedOperation):
     pass    # no dumpable stream — Python-level crash handling still works
 

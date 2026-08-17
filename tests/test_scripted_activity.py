@@ -9,6 +9,7 @@ event loop: ticks are pumped manually and the clock is monkeypatched.
 import os
 import tempfile
 from datetime import datetime
+from typing import cast
 
 import pytest
 
@@ -48,6 +49,11 @@ class _FakeCtrl:
 
 
 class _FakeSkin:
+    # Organ-sensing extras: only set by tests that exercise organ conditions
+    # (annotations only — no runtime attribute unless a test assigns them).
+    organ: dict
+    organs: list[dict]
+
     def __init__(self, skin_id="skin-1", controller=None, n_chambers=3):
         self.skin_id = skin_id
         self.chambers = {i: object() for i in range(n_chambers)}
@@ -198,6 +204,7 @@ def test_enter_initial_sets_purple_led(clock):
     activity, ctrl, skin, robot = _condition_a()
     _start(activity, robot)
     assert activity.unit_state(_unit(activity).unit_id) == "phase1"
+    assert ctrl.led is not None
     assert ctrl.led[0] == "#8e44ad"     # purple
 
 
@@ -214,6 +221,7 @@ def test_time_advances_through_phases(clock):
     clock.advance(181)                  # > 3 min more (5 min total)
     activity._on_tick()
     assert activity.unit_state(uid) == "phase3"
+    assert ctrl.led is not None
     assert ctrl.led[0] == "#f1c40f"     # yellow
 
 
@@ -245,6 +253,7 @@ def test_advance_phase_skips_timer_and_stops_at_terminal(clock):
 
     assert activity.advance_phase() == "phase3"
     assert activity.unit_state(uid) == "phase3"
+    assert ctrl.led is not None
     assert ctrl.led[0] == "#f1c40f"               # yellow
 
     # phase3 is terminal (no transitions) → nothing left to advance.
@@ -909,7 +918,8 @@ def test_if_robot_gates_thymio_drive_to_the_thymio(clock):
     act = ScriptedActivity("t", "d", _if_robot_spec(
         "thymio", do=[{"thymio_drive": {"left": 100, "right": 100}}],
         els=[{"inflate": {"chamber": 0, "pct": 40}}]))
-    act._setup(Session("S001", act), [thymio, turtle])
+    from src.robots.base_robot import BaseRobot
+    act._setup(Session("S001", act), cast("list[BaseRobot]", [thymio, turtle]))
     for unit in act._units.values():
         act._enter_state(unit, act._initial)
     assert thymio.motors == [(100, 100)]

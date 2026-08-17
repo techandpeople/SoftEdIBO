@@ -16,7 +16,9 @@ from src.ml.touch_motion import (
 )
 from src.ml.touch_segmenter import TouchSegmenter
 
-_POS = list(geometry_for("thymio").sensors_mm)
+_GEOM = geometry_for("thymio")
+assert _GEOM is not None
+_POS = list(_GEOM.sensors_mm)
 
 
 @pytest.fixture
@@ -52,7 +54,9 @@ def test_centroid_weights_by_magnitude():
     assert weighted_centroid([100.0, 0.0], [(0.0, 0.0), (10.0, 0.0)]) == (0.0, 0.0)
     # Equal weights → midpoint; floor drops the quiet sensor.
     assert weighted_centroid([50.0, 50.0], [(0.0, 0.0), (10.0, 0.0)]) == (5.0, 0.0)
-    cx, _cy = weighted_centroid([50.0, 5.0], [(0.0, 0.0), (10.0, 0.0)], floor=10.0)
+    centroid = weighted_centroid([50.0, 5.0], [(0.0, 0.0), (10.0, 0.0)], floor=10.0)
+    assert centroid is not None
+    cx, _cy = centroid
     assert cx == 0.0
 
 
@@ -102,6 +106,7 @@ def test_merged_taps_on_different_sensors_are_not_a_slide():
     a = _segment([([0, 300.0, 0, 0], [1])])
     b = _segment([([0, 0, 300.0, 0], [2])])
     merged = merge_segments([a, b])
+    assert merged is not None
     assert merged.n_pulses == 2
     assert segment_direction(merged, _POS) is None
 

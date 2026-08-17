@@ -206,7 +206,10 @@ class TrainTouchDialog(BaseDialog, Ui_TrainTouchDialog):
         if path is None or table_row >= len(self._recordings[path]):
             return
         rows = self._recordings[path]
-        label = (self.table.cellWidget(table_row, 4).currentData() or "")
+        combo = self.table.cellWidget(table_row, 4)
+        if not isinstance(combo, QComboBox):
+            return
+        label = combo.currentData() or ""
         rows[table_row].label = label
         # A label change on any member of a group applies to the whole group.
         gid = rows[table_row].group_id
@@ -219,7 +222,7 @@ class TrainTouchDialog(BaseDialog, Ui_TrainTouchDialog):
     def _set_combo_label(self, table_row: int, label: str) -> None:
         """Set a row's gesture combo without re-triggering label edits."""
         combo = self.table.cellWidget(table_row, 4)
-        if combo is None:
+        if not isinstance(combo, QComboBox):
             return
         combo.blockSignals(True)
         j = combo.findData(label)
