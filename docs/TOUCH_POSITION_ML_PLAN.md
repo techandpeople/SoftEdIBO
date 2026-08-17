@@ -70,6 +70,18 @@ must live in the GUI): **Tools -> Touch Position Bench...**
 **Gate:** adopt the finest grid with >=~90 % accuracy. If only 2x2 survives,
 stop here (quadrants were the honest resolution) and consider Phase 4.
 
+**Capture protocol** (baked into the dialog intro): resting skin, mounted in
+its final position on the robot (calibration must match deployment); vary
+press strength across repetitions so the force-normalization is trained on
+real nonlinearity, not one force; no rings/watches on the pressing hand and
+phones/metal away from the skin - magnetometers see them all.
+
+The gate is **absolute, not comparative**: benching only the alternated sheet
+is enough (user decision 2026-08-17) - a uniform-sheet baseline would only
+quantify how much the alternation bought, which no decision needs. One run's
+report already carries its own diagnostics (per-cell recall + peak energies
+separate SNR-limited from encoding-limited failures).
+
 ### Phase 1 - Position model + runtime integration
 
 - `src/ml/touch_position.py`: `TouchPositionModel` per `skin_type` (variant as
@@ -123,24 +135,41 @@ verdict:
 | Cells fail with LOW peak energy | SNR / amplitude | levers 2 + 3 |
 | Cells confused DESPITE strong peaks (neighbour confusions) | encoding | lever 1 |
 
-1. **The code - magnet sheet (near-zero cost, next casting):**
-   **alternating polarity** in the 4x4 matrix (N/S checkerboard) - with all
-   magnets alike, adjacent press points give *similar* signatures; alternated,
-   they give near-opposite signs and the class distance jumps. Optionally
-   also diversify orientations (some magnets lying at 90 deg) for even more
-   unique per-zone fingerprints.
+1. **The code - magnet sheet - DECIDED (user, 2026-08-17):** the next sheet
+   casting uses **alternating polarity** in the 4x4 matrix (N/S
+   checkerboard) - with all magnets alike, adjacent press points give
+   *similar* signatures; alternated, they give near-opposite signs and the
+   class distance jumps. Orientation diversity was considered and **dropped**:
+   the magnets are cylinders (axially magnetized), so laying them sideways is
+   not practical. IMPORTANT: an alternated sheet produces completely
+   different signatures AND different actuation-coupling behaviour - treat it
+   as a new `skin_variant` string (e.g. `altpol`) so bench datasets, position
+   models and coupling calibrations from uniform sheets are never mixed with
+   it, and re-run Calibrate Touch Coupling on the new sheet.
 2. **The mechanics - displacement headroom:** a thicker/softer under-layer
    beneath the magnets (lower-shore silicone, or small voids/dimples under
    each magnet) so presses move them further; bonding the sheet to the top
    skin adds the X/Y component (see the build section).
-3. **The sensor operating point - firmware only:** raise MLX90393 OSR/filter
-   (currently GAIN_2X/OSR_2/FILTER_3) to push noise sub-uT, trading stream
-   rate - position does not need 28 Hz, a clean ~15 Hz serves.
-4. **The time dimension - software only, data already captured:** the
-   signature uses the peak window, but the press *transient* (how the 12-D
-   vector grows/rotates) is extra information; bench datasets store the FULL
-   segments, so temporal features can be evaluated offline on existing data,
-   no recapture.
+3. **The sensor operating point - firmware, IMPLEMENTED (needs one reflash,
+   `fw:"magvec-1"` in the ready message confirms it landed):**
+   `{"cmd":"configure","osr":0-3,"filter":0-7}` now retunes the MLX90393 at
+   runtime (auto re-zeros; hands off while it settles), so the bench can
+   sweep the noise-vs-cadence trade without reflashing per attempt - position
+   does not need 28 Hz, a clean ~15 Hz serves. Same reflash also fixes a
+   silent information leak: `vec` rows were quantized to whole uT on the
+   wire; deltas under 100 uT now stream at tenth-uT (the weak far-sensor
+   responses the position ML feeds on live exactly there). Both boards that
+   carry the module (standalone + direct) rebuild clean.
+4. **The time dimension - APPROVED (user) & IMPLEMENTED in the bench
+   analysis:** the press *transient* (how the 12-D vector grows/rotates)
+   carries information the peak snapshot collapses away. Six transient
+   features (`BenchPress.temporal_features`: rise/fall/duration, direction
+   stability first->last, direction path length, rise slope) are appended to
+   the normalized signature; the report scores `vec+transient` /
+   `mag+transient` feature sets against the peak-only ones, and the pattern
+   section scores peak-only vs +transient (a squeeze *builds* differently
+   from a press). Bench datasets store the FULL segments, so this evaluates
+   on existing data - no recapture.
 
 Exploratory note (not a phase): **active sensing** - a short known chamber
 pulse perturbs the magnets in a touch-dependent way; the response could
@@ -169,6 +198,16 @@ currently not bonded to the magnet sheet.
   different points give *distinct* signatures at the 4 sensors. That is a
   property of this build (magnet pitch, layer stiffness) and exactly what the
   bench measures. Run it before any construction change.
+- **The air chambers interfere with the magnets - never forget it.**
+  Inflation/vacuum deforms the silicone and shifts magnets exactly like a
+  touch does ([TOUCH_COUPLING.md](TOUCH_COUPLING.md)); with alternating
+  polarities the *sign* of each chamber's interference changes too. The
+  standing rules: bench captures happen on a **resting** skin; runtime
+  position/gesture reads during actuation must consume the **compensated**
+  stream (vector compensation + `TransitionGuard`); Calibrate Touch Coupling
+  must be re-run after ANY sheet change (new casting, polarity flip,
+  bonding). Where compensation is not calibrated, position output during
+  actuation should be flagged untrusted rather than reported.
 - **Bonding the magnet sheet to the chamber skin** (user idea) would couple
   tangential finger motion into X/Y magnet displacement - precisely the
   signal slides and squeezes need, and the 3-axis sensors are built for it.

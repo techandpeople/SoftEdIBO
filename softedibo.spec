@@ -55,6 +55,10 @@ main_a = Analysis(
     binaries=[],
     datas=[
         ("config/", "config/"),
+        # App icon: the .ico is baked into the exe resource below (Windows file
+        # / title-bar icon); the .png is what Qt loads at runtime for the
+        # window + taskbar icon (see src/gui/app_icon.py).
+        ("softedibo.png", "."),
         # Block editor assets (Tools => Behaviour Editor...). HTML + any vendored
         # Blockly copy; loaded lazily, only when the editor is opened.
         ("src/gui/blockly/", "src/gui/blockly/"),
@@ -114,6 +118,11 @@ main_exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    # Windows exe resource icon (Explorer, taskbar pin, shortcuts). Must be a
+    # real multi-size .ico - handing PyInstaller a .png makes it try to convert
+    # via Pillow, which is not a build dependency. Regenerate from
+    # softedibo.png with scripts/make_icon.py after changing the artwork.
+    icon="softedibo.ico",
 )
 
 # ---------------------------------------------------------------------------

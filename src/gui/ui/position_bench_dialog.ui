@@ -21,7 +21,7 @@
        <item>
         <widget class="QLabel" name="setup_intro">
          <property name="wordWrap"><bool>true</bool></property>
-         <property name="text"><string>Measures how precisely THIS skin can locate a touch - beyond the 4 quadrants. Mark a grid on the skin (tape or a printed overlay), then press each cell when prompted. The report at the end says which grid size the data supports. Capture on a resting skin (no inflation).</string></property>
+         <property name="text"><string>Measures how precisely THIS skin can locate a touch - beyond the 4 quadrants. Mark a grid on the skin (tape or a printed overlay), then press each cell when prompted. The report at the end says which grid size the data supports. Protocol: resting skin (no inflation), mounted in its final position; vary how hard you press across repetitions; remove rings/watches and keep phones and metal away - the sensors see them too.</string></property>
         </widget>
        </item>
        <item>

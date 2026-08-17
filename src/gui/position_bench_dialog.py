@@ -27,7 +27,7 @@ from typing import Any
 
 from PySide6.QtCore import QTimer, Signal
 from PySide6.QtGui import QFontDatabase
-from PySide6.QtWidgets import QFileDialog, QWidget
+from PySide6.QtWidgets import QFileDialog, QMessageBox, QWidget
 
 from src.config.settings import Settings
 from src.gui.async_task import run_async
@@ -48,6 +48,8 @@ from src.ml.position_bench import (
     load_dataset,
     save_jsonl,
 )
+
+_DIALOG_TITLE = "Touch Position Bench"
 
 _PAGE_SETUP, _PAGE_CAPTURE, _PAGE_RESULTS = 0, 1, 2
 
@@ -74,6 +76,7 @@ class PositionBenchDialog(BaseDialog, Ui_PositionBenchDialog):
         self._done_reps = 0
         self._settling = False              # ignore frames while re-zeroing
         self._saw_vec = False
+        self._vec_streaming = False         # we turned the node's vec rows on
         self._dataset_path: Path | None = None
 
         self.type_combo.addItem("", "")
@@ -155,6 +158,15 @@ class PositionBenchDialog(BaseDialog, Ui_PositionBenchDialog):
                 if p.strip()]
 
     def _start(self) -> None:
+        # Schmitt hysteresis: the release threshold must sit below the press
+        # one, and the two spin boxes are independent. PressDetector raises on
+        # a bad pair, which would escape this slot as an unhandled exception.
+        if self.exit_spin.value() > self.enter_spin.value():
+            QMessageBox.warning(
+                self, _DIALOG_TITLE,
+                "The release threshold must be at or below the press "
+                "threshold, otherwise a press could never end.")
+            return
         patterns = self._pattern_names()
         if patterns:
             self._targets = [(name, None) for name in patterns]
@@ -177,6 +189,7 @@ class PositionBenchDialog(BaseDialog, Ui_PositionBenchDialog):
         if self._gateway is not None and self._source:
             self._gateway.send(self._source, "configure", repeat=2,
                                stream_vec=True)
+            self._vec_streaming = True
         self._rebaseline(self._refresh_capture)
 
     def _rebaseline(self, then) -> None:
@@ -347,6 +360,13 @@ class PositionBenchDialog(BaseDialog, Ui_PositionBenchDialog):
     # ------------------------------------------------------------------
 
     def _cleanup(self, *_a) -> None:
+        # stream_vec lives in the node's RAM, so leaving it on would keep the
+        # 3-axis rows coming for the rest of its power cycle - and TouchCompensator
+        # switches to vector subtraction the moment it sees them.
+        if self._vec_streaming and self._gateway is not None and self._source:
+            self._gateway.send(self._source, "configure", repeat=2,
+                               stream_vec=False)
+            self._vec_streaming = False
         remove = getattr(self._gateway, "remove_message_callback", None)
         if remove is not None:
             remove(self._on_gateway_message)

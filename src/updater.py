@@ -3,7 +3,8 @@
 Supports two environments:
 - **Linux AppImage**: replaces the AppImage atomically, restarts via ``os.execv``.
 - **Windows frozen (PyInstaller)**: downloads a zip, launches a PowerShell script
-  that extracts it after the app exits, then restarts ``SoftEdIBO.exe``.
+  that unpacks it into a staging directory after the app exits and swaps it with
+  the installation (see :class:`WindowsUpdateInstaller`).
 
 Only active when running as a frozen binary and ``GITHUB_REPO`` is configured.
 Uses ``QNetworkAccessManager`` for fully async HTTP - no threads, no blocking.
@@ -23,15 +24,17 @@ import logging
 import os
 import re
 import stat
+import subprocess
 import sys
 import tempfile
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import IO
 
 from PySide6.QtCore import QObject, QUrl, Signal
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 
 from src._version import GITHUB_REPO, __build_time__, __commit__, __version__
+from src.app_paths import app_state_dir
 
 logger = logging.getLogger(__name__)
 
@@ -281,3 +284,201 @@ class AppUpdater(QObject):
         if self._tmp_path:
             self._tmp_path.unlink(missing_ok=True)
             self._tmp_path = None
+
+
+# ---------------------------------------------------------------------------
+# Windows install swap
+# ---------------------------------------------------------------------------
+
+#: PowerShell installer run after the app exits. Placeholders are substituted
+#: by :meth:`WindowsUpdateInstaller.build_script`; every path is injected as a
+#: single-quoted PowerShell literal.
+_PS_INSTALLER = r"""
+# SoftEdIBO update installer - generated at update time, safe to delete.
+$ErrorActionPreference = 'Stop'
+# Never keep a handle on the installation: a directory cannot be renamed while
+# it is some process's working directory.
+Set-Location -LiteralPath $env:TEMP
+
+$zip     = @@ZIP@@
+$install = @@INSTALL@@
+$exe     = @@EXE@@
+$stage   = @@STAGE@@
+$backup  = @@BACKUP@@
+$log     = @@LOG@@
+$appPid  = @@PID@@
+
+function Write-Log($msg) {
+    try {
+        Add-Content -LiteralPath $log -Value ((Get-Date -Format 'HH:mm:ss') + ' ' + $msg)
+    } catch { }
+}
+
+function Abort($msg, $relaunch = $true) {
+    Write-Log ('FAILED: ' + $msg)
+    try {
+        Add-Type -AssemblyName PresentationFramework
+        [System.Windows.MessageBox]::Show(
+            $msg + [Environment]::NewLine + [Environment]::NewLine + 'Log: ' + $log,
+            'SoftEdIBO update failed') | Out-Null
+    } catch { }
+    # The old installation is always left intact when we bail out, so putting
+    # the user back where they were is just a matter of starting it again.
+    if ($relaunch -and (Test-Path -LiteralPath $exe)) { Start-Process -FilePath $exe }
+    exit 1
+}
+
+Write-Log ('Updating ' + $install)
+
+# 1. Wait for the app to really exit. Unpacking while it still holds its Qt
+#    DLLs is what leaves a half-updated bundle behind, so time out into Abort
+#    instead of pressing on.
+$deadline = (Get-Date).AddSeconds(@@WAIT@@)
+while (Get-Process -Id $appPid -ErrorAction SilentlyContinue) {
+    if ((Get-Date) -gt $deadline) {
+        # Still running, so do not start a second copy on the way out.
+        # Space-separated arguments: Abort(a, b) would pass one array instead.
+        Abort ('SoftEdIBO is still running (pid ' + $appPid + '), so the update was not applied. ' +
+               'Close it and try again.') $false
+    }
+    Start-Sleep -Milliseconds 200
+}
+Start-Sleep -Milliseconds 500
+Write-Log 'App exited'
+
+# 2. Unpack into a staging directory next to the installation. tar.exe (bsdtar,
+#    shipped with Windows 10 1803+) reads zips and is an order of magnitude
+#    faster than Expand-Archive on a bundle of this many small files.
+if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
+New-Item -ItemType Directory -Path $stage | Out-Null
+$tar = Join-Path $env:SystemRoot 'System32\tar.exe'
+try {
+    if (Test-Path -LiteralPath $tar) {
+        Write-Log 'Extracting with tar.exe'
+        & $tar -x -f $zip -C $stage
+        if ($LASTEXITCODE -ne 0) { throw ('tar.exe exited with ' + $LASTEXITCODE) }
+    } else {
+        Write-Log 'Extracting with Expand-Archive (tar.exe not found)'
+        Expand-Archive -LiteralPath $zip -DestinationPath $stage
+    }
+} catch {
+    Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
+    Abort('Could not extract the update: ' + $_.Exception.Message)
+}
+
+if (-not (Test-Path -LiteralPath (Join-Path $stage 'SoftEdIBO.exe'))) {
+    Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
+    Abort('The downloaded archive does not contain a SoftEdIBO build.')
+}
+Write-Log 'Extracted'
+
+# 3. Swap the directories. Two renames either land the new bundle whole or
+#    leave the old one whole - there is no state in between.
+if (Test-Path -LiteralPath $backup) {
+    Remove-Item -LiteralPath $backup -Recurse -Force -ErrorAction SilentlyContinue
+}
+try {
+    Move-Item -LiteralPath $install -Destination $backup
+} catch {
+    Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
+    Abort('Could not replace the installation: ' + $_.Exception.Message)
+}
+try {
+    Move-Item -LiteralPath $stage -Destination $install
+} catch {
+    Move-Item -LiteralPath $backup -Destination $install -ErrorAction SilentlyContinue
+    Abort('Could not move the new version into place: ' + $_.Exception.Message)
+}
+Write-Log 'Swapped'
+
+# 4. The downloaded zip sits inside the old installation, so it is dropped
+#    along with the backup.
+Remove-Item -LiteralPath $backup -Recurse -Force -ErrorAction SilentlyContinue
+Write-Log 'Done'
+Start-Process -FilePath $exe
+"""
+
+
+def _ps_literal(value: object) -> str:
+    """Quote *value* as a PowerShell single-quoted string literal."""
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+class WindowsUpdateInstaller:
+    """Replace a frozen Windows installation with a downloaded update zip.
+
+    Extracting in place over the running installation is not safe: PowerShell's
+    ``Expand-Archive -Force`` deletes each target file before rewriting it, so
+    every DLL the exiting process still holds fails with "access denied" and
+    the bundle ends up half old, half new - which surfaces on the next launch
+    as ``libshiboken: could not import module 'PySide6.QtGui'``. It is also
+    painfully slow: ``Expand-Archive`` handles a bundle of thousands of small
+    files at a fraction of ``tar.exe``'s throughput.
+
+    So the work is done by a generated PowerShell script that unpacks the zip
+    into a staging directory *beside* the installation and swaps the two with
+    renames, only once the app process is confirmed gone. Any failure aborts
+    with the old installation untouched and reports it to the user.
+    """
+
+    #: How long the script waits for the app process to disappear.
+    EXIT_TIMEOUT_S = 120
+
+    def __init__(self, exe: PurePath | str | None = None,
+                 pid: int | None = None) -> None:
+        # PurePath is accepted so the script can be generated (and tested) for
+        # Windows paths from any host.
+        self._exe = exe if isinstance(exe, PurePath) else Path(exe or sys.executable)
+        self._pid = os.getpid() if pid is None else pid
+
+    @property
+    def install_dir(self) -> PurePath:
+        """Directory holding ``SoftEdIBO.exe`` and ``_internal/``."""
+        return self._exe.parent
+
+    @property
+    def staging_dir(self) -> PurePath:
+        """Where the zip is unpacked. A sibling, so the swap is a rename."""
+        return self.install_dir.with_name(self.install_dir.name + ".update-new")
+
+    @property
+    def backup_dir(self) -> PurePath:
+        """Where the outgoing installation is parked before deletion."""
+        return self.install_dir.with_name(self.install_dir.name + ".update-old")
+
+    @property
+    def log_path(self) -> Path:
+        """Installer log, alongside the app's own logs."""
+        return app_state_dir() / "update.log"
+
+    def build_script(self, zip_path: PurePath | str) -> str:
+        """Return the PowerShell installer for *zip_path*."""
+        substitutions = {
+            "@@ZIP@@": _ps_literal(zip_path),
+            "@@INSTALL@@": _ps_literal(self.install_dir),
+            "@@EXE@@": _ps_literal(self._exe),
+            "@@STAGE@@": _ps_literal(self.staging_dir),
+            "@@BACKUP@@": _ps_literal(self.backup_dir),
+            "@@LOG@@": _ps_literal(self.log_path),
+            "@@PID@@": str(self._pid),
+            "@@WAIT@@": str(self.EXIT_TIMEOUT_S),
+        }
+        script = _PS_INSTALLER
+        for placeholder, value in substitutions.items():
+            script = script.replace(placeholder, value)
+        return script
+
+    def launch(self, zip_path: PurePath | str) -> None:
+        """Write the installer and start it detached. The caller then exits."""
+        self.log_path.parent.mkdir(parents=True, exist_ok=True)
+        script_dir = Path(tempfile.gettempdir())
+        script = script_dir / "softedibo-update.ps1"
+        script.write_text(self.build_script(zip_path), encoding="utf-8")
+        logger.info("Launching update installer %s (log: %s)", script, self.log_path)
+
+        subprocess.Popen(
+            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
+             "-File", str(script)],
+            cwd=str(script_dir),  # must not be the directory we are about to rename
+            creationflags=0x08000000,  # CREATE_NO_WINDOW
+        )

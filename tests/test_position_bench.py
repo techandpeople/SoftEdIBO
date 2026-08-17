@@ -194,3 +194,71 @@ class TestAnalysis:
         report = analyze({"rows": 0, "cols": 0}, presses)
         assert "Patterns (2 classes)" in report
         assert "squeeze" in report and "both_hands" in report
+
+
+class TestTemporalFeatures:
+    def test_six_features_sane(self):
+        press = BenchPress(label="0,0", cell=(0, 0), rep=0)
+        for i, (mag, vx) in enumerate([(20.0, 2.0), (100.0, 10.0),
+                                       (100.0, 10.0), (40.0, 4.0)]):
+            press.times_ms.append(i * 35.0)
+            press.mags.append([mag, 0.0, 0.0, 0.0])
+            press.vecs.append([[vx, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]])
+        feats = press.temporal_features()
+        assert len(feats) == 6
+        rise_s, fall_s, dur_s, stability, path, slope = feats
+        assert rise_s == pytest.approx(0.035)
+        assert dur_s == pytest.approx(0.105)
+        # Direction never changes in this synthetic press.
+        assert stability == pytest.approx(1.0)
+        assert path == pytest.approx(0.0)
+        assert slope > 0
+
+    def test_use_vec_false_ignores_vector_rows(self):
+        """The mag-only feature set is the control for the vec one, so its
+        transients must not be derived from the 3-axis rows."""
+        press = BenchPress(label="0,0", cell=(0, 0), rep=0)
+        # Magnitudes hold still while the vec direction swings hard: only a
+        # vec-derived stability can drop below 1.
+        for i, vec_row in enumerate([
+            [[10.0, 0.0, 0.0], [0.0] * 3, [0.0] * 3, [0.0] * 3],
+            [[0.0, 10.0, 0.0], [0.0] * 3, [0.0] * 3, [0.0] * 3],
+            [[0.0, 0.0, 10.0], [0.0] * 3, [0.0] * 3, [0.0] * 3],
+        ]):
+            press.times_ms.append(i * 35.0)
+            press.mags.append([10.0, 0.0, 0.0, 0.0])
+            press.vecs.append(vec_row)
+        _, _, _, vec_stability, vec_path, _ = press.temporal_features(use_vec=True)
+        _, _, _, mag_stability, mag_path, _ = press.temporal_features(use_vec=False)
+        assert vec_stability < 0.5 and vec_path > 0.5      # direction swung
+        assert mag_stability == pytest.approx(1.0)         # magnitudes did not
+        assert mag_path == pytest.approx(0.0)
+
+
+class TestMixedVecDatasets:
+    def test_presses_without_vec_do_not_make_a_ragged_matrix(self):
+        """A pre-reflash capture analyzed together with a post-reflash one used
+        to mix 12-D and 4-D rows, and numpy refused the whole report."""
+        pytest.importorskip("sklearn")
+        presses = _synthetic_grid_presses(rows=2, cols=2, reps=8)
+        for p in presses[::4]:               # a quarter predate stream_vec
+            p.vecs = [None] * len(p.vecs)
+        report = analyze({"rows": 2, "cols": 2}, presses)
+        assert "Grid cells (2x2" in report
+        assert "presses skipped" in report   # the loss is stated, not silent
+
+    def test_empty_press_is_zeroes(self):
+        assert BenchPress(label="x", cell=None, rep=0).temporal_features() \
+            == [0.0] * 6
+
+    def test_report_includes_transient_sets(self):
+        pytest.importorskip("sklearn")
+        presses = _synthetic_grid_presses()
+        report = analyze({"rows": 3, "cols": 3}, presses)
+        assert "vec+transient" in report
+        presses_p = _synthetic_grid_presses(rows=1, cols=2, reps=8)
+        for p in presses_p:
+            p.label = "squeeze" if p.cell == (0, 0) else "press_flat"
+            p.cell = None
+        report_p = analyze({"rows": 0, "cols": 0}, presses_p)
+        assert "+transient" in report_p

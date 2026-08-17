@@ -175,7 +175,7 @@ jobs:
             libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
             libxcb-shape0 libxcb-xinerama0 libxcb-xkb1 \
             libxkbcommon-x11-0 libfontconfig1 \
-            imagemagick libfuse2
+            libfuse2
 
       - name: Install Python dependencies
         run: |
@@ -233,12 +233,6 @@ jobs:
           chmod +x appimagetool-x86_64.AppImage
           ./appimagetool-x86_64.AppImage --appimage-extract
           mv squashfs-root appimagetool-bin
-
-      - name: Generate app icon
-        run: |
-          convert -size 256x256 gradient:'#1a5276-#2980b9' \
-            -font DejaVu-Sans-Bold -pointsize 32 -fill white \
-            -gravity Center -annotate 0 "SoftEdIBO" softedibo.png
 
       - name: Create AppDir
         run: |

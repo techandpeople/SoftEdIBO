@@ -76,7 +76,11 @@ inline bool     baselineReady = false;
 inline uint16_t baselineN     = 0;
 inline uint32_t lastStreamMs   = 0;
 inline uint32_t lastAnnounceMs = 0;
-inline char     announceMsg[96] = {};
+// Sensor retune asked for from the RX callback; applied by tick() on the main
+// task (I2C is not safe to touch from the callback). -1 = nothing pending.
+inline volatile int pendingOsr    = -1;
+inline volatile int pendingFilter = -1;
+inline char     announceMsg[128] = {};
 
 inline float vmag(const Vec3& v) { return sqrtf(v.x * v.x + v.y * v.y + v.z * v.z); }
 
@@ -104,9 +108,11 @@ inline bool addSensor(uint8_t addr, TwoWire* bus, bool optional = false) {
 }
 
 inline void buildAnnounce() {
+    // "fw" is the flash marker (docs rule: confirm a build actually landed
+    // before judging it) - bump it whenever this module's behaviour changes.
     snprintf(announceMsg, sizeof(announceMsg),
              "{\"status\":\"node_magnet_sensor_ready\",\"sensors\":%u%s,"
-             "\"variant\":\"mlx90393\"}",
+             "\"variant\":\"mlx90393\",\"fw\":\"magvec-1\"}",
              (unsigned)count, streamVec ? ",\"vec\":1" : "");
 }
 
@@ -142,6 +148,18 @@ inline void applyConfigure(const JsonDocument& doc) {
         streamVec = doc["stream_vec"].as<bool>();
         buildAnnounce();                    // keep the advertised capability honest
     }
+    // Sensor operating point (position-ML lever: trade stream cadence for
+    // noise). Values are the Adafruit enum indices: osr 0-3, filter 0-7.
+    // Retuning changes the conversion characteristics, so the baseline is
+    // reset - keep hands off the skin until it re-settles.
+    //
+    // We run inside the ESP-NOW receive callback, so the blocking I2C writes
+    // cannot happen here - they would race tick()'s readSensor() on the main
+    // task. Park the request and let tick() apply it.
+    if (!doc["osr"].isNull())
+        pendingOsr = constrain(doc["osr"].as<int>(), 0, 3);
+    if (!doc["filter"].isNull())
+        pendingFilter = constrain(doc["filter"].as<int>(), 0, 7);
 }
 
 // Broadcast the ready message. Must be called from setup() AFTER se::begin()
@@ -223,8 +241,18 @@ inline void buildMessage(const Vec3* samples, const bool* valid, char* buf, size
                                      samples[i].y - baseline[i].y,
                                      samples[i].z - baseline[i].z}
                               : Vec3{0.0f, 0.0f, 0.0f};
-            pos += snprintf(buf + pos, cap - pos, "%s[%.0f,%.0f,%.0f]",
-                            i ? "," : "", d.x, d.y, d.z);
+            // Tenth-uT precision for small deltas: quantizing to whole uT
+            // would bury the weak far-sensor responses the position ML feeds
+            // on. Large deltas keep whole uT so the frame stays under the
+            // ESP-NOW payload cap even with 5 sensors.
+            pos += snprintf(buf + pos, cap - pos, "%s[", i ? "," : "");
+            const float comps[3] = {d.x, d.y, d.z};
+            for (int a = 0; a < 3; ++a) {
+                pos += snprintf(buf + pos, cap - pos,
+                                fabsf(comps[a]) < 100.0f ? "%s%.1f" : "%s%.0f",
+                                a ? "," : "", comps[a]);
+            }
+            pos += snprintf(buf + pos, cap - pos, "]");
         }
     }
     snprintf(buf + pos, cap - pos, "]}");
@@ -242,6 +270,18 @@ inline void tick(uint32_t now) {
     if (!se::node::gatewayKnown && now - lastAnnounceMs >= ANNOUNCE_INTERVAL_MS) {
         lastAnnounceMs = now;
         se::broadcast(announceMsg);
+    }
+
+    // Apply a retune parked by the RX callback, before this round's reads.
+    if (pendingOsr >= 0 || pendingFilter >= 0) {
+        const int osr = pendingOsr, flt = pendingFilter;
+        pendingOsr = pendingFilter = -1;
+        for (size_t i = 0; i < count; ++i) {
+            if (!ready[i]) continue;
+            if (osr >= 0) mlx[i].setOversampling((mlx90393_oversampling_t)osr);
+            if (flt >= 0) mlx[i].setFilter((mlx90393_filter_t)flt);
+        }
+        resetBaseline();
     }
 
     if (now - lastStreamMs < streamIntervalMs) return;

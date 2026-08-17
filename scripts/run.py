@@ -85,6 +85,12 @@ def main():
         pass   # editor will report a clear error if WebEngine is unavailable
 
     app = QApplication(sys.argv)
+
+    # Before any window is created (the setup wizard may open first), so every
+    # top-level window inherits it.
+    from src.gui.app_icon import apply_app_icon
+    apply_app_icon(app)
+
     install_exception_hooks("SoftEdIBO")
 
     # Diagnostic only - off unless SOFTEDIBO_WATCHDOG is set. Dumps the GUI

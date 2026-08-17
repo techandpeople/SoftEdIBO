@@ -30,6 +30,15 @@ from typing import Any, Iterable, Sequence
 # peak window the signature is averaged over.
 PEAK_WINDOW_FRAC = 0.7
 
+# Transient features are appended to a UNIT-NORM signature, so they must be
+# squashed to a comparable size or they own every kNN distance. Divisors are
+# the "already long/large" end of each feature: 2 s for rise/fall/duration,
+# 1.0 for the stability cosine, 2.0 for path length on the unit sphere and
+# 20 kuT/s for the rise slope. The weight then keeps the whole block a minority
+# of the distance, so the spatial signature still decides.
+_TRANSIENT_SCALES = (2.0, 2.0, 2.0, 1.0, 2.0, 20.0)
+_TRANSIENT_WEIGHT = 0.5
+
 
 class AnalysisUnavailable(RuntimeError):
     """Raised when the analysis step needs the optional ``ml`` extra."""
@@ -96,7 +105,8 @@ class BenchPress:
             return []
 
         if use_vec:
-            rows = [self.vecs[i] for i in window if self.vecs[i] is not None]
+            rows = [row for row in (self.vecs[i] for i in window)
+                    if row is not None]
             if rows:
                 out = [0.0] * (3 * n)
                 for row in rows:
@@ -112,6 +122,69 @@ class BenchPress:
             for s in range(min(n, len(row))):
                 out[s] += float(row[s])
         return [v / len(window) for v in out]
+
+    def _unit_rows(self, floor_frac: float = 0.3,
+                   use_vec: bool = True) -> list[list[float]]:
+        """Per-sample unit signatures for samples above ``floor_frac`` of the
+        peak energy - the direction trajectory of the press. Uses vec rows when
+        asked for AND available (skipping vec-less samples so dimensions stay
+        consistent), else the scalar magnitudes."""
+        energies = self._energies()
+        peak = max(energies, default=0.0)
+        if peak <= 0.0:
+            return []
+        use_vec = use_vec and self.has_vec
+        rows: list[list[float]] = []
+        for i, e in enumerate(energies):
+            if e < peak * floor_frac:
+                continue
+            if use_vec:
+                row = self.vecs[i]
+                if row is None:
+                    continue
+                flat = [float(v) for triple in row for v in triple]
+            else:
+                flat = [float(v) for v in self.mags[i]]
+            norm = math.sqrt(sum(v * v for v in flat))
+            if norm <= 0.0:
+                continue
+            rows.append([v / norm for v in flat])
+        return rows
+
+    def temporal_features(self, use_vec: bool = True) -> list[float]:
+        """Transient shape of the press - the plan's lever 4 (time dimension).
+
+        Six features to append to the normalized peak signature: rise/fall/
+        duration, direction stability (cosine between the first above-floor
+        sample's unit signature and the last one's - two spots with similar
+        peaks can differ in how the field *builds*), direction path length,
+        and energy rise slope.
+
+        Returned in physical units (seconds, cosine, kuT/s); the caller scales
+        them with :func:`_scaled_transients` before appending them to a
+        unit-norm signature. ``use_vec`` must match the signature they are
+        appended to, or the magnitude-only feature set would smuggle in 3-axis
+        information.
+        """
+        energies = self._energies()
+        peak = max(energies, default=0.0)
+        if peak <= 0.0 or len(self.times_ms) < 2:
+            return [0.0] * 6
+        peak_i = energies.index(peak)
+        rise_s = (self.times_ms[peak_i] - self.times_ms[0]) / 1000.0
+        fall_s = (self.times_ms[-1] - self.times_ms[peak_i]) / 1000.0
+        dur_s = self.duration_ms / 1000.0
+        units = self._unit_rows(use_vec=use_vec)
+        if len(units) >= 2 and len(units[0]) == len(units[-1]):
+            stability = sum(a * b for a, b in zip(units[0], units[-1]))
+            path = sum(
+                math.sqrt(sum((b - a) ** 2 for a, b in zip(u1, u2)))
+                for u1, u2 in zip(units, units[1:])
+                if len(u1) == len(u2))
+        else:
+            stability, path = 1.0, 0.0
+        slope = peak / max(rise_s, 0.02) / 1000.0     # kuT/s
+        return [rise_s, fall_s, dur_s, stability, path, slope]
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -194,36 +267,48 @@ class PressDetector:
         """Process one ``magnet`` message; returns a finished press or None."""
         mags, vec = self._sample_of(msg)
         energy = sum(mags)
+        if self._active:
+            return self._feed_active(t_ms, mags, vec, energy)
+        self._feed_idle(t_ms, mags, vec, energy)
+        return None
 
-        if not self._active:
-            if energy >= self.enter_ut:
-                self._hot_run += 1
-                self._pending.append((t_ms, mags, vec))
-                if self._hot_run >= self.confirm_samples:
-                    self._active = True
-                    self._cold_run = 0
-                    self._cur = BenchPress(label="", cell=None, rep=0)
-                    for pt, pm, pv in self._pending:
-                        self._append(pt, pm, pv)
-                    self._pending = []
-            else:
-                self._hot_run = 0
-                self._pending = []
-            return None
+    def _feed_idle(self, t_ms: float, mags: list[float],
+                   vec: list[list[float]] | None, energy: float) -> None:
+        """Waiting for a press: open one after ``confirm_samples`` hot in a row,
+        replaying the samples held back so the rise is not clipped."""
+        if energy < self.enter_ut:
+            self._hot_run = 0
+            self._pending = []
+            return
+        self._hot_run += 1
+        self._pending.append((t_ms, mags, vec))
+        if self._hot_run < self.confirm_samples:
+            return
+        self._active = True
+        self._cold_run = 0
+        self._cur = BenchPress(label="", cell=None, rep=0)
+        for pt, pm, pv in self._pending:
+            self._append(pt, pm, pv)
+        self._pending = []
 
+    def _feed_active(self, t_ms: float, mags: list[float],
+                     vec: list[list[float]] | None,
+                     energy: float) -> BenchPress | None:
+        """Inside a press: close it after ``release_samples`` cold in a row,
+        and hand it back unless it was too short to be anything but noise."""
         self._append(t_ms, mags, vec)
-        if energy < self.exit_ut:
-            self._cold_run += 1
-            if self._cold_run >= self.release_samples:
-                press, self._cur = self._cur, None
-                self._active = False
-                self._hot_run = 0
-                self._cold_run = 0
-                if press is not None and press.duration_ms >= self.min_duration_ms:
-                    return press
-                return None
-        else:
+        if energy >= self.exit_ut:
             self._cold_run = 0
+            return None
+        self._cold_run += 1
+        if self._cold_run < self.release_samples:
+            return None
+        press, self._cur = self._cur, None
+        self._active = False
+        self._hot_run = 0
+        self._cold_run = 0
+        if press is not None and press.duration_ms >= self.min_duration_ms:
+            return press
         return None
 
     def _append(self, t_ms: float, mags: list[float],
@@ -353,7 +438,35 @@ def load_dataset(paths: Iterable[Path | str]) -> tuple[dict[str, Any], list[Benc
 # Analysis
 # ---------------------------------------------------------------------------
 
-def _import_ml():
+@dataclass(frozen=True)
+class _Models:
+    """The lazily-imported numpy/sklearn handles, carried as one collaborator.
+
+    ``ml`` is an optional extra, so nothing here can be imported at module
+    level; bundling the handles keeps the report helpers from threading six
+    positional parameters through each other.
+    """
+
+    np: Any
+    forest_clf: Any
+    forest_reg: Any
+    kfold: Any
+    cross_val_predict: Any
+    knn_clf: Any
+
+    def rf(self) -> Any:
+        """A fresh classification forest, seeded so reports are reproducible."""
+        return self.forest_clf(n_estimators=300, random_state=0)
+
+    def knn(self, neighbors: int = 3) -> Any:
+        return self.knn_clf(n_neighbors=neighbors)
+
+    def classifiers(self) -> list[tuple[str, Any]]:
+        """The two scored side by side in every section."""
+        return [("kNN(3)", self.knn()), ("RandomForest", self.rf())]
+
+
+def _import_ml() -> _Models:
     try:
         import numpy as np
         from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
@@ -364,16 +477,31 @@ def _import_ml():
             "Analysis needs numpy + scikit-learn - install the ml extra: "
             "pip install -e '.[ml]'"
         ) from exc
-    return np, RandomForestClassifier, RandomForestRegressor, \
-        StratifiedKFold, cross_val_predict, KNeighborsClassifier
+    return _Models(np=np, forest_clf=RandomForestClassifier,
+                   forest_reg=RandomForestRegressor, kfold=StratifiedKFold,
+                   cross_val_predict=cross_val_predict,
+                   knn_clf=KNeighborsClassifier)
 
 
-def _normalized_signatures(presses: Sequence[BenchPress],
-                           use_vec: bool) -> tuple[list[list[float]], list[int]]:
+def _scaled_transients(raw: Sequence[float]) -> list[float]:
+    """Squash the physical transient features so they can join a unit signature.
+
+    They are appended to a vector of norm 1, so raw seconds and kuT/s would own
+    every distance a kNN computes - the spatial pattern would stop deciding.
+    """
+    return [_TRANSIENT_WEIGHT * min(v / scale, 1.0)
+            for v, scale in zip(raw, _TRANSIENT_SCALES)]
+
+
+def _normalized_signatures(
+    presses: Sequence[BenchPress], use_vec: bool, with_time: bool = False,
+) -> tuple[list[list[float]], list[int]]:
     """Unit-normalized signatures + indices of the presses that yielded one.
 
     Normalizing strips press strength (magnitude ~ force), leaving the spatial
     pattern - see the force/position separation argument in the plan doc.
+    ``with_time`` appends the six transient features (lever 4): the press
+    *trajectory* carries information the peak snapshot collapses away.
     """
     rows: list[list[float]] = []
     kept: list[int] = []
@@ -382,8 +510,22 @@ def _normalized_signatures(presses: Sequence[BenchPress],
         norm = math.sqrt(sum(v * v for v in sig))
         if not sig or norm <= 0.0:
             continue
-        rows.append([v / norm for v in sig])
+        row = [v / norm for v in sig]
+        if with_time:
+            row += _scaled_transients(p.temporal_features(use_vec=use_vec))
+        rows.append(row)
         kept.append(i)
+
+    # ``signature(use_vec=True)`` falls back to the N-D magnitudes for a press
+    # with no vec rows, so a dataset mixing pre- and post-reflash captures would
+    # otherwise build a ragged matrix that numpy refuses. Keep the majority
+    # dimension and drop the rest; the caller reports the loss via ``kept``.
+    if rows:
+        widths = [len(r) for r in rows]
+        want = max(set(widths), key=widths.count)
+        keep_at = [j for j, r in enumerate(rows) if len(r) == want]
+        rows = [rows[j] for j in keep_at]
+        kept = [kept[j] for j in keep_at]
     return rows, kept
 
 
@@ -406,17 +548,23 @@ def _dominant_sensor_quadrant(press: BenchPress) -> str | None:
     return {0: "0,0", 1: "0,1", 2: "1,0", 3: "1,1"}.get(s)
 
 
-def _cv_accuracy(np, clf, skf_cls, X, y) -> float | None:
-    """Stratified CV accuracy; None when a class is too small to fold."""
+def _label_counts(y: Sequence[str]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for label in y:
         counts[label] = counts.get(label, 0) + 1
+    return counts
+
+
+def _cv_accuracy(models: _Models, clf, X, y) -> float | None:
+    """Stratified CV accuracy; None when a class is too small to fold."""
+    counts = _label_counts(y)
     min_count = min(counts.values())
     if len(counts) < 2 or min_count < 2:
         return None
     from sklearn.model_selection import cross_val_score
-    skf = skf_cls(n_splits=min(5, min_count), shuffle=True, random_state=0)
-    scores = cross_val_score(clf, np.asarray(X), np.asarray(y), cv=skf)
+    skf = models.kfold(n_splits=min(5, min_count), shuffle=True, random_state=0)
+    scores = cross_val_score(clf, models.np.asarray(X), models.np.asarray(y),
+                             cv=skf)
     return float(scores.mean())
 
 
@@ -425,7 +573,7 @@ def analyze(meta: dict[str, Any], presses: Sequence[BenchPress]) -> str:
 
     Raises :class:`AnalysisUnavailable` without the ``ml`` extra installed.
     """
-    (np, RFC, RFR, StratifiedKFold, cross_val_predict, KNN) = _import_ml()
+    models = _import_ml()
 
     lines: list[str] = ["=== Touch position bench report ==="]
     grid_presses = [p for p in presses if p.cell is not None]
@@ -442,90 +590,131 @@ def analyze(meta: dict[str, Any], presses: Sequence[BenchPress]) -> str:
     )
 
     if grid_presses and rows and cols:
-        lines += _grid_section(np, RFC, RFR, StratifiedKFold, cross_val_predict,
-                               KNN, grid_presses, rows, cols, cell_mm, has_vec)
+        lines += _grid_section(models, grid_presses, rows, cols, cell_mm,
+                               has_vec)
     if pattern_presses:
-        lines += _pattern_section(np, RFC, StratifiedKFold, KNN,
-                                  pattern_presses, has_vec)
+        lines += _pattern_section(models, pattern_presses, has_vec)
     return "\n".join(lines)
 
 
-def _grid_section(np, RFC, RFR, StratifiedKFold, cross_val_predict, KNN,
-                  presses: list[BenchPress], rows: int, cols: int,
-                  cell_mm, has_vec: bool) -> list[str]:
+@dataclass
+class _Scored:
+    """The best-scoring feature set, and the matrix that produced it."""
+
+    accuracy: float
+    X: list[list[float]]
+    y: list[str]
+    kept: list[int]
+
+
+def _grid_section(models: _Models, presses: list[BenchPress], rows: int,
+                  cols: int, cell_mm, has_vec: bool) -> list[str]:
     out = ["", f"-- Grid cells ({rows}x{cols} = {rows * cols}) --"]
+    best, score_lines = _score_feature_sets(models, presses, has_vec)
+    out += score_lines
+    if best is None:
+        out.append("  (not enough data per cell for cross-validation)")
+        return out
+    out += _quadrant_lines(models, presses, best, rows, cols)
+    out += _regression_lines(models, presses, best, cell_mm)
+    out += _recall_lines(models, best, rows, cols)
+    return out
 
-    feature_sets = [("vec 3-axis", True)] if has_vec else []
-    feature_sets.append(("mag scalar", False))
 
-    best: tuple[float, Any, Any, list[int]] | None = None  # acc, X, y, kept
-    for name, use_vec in feature_sets:
-        X, kept = _normalized_signatures(presses, use_vec=use_vec)
+def _feature_sets(has_vec: bool) -> list[tuple[str, bool, bool]]:
+    """(label, use_vec, with_time). The mag rows are the control for the vec
+    ones, so they are always scored, even on a vec-capable dataset."""
+    sets = ([("vec 3-axis", True, False), ("vec+transient", True, True)]
+            if has_vec else [])
+    return sets + [("mag scalar", False, False), ("mag+transient", False, True)]
+
+
+def _score_feature_sets(models: _Models, presses: list[BenchPress],
+                        has_vec: bool) -> tuple[_Scored | None, list[str]]:
+    """Cross-validate every feature set x classifier; keep the best matrix."""
+    out: list[str] = []
+    best: _Scored | None = None
+    for name, use_vec, with_time in _feature_sets(has_vec):
+        X, kept = _normalized_signatures(presses, use_vec=use_vec,
+                                         with_time=with_time)
         y = [presses[i].label for i in kept]
         if not X:
             out.append(f"  {name}: no usable signatures")
             continue
+        if len(kept) < len(presses):
+            out.append(f"  {name}: {len(presses) - len(kept)} of {len(presses)} "
+                       "presses skipped (no usable signature at this width)")
         dims = len(X[0])
-        for clf_name, clf in (
-            ("kNN(3)", KNN(n_neighbors=3)),
-            ("RandomForest", RFC(n_estimators=300, random_state=0)),
-        ):
-            acc = _cv_accuracy(np, clf, StratifiedKFold, X, y)
-            shown = f"{acc * 100:5.1f} %" if acc is not None else "  n/a (too few reps)"
-            out.append(f"  {clf_name:<13} {name:<10} ({dims:>2}-D): {shown}")
-            if acc is not None and (best is None or acc > best[0]):
-                best = (acc, X, y, kept)
+        for clf_name, clf in models.classifiers():
+            acc = _cv_accuracy(models, clf, X, y)
+            shown = (f"{acc * 100:5.1f} %" if acc is not None
+                     else "  n/a (too few reps)")
+            out.append(f"  {clf_name:<13} {name:<14} ({dims:>2}-D): {shown}")
+            if acc is not None and (best is None or acc > best.accuracy):
+                best = _Scored(acc, X, y, kept)
+    return best, out
 
-    if best is None:
-        out.append("  (not enough data per cell for cross-validation)")
-        return out
-    acc, X, y, kept = best
 
-    # Merged 2x2 (today's resolution) + the dominant-sensor baseline.
-    quad_y = [_quadrant_of(presses[i].cell, rows, cols) for i in kept]  # type: ignore[arg-type]
-    quad_acc = _cv_accuracy(np, RFC(n_estimators=300, random_state=0),
-                            StratifiedKFold, X, quad_y)
+def _quadrant_lines(models: _Models, presses: list[BenchPress], best: _Scored,
+                    rows: int, cols: int) -> list[str]:
+    """Merged 2x2 (today's resolution) vs the dominant-sensor baseline."""
+    quad_y = [_quadrant_of(presses[i].cell, rows, cols)  # type: ignore[arg-type]
+              for i in best.kept]
+    quad_acc = _cv_accuracy(models, models.rf(), best.X, quad_y)
     hits = total = 0
-    for i in kept:
+    for i in best.kept:
         guess = _dominant_sensor_quadrant(presses[i])
         if guess is None:
             continue
         total += 1
         hits += guess == _quadrant_of(presses[i].cell, rows, cols)  # type: ignore[arg-type]
-    out.append("")
-    out.append("  Merged 2x2 (quadrants):")
+
+    out = ["", "  Merged 2x2 (quadrants):"]
     if quad_acc is not None:
         out.append(f"    best features + RF      : {quad_acc * 100:5.1f} %")
     if total:
         out.append(f"    dominant-sensor baseline: {hits / total * 100:5.1f} %"
                    "   <- roughly today's quadrant logic")
+    return out
 
-    # Continuous position regression.
-    Y = np.asarray([[presses[i].cell[0], presses[i].cell[1]] for i in kept],  # type: ignore[index]
-                   dtype=float)
-    if len(set(y)) >= 2 and min(y.count(label) for label in set(y)) >= 2:
-        reg = RFR(n_estimators=300, random_state=0)
-        pred = cross_val_predict(reg, np.asarray(X), Y, cv=min(5, len(X)))
-        err_cells = float(np.mean(np.linalg.norm(pred - Y, axis=1)))
-        mm = f" (= {err_cells * float(cell_mm):.1f} mm)" if cell_mm else ""
-        out.append(f"  Continuous (x,y) regression mean error: "
-                   f"{err_cells:.2f} cells{mm}")
 
-    # Per-cell recall heat grid from CV predictions of the best feature set.
-    skf = StratifiedKFold(n_splits=min(5, min(y.count(l) for l in set(y))),
-                          shuffle=True, random_state=0)
-    y_pred = cross_val_predict(RFC(n_estimators=300, random_state=0),
-                               np.asarray(X), np.asarray(y), cv=skf)
+def _regression_lines(models: _Models, presses: list[BenchPress],
+                      best: _Scored, cell_mm) -> list[str]:
+    """Continuous (x, y) position error, in cells and mm."""
+    counts = _label_counts(best.y)
+    if len(counts) < 2 or min(counts.values()) < 2:
+        return []
+    np = models.np
+    Y = np.asarray([[presses[i].cell[0], presses[i].cell[1]]  # type: ignore[index]
+                    for i in best.kept], dtype=float)
+    reg = models.forest_reg(n_estimators=300, random_state=0)
+    pred = models.cross_val_predict(reg, np.asarray(best.X), Y,
+                                    cv=min(5, len(best.X)))
+    err_cells = float(np.mean(np.linalg.norm(pred - Y, axis=1)))
+    mm = f" (= {err_cells * float(cell_mm):.1f} mm)" if cell_mm else ""
+    return [f"  Continuous (x,y) regression mean error: "
+            f"{err_cells:.2f} cells{mm}"]
+
+
+def _recall_lines(models: _Models, best: _Scored, rows: int,
+                  cols: int) -> list[str]:
+    """Per-cell recall heat grid + worst confusions, from CV predictions."""
+    counts = _label_counts(best.y)
+    np = models.np
+    skf = models.kfold(n_splits=min(5, min(counts.values())), shuffle=True,
+                       random_state=0)
+    y_pred = models.cross_val_predict(models.rf(), np.asarray(best.X),
+                                      np.asarray(best.y), cv=skf)
     recall: dict[str, tuple[int, int]] = {}
     confusions: dict[tuple[str, str], int] = {}
-    for truth, pred_label in zip(y, y_pred):
+    for truth, pred_label in zip(best.y, y_pred):
         ok, n = recall.get(truth, (0, 0))
         recall[truth] = (ok + (pred_label == truth), n + 1)
         if pred_label != truth:
             key = (truth, str(pred_label))
             confusions[key] = confusions.get(key, 0) + 1
-    out.append("")
-    out.append("  Per-cell recall (%, RF on best features):")
+
+    out = ["", "  Per-cell recall (%, RF on best features):"]
     for r in range(rows):
         vals = []
         for c in range(cols):
@@ -539,21 +728,25 @@ def _grid_section(np, RFC, RFR, StratifiedKFold, cross_val_predict, KNN,
     return out
 
 
-def _pattern_section(np, RFC, StratifiedKFold, KNN,
-                     presses: list[BenchPress], has_vec: bool) -> list[str]:
-    out = ["", f"-- Patterns ({len(set(p.label for p in presses))} classes) --"]
+def _pattern_section(models: _Models, presses: list[BenchPress],
+                     has_vec: bool) -> list[str]:
+    out = ["", f"-- Patterns ({len({p.label for p in presses})} classes) --"]
+    # Transients matter most here (a squeeze *builds* differently from a
+    # press), so patterns are scored with and without them.
+    for tag, with_time in (("peak only", False), ("+transient", True)):
+        X, kept = _normalized_signatures(presses, use_vec=has_vec,
+                                         with_time=with_time)
+        y = [presses[i].label for i in kept]
+        if not X:
+            out.append("  no usable signatures")
+            return out
+        for clf_name, clf in models.classifiers():
+            acc = _cv_accuracy(models, clf, X, y)
+            shown = (f"{acc * 100:5.1f} %" if acc is not None
+                     else "n/a (too few reps)")
+            out.append(f"  {clf_name:<13} {tag:<11}: {shown}")
     X, kept = _normalized_signatures(presses, use_vec=has_vec)
     y = [presses[i].label for i in kept]
-    if not X:
-        out.append("  no usable signatures")
-        return out
-    for clf_name, clf in (
-        ("kNN(3)", KNN(n_neighbors=3)),
-        ("RandomForest", RFC(n_estimators=300, random_state=0)),
-    ):
-        acc = _cv_accuracy(np, clf, StratifiedKFold, X, y)
-        shown = f"{acc * 100:5.1f} %" if acc is not None else "n/a (too few reps)"
-        out.append(f"  {clf_name:<13}: {shown}")
     for label in sorted(set(y)):
         sub = [presses[i] for i in kept if presses[i].label == label]
         peak = statistics.median(p.peak_energy for p in sub)

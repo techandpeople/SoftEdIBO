@@ -208,7 +208,7 @@ class RobotPanel(QWidget, Ui_RobotPanel):
         )
         node_item.setToolTip(
             1, "Round-trip latency to this node over ESP-NOW "
-               "(ping/pong, refreshed every few seconds). "-" means no reply."
+               '(ping/pong, refreshed every few seconds). "-" means no reply.'
         )
         if mac:
             self._node_items.setdefault(mac, []).append(node_item)

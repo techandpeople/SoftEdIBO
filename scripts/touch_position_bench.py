@@ -117,6 +117,13 @@ class BenchRig:
             raise SystemExit(f"ERROR: could not connect to gateway on {port}")
         self.gateway.on_message(self._on_message)
 
+    @property
+    def node_mac(self) -> str:
+        """The resolved touch node; call resolve_mac() before anything else."""
+        if self.mac is None:
+            raise RuntimeError("no magnet node resolved yet - call resolve_mac()")
+        return self.mac
+
     def _on_message(self, data: dict) -> None:
         if data.get("type") == "magnet":
             self.messages.put((data, time.monotonic() * 1000.0))
@@ -162,7 +169,7 @@ class BenchRig:
         """Turn on 3-axis vec rows + re-zero; returns whether vec arrived."""
         print("Enabling 3-axis streaming and re-zeroing sensors "
               f"(~{BASELINE_SETTLE_S:.0f}s, do NOT touch the skin)...")
-        self.gateway.send(self.mac, "configure", stream_vec=True)
+        self.gateway.send(self.node_mac, "configure", stream_vec=True)
         self.rebaseline()
         deadline = time.monotonic() + 3.0
         saw_vec = saw_any = False
@@ -180,7 +187,7 @@ class BenchRig:
         return saw_vec
 
     def rebaseline(self) -> None:
-        self.gateway.send(self.mac, "rebaseline")
+        self.gateway.send(self.node_mac, "rebaseline")
         time.sleep(BASELINE_SETTLE_S)
         self.drain()   # discard anything captured during settling
 

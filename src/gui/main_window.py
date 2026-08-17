@@ -467,29 +467,29 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         dlg.exec()
 
     def _apply_windows_update(self, zip_path: Path) -> None:
-        """Launch a PowerShell script that extracts the update zip after we exit."""
-        import subprocess
+        """Hand the zip to the installer, then quit so it can do the swap."""
+        from src.updater import WindowsUpdateInstaller
 
-        exe = sys.executable
-        pid = os.getpid()
-
-        # zip_path is next to SoftEdIBO.exe - extract to its own directory
-        # so files are replaced in-place without needing a separate install_dir.
-        ps_script = (
-            f"Wait-Process -Id {pid} -Timeout 30 -ErrorAction SilentlyContinue\n"
-            f"Start-Sleep -Seconds 1\n"
-            f"Expand-Archive -Path '{zip_path}' -DestinationPath (Split-Path '{zip_path}') -Force\n"
-            f"Remove-Item '{zip_path}' -ErrorAction SilentlyContinue\n"
-            f"Start-Process '{exe}'\n"
+        QMessageBox.information(
+            self,
+            "Applying update",
+            "SoftEdIBO will close now and reopen once the update is installed.\n"
+            "This takes about a minute.",
         )
 
-        ps_file = zip_path.with_name("softedibo-update.ps1")
-        ps_file.write_text(ps_script, encoding="utf-8")
+        installer = WindowsUpdateInstaller()
+        try:
+            installer.launch(zip_path)
+        except (OSError, ValueError) as exc:
+            # ValueError: a portable install extracted to a drive root has no
+            # parent to rename, so staging_dir's with_name() refuses.
+            QMessageBox.critical(
+                self,
+                "Update failed",
+                f"Could not start the update installer:\n{exc}",
+            )
+            return
 
-        subprocess.Popen(
-            ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File", str(ps_file)],
-            creationflags=0x08000000,  # CREATE_NO_WINDOW
-        )
         QApplication.quit()
 
     def _apply_linux_update(self, new_appimage: Path) -> None:
