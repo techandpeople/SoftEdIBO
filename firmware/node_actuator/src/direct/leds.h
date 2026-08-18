@@ -9,8 +9,8 @@
 // ESP-NOW commands (see commands.h). Rendering is non-blocking AND fully deferred:
 // the recv callback only updates the per-pixel target buffer plus the animation
 // state, and loop()'s update() is the ONLY place strip.show() runs. That matters
-// because show() bit-bangs the strip with interrupts disabled (~0.7 ms for a
-// 24-LED RGBW ring); driving it from the ESP-NOW receive task - once per pixel for
+// because show() bit-bangs the strip with interrupts disabled (~0.5 ms for a
+// 16-LED RGBW ring); driving it from the ESP-NOW receive task - once per pixel for
 // a split-ring repaint - starved the radio and reset the node. One show() per loop,
 // off the receive task, keeps the link up.
 //

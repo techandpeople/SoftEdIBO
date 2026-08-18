@@ -36,8 +36,9 @@ constexpr int VALVE_PINS[6] = {25, 4, 16, 17, 18, 19};
 constexpr int NUM_CHAMBERS = 3;
 
 // WS2812 / NeoPixel ring on a single data line (IO23 is otherwise unused).
+// 16-LED ring (the boards on the Thymios were 24-LED until 2026-08-18).
 constexpr int LED_PIN  = 23;
-constexpr int NUM_LEDS = 24;
+constexpr int NUM_LEDS = 16;
 
 // Organ + cover sensing ADC input (see organ.h). IO36 (SENSOR_VP) is the
 // only free ADC1 input - IO34/35/39 are the pressure sensors, IO32/33 the

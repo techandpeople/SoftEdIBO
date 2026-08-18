@@ -29,7 +29,10 @@
 //              cutoff must persist CUTOFF_DEBOUNCE reads per chamber. A target
 //              the gauge cannot see (deflate below the sensor floor) closes on
 //              its per-chamber time budget (capMs, from the PC's calibrated
-//              deflate curve) instead.
+//              deflate curve) instead. A BLIND chamber (board with no pressure
+//              sensor populated - the PC sends "timed":1) is time-only both
+//              ways: its floating ADC reading is noise, so the gauge never
+//              opens, closes, or verifies it - only capMs does.
 //   SETTLING - entered once, after the LAST open valve closes. Every gauge now
 //              reads its OWN chamber, so after SETTLE_MS each requested chamber
 //              is verified isolated (+/-tol); whatever is short re-opens for a
@@ -117,6 +120,7 @@ struct Engine {
     uint32_t accumMs[MAXN]  = {};  // cumulative open time this sequence (safety cap)
     uint32_t capMs[MAXN]    = {};  // per-chamber open-time budget (0 = tune.chamber_max_ms)
     uint8_t  overCnt[MAXN]  = {};  // per-chamber consecutive at-target reads (cutoff debounce)
+    uint16_t blindMask      = 0;   // chambers running open-loop: gauge ignored, capMs closes
 
     void begin(uint8_t direction, const Tuning& t) { dir = direction; tune = t; }
 
@@ -143,11 +147,18 @@ struct Engine {
     // while IDLE starts the coalescing window; mid-cycle it joins the next round.
     // ``cap_ms`` (optional) bounds this chamber's total open time - the closing
     // authority for a target below the gauge floor; 0 keeps the tuning backstop.
-    void request(int i, float target_kpa, float range_kpa, uint32_t cap_ms = 0) {
+    // ``blind`` runs the chamber fully open-loop (a board with no pressure
+    // sensor populated - its ADC pin floats, so any reading is noise): the
+    // gauge is ignored entirely, both for the in-round cutoff and the measure
+    // verdict, and ``cap_ms`` (or the tuning backstop) is the only closer.
+    void request(int i, float target_kpa, float range_kpa, uint32_t cap_ms = 0,
+                 bool blind = false) {
         if (i < 0 || i >= count) return;
         target[i] = target_kpa;
         range[i]  = range_kpa;
         capMs[i]  = cap_ms;
+        if (blind) blindMask |=  (uint16_t)(1u << i);
+        else       blindMask &= ~(uint16_t)(1u << i);
         accumMs[i] = 0;
         bool wasEmpty = (pendingMask == 0);
         pendingMask |= (uint16_t)(1u << i);
@@ -268,15 +279,19 @@ struct Engine {
             bool gateOpen = (int32_t)(now - phaseMs) >= (int32_t)gate;
             for (int i = 0; i < count && !endAll; i++) {
                 if (!(openMask & (1u << i))) continue;
-                float k = o.readKpa(i);
-                if (dir == 0 && k >= tune.hard_max_kpa) { endAll = true; break; }
-                // Per-chamber time budget: a stuck gauge, or a target the gauge
-                // can't see (deflate below the sensor floor) closing on its
-                // calibrated time. Closes just this chamber.
+                bool blind = (blindMask >> i) & 1;
+                // Per-chamber time budget: a stuck gauge, a target the gauge
+                // can't see (deflate below the sensor floor) or a blind chamber
+                // closing on its calibrated time. Closes just this chamber.
                 if (accumMs[i] + (now - openedMs[i]) >= capOf(i)) {
                     closeOne(i, now, o);
                     continue;
                 }
+                // A blind chamber's ADC pin floats - its reading is noise, so
+                // neither the hard ceiling nor the target cutoff may act on it.
+                if (blind) continue;
+                float k = o.readKpa(i);
+                if (dir == 0 && k >= tune.hard_max_kpa) { endAll = true; break; }
                 // Progressive close: every open chamber equalises with the line,
                 // so this chamber reading its own target means the line got there
                 // - it is done. Debounced per chamber so a spike can't close it.
@@ -300,13 +315,16 @@ struct Engine {
             }
             for (int i = 0; i < count; i++) {
                 if (!(pendingMask & (1u << i))) continue;
-                float tol = tune.tol_frac * range[i];
-                float k   = o.readKpa(i);
                 // A chamber that spent its time budget counts as done even when
                 // its gauge disagrees - for a target below the sensor floor the
                 // budget IS the closing authority, and re-opening it would loop.
-                bool done = reached(k, i, tol)
-                         || accumMs[i] >= capOf(i);
+                // A blind chamber (no sensor populated) is time-ONLY: its noise
+                // reading may neither confirm nor deny the target.
+                bool done = accumMs[i] >= capOf(i);
+                if (!done && !((blindMask >> i) & 1)) {
+                    float tol = tune.tol_frac * range[i];
+                    done = reached(o.readKpa(i), i, tol);
+                }
                 if (done) pendingMask &= ~(uint16_t)(1u << i);
             }
             o.dbg(EV_MEASURE, pendingMask);

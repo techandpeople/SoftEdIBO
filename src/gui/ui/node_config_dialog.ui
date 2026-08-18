@@ -46,6 +46,12 @@
        <property name="suffix"><string> slots</string></property>
       </widget>
      </item>
+     <item row="3" column="1">
+      <widget class="QCheckBox" name="no_sensors_check">
+       <property name="whatsThis"><string>Tick when this board's PCB has NO pressure sensors soldered yet (boards awaiting parts). Every inflate/deflate then runs purely on the manual per-chamber fill/empty times from the skin config - the firmware opens the valves and runs the pumps for exactly that long and ignores its (floating, meaningless) sensor readings. Untick once the sensors are populated to get closed-loop pressure control back.</string></property>
+       <property name="text"><string>No pressure sensors on this board</string></property>
+      </widget>
+     </item>
     </layout>
    </item>
    <item>

@@ -87,12 +87,13 @@ hospital study's behaviours. Two layers:
   PWM, lower = a gentler / lower-energy stroke, `0` = full speed. Unlike
   `period_ms` it needs no fill calibration, so it tunes a beat's energy directly.
   The LED verbs `set_led` / `set_led_halves` / `fade` take an optional `ring`
-  (`"all"` default, or `0..3`): the multiplexed board has **four independent LED
-  rings** that can animate separately, so a multiplexed activity can drive each
-  ring on its own, while the direct board has a single ring and ignores higher
+  (`"all"` default, or `0..2`): the multiplexed board defines **three independent
+  24-LED rings** that can animate separately (Tree populates all three, one per
+  branch skin; Turtle only ring 0), so a Tree activity can drive each ring on
+  its own, while the direct board has a single 16-LED ring and ignores higher
   indices. `ring` omitted / `"all"` keeps the prior whole-ring behaviour; the
-  firmware sizes the selected ring itself (24- vs 16-LED). A multiplexed-authored
-  behaviour run on a direct board degrades gracefully (only ring 0 shows).
+  firmware sizes the selected ring itself. A multiplexed-authored behaviour run
+  on a direct board degrades gracefully (only ring 0 shows).
   The `organs` condition compares how many of the skin's plugged organs resolve
   to good/bad (decomposed from the organ circuit by `OrganResolver`): `scope`
   `all_good`/`all_bad` mean "every organ matches", `count` compares the good and

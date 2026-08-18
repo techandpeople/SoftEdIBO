@@ -57,7 +57,9 @@ _MISSING_FIELD_TITLE = "Missing Field"
 
 class _ChamberRow(QWidget):
     """A single chamber row: MAC dropdown + slot spinbox + min/max pressure
-    spinboxes + fill-mode combo + remove."""
+    spinboxes + fill-mode combo + remove. On a node flagged as having no
+    pressure sensors (``sensorless_macs``) the row also shows manual fill/empty
+    time fields - the open-loop actuation windows."""
 
     def __init__(
         self,
@@ -68,11 +70,15 @@ class _ChamberRow(QWidget):
         max_pressure: float = _DEFAULT_MAX_KPA,
         min_pressure: float = _DEFAULT_MIN_KPA,
         fill_mode: str = _DEFAULT_FILL_MODE,
+        fill_time_ms: int | None = None,
+        empty_time_ms: int | None = None,
+        sensorless_macs: set[str] | frozenset[str] = frozenset(),
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self._node_macs      = node_macs
-        self._node_max_slots = node_max_slots
+        self._node_macs       = node_macs
+        self._node_max_slots  = node_max_slots
+        self._sensorless_macs = set(sensorless_macs)
 
         hbox = QHBoxLayout(self)
         hbox.setContentsMargins(0, 0, 0, 0)
@@ -132,6 +138,37 @@ class _ChamberRow(QWidget):
             "until the gauge sensor reaches the target. Deflate is always "
             "pressure-based (the sensor cannot read vacuum).")
 
+        # Manual open-loop times for a node with NO pressure sensors populated:
+        # full-fill (0->100%) and full-empty (100->0%) valve-open windows. Shown
+        # only when the selected node is flagged sensorless; 0 = unset.
+        self._fill_ms_spin = QSpinBox()
+        self._fill_ms_spin.setRange(0, 60000)
+        self._fill_ms_spin.setSingleStep(100)
+        self._fill_ms_spin.setValue(int(fill_time_ms or 0))
+        self._fill_ms_spin.setSuffix(" ms")
+        self._fill_ms_spin.setSpecialValueText("-")
+        self._fill_ms_spin.setFixedWidth(80)
+        self._fill_ms_spin.setWhatsThis(
+            "Manual FULL-FILL time for this chamber (0% -> 100%), used because "
+            "this node has no pressure sensors soldered: an inflate opens the "
+            "valve and runs the pump for the matching fraction of this window, "
+            "ignoring the (floating) sensor. Time it with a stopwatch on the "
+            "real chamber. '-' = unset (the chamber refuses to inflate).")
+        self._empty_ms_spin = QSpinBox()
+        self._empty_ms_spin.setRange(0, 60000)
+        self._empty_ms_spin.setSingleStep(100)
+        self._empty_ms_spin.setValue(int(empty_time_ms or 0))
+        self._empty_ms_spin.setSuffix(" ms")
+        self._empty_ms_spin.setSpecialValueText("-")
+        self._empty_ms_spin.setFixedWidth(80)
+        self._empty_ms_spin.setWhatsThis(
+            "Manual FULL-EMPTY time for this chamber (100% -> 0%, vacuum pull), "
+            "used because this node has no pressure sensors soldered: a deflate "
+            "opens the valve and runs the vacuum pump for the matching fraction "
+            "of this window. '-' = unset (the chamber refuses to deflate).")
+        self._fill_ms_label  = QLabel("Fill t:")
+        self._empty_ms_label = QLabel("Empty t:")
+
         self._remove_btn = QPushButton("x")
         self._remove_btn.setFixedWidth(24)
         self._remove_btn.setFixedHeight(24)
@@ -144,7 +181,12 @@ class _ChamberRow(QWidget):
         hbox.addWidget(self._max_spin)
         hbox.addWidget(QLabel("Fill:"))
         hbox.addWidget(self._mode_combo)
+        hbox.addWidget(self._fill_ms_label)
+        hbox.addWidget(self._fill_ms_spin)
+        hbox.addWidget(self._empty_ms_label)
+        hbox.addWidget(self._empty_ms_spin)
         hbox.addWidget(self._remove_btn)
+        self._update_manual_times()
 
     @property
     def remove_btn(self) -> QPushButton:
@@ -159,8 +201,26 @@ class _ChamberRow(QWidget):
             self._mode_combo.currentData(),
         )
 
+    def get_manual_times(self) -> tuple[int | None, int | None]:
+        """Manual (fill_ms, empty_ms) for a sensorless node, else (None, None).
+
+        Only meaningful while the selected node is flagged as having no
+        pressure sensors - a populated node keeps its calibrated curves and
+        must not pick up stale manual values."""
+        if self._mac_combo.currentText() not in self._sensorless_macs:
+            return None, None
+        return (self._fill_ms_spin.value() or None,
+                self._empty_ms_spin.value() or None)
+
     def _on_mac_changed(self, _mac: str) -> None:
         self._update_slot_max()
+        self._update_manual_times()
+
+    def _update_manual_times(self) -> None:
+        sensorless = self._mac_combo.currentText() in self._sensorless_macs
+        for w in (self._fill_ms_label, self._fill_ms_spin,
+                  self._empty_ms_label, self._empty_ms_spin):
+            w.setVisible(sensorless)
 
     def _update_slot_max(self) -> None:
         mac      = self._mac_combo.currentText()
@@ -361,6 +421,8 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
                 max_pressure=float(ch.get("max_pressure", _DEFAULT_MAX_KPA)),
                 min_pressure=float(ch.get("min_pressure", _DEFAULT_MIN_KPA)),
                 fill_mode=skincfg.normalize_fill_mode(ch.get("fill_mode")),
+                fill_time_ms=ch.get("fill_time_ms"),
+                empty_time_ms=ch.get("empty_time_ms"),
             )
         if not self._rows:
             self._add_row()  # start with one empty row
@@ -544,6 +606,12 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         return skincfg.node_max_slots(
             self._settings.data, self._robot_type, self._robot_index)
 
+    def _sensorless_macs(self) -> set[str]:
+        """MACs of this robot's nodes flagged as having no pressure sensors
+        populated (node config ``pressure_sensors: false``)."""
+        return {n.get("mac", "") for n in self._robot_nodes()
+                if n.get("pressure_sensors") is False}
+
     def _load_skin_cfg(self) -> dict:
         return skincfg.load_skin_cfg(
             self._settings.data, self._robot_type, self._robot_index,
@@ -565,6 +633,8 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         max_pressure: float = _DEFAULT_MAX_KPA,
         min_pressure: float = _DEFAULT_MIN_KPA,
         fill_mode: str = _DEFAULT_FILL_MODE,
+        fill_time_ms: int | None = None,
+        empty_time_ms: int | None = None,
     ) -> None:
         if len(self._rows) >= _MAX_CHAMBERS:
             return
@@ -572,7 +642,9 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         max_slots = self._node_max_slots()
         row = _ChamberRow(macs, max_slots, mac=mac, slot=slot,
                           max_pressure=max_pressure, min_pressure=min_pressure,
-                          fill_mode=fill_mode)
+                          fill_mode=fill_mode,
+                          fill_time_ms=fill_time_ms, empty_time_ms=empty_time_ms,
+                          sensorless_macs=self._sensorless_macs())
         row.remove_btn.clicked.connect(lambda: self._remove_row(row))
         self._rows.append(row)
         self.rows_layout.addWidget(row)
@@ -975,8 +1047,8 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
     # ------------------------------------------------------------------
 
     def _on_test(self) -> None:
-        rows = [row.get_values() for row in self._rows]
-        macs = list({mac for mac, *_ in rows if mac})
+        macs = list({row.get_values()[0] for row in self._rows
+                     if row.get_values()[0]})
         if not macs:
             QMessageBox.warning(self, "Test Actuators", "Configure at least one chamber first.")
             return
@@ -989,7 +1061,8 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         prev = {(c.get("mac"), int(c.get("slot", 0))): c
                 for c in self._load_skin_cfg().get("chambers", [])}
         chambers: list[dict] = []
-        for m, s, max_p, min_p, mode in rows:
+        for row in self._rows:
+            m, s, max_p, min_p, mode = row.get_values()
             if m != mac:
                 continue
             cfg = {"slot": int(s), "max_pressure": float(max_p),
@@ -1000,6 +1073,13 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
                     cfg["fill_profile"] = saved["fill_profile"]
                 if saved.get("fill_time_ms") is not None:
                     cfg["fill_time_ms"] = saved["fill_time_ms"]
+            # Manual open-loop times (sensorless node) straight from the row,
+            # so the bench can drive the chamber before the skin is saved.
+            fill_ms, empty_ms = row.get_manual_times()
+            if fill_ms:
+                cfg["fill_time_ms"] = fill_ms
+            if empty_ms:
+                cfg["empty_time_ms"] = empty_ms
             chambers.append(cfg)
         # Touch config (coupling matrix + compensation tuning) isn't edited in
         # the chamber rows - it comes from the touch-coupling calibration tool -
@@ -1009,10 +1089,13 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         skin_cfgs = [{"skin_id": skin_id, "chambers": chambers,
                       "skin_type": self.skin_type_combo.currentData() or "",
                       "touch": self._load_skin_cfg().get("touch")}]
-        # LED ring layout for this node's type, so the dialog shows one tester per
-        # ring (node_multiplexed has four). Defaults to a single ring if unknown.
+        # LED ring layout for this node's type, trimmed to the rings this robot's
+        # PCB populates (Turtle solders 1 of the multiplexed board's 3, Tree all
+        # 3), so the dialog shows one tester per real ring. Defaults to a single
+        # ring if the node type is unknown.
         node_types = {n.get("mac"): n.get("node_type") for n in self._robot_nodes()}
-        led_rings = list(skincfg.NODE_LED_RINGS.get(node_types.get(mac) or "", (24,)))
+        led_rings = list(skincfg.led_rings_for(node_types.get(mac),
+                                               self._robot_type) or (16,))
         dlg = TestActuatorsDialog(
             mac=mac,
             skin_cfgs=skin_cfgs,
@@ -1020,6 +1103,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
             led_rings=led_rings,
             led_angles=dict(self._led_angles),
             on_save_angle=self._save_led_angle,
+            pressure_sensors=mac not in self._sensorless_macs(),
             parent=self,
         )
         dlg.exec()
@@ -1154,7 +1238,8 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         prev = {(c.get("mac"), int(c.get("slot", 0))): c
                 for c in self._load_skin_cfg().get("chambers", [])}
         chambers: list[dict] = []
-        for m, s, p, mn, fm in (row.get_values() for row in self._rows):
+        for row in self._rows:
+            m, s, p, mn, fm = row.get_values()
             ch: dict = {"mac": m, "slot": s, "max_pressure": p,
                         "min_pressure": mn, "fill_mode": fm}
             saved = prev.get((m, int(s)))
@@ -1163,6 +1248,13 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
                     ch["fill_profile"] = saved["fill_profile"]
                 if saved.get("fill_time_ms") is not None:
                     ch["fill_time_ms"] = saved["fill_time_ms"]
+            # Manual open-loop times, editable in the row for a sensorless
+            # node (they override any carried-over calibrated scalar).
+            fill_ms, empty_ms = row.get_manual_times()
+            if fill_ms:
+                ch["fill_time_ms"] = fill_ms
+            if empty_ms:
+                ch["empty_time_ms"] = empty_ms
             chambers.append(ch)
         if skincfg.find_missing_mac(chambers):
             QMessageBox.warning(

@@ -271,12 +271,14 @@ void parseAndQueue(const uint8_t* data, int len) {
         c.param = doc["delta"] | 10;
         c.fill_ms = doc["ms"] | 0;
         c.duty = doc["duty"] | 0;
+        c.timed = doc["timed"] | 0;
     } else if (strcmp(cmd, "deflate") == 0) {
         c.type = cmd_queue::CMD_DEFLATE;
         c.chamber = doc["chamber"] | -1;
         c.param = doc["delta"] | 10;
         c.fill_ms = doc["ms"] | 0;
         c.duty = doc["duty"] | 0;
+        c.timed = doc["timed"] | 0;
     } else if (strcmp(cmd, "set_pressure") == 0) {
         c.type = cmd_queue::CMD_SET_PRESSURE;
         c.chamber = doc["chamber"] | -1;
@@ -367,9 +369,9 @@ void parseAndQueue(const uint8_t* data, int len) {
 #endif
     } else if (strcmp(cmd, "set_led") == 0) {
         // Handled inline (not queued): just stores each ring's target LED state,
-        // which loop()'s leds::update() renders. "ring" (0..3) selects one of the
-        // four rings; omitted / -1 addresses all four at once.
-        // {"cmd":"set_led","ring":0..3,"color":"#RRGGBB",
+        // which loop()'s leds::update() renders. "ring" (0..NUM_RINGS-1) selects
+        // one ring; omitted / -1 addresses all at once.
+        // {"cmd":"set_led","ring":N,"color":"#RRGGBB",
         //  "pattern":"off|solid|blink|pulse|comet|fade","period_ms":N,"count":N,
         //  "fade_ms":N,"index":N}  "fade" adds "color2":"#RRGGBB" and cross-fades
         //  c1<->c2 on the node (the PC used to stream that colour sweep frame by frame).
@@ -398,7 +400,7 @@ void parseAndQueue(const uint8_t* data, int len) {
         // Split ring(s) into len(colors) equal arcs (the purple/yellow look) in
         // ONE frame. Replaces the PC's old per-pixel burst - 24 set_led frames
         // that reset the node by calling show() once per pixel in the recv task.
-        // {"cmd":"set_led_halves","ring":0..3,"colors":["#RRGGBB",...],"pattern":...,
+        // {"cmd":"set_led_halves","ring":N,"colors":["#RRGGBB",...],"pattern":...,
         //  "fade_ms":N}  pattern "comet" paints one comet per colour.
         const char* pat = doc["pattern"]   | "solid";
         uint32_t period = doc["period_ms"] | 0;
@@ -504,6 +506,14 @@ void applyChamberCmd(int n, const cmd_queue::Cmd& c) {
 
     switch (c.type) {
     case CMD_INFLATE: {
+        // "timed":1 = the board has no pressure sensor populated: the gauge
+        // reading is floating-pin noise, so neither the below-target guard nor
+        // the engine may consult it - fill_ms is the only authority.
+        if (c.timed) {
+            if (c.fill_ms) chambers::requestInflate(n, ch.max_kpa, duty,
+                                                    c.fill_ms, /*blind=*/true);
+            break;
+        }
         float delta  = (ch.max_kpa - ch.min_kpa) * constrain(c.param, 0, 100) / 100.0f;
         float target = min(chambers::cachedKpa[n] + delta, ch.max_kpa);
         // Only actuate if actually below target (else a repeated "+" at the cap
@@ -513,6 +523,14 @@ void applyChamberCmd(int n, const cmd_queue::Cmd& c) {
         break;
     }
     case CMD_DEFLATE: {
+        // Open-loop deflate for a sensorless board. Without this the guard
+        // below always drops the command (cachedKpa reads ~min_kpa with the
+        // pin floating), so a vacuum pull could never even start.
+        if (c.timed) {
+            if (c.fill_ms) chambers::requestDeflate(n, ch.min_kpa, duty,
+                                                    c.fill_ms, /*blind=*/true);
+            break;
+        }
         float delta  = (ch.max_kpa - ch.min_kpa) * constrain(c.param, 0, 100) / 100.0f;
         float target = max(chambers::cachedKpa[n] - delta, ch.min_kpa);
         if (chambers::cachedKpa[n] > target)

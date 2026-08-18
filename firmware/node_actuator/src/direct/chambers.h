@@ -218,8 +218,11 @@ inline void engOpen(int i, uint8_t dir) {
 // ``cap_ms`` (optional) is the per-chamber open-time budget forwarded to the
 // engine - the closing authority for a target the gauge can't see (a deflate
 // below the sensor floor, timed by the PC's calibrated deflate curve).
+// ``blind`` runs the chamber open-loop (no pressure sensor populated): the
+// engine ignores the gauge entirely and cap_ms is the only closer.
 
-inline void requestInflate(int n, float target, uint8_t duty, uint32_t cap_ms = 0) {
+inline void requestInflate(int n, float target, uint8_t duty, uint32_t cap_ms = 0,
+                           bool blind = false) {
     if (n < 0 || n >= NUM_CHAMBERS) return;
     target = max(state[n].min_kpa, min(target, state[n].max_kpa));
     bool reversed = false;
@@ -227,10 +230,11 @@ inline void requestInflate(int n, float target, uint8_t duty, uint32_t cap_ms = 
     if (reversed) recalcPumps();
     state[n].duty       = duty;
     state[n].target_kpa = target;
-    inflateEng.request(n, target, state[n].max_kpa - state[n].min_kpa, cap_ms);
+    inflateEng.request(n, target, state[n].max_kpa - state[n].min_kpa, cap_ms, blind);
 }
 
-inline void requestDeflate(int n, float target, uint8_t duty, uint32_t cap_ms = 0) {
+inline void requestDeflate(int n, float target, uint8_t duty, uint32_t cap_ms = 0,
+                           bool blind = false) {
     if (n < 0 || n >= NUM_CHAMBERS) return;
     target = max(state[n].min_kpa, min(target, state[n].max_kpa));
     bool reversed = false;
@@ -238,7 +242,7 @@ inline void requestDeflate(int n, float target, uint8_t duty, uint32_t cap_ms = 
     if (reversed) recalcPumps();
     state[n].duty       = duty;
     state[n].target_kpa = target;
-    deflateEng.request(n, target, state[n].max_kpa - state[n].min_kpa, cap_ms);
+    deflateEng.request(n, target, state[n].max_kpa - state[n].min_kpa, cap_ms, blind);
 }
 
 // Stop & hold a chamber wherever it is (drops it from both engines).

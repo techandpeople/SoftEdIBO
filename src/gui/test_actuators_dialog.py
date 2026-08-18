@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPushButton,
     QTabWidget,
     QVBoxLayout,
@@ -40,8 +41,9 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         gateway: Connected SoftEdIBO gateway.
         led_count: LED count for a single-ring node (back-compat fallback when
             ``led_rings`` is None).
-        led_rings: Per-ring LED counts for the node (e.g. ``[24, 16, 16, 16]``
-            for node_multiplexed). Each ring gets its own tester tab and is
+        led_rings: Per-ring LED counts for the node (e.g. ``[24, 24, 24]`` for a
+            Tree node_multiplexed, ``[24]`` for a Turtle one, which populates
+            only ring 0). Each ring gets its own tester tab and is
             addressed via the ``set_led`` ``ring`` field. None falls back to a
             single ring of ``led_count``.
         parent: Optional parent widget.
@@ -74,15 +76,21 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         mac: str,
         skin_cfgs: list[dict],
         gateway: Gateway,
-        led_count: int = 24,
+        led_count: int = 16,
         led_rings: list[int] | None = None,
         led_angles: dict[int, float] | None = None,
         on_save_angle=None,
+        pressure_sensors: bool = True,
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
         self._mac = mac
         self._gateway = gateway
+        # ``pressure_sensors=False``: this node's PCB has no pressure sensors
+        # populated, so every inflate/deflate is sent open-loop ("timed":1)
+        # with the manual per-chamber fill/empty window - the firmware ignores
+        # its floating gauge and closes on the time alone.
+        self._sensorless = not pressure_sensors
         # Saved per-ring LED mounting angles (ring index -> degrees), shown as each
         # ring tester's starting angle. ``on_save_angle(ring, deg)`` persists a new
         # one to the skin config (None = saving unavailable, hides the Save button).
@@ -159,7 +167,8 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         # LED ring tester(s). Inserted into the left column just above the pump
         # group (its count/size is only known from the node config, so it can't be
         # authored in the .ui). node_direct has a single ring; node_multiplexed
-        # drives four independently-addressable rings - one tester tab each, so the
+        # defines three independently-addressable rings (Turtle populates 1, Tree
+        # 3) - one tester tab each, so the
         # user can assign colours to each ring (and each LED) separately.
         rings = led_rings if led_rings is not None else (
             [led_count] if led_count > 0 else [])
@@ -512,6 +521,10 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         lbl = self._pressure_labels.get(chamber)
         if not lbl:
             return
+        if self._sensorless:
+            # The reading is floating-pin noise - showing it would only mislead.
+            lbl.setText("no sensor")
+            return
         if kpa == kpa:   # not NaN -> firmware reported real kPa
             lbl.setText(f"{kpa:.2f} kPa  ({self._pct_for_kpa(chamber, kpa)}%)")
         else:
@@ -660,9 +673,13 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
 
         Mirrors Skin._inflate: a chamber in ``time`` mode with a calibration curve
         inflates by a time window so the laggy gauge sensor never closes the loop;
-        a ``pressure``-mode chamber (or one with no curve) stays closed-loop."""
+        a ``pressure``-mode chamber (or one with no curve) stays closed-loop. On
+        a sensorless node the fill mode is irrelevant - time is all there is."""
         cfg = self._chamber_cfgs.get(slot)
-        if not cfg or normalize_fill_mode(cfg.get("fill_mode")) == FILL_MODE_PRESSURE:
+        if not cfg:
+            return None
+        if (not self._sensorless
+                and normalize_fill_mode(cfg.get("fill_mode")) == FILL_MODE_PRESSURE):
             return None
         profile = (FillProfile.from_list(cfg.get("fill_profile"))
                    or FillProfile.linear(cfg.get("fill_time_ms")))
@@ -670,16 +687,36 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
             return None
         return int(round(profile.time_for_pct(100)))
 
+    def _empty_ms(self, slot: int) -> int | None:
+        """Manual full-empty window (ms) for a sensorless chamber, else None."""
+        cfg = self._chamber_cfgs.get(slot)
+        empty = (cfg or {}).get("empty_time_ms")
+        return int(empty) if empty else None
+
+    def _warn_no_manual_time(self, which: str) -> None:
+        QMessageBox.warning(
+            self, "Test Actuators",
+            f"This node has no pressure sensors, so it needs a manual {which} "
+            "time. Enter it in the chamber row of the skin config first.")
+
     def _inflate_slot(self, slot: int) -> None:
         # The node reads "delta" (percent of this chamber's range), NOT "value":
         # a "value" key is silently ignored and the firmware falls back to 10 %.
         # delta=100 inflates toward the chamber's configured max pressure; for a
         # calibrated time-mode chamber send the time window too (the firmware then
-        # ignores the gauge sensor for the fill, capping only at HARD_MAX).
+        # ignores the gauge sensor for the fill, capping only at HARD_MAX). A
+        # sensorless node MUST have a time - it is sent with "timed":1 so the
+        # firmware runs fully open-loop on it.
         self._arm()
         self._push_limits(slot)
         ms = self._inflate_ms(slot)
-        if ms:
+        if self._sensorless:
+            if not ms:
+                self._warn_no_manual_time("fill")
+                return
+            self._gateway.send(self._mac, "inflate", chamber=slot, delta=100,
+                               ms=ms, timed=1)
+        elif ms:
             self._gateway.send(self._mac, "inflate", chamber=slot, delta=100, ms=ms)
         else:
             self._gateway.send(self._mac, "inflate", chamber=slot, delta=100)
@@ -691,9 +728,19 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
     def _deflate_slot(self, slot: int) -> None:
         # delta=100 deflates toward the chamber's configured min pressure (the
         # firmware's deflate time cap is always armed as the vacuum backstop).
+        # A sensorless node needs the manual empty window + "timed":1, or the
+        # firmware's below-target guard drops the command outright.
         self._arm()
         self._push_limits(slot)
-        self._gateway.send(self._mac, "deflate", chamber=slot, delta=100)
+        if self._sensorless:
+            ms = self._empty_ms(slot)
+            if not ms:
+                self._warn_no_manual_time("empty")
+                return
+            self._gateway.send(self._mac, "deflate", chamber=slot, delta=100,
+                               ms=ms, timed=1)
+        else:
+            self._gateway.send(self._mac, "deflate", chamber=slot, delta=100)
         # Optimistic: deflating opens this chamber's deflate valve (green on
         # node confirmation, closed when the node reports it done).
         self._set_valve_button((slot, 1), True, confirmed=False)
@@ -710,8 +757,10 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         get "only one inflating" from a lost ESP-NOW frame (no command-level
         retry). The fill is closed-loop to each chamber's configured max (a shared
         frame can't carry per-chamber calibrated fill windows - fine for a bench
-        "fill all"). A partial selection still falls back to per-slot."""
-        if set(slots) == set(self._chamber_cfgs):
+        "fill all"). A partial selection still falls back to per-slot. A
+        sensorless node always goes per-slot: each chamber needs its own manual
+        time window in the frame, which a broadcast can't carry."""
+        if set(slots) == set(self._chamber_cfgs) and not self._sensorless:
             self._broadcast_actuate("inflate", slots)
         else:
             for slot in slots:
@@ -720,8 +769,10 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
     def _deflate_slots(self, slots: list[int]) -> None:
         """Deflate several chambers - one broadcast frame for the whole node
         (see :meth:`_inflate_slots`), else per-slot. Deflate has no calibrated
-        time window, so the whole-node case can always go single-frame."""
-        if set(slots) == set(self._chamber_cfgs):
+        time window, so the whole-node case can always go single-frame - except
+        on a sensorless node, whose per-chamber manual empty windows force
+        per-slot frames."""
+        if set(slots) == set(self._chamber_cfgs) and not self._sensorless:
             self._broadcast_actuate("deflate", slots)
         else:
             for slot in slots:

@@ -643,7 +643,8 @@ class ScriptedActivity(BaseActivity):
 
     def _run_fade(self, unit: _Unit, params: dict) -> Generator:
         """One smooth colour1 -> colour2 -> colour1 cross-fade across a ring
-        (``ring`` selects one of the four, default all). Authors wrap this in
+        (``ring`` selects one of the multiplexed board's three, default all).
+        Authors wrap this in
         'repeat forever' for a continuous fade.
 
         The node runs the interpolation itself (the ``fade`` LED pattern), so
@@ -905,7 +906,7 @@ class ScriptedActivity(BaseActivity):
 
     @staticmethod
     def _parse_ring(params: dict) -> int | None:
-        """Read an optional LED ``ring`` (0..3) from a step's params. ``"all"`` /
+        """Read an optional LED ``ring`` (0..2) from a step's params. ``"all"`` /
         absent / invalid means 'every ring' (sent as ``None``), matching the
         prior whole-ring behaviour."""
         val = params.get("ring", "all")

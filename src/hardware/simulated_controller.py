@@ -90,11 +90,13 @@ class SimulatedController(QObject):
         return True
 
     def inflate(self, chamber: int, delta: int = 10,
-                ms: int | None = None, duty: int | None = None) -> bool:
+                ms: int | None = None, duty: int | None = None,
+                timed: bool = False) -> bool:
         """Inflate by delta % (relative to current target).
 
-        ``ms`` (time-based fill) and ``duty`` (pump PWM speed) are accepted for
-        interface parity and ignored - the simulation models pressure directly."""
+        ``ms`` (time-based fill), ``duty`` (pump PWM speed) and ``timed``
+        (sensorless open-loop) are accepted for interface parity and ignored -
+        the simulation models pressure directly."""
         if self._stopped:
             return False
         self._current.setdefault(chamber, 0)
@@ -108,10 +110,12 @@ class SimulatedController(QObject):
         return True
 
     def deflate(self, chamber: int, delta: int = 10,
-                duty: int | None = None) -> bool:
+                ms: int | None = None, duty: int | None = None,
+                timed: bool = False) -> bool:
         """Deflate by delta % (relative to current target).
 
-        ``duty`` is accepted for interface parity and ignored."""
+        ``ms``, ``duty`` and ``timed`` are accepted for interface parity and
+        ignored."""
         if self._stopped:
             return False
         self._current.setdefault(chamber, 0)

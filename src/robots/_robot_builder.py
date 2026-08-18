@@ -64,6 +64,7 @@ def build_skins(
     skin_configs: list[dict[str, Any]],
     controllers: dict[str, Any],
     touch_controllers: dict[str, Any] | None = None,
+    sensorless_macs: set[str] | None = None,
 ) -> dict[str, Skin]:
     """Construct Skin objects from the config format.
 
@@ -84,10 +85,15 @@ def build_skins(
             ``SimulatedMagnetSensor`` so its T-buttons drive only that skin, even when
             several skins share a touch ``node_mac``. When absent, the touch
             controller is resolved from ``controllers`` by ``touch.node_mac``.
+        sensorless_macs:  MACs of nodes whose PCB has NO pressure sensors
+            populated (node config ``pressure_sensors: false``). Skins on such
+            a node run every actuation open-loop on the manual per-chamber
+            times (see Skin ``pressure_sensors``).
     """
     skins: dict[str, Skin] = {}
     for skin_cfg in skin_configs:
-        skin = _build_one_skin(skin_cfg, controllers, touch_controllers)
+        skin = _build_one_skin(skin_cfg, controllers, touch_controllers,
+                               sensorless_macs or set())
         if skin is not None:
             skins[skin.skin_id] = skin
     return skins
@@ -95,7 +101,9 @@ def build_skins(
 
 def _build_one_skin(skin_cfg: dict[str, Any],
                     controllers: dict[str, Any],
-                    touch_controllers: dict[str, Any] | None = None) -> Skin | None:
+                    touch_controllers: dict[str, Any] | None = None,
+                    sensorless_macs: set[str] | frozenset[str] = frozenset(),
+                    ) -> Skin | None:
     """Build a single Skin from its config dict, or return None if the
     config is invalid (logs the reason)."""
     skin_id = skin_cfg.get("skin_id", "?")
@@ -127,7 +135,8 @@ def _build_one_skin(skin_cfg: dict[str, Any],
          "fill_profiles": ch.get("fill_profiles"),
          "deflate_profile": ch.get("deflate_profile"),
          "duty_curve": ch.get("duty_curve"),
-         "fill_mode": ch.get("fill_mode")}
+         "fill_mode": ch.get("fill_mode"),
+         "empty_time_ms": ch.get("empty_time_ms")}
         for ch in chambers
     ]
     # Per-ring LED mounting angle (from the skin config) -> the node's controller,
@@ -153,6 +162,7 @@ def _build_one_skin(skin_cfg: dict[str, Any],
         organs=skin_cfg.get("organs"),
         skin_type=skin_cfg.get("skin_type", ""),
         skin_variant=skin_cfg.get("skin_variant", ""),
+        pressure_sensors=mac not in sensorless_macs,
     )
 
 

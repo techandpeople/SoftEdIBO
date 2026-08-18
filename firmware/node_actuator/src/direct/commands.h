@@ -261,6 +261,14 @@ inline void applyChamberCmd(int n, const cmd_queue::Cmd& c) {
     switch (c.type) {
     case CMD_INFLATE: {
         uint8_t duty = c.duty ? c.duty : chambers::DEFAULT_INFLATE_DUTY;
+        // "timed":1 = the board has no pressure sensor populated: the gauge
+        // reading is a floating-pin noise value, so neither the below-target
+        // guard nor the engine may consult it - fill_ms is the only authority.
+        if (c.timed) {
+            if (c.fill_ms) chambers::requestInflate(n, ch.max_kpa, duty,
+                                                    c.fill_ms, /*blind=*/true);
+            break;
+        }
         float delta  = (ch.max_kpa - ch.min_kpa) * constrain(c.param, 0, 100) / 100.0f;
         float target = min(chambers::cachedKpa[n] + delta, ch.max_kpa);
         // Only actuate if actually below target (else a repeated "+" at the cap
@@ -271,6 +279,14 @@ inline void applyChamberCmd(int n, const cmd_queue::Cmd& c) {
     }
     case CMD_DEFLATE: {
         uint8_t duty = c.duty ? c.duty : chambers::DEFAULT_DEFLATE_DUTY;
+        // Open-loop deflate for a sensorless board. Without this the guard
+        // below always drops the command (cachedKpa reads ~min_kpa with the
+        // pin floating), so a vacuum pull could never even start.
+        if (c.timed) {
+            if (c.fill_ms) chambers::requestDeflate(n, ch.min_kpa, duty,
+                                                    c.fill_ms, /*blind=*/true);
+            break;
+        }
         float delta  = (ch.max_kpa - ch.min_kpa) * constrain(c.param, 0, 100) / 100.0f;
         float target = max(chambers::cachedKpa[n] - delta, ch.min_kpa);
         if (chambers::cachedKpa[n] > target)
@@ -422,8 +438,8 @@ inline void parseAndQueue(const uint8_t* data, int len) {
     Cmd c{};
 
     if      (strcmp(cmd, "ping") == 0)             { c.type = CMD_PING;         c.chamber = -1; }
-    else if (strcmp(cmd, "inflate") == 0)           { c.type = CMD_INFLATE;      c.chamber = doc["chamber"] | -1; c.param = doc["delta"] | 10; c.fill_ms = doc["ms"] | 0; c.duty = doc["duty"] | 0; }
-    else if (strcmp(cmd, "deflate") == 0)           { c.type = CMD_DEFLATE;      c.chamber = doc["chamber"] | -1; c.param = doc["delta"] | 10; c.fill_ms = doc["ms"] | 0; c.duty = doc["duty"] | 0; }
+    else if (strcmp(cmd, "inflate") == 0)           { c.type = CMD_INFLATE;      c.chamber = doc["chamber"] | -1; c.param = doc["delta"] | 10; c.fill_ms = doc["ms"] | 0; c.duty = doc["duty"] | 0; c.timed = doc["timed"] | 0; }
+    else if (strcmp(cmd, "deflate") == 0)           { c.type = CMD_DEFLATE;      c.chamber = doc["chamber"] | -1; c.param = doc["delta"] | 10; c.fill_ms = doc["ms"] | 0; c.duty = doc["duty"] | 0; c.timed = doc["timed"] | 0; }
     else if (strcmp(cmd, "set_pressure") == 0)      { c.type = CMD_SET_PRESSURE; c.chamber = doc["chamber"] | -1; c.param = doc["value"] | 0; c.duty = doc["duty"] | 0; }
     else if (strcmp(cmd, "set_max_pressure") == 0)  { c.type = CMD_SET_MAX;      c.chamber = doc["chamber"] | -1; c.param_kpa = doc["value"] | chambers::DEFAULT_MAX_KPA; c.seq = doc["seq"] | NO_SEQ; }
     else if (strcmp(cmd, "set_min_pressure") == 0)  { c.type = CMD_SET_MIN;      c.chamber = doc["chamber"] | -1; c.param_kpa = doc["value"] | chambers::DEFAULT_MIN_KPA; c.seq = doc["seq"] | NO_SEQ; }
@@ -477,7 +493,7 @@ inline void parseAndQueue(const uint8_t* data, int len) {
     }
     else if (strcmp(cmd, "set_led_halves") == 0) {
         // Split the ring into len(colors) equal arcs (the purple/yellow look) in
-        // ONE frame. Replaces the PC's old per-pixel burst - 24 set_led frames
+        // ONE frame. Replaces the PC's old per-pixel burst - one set_led frame per LED
         // that reset the node by calling strip.show() once per pixel in the recv
         // task. {"cmd":"set_led_halves","colors":["#RRGGBB",...],"pattern":...,
         // "fade_ms":N}  pattern "comet" paints one comet per colour.

@@ -103,15 +103,16 @@ POWER_FIELD = VerbField(
 )
 
 # LED ring selector, shared by the verbs that drive lights. The multiplexed
-# board has four independent rings (0..3) that can animate separately; the
-# direct board has a single ring. "all" (the default) addresses every ring at
-# once, matching the prior whole-ring behaviour; single-ring boards ignore an
-# explicit 0..3 beyond ring 0.
+# board defines three independent rings (0..2; Tree populates all three, Turtle
+# only ring 0) that can animate separately; the direct board has a single ring.
+# "all" (the default) addresses every ring at once, matching the prior
+# whole-ring behaviour; single-ring boards ignore an explicit ring beyond 0.
 RING_FIELD = VerbField(
     name="ring", type="ring", default="all",
-    description="Which LED ring to drive: 'all' (every ring) or 0..3. Only the "
-                "multiplexed board has rings 1..3 (4 independent rings); the "
-                "direct board has one ring and ignores higher indices.",
+    description="Which LED ring to drive: 'all' (every ring) or 0..2. Only the "
+                "multiplexed board has rings 1..2 (Tree populates 3 rings, "
+                "Turtle 1); the direct board has one ring and ignores higher "
+                "indices.",
 )
 
 # Cross-fade time, shared by the LED verbs. Every LED change cross-fades; this sets
@@ -144,8 +145,8 @@ BEAT_MODES = ("sync", "sequential", "random", "aligned")
 ACTIONS: tuple[Verb, ...] = (
     Verb("set_led", "action",
          "Light one LED ring (or all rings) one colour. 'comet' sweeps a single "
-         "rotating light. Pick a 'ring' to animate the multiplexed board's four "
-         "rings independently.", (
+         "rotating light. Pick a 'ring' to animate the multiplexed board's rings "
+         "independently.", (
         VerbField("color", "color", "#8e44ad"),
         VerbField("pattern", "enum", "solid", choices=LED_PATTERNS),
         VerbField("period_ms", "ms", 0,
@@ -158,7 +159,7 @@ ACTIONS: tuple[Verb, ...] = (
     Verb("set_led_halves", "action",
          "Split a ring into equal arcs, one colour each (e.g. half purple, "
          "half yellow). 'comet' instead sweeps one rotating comet per colour. "
-         "Pick a 'ring' to target one of the four rings.", (
+         "Pick a 'ring' to target one ring.", (
         VerbField("colors", "colors", ["#8e44ad", "#f1c40f"]),
         VerbField("pattern", "enum", "solid", choices=LED_PATTERNS),
         VerbField("period_ms", "ms", 0,
@@ -171,7 +172,7 @@ ACTIONS: tuple[Verb, ...] = (
     Verb("fade", "action",
          "Smoothly cross-fade a ring back and forth between two colours. Wrap "
          "in 'repeat forever' for a continuous fade. Pick a 'ring' to fade one "
-         "of the four rings independently.", (
+         "ring independently.", (
         VerbField("color1", "color", "#8e44ad"),
         VerbField("color2", "color", "#f1c40f"),
         VerbField("period_ms", "ms", 2000,

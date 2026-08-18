@@ -56,14 +56,34 @@ ACTUATOR_NODE_TYPES = ("node_direct", "node_multiplexed")
 MAGNET_NODE_TYPES = ("node_magnet_sensor", "node_direct")
 
 # LED ring layout per node type - the LED count of each independently
-# addressable ring, mirroring the firmware's RING_LEDS. node_direct drives a
-# single ring; node_multiplexed drives four (one 24-LED + three 16-LED), each
-# selected via set_led's "ring" field. The Test Actuators dialog builds one ring
-# tester per entry. Node types absent here have no LED rings.
+# addressable ring, mirroring the firmware's RING_LEDS. node_direct (the Thymio
+# board) drives a single 16-LED ring; node_multiplexed defines three 24-LED
+# rings, each selected via set_led's "ring" field. The Test Actuators dialog
+# builds one ring tester per entry. Node types absent here have no LED rings.
 NODE_LED_RINGS: dict[str, tuple[int, ...]] = {
-    "node_direct": (24,),
-    "node_multiplexed": (24, 16, 16, 16),
+    "node_direct": (16,),
+    "node_multiplexed": (24, 24, 24),
 }
+
+# Rings actually POPULATED per robot type on the multiplexed board. The Turtle
+# and Tree PCBs are the same node_multiplexed build; Turtle solders only ring 0,
+# Tree all three (one per branch skin). The firmware always defines all rings
+# (an absent ring's data pin drives nothing), so this only trims what the GUI
+# exposes. Robot types absent here show every firmware ring.
+ROBOT_LED_RING_COUNT: dict[str, int] = {
+    "turtle": 1,
+    "tree": 3,
+}
+
+
+def led_rings_for(node_type: str | None, robot_type: str | None) -> tuple[int, ...]:
+    """LED rings of ``node_type`` populated on a ``robot_type`` robot.
+
+    The firmware layout (:data:`NODE_LED_RINGS`) trimmed to the rings the
+    robot's PCB actually solders (:data:`ROBOT_LED_RING_COUNT`)."""
+    rings = NODE_LED_RINGS.get(node_type or "", ())
+    count = ROBOT_LED_RING_COUNT.get(robot_type or "")
+    return rings[:count] if count else rings
 
 
 # ---------------------------------------------------------------------------

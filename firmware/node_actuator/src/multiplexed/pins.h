@@ -45,25 +45,26 @@ constexpr int NUM_PUMPS = 6;
 constexpr int MAX_CHAMBERS = 12;
 
 // ---------------------------------------------------------------------------
-// RGBW/RGB LED rings (SK6812 / WS2812). Four independent rings - one 24-LED +
-// three 16-LED - each on its OWN data pin, driven as four separate strips (see
-// leds.h). The "set_led" command's "ring" field (0..3) selects one.
+// RGBW/RGB LED rings (SK6812 / WS2812). Up to three independent 24-LED rings -
+// each on its OWN data pin, driven as separate strips (see leds.h). The
+// "set_led" command's "ring" field (0..2) selects one.
 //
-// Pins were chosen by the hardware owner; the multiplexed board is not yet
-// soldered. The 16-LED rings are NOT on GPIO34/35/36: those are input-only on
+// The Turtle and Tree PCBs are identical builds of this board; they differ only
+// in how many rings are populated: Turtle solders 1 (ring 0), Tree solders 3
+// (one per branch skin). The firmware always defines all three - an unpopulated
+// ring's data pin just drives nothing - and the PC only exposes the rings the
+// robot's config declares.
+//
+// TODO(hardware): pin map is provisional - the final Turtle/Tree PCB routing is
+// not decided yet. The old map put rings on IO17/IO16, which overlap the
+// sensor-mux select lines SMUX_S1 (17) and SMUX_S0 (16) above; ring 1 below
+// still does, so pressure sensing fights ring 1's data line until the PCB
+// assigns free GPIOs. Rings are NOT on GPIO34/35/36: those are input-only on
 // the classic ESP32 and physically cannot output a NeoPixel data signal.
-//
-// WARNING - provisional wiring: ring 1 (IO17) and ring 2 (IO16) overlap the
-// sensor-mux select lines SMUX_S1 (17) and SMUX_S0 (16) above. While shared,
-// the mux select and the LED data line fight over the same pins at runtime, so
-// chamber pressure sensing on this board will be wrong until the mux select
-// lines are moved to other free GPIOs (the board is unsoldered, so that move is
-// still open).
 // ---------------------------------------------------------------------------
-constexpr int NUM_RINGS = 4;
-constexpr int LED_PINS[NUM_RINGS]  = {23, 17, 16, 4};
-//                                    24-LED ring  -> IO23
-//                                    16-LED ring1 -> IO17  (overlaps SMUX_S1!)
-//                                    16-LED ring2 -> IO16  (overlaps SMUX_S0!)
-//                                    16-LED ring3 -> IO4
-constexpr int RING_LEDS[NUM_RINGS] = {24, 16, 16, 16};
+constexpr int NUM_RINGS = 3;
+constexpr int LED_PINS[NUM_RINGS]  = {23, 17, 4};
+//                                    ring 0 -> IO23 (the only ring on Turtle)
+//                                    ring 1 -> IO17 (overlaps SMUX_S1! provisional)
+//                                    ring 2 -> IO4
+constexpr int RING_LEDS[NUM_RINGS] = {24, 24, 24};

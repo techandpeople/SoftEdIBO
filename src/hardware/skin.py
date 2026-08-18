@@ -60,6 +60,7 @@ class Skin:
         organs: list[dict[str, Any]] | None = None,
         skin_type: str = "",
         skin_variant: str = "",
+        pressure_sensors: bool = True,
     ):
         if not chamber_inputs:
             raise ValueError(f"Skin {skin_id!r} has no chambers")
@@ -110,6 +111,15 @@ class Skin:
         # sizes per variant; fed to the touch ML as a feature. Empty = unset.
         self.skin_variant = skin_variant or ""
 
+        # ``pressure_sensors=False`` marks the node's PCB as having no pressure
+        # sensors populated yet (boards awaiting parts). Every actuation then
+        # runs fully open-loop on manual per-chamber times: inflate on the
+        # ``fill_time_ms`` / fill curve, deflate on ``empty_time_ms``, both sent
+        # with ``timed=1`` so the firmware ignores its floating-pin gauge, and
+        # the Skin keeps an open-loop pressure ESTIMATE (the commanded target)
+        # instead of trusting the (noise) telemetry.
+        self._sensorless = not pressure_sensors
+
         self._ctrl = chamber_inputs[0]["controller"]
         self.mac: str = self._ctrl.mac_address
 
@@ -143,6 +153,10 @@ class Skin:
         # chamber inflates closed-loop on the gauge sensor even when a calibrated
         # curve exists, so the curve is ignored for runtime timing.
         self._fill_modes: dict[int, str] = {}
+        # local_idx -> manual full-range empty time (ms) or None. Only consulted
+        # on a sensorless node, where no measured deflate curve can exist: a
+        # deflate opens for empty_time_ms * delta/100.
+        self._empty_times: dict[int, int | None] = {}
 
         self._build_chambers(chamber_inputs)
 
@@ -244,6 +258,8 @@ class Skin:
             self._deflate_profiles[local_idx] = \
                 DeflateProfile.from_list(inp.get("deflate_profile"))
             self._fill_modes[local_idx] = normalize_fill_mode(inp.get("fill_mode"))
+            empty_time = inp.get("empty_time_ms")
+            self._empty_times[local_idx] = int(empty_time) if empty_time else None
             self._slots.append(node_slot)
             self._reverse[node_slot] = local_idx
             ch = AirChamber(
@@ -368,6 +384,9 @@ class Skin:
             if combos:
                 d["fill_profiles"] = {combo_key(slots): prof.to_list()
                                       for slots, prof in combos.items()}
+            empty = self._empty_times.get(idx)
+            if empty:
+                d["empty_time_ms"] = empty
             defs.append(d)
         return defs
 
@@ -445,9 +464,16 @@ class Skin:
                      state: int | None = None,
                      kpa: float = float("nan")) -> None:
         local_idx = self._reverse.get(node_slot)
-        if local_idx is not None:
-            actuating = _FW_ACTUATION.get(state) if state is not None else None
-            self._chambers[local_idx].update_pressure(pressure, actuating, kpa)
+        if local_idx is None:
+            return
+        actuating = _FW_ACTUATION.get(state) if state is not None else None
+        if self._sensorless:
+            # No sensor populated: the reported pressure/kPa is floating-pin
+            # noise. Keep the open-loop estimate; fold in only the (real)
+            # actuation state.
+            self._chambers[local_idx].update_actuation(actuating)
+            return
+        self._chambers[local_idx].update_pressure(pressure, actuating, kpa)
 
     def _on_target(self, node_slot: int, target: int) -> None:
         local_idx = self._reverse.get(node_slot)
@@ -472,13 +498,17 @@ class Skin:
             return self._inflate(local_idx, chamber, slot, value, co_active)
 
         if kind == "deflate":
-            new_target = max(0, chamber.target_pressure - value)
+            prev_target = chamber.target_pressure
+            new_target = max(0, prev_target - value)
             chamber.target_pressure = new_target
+            self._ctrl.fill_load.note_stop(slot)
+            if self._sensorless:
+                return self._deflate_open_loop(local_idx, chamber, slot,
+                                               prev_target, new_target)
             if chamber.pressure > new_target:
                 chamber.state = ChamberState.DEFLATING
             else:
                 chamber.state = ChamberState.IDLE
-            self._ctrl.fill_load.note_stop(slot)
             ms = self._deflate_ms(local_idx, chamber.pressure, new_target)
             if ms is not None:
                 return self._ctrl.deflate(slot, value, ms=ms)
@@ -486,6 +516,20 @@ class Skin:
 
         # set_pressure
         v = max(0, min(100, value))
+        if self._sensorless:
+            # No gauge to close an absolute target on - decompose into the
+            # relative open-loop moves, timed off the manual curves, from the
+            # tracked estimate (chamber.pressure mirrors the last target).
+            prev_target = chamber.target_pressure
+            if v > prev_target:
+                # _inflate reads and advances target_pressure itself.
+                return self._inflate(local_idx, chamber, slot, v - prev_target)
+            if v < prev_target:
+                chamber.target_pressure = v
+                self._ctrl.fill_load.note_stop(slot)
+                return self._deflate_open_loop(local_idx, chamber, slot,
+                                               prev_target, v)
+            return True
         chamber.target_pressure = v
         if chamber.pressure < v:
             chamber.state = ChamberState.INFLATING
@@ -524,6 +568,8 @@ class Skin:
         prev_target = chamber.target_pressure
         new_target = min(100, prev_target + value)
         chamber.target_pressure = new_target
+        # On a sensorless node chamber.pressure IS the open-loop estimate (the
+        # last commanded target), so these guards keep working unchanged.
         if chamber.pressure < new_target:
             chamber.state = ChamberState.INFLATING
         elif new_target > 0:
@@ -540,7 +586,8 @@ class Skin:
             return True
 
         profile = self._fill_profiles.get(local_idx)
-        pressure_mode = self._fill_modes.get(local_idx) == FILL_MODE_PRESSURE
+        pressure_mode = (self._fill_modes.get(local_idx) == FILL_MODE_PRESSURE
+                         and not self._sensorless)
         if profile is not None and not pressure_mode:
             load = self._ctrl.fill_load
             active = set(co_active) if co_active is not None \
@@ -554,8 +601,50 @@ class Skin:
                            - profile.time_for_pct(prev_target))
                 ms = scale_fill_ms(base_ms, load.active_count() + 1, load.pump_count)
             load.note_inflate(slot, ms)
+            if self._sensorless:
+                ok = self._ctrl.inflate(slot, value, ms=ms, timed=True)
+                if ok:
+                    chamber.pressure = new_target   # advance the estimate
+                return ok
             return self._ctrl.inflate(slot, value, ms=ms)
+        if self._sensorless:
+            # No time to run open-loop by - refuse rather than pulse blind.
+            logger.warning(
+                "Skin %s ch %d: node has no pressure sensors and no fill time "
+                "set - enter a manual fill time (ms) in the skin config",
+                self.skin_id, local_idx)
+            return False
         return self._ctrl.inflate(slot, value)
+
+    def _deflate_open_loop(self, local_idx: int, chamber: AirChamber, slot: int,
+                           prev_target: int, new_target: int) -> bool:
+        """Timed deflate for a sensorless node (no gauge to close the loop).
+
+        The open window comes from the manual per-chamber ``empty_time_ms``
+        (full-range 100->0 time, scaled by the requested delta); a measured
+        deflate curve wins when one exists (a board calibrated before its
+        sensors were removed). Sent with ``timed=1`` so the firmware skips its
+        below-target guard and ignores the floating gauge. The pressure
+        ESTIMATE advances to the new target on success."""
+        if prev_target <= new_target:
+            return True
+        profile = self._deflate_profiles.get(local_idx)
+        if profile is not None and not profile.is_empty:
+            ms = max(1, int(round(profile.extrapolate_ms(prev_target, new_target))))
+        else:
+            empty_ms = self._empty_times.get(local_idx)
+            if not empty_ms:
+                logger.warning(
+                    "Skin %s ch %d: node has no pressure sensors and no empty "
+                    "time set - enter a manual empty time (ms) in the skin "
+                    "config", self.skin_id, local_idx)
+                return False
+            ms = max(1, int(round(empty_ms * (prev_target - new_target) / 100.0)))
+        chamber.state = ChamberState.DEFLATING
+        ok = self._ctrl.deflate(slot, prev_target - new_target, ms=ms, timed=True)
+        if ok:
+            chamber.pressure = new_target   # advance the estimate
+        return ok
 
     # Targets this close to (or below) the measured deflate floor get a time
     # budget: readings hover at the floor, so the closed loop can't be trusted

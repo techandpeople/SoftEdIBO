@@ -122,6 +122,21 @@ class AirChamber:
             else:
                 self._state = ChamberState.DEFLATING
 
+    def update_actuation(self, actuating: "ChamberState | None") -> None:
+        """State-only update for a chamber on a SENSORLESS node.
+
+        The node has no pressure sensor populated, so its status ``kpa`` /
+        ``pressure`` fields are floating-pin noise and must not touch the
+        open-loop estimate the Skin maintains in ``pressure``. The firmware's
+        actuation state (``st``) is still real - the engine drives it from its
+        own valve timing - so only that is folded in.
+        """
+        if actuating is None:
+            return
+        with self._lock:
+            self._state = (self._settled_state()
+                           if actuating is ChamberState.IDLE else actuating)
+
     def _settled_state(self) -> ChamberState:
         """State of a chamber the firmware reports as not actuating: holding a
         level (``INFLATED``) or empty (``IDLE``)."""

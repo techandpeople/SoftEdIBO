@@ -70,10 +70,10 @@ NODE_TYPE_FIRMWARES: dict[str, dict[str, Path]] = {
     "node_multiplexed": {
         "release": Settings.BUNDLE / "firmware" / "node_actuator" / "firmware-multiplexed-release.bin",
         "debug":   Settings.BUNDLE / "firmware" / "node_actuator" / "firmware-multiplexed-debug.bin",
-        # RGBW LED-ring variants (SK6812). The multiplexed board drives four rings
-        # (one 24-LED + three 16-LED) as separate strips on GPIO23/17/16/4; only the
-        # NeoPixel pixel type differs (-DLED_RGBW). Selected by the same "RGBW LED
-        # ring" toggle as node_direct.
+        # RGBW LED-ring variants (SK6812). The multiplexed board drives up to
+        # three 24-LED rings as separate strips (Turtle populates 1, Tree 3);
+        # only the NeoPixel pixel type differs (-DLED_RGBW). Selected by the same
+        # "RGBW LED ring" toggle as node_direct.
         "release_rgbw": Settings.BUNDLE / "firmware" / "node_actuator" / "firmware-multiplexed-rgbw-release.bin",
         "debug_rgbw":   Settings.BUNDLE / "firmware" / "node_actuator" / "firmware-multiplexed-rgbw-debug.bin",
     },

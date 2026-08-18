@@ -73,6 +73,10 @@ class NodeConfigDialog(BaseDialog, Ui_NodeConfigDialog):
         self._on_type_changed(self.type_combo.currentText())
         if self.slots_spin.isEnabled():
             self.slots_spin.setValue(int(stored_slots))
+        # Bench board awaiting its pressure sensors: actuation runs open-loop
+        # on the manual per-chamber times (see Skin ``pressure_sensors``).
+        self.no_sensors_check.setChecked(
+            node_cfg.get("pressure_sensors") is False)
         self._update_note()
 
         self.save_btn.clicked.connect(self._on_save)
@@ -122,6 +126,8 @@ class NodeConfigDialog(BaseDialog, Ui_NodeConfigDialog):
             self.slots_spin.setRange(1, 16)
             self.slots_spin.setEnabled(True)
             self.slots_spin.setValue(NODE_TYPES.get(node_type, 12))
+        # Sensor-only boards have no chambers, so the flag is meaningless there.
+        self.no_sensors_check.setVisible(node_type != "node_magnet_sensor")
         self._update_note()
 
     def _update_note(self) -> None:
@@ -179,6 +185,11 @@ class NodeConfigDialog(BaseDialog, Ui_NodeConfigDialog):
         node_entry.update(
             {"mac": mac, "node_type": node_type, "max_slots": max_slots}
         )
+        # Only persist the non-default: a populated board carries no key.
+        if self.no_sensors_check.isChecked():
+            node_entry["pressure_sensors"] = False
+        else:
+            node_entry.pop("pressure_sensors", None)
 
         data = self._settings.data
         robots_list = (

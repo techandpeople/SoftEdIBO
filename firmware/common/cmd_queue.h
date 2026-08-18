@@ -35,6 +35,9 @@ struct Cmd {
     int16_t  param;         // delta or value (percent), or valve side / pump idx
     uint8_t  duty;          // inflate/deflate: pump PWM duty 0-255 (0 = unset -> full)
     uint32_t fill_ms;       // inflate: time-based fill window (ms; 0 = pressure-based)
+    uint8_t  timed;         // inflate/deflate: 1 = open-loop ("timed":1) - the board has
+                            // no pressure sensor populated, run purely on fill_ms and
+                            // ignore the (floating, noise) gauge readings entirely
     float    param_kpa;     // chamber min or max in kPa (depends on type)
     int16_t  cfg_chambers;  // configure: num_chambers, or manual: open/on (bool)
     float    cfg_p_min;     // configure: tank_pressure_min_kpa

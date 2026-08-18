@@ -149,10 +149,11 @@
     function defineBlocks() {
       var CH = [['current', 'current'], ['all', 'all'],
                 ['0', '0'], ['1', '1'], ['2', '2'], ['3', '3']];
-      // LED ring selector. The multiplexed board has four independent rings
-      // (0..3); the direct board has one and ignores higher indices.
+      // LED ring selector. The multiplexed board defines three independent
+      // rings (0..2; Tree populates all three, Turtle only ring 0); the direct
+      // board has one and ignores higher indices.
       var RING = [['all rings', 'all'], ['ring 0', '0'], ['ring 1', '1'],
-                  ['ring 2', '2'], ['ring 3', '3']];
+                  ['ring 2', '2']];
       // Robot kinds for the `if robot is` / `robot is` blocks (activity_kind.KINDS).
       var ROBOTS = [['Thymio', 'thymio'], ['Turtle', 'turtle'], ['Tree', 'tree']];
       Blockly.defineBlocksWithJsonArray([
@@ -186,8 +187,8 @@
                  + 'it. "pattern" comet sweeps a single rotating light. "period" '
                  + 'is the pulse/blink speed or comet revolution in ms (ignored '
                  + 'for solid/off). "smooth" is the cross-fade time of this change '
-                 + '(0 snaps). "ring" picks one of the multiplexed board\'s four '
-                 + 'rings (0..3) or "all rings"; the direct board has one ring.' },
+                 + '(0 snaps). "ring" picks one of the multiplexed board\'s three '
+                 + 'rings (0..2) or "all rings"; the direct board has one ring.' },
 
         { type: 'se_set_led_halves',
           message0: 'set LED halves %1 %2 pattern %3 period(ms) %4 smooth(ms) %5 angle %6 ring %7',
@@ -204,7 +205,7 @@
                  + 'comet gives one rotating comet per colour (two comets). '
                  + '"smooth" is the cross-fade time; "angle" rotates the split '
                  + 'around the ring (e.g. 90 = top/bottom instead of left/right). '
-                 + '"ring" picks one of the multiplexed board\'s four rings.' },
+                 + '"ring" picks one of the multiplexed board\'s three rings.' },
 
         { type: 'se_set_led_quarters',
           message0: 'set LED quarters %1 %2 %3 %4 pattern %5 period(ms) %6 smooth(ms) %7 angle %8 ring %9',
@@ -221,7 +222,7 @@
           tooltip: 'Split a ring into four colours (quarters). Pattern comet gives '
                  + 'one rotating comet per colour (four comets). "smooth" is the '
                  + 'cross-fade time; "angle" rotates the split around the ring. '
-                 + '"ring" picks one of the multiplexed board\'s four rings.' },
+                 + '"ring" picks one of the multiplexed board\'s three rings.' },
 
         { type: 'se_fade',
           message0: 'fade between %1 and %2 over %3 ms on ring %4',
@@ -232,8 +233,8 @@
           previousStatement: 'Step', nextStatement: 'Step', colour: 230,
           tooltip: 'Smoothly cross-fade a ring back and forth between two '
                  + 'colours. Wrap in "repeat forever" for a continuous fade. '
-                 + '"ring" picks one of the multiplexed board\'s four rings '
-                 + '(0..3) or "all rings".' },
+                 + '"ring" picks one of the multiplexed board\'s three rings '
+                 + '(0..2) or "all rings".' },
 
         { type: 'se_touch_progress',
           message0: 'touch fill - %1 arcs, %2 touch(es) each',

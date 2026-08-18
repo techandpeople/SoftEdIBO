@@ -64,7 +64,13 @@ class EspRobot(BaseRobot):
             }
             set_pump_counts(nodes, self._controllers)
             configure_multiplexed_nodes(nodes, self._controllers)
-            self._skins: dict[str, Skin] = build_skins(skins, self._controllers)
+            # Nodes whose PCB has no pressure sensors populated yet (config
+            # ``pressure_sensors: false``): their skins actuate open-loop on
+            # the manual per-chamber times.
+            sensorless = {n["mac"] for n in nodes
+                          if n.get("pressure_sensors") is False}
+            self._skins: dict[str, Skin] = build_skins(
+                skins, self._controllers, sensorless_macs=sensorless)
         else:
             self._controllers = {}
             self._skins = {}

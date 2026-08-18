@@ -5,11 +5,12 @@
 
 #include "pins.h"
 
-// LED ring control for node_multiplexed. Four independent rings (one 24-LED +
-// three 16-LED, see LED_PINS in pins.h) - each on its own data pin, so each is a
-// separate Adafruit_NeoPixel strip with its own animation state. Driven by the
-// "set_led" / "set_led_halves" ESP-NOW commands (see main.cpp); the "ring" field
-// selects one, omitted / -1 addresses all four at once. Rendering is non-blocking
+// LED ring control for node_multiplexed. Up to three independent 24-LED rings
+// (see LED_PINS in pins.h; Turtle populates 1, Tree 3) - each on its own data
+// pin, so each is a separate Adafruit_NeoPixel strip with its own animation
+// state. Driven by the "set_led" / "set_led_halves" ESP-NOW commands (see
+// main.cpp); the "ring" field selects one, omitted / -1 addresses all at once.
+// Rendering is non-blocking
 // AND fully deferred: the recv callback only updates each ring's per-pixel target
 // buffer plus its animation state, and loop()'s update() is the ONLY place show()
 // runs. show() bit-bangs a strip with interrupts disabled, so driving it from the
@@ -30,7 +31,7 @@ namespace leds {
 enum Pattern : uint8_t { STATIC, BLINK, PULSE, COMET, FADE };
 
 // Max arcs/colours a "set_led_halves" command may carry (also the max comet count),
-// and the largest ring (the 24-LED one) - sizes the per-ring colour buffers.
+// and the largest ring - sizes the per-ring colour buffers.
 constexpr int MAX_SEGMENTS  = 8;
 constexpr int MAX_RING_LEDS = 24;
 
@@ -54,7 +55,6 @@ inline Adafruit_NeoPixel strips[NUM_RINGS] = {
     Adafruit_NeoPixel(RING_LEDS[0], LED_PINS[0], PIXEL_TYPE),
     Adafruit_NeoPixel(RING_LEDS[1], LED_PINS[1], PIXEL_TYPE),
     Adafruit_NeoPixel(RING_LEDS[2], LED_PINS[2], PIXEL_TYPE),
-    Adafruit_NeoPixel(RING_LEDS[3], LED_PINS[3], PIXEL_TYPE),
 };
 
 // Per-ring animation state. `base` holds each pixel's target colour for the

@@ -56,7 +56,8 @@ class ESP32Controller:
         return self._gateway.send(self.mac_address, command, **kwargs)
 
     def inflate(self, chamber: int, delta: int = 10,
-                ms: int | None = None, duty: int | None = None) -> bool:
+                ms: int | None = None, duty: int | None = None,
+                timed: bool = False) -> bool:
         """Inflate a chamber by delta % of its max pressure (0-100).
 
         When ``ms`` is given, the node inflates for that many milliseconds
@@ -66,16 +67,24 @@ class ESP32Controller:
 
         ``duty`` (1-255) optionally lowers the inflate pump's PWM duty so the
         chamber fills more slowly; omit it (or pass None) for full speed.
+
+        ``timed=True`` marks the node as having NO pressure sensor populated
+        (bench board awaiting sensors): the firmware runs the fill fully
+        open-loop on ``ms`` and ignores its (floating-pin noise) gauge readings
+        entirely. Requires ``ms``.
         """
         payload: dict[str, Any] = {"chamber": chamber, "delta": delta}
         if ms is not None:
             payload["ms"] = int(ms)
         if duty is not None:
             payload["duty"] = max(1, min(255, int(duty)))
+        if timed:
+            payload["timed"] = 1
         return self.send_command("inflate", **payload)
 
     def deflate(self, chamber: int, delta: int = 10,
-                ms: int | None = None, duty: int | None = None) -> bool:
+                ms: int | None = None, duty: int | None = None,
+                timed: bool = False) -> bool:
         """Deflate a chamber by delta % of its max pressure (0-100).
 
         When ``ms`` is given it becomes the chamber's open-time budget on the
@@ -85,12 +94,19 @@ class ESP32Controller:
 
         ``duty`` (1-255) optionally lowers the deflate (vacuum) pump's PWM duty
         so the chamber empties more slowly; omit it for full speed.
+
+        ``timed=True`` runs the pull fully open-loop on ``ms`` for a node with
+        no pressure sensor populated (see :meth:`inflate`). Without it a
+        sensorless node's firmware drops the deflate outright - its floating
+        gauge reads ~min pressure, so the below-target guard never passes.
         """
         payload: dict[str, Any] = {"chamber": chamber, "delta": delta}
         if ms is not None:
             payload["ms"] = int(ms)
         if duty is not None:
             payload["duty"] = max(1, min(255, int(duty)))
+        if timed:
+            payload["timed"] = 1
         return self.send_command("deflate", **payload)
 
     @property
@@ -283,13 +299,13 @@ class ESP32Controller:
         loop(). ``pattern`` / ``period_ms`` animate the whole split ring together;
         ``pattern="comet"`` paints one rotating comet per colour (so two colours
         give two comets 180 deg apart). ``ring`` selects one of the multiplexed
-        board's four rings (0..3); omitted addresses all rings, and single-ring
+        board's three rings (0..2); omitted addresses all rings, and single-ring
         boards ignore it. ``fade_ms`` is the cross-fade time for this change
         (node default ~250 ms when omitted, 0 snaps). ``angle`` (0-360 deg) rotates
         the split around the ring, so e.g. halves can sit top/bottom instead of
         left/right.
 
-        This used to loop one ``set_led(index=...)`` per LED - a 24-frame burst
+        This used to loop one ``set_led(index=...)`` per LED - a one-frame-per-LED burst
         that reset the node, because the firmware calls ``strip.show()`` (which
         disables interrupts) once per pixel from the ESP-NOW receive task. The
         single-frame command does one ``show()`` off that task instead.
