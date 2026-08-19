@@ -10,8 +10,9 @@ Two states:
 * **armed** (default): a big red "EMERGENCY STOP" button. Pressing it - or the
   app-wide panic key - emits :attr:`stop_requested`.
 * **stopped**: it turns into a "STOPPED - click to re-arm" button. Clicking it
-  emits :attr:`rearm_requested` (the window confirms before acting). The panic
-  key never re-arms, so a second panic press only re-stops.
+  - or the app-wide '1' key - emits :attr:`rearm_requested` (the window
+  confirms before acting). The panic key never re-arms, so a second panic
+  press only re-stops, and '1' does nothing while armed.
 
 Drop it into a menu-bar corner like :class:`~src.gui.help_mode.HelpButton`::
 
@@ -36,13 +37,13 @@ _STOPPED_STYLE = (
 )
 
 _ARMED_TEXT = "EMERGENCY STOP (0)"
-_STOPPED_TEXT = "STOPPED - click to re-arm"
+_STOPPED_TEXT = "STOPPED - re-arm (1)"
 
 _HELP = (
     "Emergency stop. Immediately turns off every pump and closes every valve on "
     "all connected nodes, and freezes the running session. Also triggered by the "
-    "'0' key anywhere in the app. Click again while stopped to re-arm (a "
-    "confirmation is asked first)."
+    "'0' key anywhere in the app. Click again while stopped - or press the '1' "
+    "key - to re-arm (a confirmation is asked first)."
 )
 
 

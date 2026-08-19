@@ -503,8 +503,13 @@ class Skin:
             chamber.target_pressure = new_target
             self._ctrl.fill_load.note_stop(slot)
             if self._sensorless:
+                # The requested delta, NOT the estimate difference, sizes the
+                # pull: the estimate has no physical truth (it starts at 0 on
+                # every app start, and 0% = ambient is exactly where a vacuum
+                # pull begins - wrinkles), so an "already empty" estimate must
+                # never block the valve from opening.
                 return self._deflate_open_loop(local_idx, chamber, slot,
-                                               prev_target, new_target)
+                                               value, new_target)
             if chamber.pressure > new_target:
                 chamber.state = ChamberState.DEFLATING
             else:
@@ -528,7 +533,7 @@ class Skin:
                 chamber.target_pressure = v
                 self._ctrl.fill_load.note_stop(slot)
                 return self._deflate_open_loop(local_idx, chamber, slot,
-                                               prev_target, v)
+                                               prev_target - v, v)
             return True
         chamber.target_pressure = v
         if chamber.pressure < v:
@@ -617,31 +622,30 @@ class Skin:
         return self._ctrl.inflate(slot, value)
 
     def _deflate_open_loop(self, local_idx: int, chamber: AirChamber, slot: int,
-                           prev_target: int, new_target: int) -> bool:
+                           delta_pct: int, new_target: int) -> bool:
         """Timed deflate for a sensorless node (no gauge to close the loop).
 
-        The open window comes from the manual per-chamber ``empty_time_ms``
-        (full-range 100->0 time, scaled by the requested delta); a measured
-        deflate curve wins when one exists (a board calibrated before its
-        sensors were removed). Sent with ``timed=1`` so the firmware skips its
-        below-target guard and ignores the floating gauge. The pressure
-        ESTIMATE advances to the new target on success."""
-        if prev_target <= new_target:
+        The open window is ``delta_pct`` percent of the manual per-chamber
+        ``empty_time_ms`` (full-range 100->0 time). The REQUESTED delta sizes
+        the pull, not the estimate difference: the estimate carries no physical
+        truth (it resets to 0 on app start, and estimate 0% = ambient is where
+        a vacuum pull begins), so a deflate must always open the valve. Sent
+        with ``timed=1`` so the firmware skips its below-target guard and
+        ignores the floating gauge. The pressure ESTIMATE then floors at the
+        new target on success."""
+        delta_pct = max(0, min(100, delta_pct))
+        if delta_pct == 0:
             return True
-        profile = self._deflate_profiles.get(local_idx)
-        if profile is not None and not profile.is_empty:
-            ms = max(1, int(round(profile.extrapolate_ms(prev_target, new_target))))
-        else:
-            empty_ms = self._empty_times.get(local_idx)
-            if not empty_ms:
-                logger.warning(
-                    "Skin %s ch %d: node has no pressure sensors and no empty "
-                    "time set - enter a manual empty time (ms) in the skin "
-                    "config", self.skin_id, local_idx)
-                return False
-            ms = max(1, int(round(empty_ms * (prev_target - new_target) / 100.0)))
+        empty_ms = self._empty_times.get(local_idx)
+        if not empty_ms:
+            logger.warning(
+                "Skin %s ch %d: node has no pressure sensors and no empty "
+                "time set - enter a manual empty time (ms) in the skin "
+                "config", self.skin_id, local_idx)
+            return False
+        ms = max(1, int(round(empty_ms * delta_pct / 100.0)))
         chamber.state = ChamberState.DEFLATING
-        ok = self._ctrl.deflate(slot, prev_target - new_target, ms=ms, timed=True)
+        ok = self._ctrl.deflate(slot, delta_pct, ms=ms, timed=True)
         if ok:
             chamber.pressure = new_target   # advance the estimate
         return ok

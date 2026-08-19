@@ -77,10 +77,15 @@ def test_deflate_without_manual_time_is_refused():
     assert not ctrl.deflate_calls
 
 
-def test_deflate_from_zero_estimate_is_noop():
+def test_deflate_from_zero_estimate_still_pulls():
+    # The estimate has no physical truth (resets to 0 on app start; 0% =
+    # ambient is exactly where a vacuum pull begins), so the requested delta
+    # must always open the valve - never the estimate difference.
     skin, ctrl = _skin()
-    assert skin.deflate(0, 30)        # nothing to pull - trivially true
-    assert not ctrl.deflate_calls
+    assert skin.deflate(0, 30)
+    call = ctrl.deflate_calls[-1]
+    assert call["timed"] is True
+    assert call["ms"] == 600          # 30% of the 2000 ms full-empty window
 
 
 def test_telemetry_noise_does_not_touch_the_estimate():

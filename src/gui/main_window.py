@@ -133,9 +133,10 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.menubar.setCornerWidget(self._help_button, Qt.Corner.TopRightCorner)
 
         # Always-visible emergency stop in the opposite corner. Kills every pump
-        # and valve at once. Pressing the "0" key anywhere does the same (see the
-        # application event filter installed below).
+        # and valve at once. Pressing the "0" key anywhere does the same, and
+        # "1" re-arms while stopped (see the application event filter below).
         self._estop_button = EmergencyStopButton(self)
+        self._rearm_confirm_open = False
         self._estop_button.stop_requested.connect(self._emergency_stop)
         self._estop_button.rearm_requested.connect(self._rearm)
         self.menubar.setCornerWidget(self._estop_button, Qt.Corner.TopLeftCorner)
@@ -587,19 +588,25 @@ class MainWindow(QMainWindow, Ui_MainWindow):
     _TEXT_INPUT_TYPES = (QLineEdit, QAbstractSpinBox, QTextEdit, QPlainTextEdit)
 
     def eventFilter(self, obj, event) -> bool:
-        """App-wide panic key: a bare "0" fires the emergency stop.
+        """App-wide panic keys: a bare "0" fires the emergency stop, a bare
+        "1" re-arms (same confirmed path as clicking the re-arm button).
 
         Installed on the QApplication so it works from any tab or dialog. It is
         suppressed while a text-entry widget (or an editable combo box) has
-        focus, so typing 0 into a value field still works.
+        focus, so typing digits into a value field still works. "1" is only
+        consumed while stopped - it never re-arms an already-armed system.
         """
         if event.type() == QEvent.Type.KeyPress and isinstance(event, QKeyEvent):
-            if (event.key() == Qt.Key.Key_0
-                    and not event.isAutoRepeat()
+            if (not event.isAutoRepeat()
                     and event.modifiers() == Qt.KeyboardModifier.NoModifier
                     and not self._focus_is_text_input()):
-                self._emergency_stop()
-                return True
+                if event.key() == Qt.Key.Key_0:
+                    self._emergency_stop()
+                    return True
+                if (event.key() == Qt.Key.Key_1
+                        and self._estop_button.is_stopped):
+                    self._rearm()
+                    return True
         return super().eventFilter(obj, event)
 
     def _focus_is_text_input(self) -> bool:
@@ -623,17 +630,26 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self._session_panel.emergency_stop()
         self._estop_button.set_stopped(True)
         self.statusBar().showMessage(
-            "EMERGENCY STOP - all pumps off, valves closed. Click the button to re-arm.")
+            "EMERGENCY STOP - all pumps off, valves closed. "
+            "Press 1 or click the button to re-arm.")
         logger.warning("EMERGENCY STOP triggered")
 
     def _rearm(self) -> None:
         """Re-enable actuation after an emergency stop (asks for confirmation)."""
-        answer = QMessageBox.question(
-            self, "Re-arm robots",
-            "Re-arm all robots? Pumps and valves will be allowed to run again.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
+        # The '1' key reaches here through the app-wide event filter, so guard
+        # against re-entry while the confirmation dialog is already open.
+        if self._rearm_confirm_open:
+            return
+        self._rearm_confirm_open = True
+        try:
+            answer = QMessageBox.question(
+                self, "Re-arm robots",
+                "Re-arm all robots? Pumps and valves will be allowed to run again.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+        finally:
+            self._rearm_confirm_open = False
         if answer != QMessageBox.StandardButton.Yes:
             return
         for robot in self._robots:
