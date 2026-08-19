@@ -87,13 +87,18 @@
       s.src = src; s.onload = onload; s.onerror = onerror;
       document.head.appendChild(s);
     }
+    // The bundled build always ships blockly.min.js (softedibo.spec fails the
+    // build without it), so reaching the CDN means an incomplete install - not
+    // a normal offline run. Say that, rather than blaming the network: the CDN
+    // hop silently masked a missing asset for every machine that had internet.
     loadScript('./blockly.min.js', init, function () {
       loadScript('https://unpkg.com/blockly/blockly.min.js', init, function () {
         var e = document.getElementById('error');
         e.style.display = 'block';
-        e.textContent = 'Could not load Blockly.\n\nYou appear to be offline. '
-          + 'Run scripts/fetch_blockly.sh once (with internet) to vendor it, '
-          + 'then reopen the editor.';
+        e.textContent = 'Could not load the block editor.\n\n'
+          + 'This install is missing its Blockly copy '
+          + '(src/gui/blockly/blockly.min.js), and the online fallback could '
+          + 'not be reached either. Reinstall SoftEdIBO to fix it.';
       });
     });
 

@@ -21,9 +21,24 @@
 #       node_magnet_sensor/firmware-release.bin      (MLX90393 touch board)
 #       thymio_rcp/firmware.bin                      (XIAO ESP32-C6 RCP, WiFi-OTA app image)
 
+from pathlib import Path
+
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 block_cipher = None
+
+# ---------------------------------------------------------------------------
+# Vendored Blockly (Behaviour Editor)
+# ---------------------------------------------------------------------------
+# The editor page falls back to the unpkg CDN when the library is missing, so a
+# bundle built without it looks fine here and then dies with "Could not load
+# Blockly" on any offline machine. The bundle must be self-contained: fail the
+# build instead of shipping an editor that needs internet.
+if not Path("src/gui/blockly/blockly.min.js").is_file():
+    raise SystemExit(
+        "softedibo.spec: src/gui/blockly/blockly.min.js is missing.\n"
+        "Run `bash scripts/fetch_blockly.sh` (once, with internet) before building."
+    )
 
 # ---------------------------------------------------------------------------
 # Excludes

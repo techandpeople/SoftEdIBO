@@ -220,6 +220,11 @@ jobs:
       # Python desktop application
       # ----------------------------------------------------------------
 
+      # The Behaviour Editor falls back to the unpkg CDN when Blockly is not
+      # vendored, which breaks on any offline machine. Vendor it into the bundle.
+      - name: Vendor Blockly (offline Behaviour Editor)
+        run: bash scripts/fetch_blockly.sh
+
       - name: Build with PyInstaller
         run: pyinstaller softedibo.spec
 
@@ -332,6 +337,12 @@ jobs:
         with:
           name: firmware-tree
           path: firmware
+
+      # The Behaviour Editor falls back to the unpkg CDN when Blockly is not
+      # vendored, which breaks on any offline machine. Vendor it into the bundle.
+      - name: Vendor Blockly (offline Behaviour Editor)
+        shell: bash
+        run: bash scripts/fetch_blockly.sh
 
       - name: Build with PyInstaller
         run: pyinstaller softedibo.spec
