@@ -93,6 +93,12 @@
       </widget>
      </item>
      <item>
+      <widget class="QPushButton" name="hold_btn">
+       <property name="whatsThis"><string>Measure each chamber's leak-compensation curves. At several fill levels the firmware's hold servo keeps the inflate valve open and adjusts the pump PWM on the pressure sensor until the level stays put - the pump exactly balancing the leak; that (pressure, PWM) pair becomes a point of the hold curve. After each point the valves close and the natural pressure decay is recorded for the leak curve (kPa lost per second). The hold curve powers regulated holds (chamber stays at its level despite leaks); the leak curve diagnoses abnormal leaks and times sensorless boards. Needs pressure sensors on the node. Keep hands clear during the run.</string></property>
+       <property name="text"><string>Hold/leak curves</string></property>
+      </widget>
+     </item>
+     <item>
       <widget class="QPushButton" name="stop_btn">
        <property name="whatsThis"><string>Abort the current calibration immediately and halt every chamber (close valves, pumps off). Does not run the vacuum pump.</string></property>
        <property name="text"><string> Stop</string></property>

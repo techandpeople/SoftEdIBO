@@ -107,7 +107,7 @@ void setup() {
     // below which pressure a deflate needs a time budget instead of the sensor.
     char ready_msg[160];
     snprintf(ready_msg, sizeof(ready_msg),
-             "{\"status\":\"node_direct_ready\",\"fw\":\"timed-1\",\"rgbw\":" LED_RGBW_JSON ",\"kpa_min\":%.0f}",
+             "{\"status\":\"node_direct_ready\",\"fw\":\"hold-1\",\"rgbw\":" LED_RGBW_JSON ",\"kpa_min\":%.0f}",
              (double)pressure::FLOOR_KPA);
     se::broadcast(ready_msg);
 
@@ -188,6 +188,9 @@ void loop() {
     //      target -> close -> settle -> measure each isolated -> repeat. Drives single
     //      and multi-chamber inflate/deflate uniformly (the manifold is shared). ----
     chambers::controlTick(now);
+
+    // ---- Leak-compensating continuous holds (valve open + equilibrium duty) ----
+    chambers::holdTick(now);
 
     // ---- Manual (dev) actuation safety: dead-man auto-off + HARD_MAX cutoff ----
     chambers::manualSafetyTick(now);

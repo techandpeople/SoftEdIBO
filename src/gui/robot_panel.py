@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from src.config.settings import Settings
+from src.core import node_sharing
 from src.gui.async_task import run_async
 from src.gui.thymio_config_form import ThymioConfigForm
 from src.gui.ui_robot_panel import Ui_RobotPanel
@@ -426,6 +427,7 @@ class RobotPanel(QWidget, Ui_RobotPanel):
         online_macs: frozenset,
     ) -> None:
         tree.clear()
+        shared = node_sharing.shared_macs(self._settings.data)
         for robot_index, robot_cfg in enumerate(robots_list):
             name = (
                 robot_cfg.get("thymio_id", f"thymio-{robot_index + 1}")
@@ -477,7 +479,13 @@ class RobotPanel(QWidget, Ui_RobotPanel):
                     for ch in sk.get("chambers", [])
                     if ch.get("mac") == mac
                 )
-                label = f"[N]  {dot}  {mac}  ({node_type}, {used}/{max_slots})"
+                # A board configured on more than one robot (the Turtle and the
+                # Tree share one PCB, swapped between bodies) is called out here
+                # so it is obvious that editing it affects both.
+                others = [r for r in shared.get(mac, []) if r != name]
+                share_note = f", shared with {', '.join(others)}" if others else ""
+                label = (f"[N]  {dot}  {mac}  "
+                         f"({node_type}, {used}/{max_slots}{share_note})")
                 node_item = QTreeWidgetItem([label])
                 node_item.setForeground(0, color)
                 node_item.setData(0, Qt.ItemDataRole.UserRole, {
@@ -606,13 +614,13 @@ class RobotPanel(QWidget, Ui_RobotPanel):
         prefill_mac = ""
         known = self._gateway.known_macs
         if known:
-            all_assigned = {
-                node.get("mac", "")
-                for robots in self._settings.data.get("robots", {}).values()
-                for robot in robots
-                for node in robot.get("nodes", [])
-            }
-            unassigned = sorted(known - all_assigned)
+            # Only THIS robot's nodes are off-limits: a board may legitimately be
+            # configured on two robots (the Turtle and the Tree share one
+            # node_multiplexed PCB, swapped between bodies), so a node already
+            # used elsewhere must stay pickable here.
+            mine = node_sharing.macs_of(
+                self._settings.data, _YAML_KEY[robot_type], robot_index)
+            unassigned = sorted(known - mine)
             if unassigned:
                 items  = unassigned + ["Enter manually..."]
                 choice, ok = QInputDialog.getItem(

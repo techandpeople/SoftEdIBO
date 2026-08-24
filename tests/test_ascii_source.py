@@ -37,6 +37,9 @@ def _tracked_sources() -> list[Path]:
         if name
         and Path(name).suffix in SOURCE_SUFFIXES
         and not name.startswith(EXEMPT_DIRS)
+        # Tracked but deleted in the working tree (an uncommitted removal)
+        # has nothing to scan.
+        and (ROOT / name).exists()
     ]
 
 

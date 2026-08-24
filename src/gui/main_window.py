@@ -5,20 +5,15 @@ import os
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, Qt, QTimer
-from PySide6.QtGui import QCloseEvent, QKeyEvent
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
-    QAbstractSpinBox,
     QApplication,
-    QComboBox,
     QLabel,
-    QLineEdit,
     QMainWindow,
     QMessageBox,
-    QPlainTextEdit,
     QProgressDialog,
     QPushButton,
-    QTextEdit,
 )
 
 from src._version import __build_time__, __version__
@@ -27,7 +22,7 @@ from src.updater import AppUpdater
 from src.data.database import Database
 from src.gui.async_task import run_async
 from src.gui.data_panel import DataPanel
-from src.gui.emergency_stop_button import EmergencyStopButton
+from src.gui.emergency_stop import EmergencyStopButton, EmergencyStopController
 from src.gui.help_mode import HelpButton
 from src.gui.home_panel import HomePanel
 from src.gui.participant_panel import ParticipantPanel
@@ -37,6 +32,7 @@ from src.gui.settings_dialog import SettingsDialog
 from src.gui.ui_main_window import Ui_MainWindow
 from src.hardware.gateway import Gateway
 from src.hardware.fill_calibration import resolve_fill_profiles
+from src.hardware.node_registry import NodeRegistry
 from src.robots.base_robot import BaseRobot
 from src.robots.thymio.thymio_robot import ThymioRobot
 from src.robots.tree.tree_robot import TreeRobot
@@ -132,17 +128,18 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self._help_button = HelpButton(self)
         self.menubar.setCornerWidget(self._help_button, Qt.Corner.TopRightCorner)
 
-        # Always-visible emergency stop in the opposite corner. Kills every pump
-        # and valve at once. Pressing the "0" key anywhere does the same, and
-        # "1" re-arms while stopped (see the application event filter below).
+        # Always-visible emergency stop in the opposite corner: pumps off +
+        # valves closed everywhere, latched until re-armed. The controller
+        # also installs the app-wide panic keys ('0' stops, '1' re-arms) -
+        # see src/gui/emergency_stop.py.
         self._estop_button = EmergencyStopButton(self)
-        self._rearm_confirm_open = False
-        self._estop_button.stop_requested.connect(self._emergency_stop)
-        self._estop_button.rearm_requested.connect(self._rearm)
         self.menubar.setCornerWidget(self._estop_button, Qt.Corner.TopLeftCorner)
-        app = QApplication.instance()
-        if app is not None:
-            app.installEventFilter(self)
+        self._estop = EmergencyStopController(
+            button=self._estop_button,
+            robots=lambda: self._robots,
+            session_panel=self._session_panel,
+            window=self,
+        )
 
         # Track whether a session is live so OTA can refuse mid-actuation.
         self._session_active = False
@@ -187,6 +184,10 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         """Instantiate all robots declared in settings.yaml."""
         robots: list[BaseRobot] = []
         robot_data = self._settings.data.get("robots", {})
+        # One controller per node MAC for the whole app: the Turtle and the Tree
+        # are built on the SAME board (swapped between bodies, both left
+        # configured), so they must drive one controller, not one each.
+        registry = NodeRegistry(self._gateway)
 
         # Turtle / Tree robots - same node hardware, each its own robot kind.
         for yaml_key, robot_cls in (("turtles", TurtleRobot), ("trees", TreeRobot)):
@@ -199,6 +200,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                         # Fill in each chamber's effective fill curve (own override,
                         # else its skin-type template) before the robot builds its skins.
                         skin_configs=resolve_fill_profiles(self._settings.data, cfg["skins"]),
+                        registry=registry,
                     ))
 
         # Thymios - one RF dongle relays to several at once (each a node id), so all
@@ -222,6 +224,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                 skin_configs=resolve_fill_profiles(
                     self._settings.data, thymio_cfg.get("skins", [])),
                 link=link,
+                registry=registry,
             ))
 
         return robots
@@ -579,88 +582,6 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             f"Soft-based robot for inclusive education .<br><br>"
             f"LASIGE, Faculdade de Ciencias, Universidade de Lisboa",
         )
-
-    # ------------------------------------------------------------------
-    # Emergency stop
-    # ------------------------------------------------------------------
-
-    # Text-entry widgets where "0" must reach the field, not the panic key.
-    _TEXT_INPUT_TYPES = (QLineEdit, QAbstractSpinBox, QTextEdit, QPlainTextEdit)
-
-    def eventFilter(self, obj, event) -> bool:
-        """App-wide panic keys: a bare "0" fires the emergency stop, a bare
-        "1" re-arms (same confirmed path as clicking the re-arm button).
-
-        Installed on the QApplication so it works from any tab or dialog. It is
-        suppressed while a text-entry widget (or an editable combo box) has
-        focus, so typing digits into a value field still works. "1" is only
-        consumed while stopped - it never re-arms an already-armed system.
-        """
-        if event.type() == QEvent.Type.KeyPress and isinstance(event, QKeyEvent):
-            if (not event.isAutoRepeat()
-                    and event.modifiers() == Qt.KeyboardModifier.NoModifier
-                    and not self._focus_is_text_input()):
-                if event.key() == Qt.Key.Key_0:
-                    self._emergency_stop()
-                    return True
-                if (event.key() == Qt.Key.Key_1
-                        and self._estop_button.is_stopped):
-                    self._rearm()
-                    return True
-        return super().eventFilter(obj, event)
-
-    def _focus_is_text_input(self) -> bool:
-        w = QApplication.focusWidget()
-        if w is None:
-            return False
-        if isinstance(w, QComboBox):
-            return w.isEditable()
-        return isinstance(w, self._TEXT_INPUT_TYPES)
-
-    def _emergency_stop(self) -> None:
-        """Halt everything: pumps off + valves closed on all nodes, session frozen.
-
-        Idempotent - pressing the panic key repeatedly just re-issues the stop.
-        """
-        for robot in self._robots:
-            try:
-                robot.emergency_stop()
-            except Exception:
-                logger.exception("emergency_stop failed for %s", robot.robot_id)
-        self._session_panel.emergency_stop()
-        self._estop_button.set_stopped(True)
-        self.statusBar().showMessage(
-            "EMERGENCY STOP - all pumps off, valves closed. "
-            "Press 1 or click the button to re-arm.")
-        logger.warning("EMERGENCY STOP triggered")
-
-    def _rearm(self) -> None:
-        """Re-enable actuation after an emergency stop (asks for confirmation)."""
-        # The '1' key reaches here through the app-wide event filter, so guard
-        # against re-entry while the confirmation dialog is already open.
-        if self._rearm_confirm_open:
-            return
-        self._rearm_confirm_open = True
-        try:
-            answer = QMessageBox.question(
-                self, "Re-arm robots",
-                "Re-arm all robots? Pumps and valves will be allowed to run again.",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-        finally:
-            self._rearm_confirm_open = False
-        if answer != QMessageBox.StandardButton.Yes:
-            return
-        for robot in self._robots:
-            try:
-                robot.rearm()
-            except Exception:
-                logger.exception("rearm failed for %s", robot.robot_id)
-        self._session_panel.emergency_rearm()
-        self._estop_button.set_stopped(False)
-        self.statusBar().showMessage("Robots re-armed.", 4000)
-        logger.warning("Robots re-armed after emergency stop")
 
     # ------------------------------------------------------------------
     # Lifecycle

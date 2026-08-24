@@ -215,6 +215,81 @@ class PlateauDetector:
         return t >= self.min_ms and (t - self._floor_ms) >= self.settle_ms
 
 
+class HoldStabilityDetector:
+    """Detects when a held reading has settled - the hold servo converged.
+
+    During a hold-duty calibration the node trims the pump PWM on its gauge;
+    the pressure is "stable" once it stays within ``+-band`` of a reference for
+    ``settle_ms``. Any excursion beyond the band re-anchors the reference and
+    restarts the clock (two-sided cousin of :class:`PlateauDetector`).
+    ``min_ms`` gives the servo time to act before stability can be declared.
+
+    Pure and clock-free - feed it ``(elapsed_ms, value)`` samples.
+    """
+
+    def __init__(self, band: float, settle_ms: float, min_ms: float = 0.0) -> None:
+        self.band = float(band)
+        self.settle_ms = float(settle_ms)
+        self.min_ms = float(min_ms)
+        self._ref = float("nan")
+        self._ref_ms = 0.0
+
+    def update(self, elapsed_ms: float, value: float) -> bool:
+        """Feed one sample; returns True once the reading has settled."""
+        t = float(elapsed_ms)
+        v = float(value)
+        if not (abs(v - self._ref) <= self.band):   # NaN ref also re-anchors
+            self._ref = v
+            self._ref_ms = t
+        return t >= self.min_ms and (t - self._ref_ms) >= self.settle_ms
+
+
+class LeakRateSampler:
+    """Measures a chamber's leak rate (units/s) over a fixed valves-closed window.
+
+    Collects ``(elapsed_ms, value)`` samples for ``duration_ms`` and fits the
+    slope by least squares (robust to sensor jitter, unlike first-minus-last).
+    ``rate_per_s`` is POSITIVE for a falling reading - kPa LOST per second.
+
+    Pure and clock-free, like the other calibrators in this module.
+    """
+
+    def __init__(self, duration_ms: float) -> None:
+        self.duration_ms = float(duration_ms)
+        self._t: list[float] = []
+        self._v: list[float] = []
+        self.done = False
+
+    @property
+    def samples(self) -> int:
+        return len(self._t)
+
+    def record(self, elapsed_ms: float, value: float) -> bool:
+        """Feed one sample; returns True once the window is complete."""
+        if self.done:
+            return True
+        self._t.append(float(elapsed_ms))
+        self._v.append(float(value))
+        if elapsed_ms >= self.duration_ms:
+            self.done = True
+        return self.done
+
+    @property
+    def rate_per_s(self) -> float:
+        """Leak rate in units/s (positive = losing pressure), NaN if too few points."""
+        n = len(self._t)
+        if n < 2:
+            return float("nan")
+        ts = [t / 1000.0 for t in self._t]   # slope per second
+        mean_t = sum(ts) / n
+        mean_v = sum(self._v) / n
+        var = sum((t - mean_t) ** 2 for t in ts)
+        if var <= 0:
+            return float("nan")
+        cov = sum((t - mean_t) * (v - mean_v) for t, v in zip(ts, self._v))
+        return -(cov / var)   # falling reading -> negative slope -> positive rate
+
+
 # Plateau tuning for a deflate sweep: the fall has stopped when the level drops
 # less than 1 % over 800 ms (the mux sensor is laggy; a shorter window can call
 # the floor early on a slow tail).
@@ -400,6 +475,12 @@ def iter_actuator_chambers(settings_data: dict) -> list[dict]:
                     "deflate_profile": ch.get("deflate_profile"),
                     "duty_curve": ch.get("duty_curve"),
                     "fill_time_ms": fill_ms,
+                    # Pressure range, so the calibration dialog can recompute a
+                    # live % from the (authoritative) kPa of batched status frames.
+                    "max_pressure": float(ch.get("max_pressure", 8.0)),
+                    "min_pressure": float(ch.get("min_pressure", 0.0)),
+                    "hold_duty_curve": ch.get("hold_duty_curve"),
+                    "leak_curve": ch.get("leak_curve"),
                     "calibrated": bool(profile) or bool(fill_ms),
                 })
     return out
@@ -486,6 +567,50 @@ def set_deflate_profile(settings_data: dict, mac: str, slot: int,
     return n
 
 
+def set_hold_curve(settings_data: dict, mac: str, slot: int,
+                   curve: list[list[float]] | None) -> int:
+    """Write the equilibrium-duty curve (``hold_duty_curve``) onto matching chamber(s).
+
+    ``curve`` is ``[[kpa, duty], ...]`` - the pump PWM whose delivery exactly
+    balances the chamber's leak at that pressure, measured by the hold servo
+    calibration. Feeds the leak-compensating hold (``hold_duty`` command): the
+    runtime seeds the node with the interpolated duty and the node trims it on
+    its gauge. ``None`` clears it. Returns the number of entries updated."""
+    n = 0
+    for robot in _iter_robots(settings_data):
+        for skin in robot.get("skins") or []:
+            for ch in skin.get("chambers") or []:
+                if ch.get("mac") == mac and int(ch.get("slot", 0)) == int(slot):
+                    if curve:
+                        ch["hold_duty_curve"] = curve
+                    else:
+                        ch.pop("hold_duty_curve", None)
+                    n += 1
+    return n
+
+
+def set_leak_curve(settings_data: dict, mac: str, slot: int,
+                   curve: list[list[float]] | None) -> int:
+    """Write the leak curve (``leak_curve``) onto matching chamber(s).
+
+    ``curve`` is ``[[kpa, kpa_per_s], ...]`` - how fast the chamber loses
+    pressure at each level, measured with all valves closed after each hold
+    plateau. Used for leak diagnostics (an abnormal rate means a loose tube)
+    and to decay the open-loop estimate on sensorless boards. ``None`` clears
+    it. Returns the number of entries updated."""
+    n = 0
+    for robot in _iter_robots(settings_data):
+        for skin in robot.get("skins") or []:
+            for ch in skin.get("chambers") or []:
+                if ch.get("mac") == mac and int(ch.get("slot", 0)) == int(slot):
+                    if curve:
+                        ch["leak_curve"] = curve
+                    else:
+                        ch.pop("leak_curve", None)
+                    n += 1
+    return n
+
+
 def set_duty_curve(settings_data: dict, mac: str, slot: int,
                    curve: list[list[float]] | None) -> int:
     """Write the pump-duty->fill-speed sweep (``duty_curve``) onto matching chamber(s).
@@ -520,6 +645,11 @@ def set_duty_curve(settings_data: dict, mac: str, slot: int,
 TYPE_PROFILES_KEY = "fill_profiles_by_type"
 # Same slug+slot scheme for the falling (deflate) curves.
 DEFLATE_TYPE_PROFILES_KEY = "deflate_profiles_by_type"
+# ... and for the leak-compensation curves. Keyed by TYPE (not robot) because
+# the skins are swapped between robot bodies - the leak lives in the silicone
+# piece and its fittings, so the curve must travel with the skin type.
+HOLD_TYPE_CURVES_KEY = "hold_duty_curves_by_type"
+LEAK_TYPE_CURVES_KEY = "leak_curves_by_type"
 
 
 def type_slug(skin_type: Any, skin_variant: Any) -> str:
@@ -590,6 +720,36 @@ def set_type_deflate_profile(settings_data: dict, skin_type: Any,
     scheme as the fill templates)."""
     return _set_type_curve(settings_data, DEFLATE_TYPE_PROFILES_KEY,
                            skin_type, skin_variant, slot, profile)
+
+
+def get_type_hold_curve(settings_data: dict, skin_type: Any,
+                        skin_variant: Any, slot: Any) -> list | None:
+    """The stored type-template equilibrium-duty curve, or ``None``."""
+    return _get_type_curve(settings_data, HOLD_TYPE_CURVES_KEY,
+                           skin_type, skin_variant, slot)
+
+
+def set_type_hold_curve(settings_data: dict, skin_type: Any,
+                        skin_variant: Any, slot: Any,
+                        curve: list | None) -> bool:
+    """Write (``None`` clears) a type-template equilibrium-duty curve."""
+    return _set_type_curve(settings_data, HOLD_TYPE_CURVES_KEY,
+                           skin_type, skin_variant, slot, curve)
+
+
+def get_type_leak_curve(settings_data: dict, skin_type: Any,
+                        skin_variant: Any, slot: Any) -> list | None:
+    """The stored type-template leak curve, or ``None``."""
+    return _get_type_curve(settings_data, LEAK_TYPE_CURVES_KEY,
+                           skin_type, skin_variant, slot)
+
+
+def set_type_leak_curve(settings_data: dict, skin_type: Any,
+                        skin_variant: Any, slot: Any,
+                        curve: list | None) -> bool:
+    """Write (``None`` clears) a type-template leak curve."""
+    return _set_type_curve(settings_data, LEAK_TYPE_CURVES_KEY,
+                           skin_type, skin_variant, slot, curve)
 
 
 # ---------------------------------------------------------------------------
@@ -663,7 +823,9 @@ def _resolve_chamber(settings_data: dict, skin_type: Any, skin_variant: Any,
     slot = ch.get("slot", 0)
     patch: dict = {}
     for key, getter in (("fill_profile", get_type_profile),
-                        ("deflate_profile", get_type_deflate_profile)):
+                        ("deflate_profile", get_type_deflate_profile),
+                        ("hold_duty_curve", get_type_hold_curve),
+                        ("leak_curve", get_type_leak_curve)):
         if not ch.get(key):
             tmpl = getter(settings_data, skin_type, skin_variant, slot)
             if tmpl:

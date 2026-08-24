@@ -2,6 +2,7 @@
 
 import logging
 import threading
+import time
 from typing import Any, Callable
 
 from src.hardware.command_confirmer import CommandConfirmer
@@ -43,6 +44,12 @@ class ESP32Controller:
         # safety limits, so a dropped set_max/set_min can't leave the node on a
         # stale ceiling (the 20->50 kPa over-inflation). See confirm_limits().
         self._confirmer = CommandConfirmer(gateway, mac_address)
+        # Active leak-compensating holds ({chamber: hold_duty payload}), kept
+        # alive by a background thread (see start_hold): the firmware drops a
+        # hold not refreshed for ~6 s, so the pose can't outlive the app.
+        self._holds: dict[int, dict[str, Any]] = {}
+        self._holds_lock = threading.Lock()
+        self._hold_thread: threading.Thread | None = None
 
         self._gateway.on_message(self._handle_message)
 
@@ -115,8 +122,84 @@ class ESP32Controller:
         return self._sensor_floor_kpa
 
     def hold(self, chamber: int) -> bool:
-        """Hold pressure - stop pump, close inflate and deflate valves for this chamber."""
+        """Hold pressure - stop pump, close inflate and deflate valves for this chamber.
+
+        Also ends any leak-compensating regulated hold on the chamber (the
+        firmware drops it on ``hold`` too; this stops the PC keepalive)."""
+        self.stop_hold(chamber)
         return self.send_command("hold", chamber=chamber)
+
+    # ------------------------------------------------------------------
+    # Leak-compensating regulated hold (firmware ``hold_duty``)
+    # ------------------------------------------------------------------
+
+    # PC keepalive cadence for active holds. The firmware drops a hold not
+    # refreshed for ~6 s (its dead-man), so ~2 s survives a couple of dropped
+    # ESP-NOW frames while still dying quickly if the app goes away.
+    _HOLD_KEEPALIVE_S = 2.0
+
+    def start_hold(self, chamber: int, duty: int, kpa: float | None = None,
+                   timed: bool = False) -> bool:
+        """Start (or retune) a leak-compensating hold on ``chamber``.
+
+        The node keeps the chamber's inflate valve open with the pressure pump
+        at ``duty`` - the calibrated equilibrium PWM that balances the leak -
+        and, given ``kpa``, trims the duty slowly on its gauge. ``timed=True``
+        (or no ``kpa``) runs duty-only for sensorless boards. A background
+        keepalive re-asserts the hold every ~2 s until :meth:`stop_hold`;
+        without it the firmware dead-man releases the hold in ~6 s.
+        """
+        payload: dict[str, Any] = {"chamber": int(chamber),
+                                   "duty": max(1, min(255, int(duty)))}
+        if kpa is not None and not timed:
+            payload["kpa"] = round(float(kpa), 2)
+        if timed:
+            payload["timed"] = 1
+        with self._holds_lock:
+            self._holds[int(chamber)] = payload
+            self._ensure_hold_keepalive()
+        return self.send_command("hold_duty", **payload)
+
+    def stop_hold(self, chamber: int | None = None) -> None:
+        """End a regulated hold (all of this node's holds when ``chamber`` is
+        None): stop the keepalive and tell the node to drop it."""
+        with self._holds_lock:
+            if chamber is None:
+                had = bool(self._holds)
+                self._holds.clear()
+            else:
+                had = self._holds.pop(int(chamber), None) is not None
+        if had:
+            self.send_command("hold_duty",
+                              chamber=-1 if chamber is None else int(chamber),
+                              off=1)
+
+    def active_holds(self) -> list[int]:
+        """Chambers currently under a PC-kept regulated hold."""
+        with self._holds_lock:
+            return sorted(self._holds)
+
+    def _ensure_hold_keepalive(self) -> None:
+        """Start the keepalive thread if not running (holds_lock held)."""
+        t = self._hold_thread
+        if t is not None and t.is_alive():
+            return
+        self._hold_thread = threading.Thread(
+            target=self._hold_keepalive_loop,
+            name=f"hold-keepalive-{self.mac_address}", daemon=True)
+        self._hold_thread.start()
+
+    def _hold_keepalive_loop(self) -> None:
+        """Re-assert every active hold until none remain, then exit."""
+        while True:
+            time.sleep(self._HOLD_KEEPALIVE_S)
+            with self._holds_lock:
+                payloads = list(self._holds.values())
+                if not payloads:
+                    self._hold_thread = None
+                    return
+            for p in payloads:
+                self.send_command("hold_duty", **p)
 
     def emergency_stop(self) -> bool:
         """Latch every actuator on this node OFF - all pumps off, all valves closed.
@@ -125,6 +208,10 @@ class ESP32Controller:
         re-arms it, so the firmware holds the safe state even if the app crashes
         or the gateway link drops afterwards.
         """
+        # Kill the PC keepalive too (the firmware aborts its holds on stop; the
+        # keepalive must not re-establish them the moment the node is resumed).
+        with self._holds_lock:
+            self._holds.clear()
         return self.send_command("stop")
 
     def resume(self) -> bool:
@@ -238,6 +325,11 @@ class ESP32Controller:
         every LED command's ``angle`` so a physically-rotated ring reads right
         without each activity compensating. ``None`` / empty clears the offset."""
         self._led_angles = {int(k): float(v) for k, v in (angles or {}).items()}
+
+    @property
+    def led_angles(self) -> dict[int, float]:
+        """The per-ring mounting angles currently applied (see set_led_angles)."""
+        return dict(self._led_angles)
 
     def _effective_angle(self, ring: int | None, angle: float | None) -> float | None:
         """Combine the ring's saved mounting angle with the command's angle.

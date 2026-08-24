@@ -49,6 +49,8 @@ from src.hardware.fill_calibration import (
     DEFAULT_TIMEOUT_MS,
     ContinuousDeflateCalibrator,
     ContinuousFillCalibrator,
+    HoldStabilityDetector,
+    LeakRateSampler,
     PlateauDetector,
     get_type_min_duty,
     get_type_profile,
@@ -56,13 +58,18 @@ from src.hardware.fill_calibration import (
     set_deflate_profile,
     set_duty_curve,
     set_fill_profile,
+    set_hold_curve,
+    set_leak_curve,
     set_type_deflate_profile,
+    set_type_hold_curve,
+    set_type_leak_curve,
     set_type_min_duty,
     set_type_profile,
     type_slug,
 )
 from src.hardware.fill_profile import FillProfile
-from src.hardware.fill_scaling import duty_sweep
+from src.hardware.fill_scaling import duty_sweep, interp_curve
+from src.hardware.units import kpa_to_pct
 
 # Every sweep - and especially each duty step of a duty-curve run - MUST fill from
 # the same empty baseline or their times aren't comparable. Ambient does NOT read
@@ -96,6 +103,21 @@ _DEFAULT_RATE_MS = 40
 # the curve is steep rather than wasting samples on duties too low to move air.
 _DUTY_SWEEP: tuple[int, ...] = duty_sweep()
 
+# Hold-duty (leak compensation) calibration: at each plateau the chamber is
+# filled full-speed, then handed to the firmware's hold servo (hold_duty with a
+# target kPa) which trims the pump PWM on its gauge; the PC declares the point
+# converged once the kPa stays within a band for a settle window and records
+# (kPa, PWM). After each point the valves close and the decay is sampled for the
+# leak curve (kPa vs kPa/s). Plateaus are % of the chamber's configured range.
+_HOLD_PLATEAUS: tuple[float, ...] = (25.0, 50.0, 75.0, 100.0)
+_HOLD_SEED_DUTY = 90            # starting PWM when no curve exists yet
+_HOLD_BAND_KPA = 0.2            # stability band around the settled reading
+_HOLD_SETTLE_MS = 5000.0        # must stay in-band this long
+_HOLD_MIN_MS = 4000.0           # give the servo time to act first
+_MAX_HOLD_SERVO_MS = 30000      # give up on a point that never settles
+_MAX_HOLD_FILL_MS = 20000       # give up filling toward a plateau (leak/slow)
+_LEAK_WINDOW_MS = 8000.0        # valves-closed decay window per leak point
+
 # Deflate-curve sweep: prefill the chamber to about this level before recording
 # the falling curve, giving up (and sweeping from wherever it got) after the cap.
 _PREFILL_TARGET_PCT = 95.0
@@ -107,6 +129,8 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
 
     # gateway read thread -> GUI thread: (mac, chamber, pressure_pct, kpa)
     _pressure = Signal(str, int, float, float)
+    # gateway read thread -> GUI thread: (mac, inflate_pump_pwm)
+    _pumps = Signal(str, int)
     # Emitted after fill curves are written to settings, so the app can rebuild
     # robots to pick up the new ``fill_profile`` values.
     saved = Signal()
@@ -133,6 +157,10 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
         self._duty_results: dict[tuple[str, int], list[list[float]]] = {}
         # measured falling deflate curves: (mac, slot) -> [[ms, pct], ...]
         self._deflate_results: dict[tuple[str, int], list[list[float]]] = {}
+        # measured equilibrium-duty curves: (mac, slot) -> [[kpa, duty], ...]
+        self._hold_results: dict[tuple[str, int], list[list[float]]] = {}
+        # measured leak curves: (mac, slot) -> [[kpa, kpa_per_s], ...]
+        self._leak_results: dict[tuple[str, int], list[list[float]]] = {}
         # currently-running calibration job, or None
         self._job: dict | None = None
         self._rows: dict[tuple[str, int], dict] = {}
@@ -158,9 +186,11 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
         self.all_btn.setEnabled(bool(self._chambers) and gateway is not None)
         self.duty_btn.setEnabled(bool(self._chambers) and gateway is not None)
         self.deflate_btn.setEnabled(bool(self._chambers) and gateway is not None)
+        self.hold_btn.setEnabled(bool(self._chambers) and gateway is not None)
         self.all_btn.clicked.connect(self._calibrate_all)
         self.duty_btn.clicked.connect(self._calibrate_duty_all)
         self.deflate_btn.clicked.connect(self._calibrate_deflate_all)
+        self.hold_btn.clicked.connect(self._calibrate_hold_all)
         self.stop_btn.clicked.connect(self._stop)
         self.apply_btn.clicked.connect(self._on_apply)
         self.save_btn.clicked.connect(self._on_save)
@@ -170,6 +200,7 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
         self._tick.timeout.connect(self._on_tick)
 
         self._pressure.connect(self._on_pressure)
+        self._pumps.connect(self._on_pumps)
         if gateway is not None:
             gateway.on_message(self._on_gateway_message)
         self.finished.connect(lambda _=0: self._stop())
@@ -319,6 +350,11 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
         self._run_specs([{"mac": ch["mac"], "slot": int(ch["slot"]), "kind": "deflate"}
                          for ch in self._chambers])
 
+    def _calibrate_hold_all(self) -> None:
+        """Measure every chamber's equilibrium-duty (hold) + leak curves."""
+        self._run_specs([{"mac": ch["mac"], "slot": int(ch["slot"]), "kind": "hold"}
+                         for ch in self._chambers])
+
     def _run_specs(self, specs: list[dict]) -> None:
         if self._job is not None or not specs:
             return
@@ -361,6 +397,10 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
             # (duty, full_time_ms); a fill job is a single full-duty sweep.
             "duties": list(_DUTY_SWEEP) if kind == "duty" else [0],
             "duty_i": 0, "duty_samples": [],
+            # Hold jobs: one servo+leak point per plateau (% of range).
+            "plateaus": list(_HOLD_PLATEAUS) if kind == "hold" else [],
+            "plateau_i": 0, "hold_points": [], "leak_points": [],
+            "det": None, "leak": None, "last_pump_inf": 0, "leak_start_kpa": 0.0,
             "queue": queue, "combo_index": combo_index,
         }
         self._update_combo_status(mac, slot, combo_index)
@@ -440,6 +480,12 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
             self._tick_prefill(job)
         elif phase in ("sweep", "downsweep"):
             self._tick_sweep(job)
+        elif phase == "hold_fill":
+            self._tick_hold_fill(job)
+        elif phase == "hold_servo":
+            self._tick_hold_servo(job)
+        elif phase == "hold_leak":
+            self._tick_hold_leak(job)
 
     def _keepalive_hold(self, job: dict) -> None:
         """Refresh the firmware dead-mans (test_run + status_rate) periodically."""
@@ -459,6 +505,8 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
             self._close_valves(job["mac"], job["slot"])
             if job["kind"] == "deflate":
                 self._begin_prefill(job)
+            elif job["kind"] == "hold":
+                self._begin_hold_fill(job)
             else:
                 self._begin_sweep(job)
 
@@ -498,6 +546,115 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
         job["cal"] = ContinuousDeflateCalibrator(max_total_ms=DEFAULT_TIMEOUT_MS)
         self._send_test_run(job)
 
+    # ------------------------------------------------------------------
+    # Hold (equilibrium duty) + leak calibration phases
+    # ------------------------------------------------------------------
+
+    def _hold_target_pct(self, job: dict) -> float:
+        return job["plateaus"][job["plateau_i"]]
+
+    def _begin_hold_fill(self, job: dict) -> None:
+        """Fill full-speed toward the current plateau (no recording)."""
+        job["phase"] = "hold_fill"
+        job["phase_elapsed"] = 0
+        job["keepalive_acc"] = 0
+        job["dir"] = 0
+        job["ft"].start()
+        self._send_test_run(job)
+        self._update_combo_status(job["mac"], job["slot"], job["combo_index"])
+
+    def _tick_hold_fill(self, job: dict) -> None:
+        self._keepalive_hold(job)
+        if job["phase_elapsed"] >= _MAX_HOLD_FILL_MS:
+            # Never reached the plateau (leak/slow pump) - servo from wherever.
+            self._begin_hold_servo(job)
+
+    def _seed_hold_duty(self, job: dict) -> int:
+        """Starting PWM for the servo: the previous plateau's converged duty,
+        else the chamber's stored curve at this pressure, else the default."""
+        if job["hold_points"]:
+            return int(job["hold_points"][-1][1])
+        cfg = self._rows.get((job["mac"], job["slot"]), {}).get("cfg", {})
+        duty = interp_curve(cfg.get("hold_duty_curve"), job["last_kpa"])
+        return int(round(duty)) if duty else _HOLD_SEED_DUTY
+
+    def _send_hold(self, job: dict) -> None:
+        """(Re)assert the firmware hold servo - also its ~6 s dead-man keepalive."""
+        self._gateway.send(job["mac"], "hold_duty", chamber=job["slot"],
+                           duty=job["hold_seed"], kpa=round(job["hold_kpa"], 2))
+
+    def _begin_hold_servo(self, job: dict) -> None:
+        """Hand the chamber to the firmware hold servo and wait for stability."""
+        self._gateway.send(job["mac"], "test_stop")   # end the fill hold
+        job["phase"] = "hold_servo"
+        job["phase_elapsed"] = 0
+        job["keepalive_acc"] = 0
+        job["hold_kpa"] = job["last_kpa"]             # hold where the fill stopped
+        job["hold_seed"] = self._seed_hold_duty(job)
+        job["last_pump_inf"] = job["hold_seed"]       # until a pumps frame lands
+        job["det"] = HoldStabilityDetector(band=_HOLD_BAND_KPA,
+                                           settle_ms=_HOLD_SETTLE_MS,
+                                           min_ms=_HOLD_MIN_MS)
+        self._send_hold(job)
+        self._update_combo_status(job["mac"], job["slot"], job["combo_index"])
+
+    def _tick_hold_servo(self, job: dict) -> None:
+        job["keepalive_acc"] += _TICK_MS
+        if job["keepalive_acc"] >= _KEEPALIVE_MS:
+            job["keepalive_acc"] = 0
+            job["ft"].keepalive()
+            self._send_hold(job)
+        if job["phase_elapsed"] >= _MAX_HOLD_SERVO_MS:
+            # Never settled (big leak / pump at the rail): record the last duty
+            # anyway - a rough point beats a hole in the curve - and move on.
+            self._finish_hold_point(job)
+
+    def _finish_hold_point(self, job: dict) -> None:
+        """Record this plateau's (kPa, duty) point and start the leak window."""
+        job["hold_points"].append([round(float(job["last_kpa"]), 2),
+                                   int(job["last_pump_inf"])])
+        self._gateway.send(job["mac"], "hold_duty", chamber=job["slot"], off=1)
+        self._gateway.send(job["mac"], "hold", chamber=job["slot"])
+        job["phase"] = "hold_leak"
+        job["phase_elapsed"] = 0
+        job["keepalive_acc"] = 0
+        job["leak_start_kpa"] = float(job["last_kpa"])
+        job["leak"] = LeakRateSampler(duration_ms=_LEAK_WINDOW_MS)
+        self._update_combo_status(job["mac"], job["slot"], job["combo_index"])
+
+    def _tick_hold_leak(self, job: dict) -> None:
+        job["keepalive_acc"] += _TICK_MS
+        if job["keepalive_acc"] >= _KEEPALIVE_MS:
+            job["keepalive_acc"] = 0
+            job["ft"].keepalive()
+        # Telemetry died mid-window: close the point from the tick clock.
+        if job["phase_elapsed"] >= _LEAK_WINDOW_MS + _SWEEP_GRACE_MS:
+            self._finish_leak_point(job)
+
+    def _finish_leak_point(self, job: dict) -> None:
+        """Record this plateau's leak rate; next plateau or wrap up the job."""
+        rate = job["leak"].rate_per_s if job["leak"] is not None else float("nan")
+        if not math.isnan(rate):
+            job["leak_points"].append([round(job["leak_start_kpa"], 2),
+                                       round(float(rate), 3)])
+        job["leak"] = None
+        job["plateau_i"] += 1
+        if job["plateau_i"] < len(job["plateaus"]):
+            self._begin_hold_fill(job)   # keep filling from the current level
+            return
+        mac, slot = job["mac"], job["slot"]
+        if job["hold_points"]:
+            self._hold_results[(mac, slot)] = job["hold_points"]
+        if job["leak_points"]:
+            self._leak_results[(mac, slot)] = job["leak_points"]
+        row = self._rows.get((mac, slot))
+        if row is not None and job["hold_points"]:
+            row["result"].setText(
+                "hold " + "/".join(str(int(d)) for _, d in job["hold_points"]))
+        job["ft"].stop()
+        self._send_vent(mac, slot)       # back to ambient for the next chamber
+        self._finish_job()
+
     def _on_pressure(self, mac: str, chamber: int, pct: float, kpa: float) -> None:
         # Keep every row's live kPa current, whichever chamber is being swept.
         row = self._rows.get((mac, chamber))
@@ -510,12 +667,30 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
         job["last_kpa"] = kpa
         self._feed_job_pressure(job, row, pct)
 
+    def _on_pumps(self, mac: str, inflate_pwm: int) -> None:
+        """Track the live inflate-pump PWM of the job's node (hold servo duty)."""
+        job = self._job
+        if job is not None and mac == job["mac"] and inflate_pwm > 0:
+            job["last_pump_inf"] = int(inflate_pwm)
+
     def _feed_job_pressure(self, job: dict, row: dict | None, pct: float) -> None:
         """Advance the running job with one live reading of its chamber."""
-        if job["phase"] in ("deflate", "prefill", "downsweep") and row is not None:
+        if job["phase"] in ("deflate", "prefill", "downsweep", "hold_fill",
+                            "hold_servo", "hold_leak") and row is not None:
             row["bar"].setValue(int(max(0.0, min(100.0, pct))))
         if job["phase"] == "prefill" and pct >= _PREFILL_TARGET_PCT:
             self._begin_downsweep(job)
+        elif job["phase"] == "hold_fill":
+            if pct >= self._hold_target_pct(job):
+                self._begin_hold_servo(job)
+        elif job["phase"] == "hold_servo":
+            # The servo needs a real gauge; a NaN kPa can never settle (the
+            # detector re-anchors) so a sensorless chamber just times out.
+            if not math.isnan(job["last_kpa"]) and job["det"] is not None                     and job["det"].update(job["phase_elapsed"], job["last_kpa"]):
+                self._finish_hold_point(job)
+        elif job["phase"] == "hold_leak":
+            if not math.isnan(job["last_kpa"]) and job["leak"] is not None                     and job["leak"].record(job["phase_elapsed"], job["last_kpa"]):
+                self._finish_leak_point(job)
         elif job["phase"] == "downsweep":
             elapsed_ms = (time.monotonic() - job["t0"]) * 1000.0
             if job["cal"].record(elapsed_ms, pct):
@@ -584,6 +759,9 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
             extra = f" | duty {job['duties'][job['duty_i']]}"
         elif job is not None and job.get("kind") == "deflate":
             extra = " | deflate curve"
+        elif job is not None and job.get("kind") == "hold":
+            i = min(job["plateau_i"], len(job["plateaus"]) - 1)
+            extra = f" | hold {job['plateaus'][i]:.0f}% ({job.get('phase', '')})"
         self.combo_status.setText(f"Run {idx}/{total} - {mac} slot {slot}{extra}")
 
     def _set_buttons_enabled(self, on: bool) -> None:
@@ -593,6 +771,7 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
         self.all_btn.setEnabled(on and bool(self._chambers))
         self.duty_btn.setEnabled(on and bool(self._chambers))
         self.deflate_btn.setEnabled(on and bool(self._chambers))
+        self.hold_btn.setEnabled(on and bool(self._chambers))
         self.detail_combo.setEnabled(on)
         for r in self._rows.values():
             r["btn"].setEnabled(on)
@@ -614,6 +793,7 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
         if self._gateway is not None:
             for (mac, slot) in self._rows:
                 self._gateway.send(mac, "test_stop")
+                self._gateway.send(mac, "hold_duty", chamber=slot, off=1)
                 self._close_valves(mac, slot)
                 self._gateway.send(mac, "hold", chamber=slot)
         self._set_buttons_enabled(True)
@@ -663,7 +843,8 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
         the per-chamber override is cleared so the template shows through. Chambers
         with no skin type fall back to a per-chamber save so nothing is lost."""
         n_min = self._save_min_power()
-        if not (self._results or self._duty_results or self._deflate_results):
+        if not (self._results or self._duty_results or self._deflate_results
+                or self._hold_results or self._leak_results):
             if n_min:                       # a min-power-only edit still saves
                 self._settings.save()
                 self.saved.emit()
@@ -677,12 +858,17 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
                                    set_type_profile, set_fill_profile)
         n_type += self._save_curves(self._deflate_results, as_type,
                                     set_type_deflate_profile, set_deflate_profile)
+        n_type += self._save_curves(self._hold_results, as_type,
+                                    set_type_hold_curve, set_hold_curve)
+        n_type += self._save_curves(self._leak_results, as_type,
+                                    set_type_leak_curve, set_leak_curve)
         # Duty curves are a per-chamber pump property (not per skin type).
         for (mac, slot), curve in self._duty_results.items():
             set_duty_curve(self._settings.data, mac, slot, curve)
         self._settings.save()
         self.saved.emit()
-        n_curves = len(self._results) + len(self._deflate_results)
+        n_curves = (len(self._results) + len(self._deflate_results)
+                    + len(self._hold_results) + len(self._leak_results))
         parts = []
         if n_type:
             parts.append(f"{n_type} type template(s)")
@@ -690,6 +876,8 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
             parts.append(f"{n_curves - n_type} chamber override(s)")
         if self._duty_results:
             parts.append(f"{len(self._duty_results)} duty curve(s)")
+        if self._hold_results:
+            parts.append(f"{len(self._hold_results)} hold curve(s)")
         if n_min:
             parts.append(f"min power for {n_min} type(s)")
         self.combo_status.setText("Saved " + ", ".join(parts) + ".")
@@ -727,14 +915,36 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
     def _on_gateway_message(self, data: dict) -> None:
         if not self._active:
             return
+        mac = data.get("source")
+        if not isinstance(mac, str):
+            return
+        if data.get("type") == "pumps":
+            # Live pump PWM - the hold calibration reads the converged duty
+            # off it (the node emits a frame on every trim step).
+            inf = data.get("inf")
+            if isinstance(inf, int):
+                self._pumps.emit(mac, inf)
+            return
         if data.get("type") != "status":
             return
-        mac = data.get("source")
+        kpa_arr = data.get("kpa")
+        if isinstance(kpa_arr, list):
+            # Batched status frame (new firmware): one frame, parallel arrays,
+            # no per-chamber "pressure" - recompute the % from the kPa against
+            # each chamber's configured range.
+            for i, k in enumerate(kpa_arr):
+                if not isinstance(k, (int, float)):
+                    continue
+                cfg = self._rows.get((mac, i), {}).get("cfg")
+                pct = float(kpa_to_pct(float(k),
+                                       cfg.get("min_pressure", 0.0),
+                                       cfg.get("max_pressure", 8.0))) if cfg else 0.0
+                self._pressure.emit(mac, i, pct, float(k))
+            return
         chamber = data.get("chamber")
         pressure = data.get("pressure")
         kpa = data.get("kpa")
-        if isinstance(mac, str) and isinstance(chamber, int) \
-                and isinstance(pressure, (int, float)):
+        if isinstance(chamber, int) and isinstance(pressure, (int, float)):
             self._pressure.emit(
                 mac, chamber, float(pressure),
                 float(kpa) if isinstance(kpa, (int, float)) else float("nan"))

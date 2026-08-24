@@ -294,6 +294,16 @@ void parseAndQueue(const uint8_t* data, int len) {
         c.chamber = doc["chamber"] | -1;
         c.param_kpa = doc["value"] | config::DEFAULT_CHAMBER_MIN_KPA;
         c.seq = doc["seq"] | cmd_queue::NO_SEQ;
+    } else if (strcmp(cmd, "hold_duty") == 0) {
+        // Leak-compensating hold: {"cmd":"hold_duty","chamber":n,"duty":D,
+        // "kpa":K?,"timed":1?} starts/refreshes (PC re-sends ~2 s as keepalive);
+        // "off":1 drops it (chamber -1 = all). No "kpa" / "timed":1 = duty-only.
+        c.type = cmd_queue::CMD_HOLD_DUTY;
+        c.chamber = doc["chamber"] | -1;
+        c.duty = doc["duty"] | 0;
+        c.param = doc["off"] | 0;
+        c.timed = doc["timed"] | 0;
+        c.param_kpa = doc["kpa"].is<float>() ? doc["kpa"].as<float>() : NAN;
     } else if (strcmp(cmd, "hold") == 0) {
         c.type = cmd_queue::CMD_HOLD;
         c.chamber = doc["chamber"] | -1;
@@ -474,6 +484,7 @@ void manualClearAll() {
 // Emergency stop - slam everything off immediately. loop() keeps it that way
 // (and skips all control) while emergencyStopped is set.
 void emergencyStopAll() {
+    chambers::holdAbort();        // drop any leak-compensating holds
     chambers::abortSequences();   // drop any in-progress coupled-fill sequence
     pumps::stopAll();
     pca_valves::closeAllValves();
@@ -658,6 +669,23 @@ void processCommand(const cmd_queue::Cmd& c) {
         return;
     }
 
+    // Leak-compensating hold: register/refresh/drop; chambers::holdTick()
+    // (from loop) actually opens valves and runs the pumps when the manifold
+    // is free. param = "off" flag; chamber -1 applies to every chamber.
+    if (c.type == cmd_queue::CMD_HOLD_DUTY) {
+        const int n_ch = config::state.num_chambers;
+        if (c.chamber == -1) {
+            if (c.param) chambers::holdAbort();
+            else for (int i = 0; i < n_ch; i++)
+                chambers::holdEng.request(i, c.param_kpa, c.duty, c.timed != 0);
+        } else if (c.chamber >= 0 && c.chamber < n_ch) {
+            if (c.param) chambers::holdDrop(c.chamber);
+            else chambers::holdEng.request(c.chamber, c.param_kpa, c.duty,
+                                           c.timed != 0);
+        }
+        return;
+    }
+
     if (!configured) {
         sendError("not_configured");
         return;
@@ -791,7 +819,7 @@ void setup() {
     // doesn't yet know the gateway's MAC).
     char ready_msg[160];
     snprintf(ready_msg, sizeof(ready_msg),
-             "{\"status\":\"node_multiplexed_ready\",\"fw\":\"timed-1\",\"rgbw\":" LED_RGBW_JSON ",\"kpa_min\":%.0f}",
+             "{\"status\":\"node_multiplexed_ready\",\"fw\":\"hold-1\",\"rgbw\":" LED_RGBW_JSON ",\"kpa_min\":%.0f}",
              (double)pressure::FLOOR_KPA);
     se::broadcast(ready_msg);
 
@@ -855,6 +883,11 @@ void loop() {
         chambers::controlTick(now);
         chambers::recalcPumps();
     }
+
+    // ---- Leak-compensating continuous holds (valve open + equilibrium duty).
+    //      Suspends itself while the manual override or an engine sequence owns
+    //      the manifold (emergencyStopped never reaches here - loop returned). ----
+    chambers::holdTick(now, manualActive || chambers::seqActive());
 
     if (now - lastStatusMs >= STATUS_REPORT_MS) {
         lastStatusMs = now;

@@ -42,6 +42,7 @@ from src.gui.base_dialog import BaseDialog
 from src.gui.ui_skin_config_dialog import Ui_SkinConfigDialog
 from src.hardware.gateway import Gateway
 from src.hardware.skin_geometry import max_organs_for, variant_has_organs
+from src.robots._robot_builder import multiplexed_configure
 
 # Domain rules (node lookup, validation, persistence) live in src.core.skin_config;
 # these aliases keep the dialog terse while single-sourcing the values there.
@@ -1046,6 +1047,27 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
     # Actions
     # ------------------------------------------------------------------
 
+    def _claim_board(self) -> None:
+        """Restate this robot's board-level node state before a bench tool runs.
+
+        A node can be configured on two robots (the Turtle and the Tree share one
+        node_multiplexed PCB, swapped between bodies), so the chamber count on the
+        board is whatever the other robot last set. Pushing this robot's own
+        ``configure`` first makes the slots the tool drives the ones this body
+        actually has. Cheap and idempotent when nothing is shared.
+        """
+        if self._gateway is None or not self._gateway.is_connected:
+            return
+        for node_cfg in self._robot_nodes():
+            payload = multiplexed_configure(node_cfg)
+            mac = node_cfg.get("mac", "")
+            if payload is None or not mac:
+                continue
+            kwargs = {"num_chambers": payload["num_chambers"]}
+            if payload["organ_channels"]:
+                kwargs["organ_channels"] = payload["organ_channels"]
+            self._gateway.send(mac, "configure", **kwargs)
+
     def _on_test(self) -> None:
         macs = list({row.get_values()[0] for row in self._rows
                      if row.get_values()[0]})
@@ -1053,6 +1075,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
             QMessageBox.warning(self, "Test Actuators", "Configure at least one chamber first.")
             return
         from src.gui.test_actuators_dialog import TestActuatorsDialog
+        self._claim_board()
         skin_id = self.skin_id_edit.text().strip() or "preview"
         mac = macs[0]
         # Fill calibration (fill_profile/fill_time_ms) is not edited in the rows,
@@ -1150,6 +1173,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
                 "Add at least one chamber on an actuator node first.")
             return
         from src.gui.fill_calibration_dialog import FillCalibrationDialog
+        self._claim_board()
         FillCalibrationDialog(self._settings, self._gateway,
                               parent=self, chambers=chambers).exec()
 

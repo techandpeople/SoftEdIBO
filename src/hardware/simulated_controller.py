@@ -144,6 +144,16 @@ class SimulatedController(QObject):
             self._timer.start()
         return True
 
+    def start_hold(self, chamber: int, duty: int, kpa: float | None = None,
+                   timed: bool = False) -> bool:
+        """Leak-compensating hold - a no-op in simulation (nothing leaks): the
+        chamber simply keeps its current target. Interface parity with
+        :meth:`ESP32Controller.start_hold`."""
+        return True
+
+    def stop_hold(self, chamber: int | None = None) -> None:
+        """Interface parity with :meth:`ESP32Controller.stop_hold` (no-op)."""
+
     def hold(self, chamber: int) -> bool:
         """Freeze this chamber at its current pressure."""
         current = self._current.get(chamber, 0)

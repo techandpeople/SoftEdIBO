@@ -62,7 +62,8 @@ per-round 6 s, whole-sequence 25 s, plus a 10 s actuation watchdog).
 | `set_pressure` | `chamber` (-1 = all), `value` (0-100 %), `duty`? | Routes through the engine as an inflate or deflate to the absolute target |
 | `set_max_pressure` | `chamber`, `value` (kPa), `seq`? | Stored on the chamber until reboot. With an optional `seq` the node confirms it (see `ack` below) so the PC can retransmit a dropped safety limit instead of clamping to a stale ceiling |
 | `set_min_pressure` | `chamber`, `value` (kPa), `seq`? | Same confirmed-delivery option as `set_max_pressure` |
-| `hold` | `chamber` (-1 = all) | Closes valves, drops the chamber from both engines |
+| `hold` | `chamber` (-1 = all) | Closes valves, drops the chamber from both engines (and from any `hold_duty`) |
+| `hold_duty` | `chamber` (-1 = all), `duty` (1-255), `kpa`?, `timed`?, `off`? | Leak-compensating continuous hold: keeps the chamber's INFLATE valve open with the pressure pump at `duty` (the calibrated equilibrium PWM). With `kpa` the node trims the duty slowly on its gauge; `timed:1` (or no `kpa`) runs duty-only (sensorless boards). Same-target holds group and hold together; different targets round-robin (3 s windows) on the shared manifold. PC must re-send ~2 s as keepalive (6 s dead-man drops the hold). `off:1` drops it. Any inflate/deflate/set_pressure/hold on the chamber supersedes it; fill engines/manual/bench runs suspend it and it resumes after |
 | `stop` | - | Emergency stop: latch every pump off + valve closed; actuation commands are dropped until `resume` |
 | `resume` | - | Re-arm after `stop` |
 | `valve_manual` | `chamber`, `side` (0 = inflate, 1 = deflate), `open` (0/1) | Dev/bench override, bypasses the engine; 5 s dead-man auto-off + hard-limit cutoff |

@@ -13,6 +13,10 @@ online/offline status instead of filtering by robot class:
   activity's target skin, a warning shows under the list - the session can
   still start (useful when the physical skins were swapped without updating
   the config).
+* Ticking two robots that share a board (the Turtle and the Tree are built on
+  ONE node_multiplexed PCB, moved between bodies) BLOCKS the start: only one of
+  them can be mounted, so running both would actuate one body's chamber map
+  through the other's. This is the one hard stop here; everything else warns.
 """
 
 import time
@@ -21,6 +25,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox,
+    QDialogButtonBox,
     QFormLayout,
     QListWidgetItem,
     QWidget,
@@ -28,6 +33,7 @@ from PySide6.QtWidgets import (
 
 from src.activities import available_activities, skin_condition
 from src.activities.base_activity import BaseActivity
+from src.core import node_sharing
 from src.data.database import Database
 from src.data.models import ParticipantRecord
 from src.gui.base_dialog import BaseDialog
@@ -118,7 +124,7 @@ class SessionSetupDialog(BaseDialog, Ui_SessionSetupDialog):
             form.addWidget(self._record_check)
 
         self.activity_combo.currentIndexChanged.connect(self._on_activity_changed)
-        self.robots_list.itemChanged.connect(lambda _item: self._update_skin_warning())
+        self.robots_list.itemChanged.connect(lambda _item: self._update_selection_warnings())
         self.button_box.accepted.connect(self.accept)
         self.button_box.rejected.connect(self.reject)
 
@@ -187,14 +193,22 @@ class SessionSetupDialog(BaseDialog, Ui_SessionSetupDialog):
         skin = getattr(activity, "skin", None)
         self.target_skin_label.setText(
             skin_condition.label(skin) if skin else "Any")
-        self._update_skin_warning()
+        self._update_selection_warnings()
 
-    def _update_skin_warning(self) -> None:
-        """Warn (without blocking) when a ticked robot's configured skin
-        variants don't match the activity's target skin condition."""
+    def _update_selection_warnings(self) -> None:
+        """Repaint the warning label and gate the OK button.
+
+        Skin-variant mismatches only warn; robots sharing one board are a hard
+        stop (see the module docstring)."""
         activity = self.selected_activity
         skin = getattr(activity, "skin", None)
         lines: list[str] = []
+        clashes = node_sharing.conflicts(self.selected_robots)
+        if clashes:
+            lines.append(node_sharing.conflict_message(clashes))
+        ok_btn = self.button_box.button(QDialogButtonBox.StandardButton.Ok)
+        if ok_btn is not None:
+            ok_btn.setEnabled(not clashes)
         if skin:
             for robot in self.selected_robots:
                 mismatches = skin_condition.skin_mismatches(
@@ -222,6 +236,14 @@ class SessionSetupDialog(BaseDialog, Ui_SessionSetupDialog):
 
     def _populate_robots(self) -> None:
         """Fill the list with every configured robot (status painted later)."""
+        # {robot_id: other robots it shares a board with} - shown on the row so
+        # the mutually exclusive pair is visible before ticking both.
+        self._shares_board_with: dict[str, list[str]] = {}
+        for rids in node_sharing.conflicts(self._robots).values():
+            for rid in rids:
+                others = [o for o in rids if o != rid]
+                known = self._shares_board_with.setdefault(rid, [])
+                known += [o for o in others if o not in known]
         self.robots_list.clear()
         if not self._robots:
             self.no_robots_label.setVisible(True)
@@ -264,8 +286,10 @@ class SessionSetupDialog(BaseDialog, Ui_SessionSetupDialog):
             status, detail = self._robot_status(robot)
             dot = "*" if status in ("online", "ready", "partial") else "o"
             kind = getattr(robot, "robot_kind", "") or "?"
+            shared = self._shares_board_with.get(robot.robot_id, [])
+            share_note = f"  (shares its board with {', '.join(shared)})" if shared else ""
             item.setText(f"{dot} {robot.robot_id}  [{kind.capitalize()}]"
-                         f"  -  {detail}")
+                         f"  -  {detail}{share_note}")
             item.setForeground(_STATUS_COLORS.get(status, QColor("#cc2222")))
 
     def _robot_status(self, robot: BaseRobot) -> tuple[str, str]:

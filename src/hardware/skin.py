@@ -26,8 +26,10 @@ from src.core.skin_config import (
 from src.hardware.air_chamber import AirChamber, ChamberState
 from src.hardware.fill_calibration import combo_key, parse_combo_key
 from src.hardware.fill_profile import DeflateProfile, FillProfile
-from src.hardware.fill_scaling import DutyModel, duty_for_period, scale_fill_ms
+from src.hardware.fill_scaling import (DutyModel, duty_for_period, interp_curve,
+                                       scale_fill_ms)
 from src.hardware.touch_event_router import TouchEventRouter
+from src.hardware.units import pct_to_kpa
 from src.hardware.touch_profiles import touch_profiles
 from src.hardware.touch_source import CompensatedMagnetSource
 
@@ -157,6 +159,11 @@ class Skin:
         # on a sensorless node, where no measured deflate curve can exist: a
         # deflate opens for empty_time_ms * delta/100.
         self._empty_times: dict[int, int | None] = {}
+        # local_idx -> calibrated equilibrium-duty curve [[kpa, duty], ...] or
+        # None. Seeds the leak-compensating hold (hold_regulated) with the pump
+        # PWM that balances the leak at the hold pressure; the node then trims
+        # it on its gauge.
+        self._hold_curves: dict[int, list | None] = {}
 
         self._build_chambers(chamber_inputs)
 
@@ -260,6 +267,7 @@ class Skin:
             self._fill_modes[local_idx] = normalize_fill_mode(inp.get("fill_mode"))
             empty_time = inp.get("empty_time_ms")
             self._empty_times[local_idx] = int(empty_time) if empty_time else None
+            self._hold_curves[local_idx] = inp.get("hold_duty_curve")
             self._slots.append(node_slot)
             self._reverse[node_slot] = local_idx
             ch = AirChamber(
@@ -441,6 +449,49 @@ class Skin:
         chamber.state = ChamberState.IDLE
         self._ctrl.fill_load.note_stop(self._slots[local_idx])
         return self._ctrl.hold(self._slots[local_idx])
+
+    # Seed duty for a regulated hold on a chamber with no calibrated
+    # equilibrium curve: low enough not to blow the pose up before the node's
+    # gauge trim takes over, high enough that most pumps actually move air.
+    _HOLD_FALLBACK_DUTY = 90
+
+    def hold_regulated(self, local_idx: int, pct: int | None = None) -> bool:
+        """Leak-compensating hold: keep the chamber AT a level despite leaks.
+
+        The node keeps the inflate valve open with the pump at the calibrated
+        equilibrium duty (``hold_duty_curve`` interpolated at the hold pressure;
+        a conservative default when uncalibrated) and trims it on its gauge.
+        ``pct`` picks the level to hold (default: the chamber's current
+        target). On a sensorless node the hold is duty-only (no gauge trim), so
+        it needs the calibrated curve to mean anything. The controller keeps
+        the firmware hold alive (~2 s keepalive); it ends via
+        :meth:`release_hold` / :meth:`hold` / any actuation on the chamber.
+        """
+        chamber = self._chambers.get(local_idx)
+        if chamber is None:
+            logger.error("Skin %s has no chamber at local index %d",
+                         self.skin_id, local_idx)
+            return False
+        start_hold = getattr(self._ctrl, "start_hold", None)
+        if start_hold is None:
+            return False
+        level = chamber.target_pressure if pct is None else max(0, min(100, pct))
+        kpa = pct_to_kpa(level, chamber.min_pressure, chamber.max_pressure)
+        duty = interp_curve(self._hold_curves.get(local_idx), kpa)
+        return start_hold(self._slots[local_idx],
+                          int(round(duty)) if duty else self._HOLD_FALLBACK_DUTY,
+                          kpa=kpa, timed=self._sensorless)
+
+    def release_hold(self, local_idx: int | None = None) -> None:
+        """End a regulated hold (all of this skin's chambers when ``None``)."""
+        stop_hold = getattr(self._ctrl, "stop_hold", None)
+        if stop_hold is None:
+            return
+        if local_idx is None:
+            for idx in self._chambers:
+                stop_hold(self._slots[idx])
+        elif local_idx in self._chambers:
+            stop_hold(self._slots[local_idx])
 
     def pause(self) -> None:
         for chamber in self._chambers.values():

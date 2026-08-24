@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 
 from src.config.settings import Settings
+from src.core import node_sharing
 from src.gui.setup_wizard import firmware_for_node_type, firmware_for_c6
 from src.gui.base_dialog import BaseDialog
 from src.gui.ui_ota_update_dialog import Ui_OTAUpdateDialog
@@ -217,39 +218,56 @@ class OTAUpdateDialog(BaseDialog, Ui_OTAUpdateDialog):
     # Population
     # ------------------------------------------------------------------
 
-    def _nodes_from_settings(self) -> list[tuple[str, str, str]]:
-        """Return (robot_label, mac, node_type) for every flashable node."""
-        out: list[tuple[str, str, str]] = []
+    def _nodes_from_settings(self) -> list[tuple[str, str, list[str]]]:
+        """Return (mac, node_type, robot ids) for every flashable node.
+
+        One row per BOARD, not per robot: a node configured on two robots (the
+        Turtle and the Tree share a single node_multiplexed PCB, swapped between
+        bodies) is one device to flash, and would otherwise take two rows of
+        which only the second could show progress.
+        """
+        by_mac: dict[str, tuple[str, list[str]]] = {}
         robots = self._settings.data.get("robots", {})
         for group in robots.values():
             if not isinstance(group, list):
                 continue
             for robot in group:
-                rid = robot.get("id") or robot.get("thymio_id") or "robot"
+                rid = node_sharing.robot_id_of(robot) or "robot"
                 for node in robot.get("nodes", []):
                     mac = node.get("mac")
                     ntype = node.get("node_type", "")
-                    if mac and firmware_for_node_type(ntype) is not None:
-                        out.append((rid, mac, ntype))
-        return out
+                    if not mac or firmware_for_node_type(ntype) is None:
+                        continue
+                    _, rids = by_mac.setdefault(mac, (ntype, []))
+                    if rid not in rids:
+                        rids.append(rid)
+        return [(mac, ntype, rids) for mac, (ntype, rids) in by_mac.items()]
 
     def _populate(self) -> None:
         nodes = self._nodes_from_settings()
         self.table.setRowCount(len(nodes) + 1)   # + the gateway's C6 (Thymio RCP)
-        for row, (_rid, mac, ntype) in enumerate(nodes):
-            self._init_row(row, mac, ntype)
+        for row, (mac, ntype, rids) in enumerate(nodes):
+            shared = len(rids) > 1
+            self._init_row(row, mac, ntype,
+                           mac_text=f"{mac}  (shared)" if shared else None,
+                           tooltip=("Shared board: " if shared else "On: ")
+                                   + ", ".join(rids))
         # Always offer the C6 half of the gateway (WiFi-OTA only), last.
         self._init_row(len(nodes), _C6_KEY, _C6_TYPE, mac_text=_C6_LABEL)
         self.table.resizeColumnsToContents()
         self._refresh_online()
 
-    def _init_row(self, row: int, key: str, ntype: str, mac_text: str | None = None) -> None:
+    def _init_row(self, row: int, key: str, ntype: str, mac_text: str | None = None,
+                  tooltip: str = "") -> None:
         self._row_by_mac[key] = row
         sel = QTableWidgetItem()
         sel.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
         sel.setCheckState(Qt.CheckState.Unchecked)
         self.table.setItem(row, _COL_SEL, sel)
-        self.table.setItem(row, _COL_MAC, QTableWidgetItem(mac_text or key))
+        mac_item = QTableWidgetItem(mac_text or key)
+        if tooltip:
+            mac_item.setToolTip(tooltip)
+        self.table.setItem(row, _COL_MAC, mac_item)
         self.table.setItem(row, _COL_TYPE, QTableWidgetItem(ntype))
         self.table.setItem(row, _COL_LED, QTableWidgetItem("?"))
         self.table.setItem(row, _COL_ONLINE, QTableWidgetItem("?"))

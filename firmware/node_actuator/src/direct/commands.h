@@ -390,6 +390,22 @@ inline void process(const cmd_queue::Cmd& c) {
         chambers::testRun(c.param, c.chamber, c.duty); sendAck("test_run"); sendPumps(); return;
     }
 
+    // Leak-compensating hold: register/refresh/drop; chambers::holdTick()
+    // (from loop) actually opens valves and runs the pump when the manifold
+    // is free. param = "off" flag; chamber -1 applies to every chamber.
+    if (c.type == CMD_HOLD_DUTY) {
+        if (c.chamber == -1) {
+            if (c.param) chambers::holdAbort();
+            else for (int i = 0; i < NUM_CHAMBERS; i++)
+                chambers::holdEng.request(i, c.param_kpa, c.duty, c.timed != 0);
+        } else if (c.chamber >= 0 && c.chamber < NUM_CHAMBERS) {
+            if (c.param) chambers::holdDrop(c.chamber);
+            else chambers::holdEng.request(c.chamber, c.param_kpa, c.duty,
+                                           c.timed != 0);
+        }
+        return;
+    }
+
 #ifdef DEBUG_BUILD
     // Record which valves are open the instant an actuation command lands.
     if (c.type == CMD_INFLATE || c.type == CMD_DEFLATE
@@ -444,6 +460,10 @@ inline void parseAndQueue(const uint8_t* data, int len) {
     else if (strcmp(cmd, "set_max_pressure") == 0)  { c.type = CMD_SET_MAX;      c.chamber = doc["chamber"] | -1; c.param_kpa = doc["value"] | chambers::DEFAULT_MAX_KPA; c.seq = doc["seq"] | NO_SEQ; }
     else if (strcmp(cmd, "set_min_pressure") == 0)  { c.type = CMD_SET_MIN;      c.chamber = doc["chamber"] | -1; c.param_kpa = doc["value"] | chambers::DEFAULT_MIN_KPA; c.seq = doc["seq"] | NO_SEQ; }
     else if (strcmp(cmd, "hold") == 0)              { c.type = CMD_HOLD;         c.chamber = doc["chamber"] | -1; }
+    // Leak-compensating hold: {"cmd":"hold_duty","chamber":n,"duty":D,"kpa":K?,
+    // "timed":1?} starts/refreshes (the PC re-sends ~2 s as keepalive); "off":1
+    // drops it (chamber -1 = all). No "kpa" (or "timed":1) = duty-only, no trim.
+    else if (strcmp(cmd, "hold_duty") == 0)         { c.type = CMD_HOLD_DUTY;    c.chamber = doc["chamber"] | -1; c.duty = doc["duty"] | 0; c.param = doc["off"] | 0; c.timed = doc["timed"] | 0; c.param_kpa = doc["kpa"].is<float>() ? doc["kpa"].as<float>() : NAN; }
     else if (strcmp(cmd, "stop") == 0)              { c.type = CMD_STOP;         c.chamber = -1; }
     else if (strcmp(cmd, "resume") == 0)            { c.type = CMD_RESUME;       c.chamber = -1; }
     else if (strcmp(cmd, "test_run") == 0)          { c.type = CMD_TEST_RUN;     c.chamber = doc["chamber"] | -1; c.param = doc["dir"] | 0; c.duty = doc["duty"] | 0; }  // 0=inflate, 1=deflate; chamber -1 = all; duty 0 = full

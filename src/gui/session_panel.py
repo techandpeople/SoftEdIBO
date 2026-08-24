@@ -146,6 +146,7 @@ class SessionPanel(QWidget, Ui_SessionPanel):
 
         robot_ids = set(meta.get("robot_ids", []))
         session_robots = [r for r in self._available_robots if r.robot_id in robot_ids]
+        self._claim_boards(session_robots, activity.simulation_mode)
         session_robots = activity.prepare_robots(session_robots)
         robot_names = (
             ", ".join(r.robot_id for r in session_robots) if session_robots else "none"
@@ -289,6 +290,7 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         # has started and its units are in the initial phase.
 
         self._current_activity = activity
+        self._claim_boards(robots, activity.simulation_mode)
         robots = activity.prepare_robots(robots)
         self._session_participants = list(participants)
         self.session_started.emit(session_id)
@@ -299,6 +301,23 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         self._build_skin_participant_map(session_id)
         self._open_assignment_panel(robots)
         self._open_observer_panel()
+
+    def _claim_boards(self, robots: list[BaseRobot],
+                      simulation_mode: bool) -> None:
+        """Let every session robot restate its board-level node state.
+
+        A board can be shared by two robots (the Turtle and the Tree run on one
+        node_multiplexed PCB, swapped between bodies), so the chamber count, pump
+        budget and LED angles on the node are whatever the last robot to speak
+        set them to. Claiming at session start makes the node match the body
+        actually mounted. No-op in simulation - there is no node to configure.
+        """
+        if simulation_mode:
+            return
+        for robot in robots:
+            claim = getattr(robot, "claim_board", None)
+            if callable(claim):
+                claim()
 
     def _start_activity(self, activity: BaseActivity, session_id: str,
                         robots: list[BaseRobot]) -> None:

@@ -7,6 +7,7 @@
 #include "pumps.h"
 #include "mux.h"
 #include "coupled_fill.h"   // shared coupled-line fill supervisor (both boards)
+#include "hold_duty.h"      // shared leak-compensating continuous hold (both boards)
 
 // Per-chamber state + valve/pump coordination for node_multiplexed.
 //
@@ -103,6 +104,28 @@ inline void stop(int n) {
     state[n].min_kpa = saved_min;
 }
 
+// ---------------------------------------------------------------------------
+// Leak-compensating continuous hold (hold_duty.h). A held chamber keeps its
+// inflate valve open with pressure pumps at the calibrated equilibrium duty;
+// the gauge trims the duty on-node. Driven by holdTick() (end of this header),
+// which suspends it while anything else owns the manifold. Any explicit
+// actuation command on a chamber supersedes (drops) its hold.
+// ---------------------------------------------------------------------------
+
+inline hold_duty::Engine<MAX_CHAMBERS> holdEng;
+inline uint16_t holdValveMask = 0;   // valves the hold engine keeps open
+inline uint8_t  holdPumpDuty  = 0;   // pump duty it wants for them (0 = none)
+
+inline void holdDrop(int n) {
+    holdEng.drop(n, [](int i) { pca_valves::setChamberValve(i, false, false); });
+}
+
+inline void holdAbort() {
+    holdEng.abort();
+    holdValveMask = 0;
+    holdPumpDuty  = 0;
+}
+
 // Drive the shared pumps from the ACTUAL open valves (the pca_valves mirror),
 // never from chamber state - so a pump can only run while it has an open flow
 // path. Count-scaled for the common manifold: ceil(open_valves/VALVES_PER_PUMP)
@@ -110,13 +133,20 @@ inline void stop(int n) {
 // while a manual override drives the pumps directly (see main.cpp).
 inline void recalcPumps() {
     int openInf = 0, openDef = 0;
+    bool nonHoldInflate = false;
     for (int i = 0; i < MAX_CHAMBERS; i++) {
-        if (pca_valves::isOpen(i, 0)) openInf++;
+        if (pca_valves::isOpen(i, 0)) {
+            openInf++;
+            if (!(holdValveMask & (1u << i))) nonHoldInflate = true;
+        }
         if (pca_valves::isOpen(i, 1)) openDef++;
     }
     int pCount = openInf > 0 ? (openInf + VALVES_PER_PUMP - 1) / VALVES_PER_PUMP : 0;
     int vCount = openDef > 0 ? (openDef + VALVES_PER_PUMP - 1) / VALVES_PER_PUMP : 0;
-    pumps::setRoleActiveCount(pumps::ROLE_PRESSURE, pCount, DEFAULT_DUTY);
+    // Full duty whenever any NON-hold inflate valve is open (an engine round /
+    // manual override); a hold-only line runs at the calibrated equilibrium duty.
+    uint8_t pDuty = nonHoldInflate ? DEFAULT_DUTY : holdPumpDuty;
+    pumps::setRoleActiveCount(pumps::ROLE_PRESSURE, pCount, pDuty ? pDuty : DEFAULT_DUTY);
     pumps::setRoleActiveCount(pumps::ROLE_VACUUM,   vCount, DEFAULT_DUTY);
 }
 
@@ -187,6 +217,7 @@ inline void engOpen(int i, uint8_t dir) {
 inline void requestInflate(int n, float target, uint8_t duty, uint32_t cap_ms = 0,
                            bool blind = false) {
     if (n < 0 || n >= MAX_CHAMBERS) return;
+    holdDrop(n);   // an explicit actuation supersedes a leak-compensating hold
     target = max(state[n].min_kpa, min(target, state[n].max_kpa));
     bool reversed = false;
     deflateEng.drop(n, [&](int i) { stop(i); reversed = true; });
@@ -199,6 +230,7 @@ inline void requestInflate(int n, float target, uint8_t duty, uint32_t cap_ms = 
 inline void requestDeflate(int n, float target, uint8_t duty, uint32_t cap_ms = 0,
                            bool blind = false) {
     if (n < 0 || n >= MAX_CHAMBERS) return;
+    holdDrop(n);   // an explicit actuation supersedes a leak-compensating hold
     target = max(state[n].min_kpa, min(target, state[n].max_kpa));
     bool reversed = false;
     inflateEng.drop(n, [&](int i) { stop(i); reversed = true; });
@@ -210,6 +242,7 @@ inline void requestDeflate(int n, float target, uint8_t duty, uint32_t cap_ms = 
 
 inline void holdChamber(int n) {
     if (n < 0 || n >= MAX_CHAMBERS) return;
+    holdDrop(n);
     inflateEng.drop(n, [](int i) { stop(i); });
     deflateEng.drop(n, [](int i) { stop(i); });
     stop(n);
@@ -243,6 +276,24 @@ inline void closeAll() {
 inline void abortSequences() {
     inflateEng.abort();
     deflateEng.abort();
+}
+
+// Drive the leak-compensating hold engine. Call every loop tick with the
+// manifold-busy flag (manual override, engine sequence, emergency stop). Its
+// pump duty is applied through recalcPumps, which only honours it while NO
+// non-hold inflate valve is open.
+inline void holdTick(uint32_t now, bool busy) {
+    holdEng.count = (uint8_t)config::state.num_chambers;
+    uint8_t d = holdEng.tick(
+        now, busy,
+        [](int i) { pca_valves::setChamberValve(i, true,  false); },
+        [](int i) { pca_valves::setChamberValve(i, false, false); },
+        [](int i) -> float { float k = readKpaMedian(i); cachedKpa[i] = k; return k; });
+    if (holdEng.openMask != holdValveMask || d != holdPumpDuty) {
+        holdValveMask = holdEng.openMask;
+        holdPumpDuty  = d;
+        recalcPumps();
+    }
 }
 
 // Force-stop any chamber actuating past ACTUATION_TIMEOUT_MS (sensor failure

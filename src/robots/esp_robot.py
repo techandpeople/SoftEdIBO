@@ -11,6 +11,14 @@ Houses everything that's identical across TurtleRobot, TreeRobot, ThymioRobot:
 
 Subclasses contribute their own behaviour on top: Tree adds owner / sharing
 logic, Thymio adds tdm-client motors and LEDs.
+
+Two robots may be built on the SAME board (the Turtle and the Tree share one
+node_multiplexed PCB, swapped between bodies), so a node's controller comes from
+an injected :class:`~src.hardware.node_registry.NodeRegistry` - one controller
+per MAC, whatever the number of robots listing it - and the board-level state
+each robot needs (chamber count, LED angles, pump budget) is (re)pushed by
+:meth:`EspRobot.claim_board` instead of being owned by whichever robot happened
+to be built last.
 """
 
 from __future__ import annotations
@@ -20,10 +28,12 @@ from typing import Any
 
 from src.hardware.esp32_controller import ESP32Controller
 from src.hardware.gateway import Gateway
+from src.hardware.node_registry import NodeRegistry
 from src.hardware.skin import Skin
 from src.robots._robot_builder import (
     build_skins,
     configure_multiplexed_nodes,
+    push_led_angles,
     set_pump_counts,
 )
 from src.robots.base_robot import BaseRobot, RobotStatus
@@ -42,6 +52,10 @@ class EspRobot(BaseRobot):
                            "no-hardware" mode (e.g. ThymioRobot without nodes).
         node_configs:      List of ``{"mac": ..., "node_type": ...}`` dicts.
         skin_configs:      List of skin dicts (see ``build_skins``).
+        registry:          Shared ``{mac: controller}`` cache, so robots built on
+                           the same board talk to the same controller. Omit to
+                           give this robot a private one (tests, or a robot that
+                           shares no board).
     """
 
     def __init__(
@@ -51,29 +65,45 @@ class EspRobot(BaseRobot):
         gateway: Gateway | None,
         node_configs: list[dict[str, Any]] | None,
         skin_configs: list[dict[str, Any]] | None,
+        registry: NodeRegistry | None = None,
     ):
         super().__init__(robot_id, kind)
         self._gateway = gateway
 
-        nodes = node_configs or []
-        skins = skin_configs or []
+        self._node_configs = node_configs or []
+        self._skin_configs = skin_configs or []
 
-        if gateway is not None and nodes:
-            self._controllers: dict[str, ESP32Controller] = {
-                n["mac"]: ESP32Controller(n["mac"], gateway) for n in nodes
-            }
-            set_pump_counts(nodes, self._controllers)
-            configure_multiplexed_nodes(nodes, self._controllers)
+        if gateway is not None and self._node_configs:
+            registry = registry or NodeRegistry(gateway)
+            self._controllers: dict[str, ESP32Controller] = registry.controllers_for(
+                [n["mac"] for n in self._node_configs])
             # Nodes whose PCB has no pressure sensors populated yet (config
             # ``pressure_sensors: false``): their skins actuate open-loop on
             # the manual per-chamber times.
-            sensorless = {n["mac"] for n in nodes
+            sensorless = {n["mac"] for n in self._node_configs
                           if n.get("pressure_sensors") is False}
             self._skins: dict[str, Skin] = build_skins(
-                skins, self._controllers, sensorless_macs=sensorless)
+                self._skin_configs, self._controllers, sensorless_macs=sensorless)
+            self.claim_board()
         else:
             self._controllers = {}
             self._skins = {}
+
+    def claim_board(self) -> None:
+        """Push this robot's board-level state to its nodes.
+
+        Chamber count, pump budget and LED mounting angles belong to the BOARD,
+        not to the skin, so when a node is shared by two robots (the Turtle and
+        the Tree on one PCB) whichever robot is currently mounted has to state
+        them again. Called once at build and again whenever this robot is put to
+        work - a session start, or a tool opened on one of its skins - so the
+        node always matches the body it is wearing.
+        """
+        if not self._controllers:
+            return
+        set_pump_counts(self._node_configs, self._controllers)
+        configure_multiplexed_nodes(self._node_configs, self._controllers)
+        push_led_angles(self._skin_configs, self._controllers)
 
     # ------------------------------------------------------------------
     # Public model accessors
@@ -87,6 +117,11 @@ class EspRobot(BaseRobot):
     @property
     def skins(self) -> dict[str, Skin]:
         return self._skins
+
+    def controller_for(self, mac: str) -> ESP32Controller | None:
+        """This robot's controller for ``mac`` (shared with any robot that lists
+        the same board), or None when the node isn't one of this robot's."""
+        return self._controllers.get(mac)
 
     @property
     def node_macs(self) -> list[str]:

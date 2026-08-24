@@ -5,9 +5,17 @@ robots:
   turtles: []
   trees: []
   thymios: []
-# Turtle and Tree use the same node hardware but are separate robots, each
-# with its own hardware set ("turtles" / "trees") and its own skins on top
-# (skin_type turtle_* vs tree_round). Example node_multiplexed entry:
+# Turtle and Tree are separate robots built on the SAME board: one
+# node_multiplexed PCB is moved from one body to the other, only the chambers
+# and the body change. So the same node MAC is listed under both "turtles" and
+# "trees", each with its own skins on top (skin_type turtle_* vs tree_round),
+# and both stay configured - nothing has to be re-entered on a swap.
+# Only one of them is mounted at a time, so the app:
+#   * shares ONE controller per MAC across the robots that list it;
+#   * re-pushes the mounted robot's board state (chamber count, LED angles) when
+#     a session starts or a bench tool opens on one of its skins;
+#   * refuses to start a session with two robots that share a board.
+# Example node_multiplexed entry:
 # robots:
 #   turtles:
 #     - id: turtle_1

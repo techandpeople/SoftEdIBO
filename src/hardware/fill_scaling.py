@@ -117,6 +117,29 @@ def duty_for_period(natural_ms: float, period_ms: float,
     return max(int(min_duty), min(FULL_DUTY, duty))
 
 
+def interp_curve(curve: Any, x: float) -> float | None:
+    """Piecewise-linear lookup on a ``[[x, y], ...]`` curve; clamps outside it.
+
+    Used for the calibrated hold/leak curves (``hold_duty_curve``: kPa -> duty;
+    ``leak_curve``: kPa -> kPa/s). Returns None for an empty/invalid curve."""
+    try:
+        pts = sorted((float(p[0]), float(p[1])) for p in (curve or []))
+    except (TypeError, ValueError, IndexError):
+        return None
+    if not pts:
+        return None
+    if x <= pts[0][0]:
+        return pts[0][1]
+    if x >= pts[-1][0]:
+        return pts[-1][1]
+    for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+        if x0 <= x <= x1:
+            if x1 == x0:
+                return y0
+            return y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+    return pts[-1][1]
+
+
 class DutyModel:
     """Measured pump-duty -> fill-speed model - replaces the rough linear
     :func:`duty_for_period` when a chamber has a **duty-curve sweep**.

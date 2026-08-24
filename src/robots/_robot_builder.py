@@ -33,31 +33,60 @@ def set_pump_counts(
         ctrl.fill_load.pump_count = max(1, count)
 
 
+def multiplexed_configure(node_cfg: dict[str, Any]) -> dict[str, Any] | None:
+    """The runtime `configure` payload for a node_multiplexed entry, or None.
+
+    The multiplexed firmware is runtime-sized by gateway config, and two robots
+    sharing one board may size it differently, so the payload is derived from a
+    node config here and pushed by whoever claims the board (a robot through its
+    controller, a bench dialog straight through the gateway).
+    """
+    if node_cfg.get("node_type") != "node_multiplexed":
+        return None
+    return {
+        "num_chambers": max(1, min(int(node_cfg.get("max_slots", 12)), 16)),
+        # Mux channels carrying organ+cover circuits (index = slot in the
+        # firmware's organ broadcasts). Convention: highest channels first
+        # (I13..I15) so they stay clear of the chamber autodetect.
+        "organ_channels": [int(c) for c in node_cfg.get("organ_channels", [])] or None,
+    }
+
+
 def configure_multiplexed_nodes(
     node_configs: list[dict[str, Any]],
     controllers: dict[str, Any],
 ) -> None:
-    """Send runtime `configure` to every node_multiplexed controller.
-
-    The multiplexed firmware is runtime-sized by gateway config. This helper
-    pushes the chamber count (and any organ channels) at connect time.
-    """
+    """Send runtime `configure` to every node_multiplexed controller."""
     for node_cfg in node_configs:
-        if node_cfg.get("node_type") != "node_multiplexed":
+        payload = multiplexed_configure(node_cfg)
+        ctrl = controllers.get(node_cfg.get("mac", ""))
+        if payload is None or ctrl is None:
             continue
-        mac = node_cfg.get("mac", "")
-        ctrl = controllers.get(mac)
-        if ctrl is None:
+        ctrl.configure(num_chambers=payload["num_chambers"],
+                       organ_channels=payload["organ_channels"])
+
+
+def push_led_angles(
+    skin_configs: list[dict[str, Any]],
+    controllers: dict[str, Any],
+) -> None:
+    """Push each skin's per-ring LED mounting angle to its node.
+
+    The angle is added to every LED command, so an activity's look is rotated to
+    match a physically-turned ring without the behaviour knowing about it. It is
+    board state, not skin state: when two robots share a node (Turtle and Tree on
+    the same PCB) the angles of whichever robot claims the board win, so this is
+    re-pushed on every claim rather than once at build time.
+    """
+    for skin_cfg in skin_configs:
+        led_angles = skin_cfg.get("led_angles")
+        if not led_angles:
             continue
-
-        max_slots = max(1, min(int(node_cfg.get("max_slots", 12)), 16))
-
-        # Mux channels carrying organ+cover circuits (index = slot in the
-        # firmware's organ broadcasts). Convention: highest channels first
-        # (I13..I15) so they stay clear of the chamber autodetect.
-        organ_channels = [int(c) for c in node_cfg.get("organ_channels", [])] or None
-
-        ctrl.configure(num_chambers=max_slots, organ_channels=organ_channels)
+        mac = next((ch.get("mac") for ch in skin_cfg.get("chambers", [])
+                    if ch.get("mac")), None)
+        ctrl = controllers.get(mac or "")
+        if ctrl is not None and hasattr(ctrl, "set_led_angles"):
+            ctrl.set_led_angles(led_angles)
 
 
 def build_skins(
@@ -136,16 +165,10 @@ def _build_one_skin(skin_cfg: dict[str, Any],
          "deflate_profile": ch.get("deflate_profile"),
          "duty_curve": ch.get("duty_curve"),
          "fill_mode": ch.get("fill_mode"),
-         "empty_time_ms": ch.get("empty_time_ms")}
+         "empty_time_ms": ch.get("empty_time_ms"),
+         "hold_duty_curve": ch.get("hold_duty_curve")}
         for ch in chambers
     ]
-    # Per-ring LED mounting angle (from the skin config) -> the node's controller,
-    # so every activity's LED look is rotated to match a physically-turned ring
-    # without the behaviour having to know about it.
-    led_angles = skin_cfg.get("led_angles")
-    if led_angles and hasattr(ctrl, "set_led_angles"):
-        ctrl.set_led_angles(led_angles)
-
     touch_ctrl = (touch_controllers or {}).get(skin_id)
     if touch_ctrl is None:
         touch_ctrl = _resolve_touch_ctrl(skin_cfg, controllers)

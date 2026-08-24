@@ -7,7 +7,7 @@ from typing import Any
 from src.hardware.simulated_controller import SimulatedController
 from src.hardware.simulated_magnet_sensor import SimulatedMagnetSensor
 from src.hardware.skin import Skin
-from src.robots._robot_builder import build_skins
+from src.robots._robot_builder import build_skins, push_led_angles
 from src.robots.base_robot import BaseRobot, RobotStatus
 
 
@@ -62,6 +62,7 @@ class SimulatedRobot(BaseRobot):
         self._skins: dict[str, Skin] = build_skins(
             skin_configs, self._controllers, touch_controllers=self._magnet_sensors,
         )
+        push_led_angles(skin_configs, self._controllers)
 
     # ------------------------------------------------------------------
     # Properties

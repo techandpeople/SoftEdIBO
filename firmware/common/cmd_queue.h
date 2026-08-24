@@ -22,6 +22,9 @@ enum CmdType : uint8_t {
     // Zero the pressure sensors: capture each chamber's current reading as its
     // ambient offset (caller must have vented to atmosphere first). Persisted.
     CMD_TARE,
+    // Leak-compensating continuous hold: valve open + pump at the calibrated
+    // equilibrium duty (see common/hold_duty.h). param = off flag (1 = drop).
+    CMD_HOLD_DUTY,
     // Configuration / status.
     CMD_CONFIGURE, CMD_PING
 #ifdef DEBUG_BUILD
