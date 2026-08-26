@@ -1,11 +1,33 @@
 name: Build
 
+# paths-ignore: files that reach neither the firmware bins nor the app bundle,
+# so touching only these skips the whole workflow. Tag pushes ignore path
+# filters, so a release always builds. (Listed twice: the Actions parser does
+# not support YAML anchors.)
 on:
   push:
     branches: [master]
     tags:     ["v*"]
+    paths-ignore:
+      - "3Dmodels/**"
+      - "hardware/**"
+      - "docs/**"
+      - "**.md"
+      - "LICENSE"
+      - ".gitignore"
+      - ".vscode/**"
+      - "install.sh"
   pull_request:
     branches: [master]
+    paths-ignore:
+      - "3Dmodels/**"
+      - "hardware/**"
+      - "docs/**"
+      - "**.md"
+      - "LICENSE"
+      - ".gitignore"
+      - ".vscode/**"
+      - "install.sh"
 
 # A newer push to the same branch/PR supersedes any run still in progress
 # (tag builds are never cancelled).
@@ -24,6 +46,7 @@ jobs:
   # -----------------------------------------------------------------------
   firmware:
     runs-on: ubuntu-22.04
+    timeout-minutes: 40
 
     steps:
       - name: Checkout
@@ -155,18 +178,35 @@ jobs:
   build:
     needs: firmware
     runs-on: ubuntu-22.04
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # The finished bundle is cached under a key hashed from everything that
+      # ends up inside it (Python sources, spec, icons, the firmware SOURCES -
+      # the bins are bundled - and the version label). A push that changes none
+      # of these restores the bundle and skips pip, tests and PyInstaller
+      # entirely. actions/cache only saves when the job succeeds, so a red test
+      # suite never gets cached. On a hit the bundle's __commit__/__build_time__
+      # are those of the commit that built it (same code, so same behaviour).
+      - name: Cache app bundle
+        id: app-cache
+        uses: actions/cache@v4
+        with:
+          path: SoftEdIBO-x86_64.AppImage
+          key: app-${{ runner.os }}-${{ github.ref_type == 'tag' && github.ref_name || 'nightly' }}-${{ hashFiles('src/**', 'tests/**', 'config/**', 'requirements.txt', 'pyproject.toml', 'softedibo.spec', 'softedibo.png', 'softedibo.ico', '_esptool_main.py', 'scripts/fetch_blockly.sh', 'firmware/common/**', 'firmware/*/src/**', 'firmware/*/platformio.ini', 'firmware/gateway/CMakeLists.txt', 'firmware/gateway/sdkconfig*') }}
+
       - name: Set up Python
+        if: steps.app-cache.outputs.cache-hit != 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
 
       - name: Install system dependencies
+        if: steps.app-cache.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update -q
           sudo apt-get install -y --no-install-recommends \
@@ -178,12 +218,14 @@ jobs:
             libfuse2
 
       - name: Install Python dependencies
+        if: steps.app-cache.outputs.cache-hit != 'true'
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller
 
       - name: Generate Qt UI Python files
+        if: steps.app-cache.outputs.cache-hit != 'true'
         run: |
           for ui_file in src/gui/ui/*.ui; do
             base=$(basename "$ui_file" .ui)
@@ -191,6 +233,7 @@ jobs:
           done
 
       - name: Inject version into src/_version.py
+        if: steps.app-cache.outputs.cache-hit != 'true'
         run: |
           if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             VERSION="${GITHUB_REF_NAME}"
@@ -207,10 +250,12 @@ jobs:
       # job). Headless (offscreen QPA) - pytest/pytest-qt come from
       # requirements.txt.
       - name: Run tests
+        if: steps.app-cache.outputs.cache-hit != 'true'
         run: QT_QPA_PLATFORM=offscreen python -m pytest -q
 
       # Firmware comes prebuilt from the firmware job (cache-accelerated).
       - name: Download firmware binaries
+        if: steps.app-cache.outputs.cache-hit != 'true'
         uses: actions/download-artifact@v4
         with:
           name: firmware-tree
@@ -223,9 +268,11 @@ jobs:
       # The Behaviour Editor falls back to the unpkg CDN when Blockly is not
       # vendored, which breaks on any offline machine. Vendor it into the bundle.
       - name: Vendor Blockly (offline Behaviour Editor)
+        if: steps.app-cache.outputs.cache-hit != 'true'
         run: bash scripts/fetch_blockly.sh
 
       - name: Build with PyInstaller
+        if: steps.app-cache.outputs.cache-hit != 'true'
         run: pyinstaller softedibo.spec
 
       # ----------------------------------------------------------------
@@ -233,6 +280,7 @@ jobs:
       # ----------------------------------------------------------------
 
       - name: Download appimagetool
+        if: steps.app-cache.outputs.cache-hit != 'true'
         run: |
           wget -q https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
           chmod +x appimagetool-x86_64.AppImage
@@ -240,6 +288,7 @@ jobs:
           mv squashfs-root appimagetool-bin
 
       - name: Create AppDir
+        if: steps.app-cache.outputs.cache-hit != 'true'
         run: |
           mkdir -p SoftEdIBO.AppDir
           cp -r dist/SoftEdIBO/. SoftEdIBO.AppDir/
@@ -272,6 +321,7 @@ jobs:
           cp softedibo.png SoftEdIBO.AppDir/.DirIcon
 
       - name: Build AppImage
+        if: steps.app-cache.outputs.cache-hit != 'true'
         run: |
           ARCH=x86_64 ./appimagetool-bin/AppRun \
             SoftEdIBO.AppDir SoftEdIBO-x86_64.AppImage
@@ -290,25 +340,45 @@ jobs:
   # -----------------------------------------------------------------------
   build-windows:
     needs: firmware
+    # Windows runners bill at 2x; PRs get the tested Linux build only.
+    if: github.event_name != 'pull_request'
     runs-on: windows-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # The finished bundle is cached under a key hashed from everything that
+      # ends up inside it (Python sources, spec, icons, the firmware SOURCES -
+      # the bins are bundled - and the version label). A push that changes none
+      # of these restores the bundle and skips pip, tests and PyInstaller
+      # entirely. actions/cache only saves when the job succeeds, so a red test
+      # suite never gets cached. On a hit the bundle's __commit__/__build_time__
+      # are those of the commit that built it (same code, so same behaviour).
+      - name: Cache app bundle
+        id: app-cache
+        uses: actions/cache@v4
+        with:
+          path: SoftEdIBO-windows-x64.zip
+          key: app-${{ runner.os }}-${{ github.ref_type == 'tag' && github.ref_name || 'nightly' }}-${{ hashFiles('src/**', 'tests/**', 'config/**', 'requirements.txt', 'pyproject.toml', 'softedibo.spec', 'softedibo.png', 'softedibo.ico', '_esptool_main.py', 'scripts/fetch_blockly.sh', 'firmware/common/**', 'firmware/*/src/**', 'firmware/*/platformio.ini', 'firmware/gateway/CMakeLists.txt', 'firmware/gateway/sdkconfig*') }}
+
       - name: Set up Python
+        if: steps.app-cache.outputs.cache-hit != 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
 
       - name: Install Python dependencies
+        if: steps.app-cache.outputs.cache-hit != 'true'
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller
 
       - name: Generate Qt UI Python files
+        if: steps.app-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           for ui_file in src/gui/ui/*.ui; do
@@ -317,6 +387,7 @@ jobs:
           done
 
       - name: Inject version into src/_version.py
+        if: steps.app-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
@@ -333,6 +404,7 @@ jobs:
       # on Windows runners, and ESP .bin files are host-OS-independent). Drop the
       # tree-layout bins into the workspace so PyInstaller bundles them.
       - name: Download firmware binaries (built on Linux)
+        if: steps.app-cache.outputs.cache-hit != 'true'
         uses: actions/download-artifact@v4
         with:
           name: firmware-tree
@@ -341,13 +413,16 @@ jobs:
       # The Behaviour Editor falls back to the unpkg CDN when Blockly is not
       # vendored, which breaks on any offline machine. Vendor it into the bundle.
       - name: Vendor Blockly (offline Behaviour Editor)
+        if: steps.app-cache.outputs.cache-hit != 'true'
         shell: bash
         run: bash scripts/fetch_blockly.sh
 
       - name: Build with PyInstaller
+        if: steps.app-cache.outputs.cache-hit != 'true'
         run: pyinstaller softedibo.spec
 
       - name: Create zip archive
+        if: steps.app-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: Compress-Archive -Path dist/SoftEdIBO/* -DestinationPath SoftEdIBO-windows-x64.zip
 
@@ -366,6 +441,7 @@ jobs:
     needs: [build, build-windows]
     if: github.ref == 'refs/heads/master'
     runs-on: ubuntu-22.04
+    timeout-minutes: 10
     permissions:
       contents: write
 
@@ -417,6 +493,7 @@ jobs:
     needs: [build, build-windows]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-22.04
+    timeout-minutes: 10
     permissions:
       contents: write
 
