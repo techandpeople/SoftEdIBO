@@ -416,9 +416,26 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
             return
         if msg_type != "status":
             return
+        kpa = data.get("kpa")
+        if isinstance(kpa, list):
+            # New actuator firmware batches every chamber into ONE frame as
+            # parallel arrays (no "chamber" key). This dialog reads RAW gateway
+            # frames (the session path uses esp32_controller, which expands the
+            # batch itself), so it must expand the arrays here - otherwise the
+            # pressure labels stay "-" and the valve buttons never green.
+            vi = data.get("vi") or []
+            vd = data.get("vd") or []
+            for i, k in enumerate(kpa):
+                if isinstance(k, (int, float)):
+                    # pressure % is not sent in the batch; _update_pressure
+                    # recomputes it from the authoritative kPa anyway.
+                    self._pressure_received.emit(i, 0, float(k))
+                if (i < len(vi) and isinstance(vi[i], int)
+                        and i < len(vd) and isinstance(vd[i], int)):
+                    self._valves_received.emit(i, vi[i], vd[i])
+            return
         chamber = data.get("chamber")
         pressure = data.get("pressure")
-        kpa = data.get("kpa")
         if isinstance(chamber, int) and isinstance(pressure, int):
             # ``kpa`` only arrives from firmware new enough to send it; NaN flags
             # "unknown" so the label can fall back to just the percentage.

@@ -396,11 +396,20 @@ class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
         false 'residual' that faked co-inflation combinations). The running
         minimum kPa is that chamber's ambient floor; because the magnet baseline
         is captured at the same floor, its constant contribution cancels."""
+        kpa_arr = data.get("kpa")
+        if isinstance(kpa_arr, list):
+            # Batched status frame (new firmware): parallel arrays, no
+            # "chamber" key - fold each entry as its own chamber.
+            for i, k in enumerate(kpa_arr):
+                if isinstance(k, (int, float)):
+                    self._fold_level(skin, i, float(k), None)
+            return
         ch = data.get("chamber")
         if not isinstance(ch, int):
             return
-        kpa = data.get("kpa")
-        pct = data.get("pressure")
+        self._fold_level(skin, ch, data.get("kpa"), data.get("pressure"))
+
+    def _fold_level(self, skin: dict, ch: int, kpa, pct) -> None:
         if isinstance(kpa, (int, float)):
             kpa = float(kpa)
             self._tare[ch] = min(self._tare.get(ch, kpa), kpa)
