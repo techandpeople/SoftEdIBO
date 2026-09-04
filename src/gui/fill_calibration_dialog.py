@@ -68,7 +68,8 @@ from src.hardware.fill_calibration import (
     type_slug,
 )
 from src.hardware.fill_profile import FillProfile
-from src.hardware.fill_scaling import duty_sweep, interp_curve
+from src.hardware.fill_scaling import duty_sweep
+from src.hardware.hold_duty import seed_hold_duty
 from src.hardware.units import kpa_to_pct
 
 # Every sweep - and especially each duty step of a duty-curve run - MUST fill from
@@ -110,7 +111,6 @@ _DUTY_SWEEP: tuple[int, ...] = duty_sweep()
 # (kPa, PWM). After each point the valves close and the decay is sampled for the
 # leak curve (kPa vs kPa/s). Plateaus are % of the chamber's configured range.
 _HOLD_PLATEAUS: tuple[float, ...] = (25.0, 50.0, 75.0, 100.0)
-_HOLD_SEED_DUTY = 90            # starting PWM when no curve exists yet
 _HOLD_BAND_KPA = 0.2            # stability band around the settled reading
 _HOLD_SETTLE_MS = 5000.0        # must stay in-band this long
 _HOLD_MIN_MS = 4000.0           # give the servo time to act first
@@ -575,8 +575,7 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
         if job["hold_points"]:
             return int(job["hold_points"][-1][1])
         cfg = self._rows.get((job["mac"], job["slot"]), {}).get("cfg", {})
-        duty = interp_curve(cfg.get("hold_duty_curve"), job["last_kpa"])
-        return int(round(duty)) if duty else _HOLD_SEED_DUTY
+        return seed_hold_duty(cfg.get("hold_duty_curve"), job["last_kpa"])
 
     def _send_hold(self, job: dict) -> None:
         """(Re)assert the firmware hold servo - also its ~6 s dead-man keepalive."""

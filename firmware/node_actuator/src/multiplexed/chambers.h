@@ -115,6 +115,9 @@ inline void stop(int n) {
 inline hold_duty::Engine<MAX_CHAMBERS> holdEng;
 inline uint16_t holdValveMask = 0;   // valves the hold engine keeps open
 inline uint8_t  holdPumpDuty  = 0;   // pump duty it wants for them (0 = none)
+// Chambers under a bench VENT (both valves open, no pump): excluded from the
+// pump recalc so nothing pumps into a chamber that is open to atmosphere.
+inline uint16_t ventMask      = 0;
 
 inline void holdDrop(int n) {
     holdEng.drop(n, [](int i) { pca_valves::setChamberValve(i, false, false); });
@@ -135,6 +138,7 @@ inline void recalcPumps() {
     int openInf = 0, openDef = 0;
     bool nonHoldInflate = false;
     for (int i = 0; i < MAX_CHAMBERS; i++) {
+        if (ventMask & (1u << i)) continue;   // vented: no flow path for a pump
         if (pca_valves::isOpen(i, 0)) {
             openInf++;
             if (!(holdValveMask & (1u << i))) nonHoldInflate = true;

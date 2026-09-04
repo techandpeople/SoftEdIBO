@@ -323,6 +323,11 @@ void parseAndQueue(const uint8_t* data, int len) {
         c.type = cmd_queue::CMD_PUMP_MANUAL;
         c.param = doc["pump"] | 0;     // 0=pressure, 1=vacuum
         c.cfg_chambers = doc["on"] | 0;
+    } else if (strcmp(cmd, "vent") == 0) {
+        // Bench vent: both valves of the chamber (-1 = all) open, pumps off it.
+        c.type = cmd_queue::CMD_VENT;
+        c.chamber = doc["chamber"] | -1;
+        c.cfg_chambers = doc["open"] | 0;
     } else if (strcmp(cmd, "configure") == 0) {
         c.type = cmd_queue::CMD_CONFIGURE;
         c.cfg_chambers = doc["num_chambers"] | config::state.num_chambers;
@@ -462,10 +467,25 @@ void applyManualPump(int role01, bool on) {
 
 void applyManualValve(int chamber, int side, bool open) {
     if (chamber < 0 || chamber >= MAX_CHAMBERS || side < 0 || side > 1) return;
-    if (open) manualValveOpen[chamber][1 - side] = false;   // single side open
+    if (open) {
+        manualValveOpen[chamber][1 - side] = false;   // single side open
+        chambers::ventMask &= ~(uint16_t)(1u << chamber);   // ...which ends a vent
+    }
     manualValveOpen[chamber][side] = open;
     pca_valves::setChamberValve(chamber,
         manualValveOpen[chamber][0], manualValveOpen[chamber][1]);
+}
+
+// Bench vent of one chamber: BOTH valves open under the manual override (so
+// the dead-man / keepalive rules apply) and excluded from the pump recalc, so
+// the chamber equalises to atmosphere with no pump running into it.
+void applyManualVent(int chamber, bool open) {
+    if (chamber < 0 || chamber >= MAX_CHAMBERS) return;
+    uint16_t bit = (uint16_t)(1u << chamber);
+    if (open) chambers::ventMask |= bit; else chambers::ventMask &= ~bit;
+    manualValveOpen[chamber][0] = manualValveOpen[chamber][1] = open;
+    pca_valves::setChamberValve(chamber, open, open);
+    chambers::recalcPumps();
 }
 
 // Turn every manual actuator off and hand control back to the autonomous loops.
@@ -478,6 +498,7 @@ void manualClearAll() {
             pca_valves::setChamberValve(chmbr, false, false);
         manualValveOpen[chmbr][0] = manualValveOpen[chmbr][1] = false;
     }
+    chambers::ventMask = 0;
     manualActive = false;
 }
 
@@ -707,6 +728,25 @@ void processCommand(const cmd_queue::Cmd& c) {
     // used to leave most chambers un-actuated (the "only one inflates" bug).
     int n = c.chamber;
     int limit = min(config::state.num_chambers, (int)MAX_CHAMBERS);
+    if (c.type == cmd_queue::CMD_VENT) {
+        // Bench vent (chamber -1 = all): enter the manual override from a clean
+        // slate (like valve_manual), drop any hold, then open both valves with
+        // the chamber excluded from the pump recalc.
+        if (!manualActive) {
+            chambers::abortSequences();
+            chambers::closeAll();
+            chambers::recalcPumps();
+        }
+        manualActive = true;
+        manualTs     = millis();
+        bool open = c.cfg_chambers != 0;
+        int lo = n < 0 ? 0 : n, hi = n < 0 ? limit - 1 : n;
+        for (int i = lo; i <= hi && i < limit; i++) {
+            chambers::holdDrop(i);
+            applyManualVent(i, open);
+        }
+        return;
+    }
     if (n == -1 && isFanOut(c.type)) {
         for (int i = 0; i < limit; i++) applyChamberCmd(i, c);
         return;
@@ -819,7 +859,7 @@ void setup() {
     // doesn't yet know the gateway's MAC).
     char ready_msg[160];
     snprintf(ready_msg, sizeof(ready_msg),
-             "{\"status\":\"node_multiplexed_ready\",\"fw\":\"hold-1\",\"rgbw\":" LED_RGBW_JSON ",\"kpa_min\":%.0f}",
+             "{\"status\":\"node_multiplexed_ready\",\"fw\":\"hold-2\",\"rgbw\":" LED_RGBW_JSON ",\"kpa_min\":%.0f}",
              (double)pressure::FLOOR_KPA);
     se::broadcast(ready_msg);
 

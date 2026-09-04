@@ -174,6 +174,8 @@ class EspRobot(BaseRobot):
         all actuation and the firmware holds the safe state even if the link
         drops afterwards. Re-arm with :meth:`rearm`.
         """
+        for skin in self._skins.values():
+            skin.release_hold()   # keepalives must not re-hold after re-arm
         for ctrl in self._controllers.values():
             ctrl.emergency_stop()
 

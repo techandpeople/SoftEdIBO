@@ -437,6 +437,23 @@ inline void process(const cmd_queue::Cmd& c) {
         for (int i = 0; i < NUM_CHAMBERS; i++) applyChamberCmd(i, c);
         return;
     }
+    if (c.type == CMD_VENT) {
+        // Bench vent (chamber -1 = all): the chamber leaves both engines and any
+        // hold, then both its valves open with the pumps kept off it.
+        bool open = c.cfg_chambers != 0;
+        int lo = n < 0 ? 0 : n, hi = n < 0 ? NUM_CHAMBERS - 1 : n;
+        if (lo >= NUM_CHAMBERS) return;
+        bool closed = false;
+        for (int i = lo; i <= hi; i++) {
+            chambers::inflateEng.drop(i, [&](int k) { chambers::stop(k); closed = true; });
+            chambers::deflateEng.drop(i, [&](int k) { chambers::stop(k); closed = true; });
+            chambers::holdDrop(i);
+            chambers::setManualVent(i, open);
+        }
+        (void)closed;   // setManualVent recalcs the pumps itself
+        sendPumps();
+        return;
+    }
     if (n < 0 || n >= NUM_CHAMBERS) {
         ackConfirmable(c, false, "bad_chamber");   // NACK: PC fails fast, no retry
         return;
@@ -480,6 +497,13 @@ inline void parseAndQueue(const uint8_t* data, int len) {
         c.type = CMD_PUMP_MANUAL;
         c.param = doc["pump"] | 0;     // 0=inflate, 1=deflate
         c.cfg_chambers = doc["on"] | 0;
+    }
+    // Bench vent: {"cmd":"vent","chamber":n|-1,"open":0|1} - both valves of the
+    // chamber open, no pump (manual-override dead-man; PC keeps it alive).
+    else if (strcmp(cmd, "vent") == 0) {
+        c.type = CMD_VENT;
+        c.chamber = doc["chamber"] | -1;
+        c.cfg_chambers = doc["open"] | 0;
     }
 #ifdef DEBUG_BUILD
     else if (strcmp(cmd, "debug") == 0)             { c.type = CMD_DEBUG;        c.chamber = -1; }

@@ -26,7 +26,8 @@ from src.core.skin_config import (
 from src.hardware.air_chamber import AirChamber, ChamberState
 from src.hardware.fill_calibration import combo_key, parse_combo_key
 from src.hardware.fill_profile import DeflateProfile, FillProfile
-from src.hardware.fill_scaling import (DutyModel, duty_for_period, interp_curve,
+from src.hardware.hold_duty import seed_hold_duty
+from src.hardware.fill_scaling import (DutyModel, duty_for_period,
                                        scale_fill_ms)
 from src.hardware.touch_event_router import TouchEventRouter
 from src.hardware.units import pct_to_kpa
@@ -164,6 +165,11 @@ class Skin:
         # PWM that balances the leak at the hold pressure; the node then trims
         # it on its gauge.
         self._hold_curves: dict[int, list | None] = {}
+        # local_idx of chambers under an AUTOMATIC regulated hold: once an
+        # inflate/deflate settles at a nonzero level the skin holds it there
+        # (valve regulated + shared pump servoed on the node) until the next
+        # actuation, so a leaky skin keeps its pose. Sensored nodes only.
+        self._auto_held: set[int] = set()
 
         self._build_chambers(chamber_inputs)
 
@@ -448,22 +454,19 @@ class Skin:
         chamber.target_pressure = chamber.pressure
         chamber.state = ChamberState.IDLE
         self._ctrl.fill_load.note_stop(self._slots[local_idx])
+        self._release_auto_hold(local_idx)
         return self._ctrl.hold(self._slots[local_idx])
-
-    # Seed duty for a regulated hold on a chamber with no calibrated
-    # equilibrium curve: low enough not to blow the pose up before the node's
-    # gauge trim takes over, high enough that most pumps actually move air.
-    _HOLD_FALLBACK_DUTY = 90
 
     def hold_regulated(self, local_idx: int, pct: int | None = None) -> bool:
         """Leak-compensating hold: keep the chamber AT a level despite leaks.
 
-        The node keeps the inflate valve open with the pump at the calibrated
-        equilibrium duty (``hold_duty_curve`` interpolated at the hold pressure;
-        a conservative default when uncalibrated) and trims it on its gauge.
+        The node keeps the inflate valve open while the gauge reads below the
+        level and servos the shared pump in real time (floor
+        :data:`~src.hardware.hold_duty.HOLD_DUTY_MIN`), seeded from the
+        calibrated ``hold_duty_curve`` at the hold pressure when present.
         ``pct`` picks the level to hold (default: the chamber's current
-        target). On a sensorless node the hold is duty-only (no gauge trim), so
-        it needs the calibrated curve to mean anything. The controller keeps
+        target). On a sensorless node the hold is duty-only (valve open at
+        the seed), so it needs the calibrated curve to mean anything. The controller keeps
         the firmware hold alive (~2 s keepalive); it ends via
         :meth:`release_hold` / :meth:`hold` / any actuation on the chamber.
         """
@@ -477,9 +480,8 @@ class Skin:
             return False
         level = chamber.target_pressure if pct is None else max(0, min(100, pct))
         kpa = pct_to_kpa(level, chamber.min_pressure, chamber.max_pressure)
-        duty = interp_curve(self._hold_curves.get(local_idx), kpa)
         return start_hold(self._slots[local_idx],
-                          int(round(duty)) if duty else self._HOLD_FALLBACK_DUTY,
+                          seed_hold_duty(self._hold_curves.get(local_idx), kpa),
                           kpa=kpa, timed=self._sensorless)
 
     def release_hold(self, local_idx: int | None = None) -> None:
@@ -488,12 +490,42 @@ class Skin:
         if stop_hold is None:
             return
         if local_idx is None:
+            self._auto_held.clear()
             for idx in self._chambers:
                 stop_hold(self._slots[idx])
         elif local_idx in self._chambers:
+            self._auto_held.discard(local_idx)
             stop_hold(self._slots[local_idx])
 
+    def _release_auto_hold(self, local_idx: int) -> None:
+        """Drop the automatic hold on a chamber about to be actuated (the
+        node drops it too, but the controller keepalive must stop first)."""
+        if local_idx in self._auto_held:
+            self.release_hold(local_idx)
+
+    def _settle_auto_hold(self, local_idx: int) -> None:
+        """A chamber that settled at a nonzero level: hold it there.
+
+        Called when the firmware reports the chamber idle after an actuation
+        (and directly for a command that was already at its target). Only on
+        sensored nodes - a blind hold would pump into the skin forever - and
+        only for a positive-pressure pose: the node's hold engine drives the
+        inflate side alone, so a vacuum pose (wrinkles) is left as it is.
+        """
+        chamber = self._chambers.get(local_idx)
+        if (chamber is None or self._sensorless or local_idx in self._auto_held
+                or chamber.state is not ChamberState.INFLATED):
+            return
+        level = chamber.target_pressure
+        if level <= 0:
+            return
+        if pct_to_kpa(level, chamber.min_pressure, chamber.max_pressure) <= 0:
+            return
+        if self.hold_regulated(local_idx):
+            self._auto_held.add(local_idx)
+
     def pause(self) -> None:
+        self.release_hold()
         for chamber in self._chambers.values():
             chamber.state = ChamberState.IDLE
 
@@ -524,7 +556,13 @@ class Skin:
             # actuation state.
             self._chambers[local_idx].update_actuation(actuating)
             return
-        self._chambers[local_idx].update_pressure(pressure, actuating, kpa)
+        chamber = self._chambers[local_idx]
+        was_moving = chamber.state in (ChamberState.INFLATING,
+                                       ChamberState.DEFLATING)
+        chamber.update_pressure(pressure, actuating, kpa)
+        # Actuation just finished at a level: keep it there against the leak.
+        if was_moving and chamber.state is ChamberState.INFLATED:
+            self._settle_auto_hold(local_idx)
 
     def _on_target(self, node_slot: int, target: int) -> None:
         local_idx = self._reverse.get(node_slot)
@@ -544,9 +582,14 @@ class Skin:
         # firmware clamps to them even if the construction-time push was lost or
         # an external tool left a stale limit (see _push_limits).
         self._push_limits(local_idx)
+        # A new actuation supersedes the automatic hold; it is re-established
+        # once the chamber settles (see _on_pressure / _settle_auto_hold).
+        self._release_auto_hold(local_idx)
 
         if kind == "inflate":
-            return self._inflate(local_idx, chamber, slot, value, co_active)
+            ok = self._inflate(local_idx, chamber, slot, value, co_active)
+            self._settle_auto_hold(local_idx)   # no-op unless already there
+            return ok
 
         if kind == "deflate":
             prev_target = chamber.target_pressure
@@ -602,8 +645,11 @@ class Skin:
         if duty is None:
             duty = self._duty_for_period(local_idx, chamber.pressure, v, period_ms)
         if duty is not None:
-            return self._ctrl.set_pressure(slot, v, duty=duty)
-        return self._ctrl.set_pressure(slot, v)
+            ok = self._ctrl.set_pressure(slot, v, duty=duty)
+        else:
+            ok = self._ctrl.set_pressure(slot, v)
+        self._settle_auto_hold(local_idx)   # no-op unless already at target
+        return ok
 
     def _inflate(self, local_idx: int, chamber: AirChamber, slot: int,
                  value: int, co_active: set[int] | None = None) -> bool:

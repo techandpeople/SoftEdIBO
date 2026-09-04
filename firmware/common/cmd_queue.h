@@ -11,6 +11,10 @@ enum CmdType : uint8_t {
     CMD_INFLATE, CMD_DEFLATE, CMD_SET_PRESSURE, CMD_SET_MAX, CMD_SET_MIN, CMD_HOLD,
     // Manual valve/pump control (debug/test).
     CMD_VALVE_MANUAL, CMD_PUMP_MANUAL,
+    // Per-chamber vent (bench): BOTH valves of the chamber open with no pump
+    // feeding them, so it equalises to atmosphere; chamber -1 = every chamber.
+    // cfg_chambers = open (0/1). Manual-override rules (dead-man) apply.
+    CMD_VENT,
     // Continuous bench test: latch one pump + all of its valves wide open,
     // ignoring pressure + the dead-man, until stopped (node_direct only).
     CMD_TEST_RUN, CMD_TEST_STOP,

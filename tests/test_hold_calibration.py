@@ -18,6 +18,7 @@ from src.hardware.fill_calibration import (
     set_type_leak_curve,
 )
 from src.hardware.fill_scaling import FillLoadTracker, interp_curve
+from src.hardware.hold_duty import HOLD_DUTY_MIN, seed_hold_duty
 from src.hardware.skin import Skin
 
 
@@ -142,17 +143,34 @@ class _HoldCtrl:
     def hold(self, chamber) -> bool:
         return True
 
+    # Plain actuation stubs so the auto-hold tests can drive a Skin.
+    def inflate(self, chamber, delta=10, **kw) -> bool:
+        return True
+
+    def deflate(self, chamber, delta=10, **kw) -> bool:
+        return True
+
+    def set_pressure(self, chamber, value, **kw) -> bool:
+        return True
+
+
+def test_seed_hold_duty_clamps_to_floor():
+    assert seed_hold_duty(None, 5.0) == HOLD_DUTY_MIN
+    assert seed_hold_duty([[0.0, 40], [10.0, 140]], 5.0) == HOLD_DUTY_MIN
+    assert seed_hold_duty([[0.0, 140], [10.0, 200]], 5.0) == 170
+    assert seed_hold_duty([[0.0, 300]], 1.0) == 255
+
 
 def test_hold_regulated_seeds_duty_from_curve():
     ctrl = _HoldCtrl()
     skin = Skin("shell", [{
         "controller": ctrl, "node_slot": 0, "max_pressure": 10.0,
-        "hold_duty_curve": [[0.0, 40], [10.0, 140]],
+        "hold_duty_curve": [[0.0, 140], [10.0, 200]],
     }])
     assert skin.hold_regulated(0, pct=50)      # 50% of 0..10 kPa -> 5 kPa
     call = ctrl.hold_calls[-1]
     assert call["kpa"] == 5.0
-    assert call["duty"] == 90                  # midpoint of 40..140
+    assert call["duty"] == 170                 # midpoint of 140..200
     assert call["timed"] is False
 
 
@@ -161,9 +179,82 @@ def test_hold_regulated_falls_back_without_curve_and_releases():
     skin = Skin("shell", [{"controller": ctrl, "node_slot": 3,
                            "max_pressure": 10.0}])
     assert skin.hold_regulated(0, pct=80)
-    assert ctrl.hold_calls[-1]["duty"] == Skin._HOLD_FALLBACK_DUTY
+    assert ctrl.hold_calls[-1]["duty"] == HOLD_DUTY_MIN
     skin.release_hold(0)
     assert ctrl.stop_calls == [3]              # node slot, not local index
+
+
+# ---------------------------------------------------------------------------
+# Automatic hold: a chamber that settles at a level is held there
+# ---------------------------------------------------------------------------
+
+def _status(skin, slot, kpa, st):
+    """Feed one firmware status frame (st 0 idle / 1 inflating / 2 deflating)."""
+    skin._on_pressure(slot, 0, st, kpa)
+
+
+def test_auto_hold_engages_when_inflate_settles_and_releases_on_deflate():
+    ctrl = _HoldCtrl()
+    skin = Skin("shell", [{"controller": ctrl, "node_slot": 2,
+                           "max_pressure": 10.0}])
+    assert skin.set_pressure(0, 60)             # target 6 kPa
+    assert ctrl.hold_calls == []                # nothing to hold yet
+    _status(skin, 2, 3.0, 1)                    # inflating
+    _status(skin, 2, 6.0, 0)                    # firmware idle at the level
+    assert len(ctrl.hold_calls) == 1
+    assert ctrl.hold_calls[0]["chamber"] == 2
+    assert ctrl.hold_calls[0]["kpa"] == 6.0
+    _status(skin, 2, 6.0, 0)                    # steady frames: no re-send
+    assert len(ctrl.hold_calls) == 1
+
+    assert skin.deflate(0, 100)                 # actuation drops the hold first
+    assert ctrl.stop_calls == [2]
+    _status(skin, 2, 2.0, 2)
+    _status(skin, 2, 0.0, 0)                    # empty: nothing to hold
+    assert len(ctrl.hold_calls) == 1
+
+
+def test_auto_hold_immediate_when_already_at_target():
+    ctrl = _HoldCtrl()
+    skin = Skin("shell", [{"controller": ctrl, "node_slot": 0,
+                           "max_pressure": 10.0}])
+    _status(skin, 0, 5.0, 0)                    # sitting at 5 kPa, no target
+    assert ctrl.hold_calls == []
+    assert skin.set_pressure(0, 50)             # already there -> hold now
+    assert len(ctrl.hold_calls) == 1
+    assert ctrl.hold_calls[0]["kpa"] == 5.0
+
+
+def test_auto_hold_skips_vacuum_and_sensorless():
+    ctrl = _HoldCtrl()
+    vac = Skin("wrinkles", [{"controller": ctrl, "node_slot": 0,
+                             "min_pressure": -20.0, "max_pressure": 0.0}])
+    assert vac.set_pressure(0, 50)              # -10 kPa: inflate-only engine
+    _status(vac, 0, -15.0, 2)
+    _status(vac, 0, -10.0, 0)
+    assert ctrl.hold_calls == []
+
+    blind = Skin("blind", [{"controller": ctrl, "node_slot": 1,
+                            "max_pressure": 10.0, "fill_time_ms": 1000}],
+                 pressure_sensors=False)
+    assert blind.set_pressure(0, 50)
+    _status(blind, 1, 0.0, 1)
+    _status(blind, 1, 0.0, 0)
+    assert ctrl.hold_calls == []
+
+
+def test_pause_and_hold_release_auto_holds():
+    ctrl = _HoldCtrl()
+    skin = Skin("shell", [{"controller": ctrl, "node_slot": 4,
+                           "max_pressure": 10.0}])
+    skin.set_pressure(0, 40)
+    _status(skin, 4, 1.0, 1)
+    _status(skin, 4, 4.0, 0)
+    assert len(ctrl.hold_calls) == 1
+    skin.hold(0)                                # freeze = closed valves, no hold
+    assert ctrl.stop_calls == [4]
+    _status(skin, 4, 4.0, 0)                    # no transition: stays released
+    assert len(ctrl.hold_calls) == 1
 
 
 def test_hold_regulated_sensorless_is_duty_only():

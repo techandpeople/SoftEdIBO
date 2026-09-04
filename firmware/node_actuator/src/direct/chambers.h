@@ -124,6 +124,11 @@ inline void setValve(int ch, int side, bool open) {
 inline uint16_t holdValveMask = 0;
 inline uint8_t  holdPumpDuty  = 0;
 
+// Chambers under a bench VENT (both valves open, no pump): their open valves
+// do not count as a flow path for recalcPumps, so a vented chamber never has a
+// pump run into it. Set/cleared by setManualVent (manual override rules).
+inline uint16_t ventMask = 0;
+
 // Drive the shared pumps PURELY from the ACTUAL open valves, never from chamber
 // state: each pump runs as long as ANY valve of its direction is open, and stops
 // only once they are all closed. So a pump can never dead-head (no open valve of
@@ -136,6 +141,7 @@ inline void recalcPumps() {
     bool anyDeflateOpen = false;
     bool nonHoldInflate = false;
     for (int i = 0; i < NUM_CHAMBERS; i++) {
+        if (ventMask & (1u << i)) continue;   // vented: open to atmosphere, no pump
         if (valveOpen[i * 2 + 0]) {
             anyInflateOpen = true;
             if (!(holdValveMask & (1u << i))) nonHoldInflate = true;
@@ -377,8 +383,10 @@ inline void setManualPump(int idx, bool on) {
 
 inline void setManualValve(int ch, int side, bool open) {
     if (ch < 0 || ch >= NUM_CHAMBERS || side < 0 || side > 1) return;
-    // Single side open per chamber: opening one side closes the other.
+    // Single side open per chamber: opening one side closes the other (and
+    // ends a vent, which is the one state with both sides open).
     if (open) {
+        ventMask &= ~(uint16_t)(1u << ch);
         int other = ch * 2 + (1 - side);
         if (manualValveOn[other]) {
             manualValveOn[other] = false;
@@ -390,6 +398,24 @@ inline void setManualValve(int ch, int side, bool open) {
     manualValveOn[i] = open;
     manualValveTs[i] = open ? millis() : 0;
     setValve(ch, side, open);
+}
+
+// Bench vent of one chamber: BOTH its valves open under the manual override
+// (dead-man + keepalive like any manual valve) and excluded from the pump
+// recalc, so the chamber equalises to atmosphere through the off pumps' paths
+// without a pump running into it. Neutralises an inflated OR vacuumed chamber
+// in one go. Closing restores the normal single-side manual rule.
+inline void setManualVent(int ch, bool open) {
+    if (ch < 0 || ch >= NUM_CHAMBERS) return;
+    uint16_t bit = (uint16_t)(1u << ch);
+    if (open) ventMask |= bit; else ventMask &= ~bit;
+    for (int side = 0; side < 2; side++) {
+        int i = ch * 2 + side;
+        manualValveOn[i] = open;
+        manualValveTs[i] = open ? millis() : 0;
+        setValve(ch, side, open);
+    }
+    recalcPumps();   // pumps must not chase the vented valves (or dead-head)
 }
 
 inline void manualSafetyTick(uint32_t now) {
@@ -404,7 +430,8 @@ inline void manualSafetyTick(uint32_t now) {
     bool deadmanClosed = false;
     for (int i = 0; i < NUM_CHAMBERS * 2; i++)
         if (manualValveOn[i] && (int32_t)(now - manualValveTs[i]) >= (int32_t)MANUAL_MAX_ON_MS) {
-            setManualValve(i / 2, i % 2, false);
+            if (ventMask & (1u << (i / 2))) setManualVent(i / 2, false);
+            else setManualValve(i / 2, i % 2, false);
             deadmanClosed = true;
         }
     // A manual-open valve counts into recalcPumps(), so an engine round can leave
@@ -483,6 +510,7 @@ inline void testRun(int dir, int chamber = -1, uint8_t duty = 0) {
     uint8_t runDuty = duty ? duty : DEFAULT_INFLATE_DUTY;
     for (int i = 0; i < 2; i++)                 { manualPumpOn[i] = false; manualPumpTs[i] = 0; }
     for (int i = 0; i < NUM_CHAMBERS * 2; i++)  { manualValveOn[i] = false; manualValveTs[i] = 0; }
+    ventMask = 0;
     ledcWrite(PUMP1_LEDC_CH, dir == 0 ? runDuty : 0);
     ledcWrite(PUMP2_LEDC_CH, dir == 1 ? runDuty : 0);
     for (int n = 0; n < NUM_CHAMBERS; n++) {
@@ -507,11 +535,12 @@ inline void emergencyStopAll() {
     // Pumps off.
     ledcWrite(PUMP1_LEDC_CH, 0);
     ledcWrite(PUMP2_LEDC_CH, 0);
-    // All valves closed + clear any manual override.
+    // All valves closed + clear any manual override (vent included).
     for (int i = 0; i < NUM_CHAMBERS * 2; i++) {
         manualValveOn[i] = false;
         manualValveTs[i] = 0;
     }
+    ventMask = 0;
     manualPumpOn[0] = manualPumpOn[1] = false;
     manualPumpTs[0] = manualPumpTs[1] = 0;
     for (int n = 0; n < NUM_CHAMBERS; n++) stop(n);   // closes both valves, resets state

@@ -1,5 +1,7 @@
 """Test actuators dialog - inflate/deflate individual chambers via the gateway."""
 
+import time
+
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QGroupBox,
@@ -20,7 +22,7 @@ from src.gui.base_dialog import BaseDialog
 from src.gui.ui_test_actuators_dialog import Ui_TestActuatorsDialog
 from src.hardware.gateway import Gateway
 from src.hardware.fill_profile import FillProfile
-from src.hardware.fill_scaling import interp_curve
+from src.hardware.hold_duty import seed_hold_duty
 from src.hardware.units import kpa_to_pct
 
 
@@ -60,6 +62,10 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
     # a pump greens whoever runs it (manual toggle, an inflate/deflate, the
     # closed-loop control) - the visible "action" of a fill. Main thread.
     _pumps_received = Signal(int, int)             # inflate_pwm, deflate_pwm
+    # Emitted from the gateway read thread with the node's actuation state per
+    # chamber (0 idle, 1 inflating, 2 deflating): tells the auto-hold when a
+    # one-shot inflate/deflate has finished. Main thread.
+    _actuation_received = Signal(int, int)         # chamber, st
     # Emitted from the gateway read thread with the node's magnet-sensor stream
     # (per-sensor uT). Connected to _on_magnet_data on the main thread, which
     # lazily builds the sensor tester the first time a node actually streams it.
@@ -120,9 +126,19 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         # drops a hold the user still wants; cleared on toggle-off/STOP/close.
         self._held: dict[int, dict] = {}
         self._hold_btns: dict[int, QPushButton] = {}
+        # Per-chamber bench vent: slots whose BOTH valves the user holds open
+        # with the pumps kept off them (firmware ``vent``). Re-asserted by the
+        # manual keepalive (same ~5 s dead-man as the manual valves).
+        self._vented: set[int] = set()
+        self._vent_btns: dict[int, QPushButton] = {}
         self._hold_timer = QTimer(self)
         self._hold_timer.setInterval(2000)
         self._hold_timer.timeout.connect(self._hold_keepalive)
+        # Automatic hold after a one-shot inflate/deflate: slot -> when the
+        # command went out + whether the node was seen actuating since. When the
+        # node reports the chamber idle again the level reached is held (Hold
+        # toggles on) so a leaky chamber stays inflated until deflated.
+        self._auto_hold_pending: dict[int, dict] = {}
         # slot => last reported kPa (the Hold toggle holds "where it is now").
         self._levels_kpa: dict[int, float] = {}
         # slot => chamber config dict (max/min pressure, fill mode + calibration).
@@ -259,6 +275,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         self._pressure_received.connect(self._update_pressure)
         self._valves_received.connect(self._update_valves)
         self._pumps_received.connect(self._update_pumps)
+        self._actuation_received.connect(self._update_actuation)
         self._magnet_received.connect(self._on_magnet_data)
         self._gateway.on_message(self._on_gateway_message)
         self.finished.connect(self._on_closed)
@@ -341,16 +358,32 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
                 hold_btn.setCheckable(True)
                 hold_btn.setWhatsThis(
                     "Leak-compensating hold: keep this chamber AT its current "
-                    "pressure despite leaks. The node keeps the inflate valve "
-                    "open with the pump running at the equilibrium PWM (from "
-                    "the Hold/leak calibration when present) and adjusts it on "
-                    "the pressure sensor. The dialog re-asserts the hold every "
-                    "~2 s; toggling off, actuating the chamber, STOP ALL or "
-                    "closing the dialog releases it.")
+                    "pressure despite leaks. The node opens the inflate valve "
+                    "whenever the sensor reads below the level and adjusts "
+                    "the shared pump PWM in real time (never below 150 while "
+                    "holding). Toggles on by itself once an Inflate or "
+                    "Deflate finishes at a nonzero level, so the chamber stays "
+                    "inflated until you deflate it. The dialog re-asserts the "
+                    "hold every ~2 s; toggling off, actuating the chamber, "
+                    "STOP ALL or closing the dialog releases it.")
                 hold_btn.toggled.connect(
                     lambda on, s=slot: self._toggle_hold(s, on))
                 self._hold_btns[slot] = hold_btn
                 slot_row.addWidget(hold_btn)
+
+            vent_btn = QPushButton("Vent")
+            vent_btn.setCheckable(True)
+            vent_btn.setWhatsThis(
+                "Vent this chamber: open BOTH its valves with the pumps kept "
+                "off it, so it equalises to atmosphere - neutralises an "
+                "inflated or vacuumed chamber and stops its hold. Stays open "
+                "while toggled (the dialog keeps the node's dead-man alive); "
+                "toggle off, actuate the chamber, STOP ALL or close the "
+                "dialog to close the valves again.")
+            vent_btn.toggled.connect(
+                lambda on, s=slot: self._toggle_vent_slot(s, on))
+            self._vent_btns[slot] = vent_btn
+            slot_row.addWidget(vent_btn)
 
             # Manual valve toggle controls (monospace font for fixed width). The
             # label flips on click (optimistic), but the GREEN fill is driven only
@@ -425,6 +458,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
             # pressure labels stay "-" and the valve buttons never green.
             vi = data.get("vi") or []
             vd = data.get("vd") or []
+            st = data.get("st") or []
             for i, k in enumerate(kpa):
                 if isinstance(k, (int, float)):
                     # pressure % is not sent in the batch; _update_pressure
@@ -433,6 +467,8 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
                 if (i < len(vi) and isinstance(vi[i], int)
                         and i < len(vd) and isinstance(vd[i], int)):
                     self._valves_received.emit(i, vi[i], vd[i])
+                if i < len(st) and isinstance(st[i], int):
+                    self._actuation_received.emit(i, st[i])
             return
         chamber = data.get("chamber")
         pressure = data.get("pressure")
@@ -449,6 +485,9 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         vd = data.get("vd")
         if isinstance(chamber, int) and isinstance(vi, int) and isinstance(vd, int):
             self._valves_received.emit(chamber, vi, vd)
+        st = data.get("st")
+        if isinstance(chamber, int) and isinstance(st, int):
+            self._actuation_received.emit(chamber, st)
 
     def _on_magnet_data(self, mag: list, vec=None) -> None:
         """Main thread: feed the sensor tester, building it on the first frame.
@@ -760,6 +799,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         # sensorless node MUST have a time - it is sent with "timed":1 so the
         # firmware runs fully open-loop on it.
         self._arm()
+        self._drop_hold_ui(slot)
         self._push_limits(slot)
         ms = self._inflate_ms(slot)
         if self._sensorless:
@@ -772,6 +812,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
             self._gateway.send(self._mac, "inflate", chamber=slot, delta=100, ms=ms)
         else:
             self._gateway.send(self._mac, "inflate", chamber=slot, delta=100)
+        self._arm_auto_hold([slot])
         # Optimistic: inflating opens this chamber's inflate valve. Show it OPEN
         # right away (even with the node offline); the status greens it if the
         # node confirms, and closes it when the fill finishes / the node reports.
@@ -783,6 +824,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         # A sensorless node needs the manual empty window + "timed":1, or the
         # firmware's below-target guard drops the command outright.
         self._arm()
+        self._drop_hold_ui(slot)
         self._push_limits(slot)
         if self._sensorless:
             ms = self._empty_ms(slot)
@@ -793,6 +835,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
                                ms=ms, timed=1)
         else:
             self._gateway.send(self._mac, "deflate", chamber=slot, delta=100)
+        self._arm_auto_hold([slot])
         # Optimistic: deflating opens this chamber's deflate valve (green on
         # node confirmation, closed when the node reports it done).
         self._set_valve_button((slot, 1), True, confirmed=False)
@@ -838,8 +881,10 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         burst-loss."""
         self._arm()
         for slot in slots:
+            self._drop_hold_ui(slot)
             self._push_limits(slot)
         self._gateway.send(self._mac, command, chamber=-1, delta=100)
+        self._arm_auto_hold(slots)
         # Optimistic: show every actuated chamber's valve OPEN immediately (green
         # once the node confirms). side 0 = inflate, 1 = deflate.
         side = 0 if command == "inflate" else 1
@@ -860,6 +905,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
             if not self._held:
                 self._hold_timer.stop()
             return
+        self._drop_vent_ui(slot, send_off=True)   # a vent and a hold exclude each other
         self._arm()
         self._push_limits(slot)
         cfg = self._chamber_cfgs.get(slot, {})
@@ -867,13 +913,111 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         if kpa is None:
             # No status yet: hold at the configured max as a safe-ish default.
             kpa = float(cfg.get("max_pressure", 8.0))
-        duty = interp_curve(cfg.get("hold_duty_curve"), kpa)
         payload = {"chamber": slot,
-                   "duty": int(round(duty)) if duty else 90,
+                   "duty": seed_hold_duty(cfg.get("hold_duty_curve"), kpa),
                    "kpa": round(float(kpa), 2)}
         self._held[slot] = payload
         self._gateway.send(self._mac, "hold_duty", **payload)
         self._hold_timer.start()
+
+    def _toggle_vent_slot(self, slot: int, on: bool) -> None:
+        """Per-chamber Vent toggle: both valves open, pumps off it (firmware
+        ``vent``). Ends any hold on the chamber; kept alive by the manual
+        keepalive like a held manual valve."""
+        if not on:
+            self._drop_vent_ui(slot, send_off=True)
+            return
+        self._drop_hold_ui(slot)
+        self._arm()
+        self._vented.add(slot)
+        self._gateway.send(self._mac, "vent", chamber=slot, open=1)
+        # Optimistic: both valves show OPEN now, green once the node reports.
+        self._set_valve_button((slot, 0), True, confirmed=False)
+        self._set_valve_button((slot, 1), True, confirmed=False)
+        self._refresh_manual_keepalive()
+
+    def _drop_vent_ui(self, slot: int, *, send_off: bool) -> None:
+        """End a vent on this chamber: untoggle its button (no signal) and,
+        when ``send_off``, tell the node to close both valves (an actuation
+        supersedes the vent on the node by itself, so those callers skip it)."""
+        if slot not in self._vented:
+            return
+        self._vented.discard(slot)
+        if send_off:
+            self._gateway.send(self._mac, "vent", chamber=slot, open=0)
+        self._set_valve_button((slot, 0), False)
+        self._set_valve_button((slot, 1), False)
+        btn = self._vent_btns.get(slot)
+        if btn is not None:
+            btn.blockSignals(True)
+            btn.setChecked(False)
+            btn.blockSignals(False)
+        self._refresh_manual_keepalive()
+
+    def _drop_all_vents_ui(self) -> None:
+        for slot in list(self._vented):
+            self._drop_vent_ui(slot, send_off=False)
+
+    def _drop_hold_ui(self, slot: int) -> None:
+        """An actuation supersedes a hold or vent on this chamber (the
+        firmware drops them): stop the keepalive for it and untoggle the
+        button so the UI matches, without re-sending "off". Also forgets a
+        pending auto-hold."""
+        self._auto_hold_pending.pop(slot, None)
+        self._drop_vent_ui(slot, send_off=False)
+        if self._held.pop(slot, None) is not None:
+            btn = self._hold_btns.get(slot)
+            if btn is not None:
+                btn.blockSignals(True)
+                btn.setChecked(False)
+                btn.blockSignals(False)
+            if not self._held:
+                self._hold_timer.stop()
+
+    # A one-shot actuation is taken as finished when the node reports the
+    # chamber idle after having been seen actuating, or - in case the fill was
+    # too short for a status frame to catch it moving - idle this long after
+    # the command went out.
+    _AUTO_HOLD_SETTLE_S = 1.5
+    # Levels at or under this (% of the chamber's range) are "empty": nothing
+    # to hold. Also requires a positive gauge (the hold is inflate-only).
+    _AUTO_HOLD_MIN_PCT = 5
+
+    def _arm_auto_hold(self, slots: list[int]) -> None:
+        """Remember that a one-shot inflate/deflate is under way on ``slots``:
+        when each settles at a nonzero level it is held there (Hold toggles
+        on), so a leaky chamber stays inflated until it is deflated. Sensored
+        nodes only - a blind hold would pump into the skin forever."""
+        if self._sensorless:
+            return
+        now = time.monotonic()
+        for slot in slots:
+            if slot in self._hold_btns:
+                self._auto_hold_pending[slot] = {"since": now, "moving": False}
+
+    def _update_actuation(self, chamber: int, st: int) -> None:
+        """Main thread: node actuation state (0 idle / 1 inflating / 2
+        deflating) - completes a pending auto-hold once the chamber is idle."""
+        pending = self._auto_hold_pending.get(chamber)
+        if pending is None:
+            return
+        if st != 0:
+            pending["moving"] = True
+            return
+        if not pending["moving"] and (
+                time.monotonic() - pending["since"] < self._AUTO_HOLD_SETTLE_S):
+            return
+        self._auto_hold_pending.pop(chamber, None)
+        if self._stopped or self._run is not None:
+            return
+        kpa = self._levels_kpa.get(chamber)
+        if kpa is None or kpa <= 0:
+            return
+        if self._pct_for_kpa(chamber, kpa) <= self._AUTO_HOLD_MIN_PCT:
+            return          # deflated: nothing to hold
+        btn = self._hold_btns.get(chamber)
+        if btn is not None and not btn.isChecked():
+            btn.setChecked(True)     # -> _toggle_hold(slot, True) at this kPa
 
     def _hold_keepalive(self) -> None:
         """Re-assert every active hold (firmware dead-man is ~6 s)."""
@@ -883,6 +1027,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
     def _release_holds(self) -> None:
         """Drop every hold (STOP ALL / dialog close): keepalive off + node off."""
         self._hold_timer.stop()
+        self._auto_hold_pending.clear()
         if self._held:
             self._held.clear()
             self._gateway.send(self._mac, "hold_duty", chamber=-1, off=1)
@@ -902,6 +1047,9 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         key = (chamber, side)
         want_open = not self._valve_intent.get(key, False)
         self._valve_intent[key] = want_open
+        if want_open:
+            # Opening one side ends a vent on the node (single-side rule).
+            self._drop_vent_ui(chamber, send_off=False)
 
         # Send command to firmware (re-arm first if STOP ALL latched the node)
         if want_open:
@@ -1009,16 +1157,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         chamber (opens its valve + drives the pump, ignoring the pressure cap,
         until stopped); otherwise do a one-shot fill toward the configured
         max/min."""
-        # An actuation supersedes a hold on this chamber (the firmware drops
-        # it); untoggle the button so the UI matches, without re-sending "off".
-        if self._held.pop(slot, None) is not None:
-            btn = self._hold_btns.get(slot)
-            if btn is not None:
-                btn.blockSignals(True)
-                btn.setChecked(False)
-                btn.blockSignals(False)
-            if not self._held:
-                self._hold_timer.stop()
+        self._drop_hold_ui(slot)
         if self._run == (direction, slot):
             self._stop_run()
         elif self.cont_cb.isChecked():
@@ -1082,7 +1221,8 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
     def _refresh_manual_keepalive(self) -> None:
         """Run the manual dead-man keepalive only while a valve/pump is held on."""
         any_on = (any(self._valve_intent.values())
-                  or any(on for on, _ in self._pump_states.values()))
+                  or any(on for on, _ in self._pump_states.values())
+                  or bool(self._vented))
         if any_on and not self._manual_keepalive.isActive():
             self._manual_keepalive.start()
         elif not any_on and self._manual_keepalive.isActive():
@@ -1104,6 +1244,9 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
             if on:
                 self._gateway.send(self._mac, "pump_manual", pump=pump, on=1)
                 sent = True
+        for slot in self._vented:
+            self._gateway.send(self._mac, "vent", chamber=slot, open=1)
+            sent = True
         if not sent:
             self._manual_keepalive.stop()
 
@@ -1123,6 +1266,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         Releases every held valve override and stops the keepalive; the next
         status broadcast then drives the valve buttons from the real state."""
         self._valve_intent.clear()
+        self._drop_all_vents_ui()
         for key in self._valve_states:
             self._set_valve_button(key, False)
         for pump in list(self._pump_states):
@@ -1154,6 +1298,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         # and the keepalive must not re-establish them after a later re-arm.
         self._hold_timer.stop()
         self._held.clear()
+        self._auto_hold_pending.clear()
         for btn in self._hold_btns.values():
             btn.blockSignals(True)
             btn.setChecked(False)

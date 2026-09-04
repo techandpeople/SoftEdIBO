@@ -6,6 +6,7 @@ import time
 from typing import Any, Callable
 
 from src.hardware.command_confirmer import CommandConfirmer
+from src.hardware.hold_duty import clamp_hold_duty
 from src.hardware.gateway import Gateway
 from src.hardware.fill_scaling import FillLoadTracker
 from src.hardware.touch_profiles import touch_profiles
@@ -142,15 +143,17 @@ class ESP32Controller:
                    timed: bool = False) -> bool:
         """Start (or retune) a leak-compensating hold on ``chamber``.
 
-        The node keeps the chamber's inflate valve open with the pressure pump
-        at ``duty`` - the calibrated equilibrium PWM that balances the leak -
-        and, given ``kpa``, trims the duty slowly on its gauge. ``timed=True``
-        (or no ``kpa``) runs duty-only for sensorless boards. A background
+        Given ``kpa`` the node keeps the chamber's inflate valve open while
+        its gauge reads below the target and servos the shared pressure pump
+        in real time, never below :data:`HOLD_DUTY_MIN` while a held valve is
+        open; ``duty`` only seeds that servo (the calibrated equilibrium PWM
+        when known). ``timed=True`` (or no ``kpa``) keeps the valve open at
+        ``duty`` for sensorless boards. A background
         keepalive re-asserts the hold every ~2 s until :meth:`stop_hold`;
         without it the firmware dead-man releases the hold in ~6 s.
         """
         payload: dict[str, Any] = {"chamber": int(chamber),
-                                   "duty": max(1, min(255, int(duty)))}
+                                   "duty": clamp_hold_duty(duty)}
         if kpa is not None and not timed:
             payload["kpa"] = round(float(kpa), 2)
         if timed:
