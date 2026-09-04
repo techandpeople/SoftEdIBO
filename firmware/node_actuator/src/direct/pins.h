@@ -11,11 +11,14 @@
 // Pin assignments are verified against the schematic netlist.
 // ---------------------------------------------------------------------------
 
-// Pressure sensors (XGZP6847A) on input-only ADC pins
-constexpr int PSENSOR_PINS[3] = {39, 34, 35};
-//                              PSENSOR1=IO39 (SENSOR_VN, J2_4)
-//                              PSENSOR2=IO34 (J2_5)
-//                              PSENSOR3=IO35 (J2_6)
+// Pressure sensors (XGZP6847A) on input-only ADC pins. Index = chamber.
+// Since the 2026-09 re-tubing the sensor on PSENSOR1 sits on chamber 2's
+// tube and PSENSOR3 on chamber 0's, so chambers 0 and 2 are swapped here
+// (the valve mapping below is unchanged).
+constexpr int PSENSOR_PINS[3] = {35, 34, 39};
+//                              ch0 = PSENSOR3=IO35 (J2_6)
+//                              ch1 = PSENSOR2=IO34 (J2_5)
+//                              ch2 = PSENSOR1=IO39 (SENSOR_VN, J2_4)
 
 // Pumps via DRV3297 PWM inputs. PUMP1 (LEDC ch0) = inflate/pressure pump,
 // PUMP2 (LEDC ch1) = deflate/vacuum pump (see chambers.h recalcPumps()).
