@@ -1,6 +1,7 @@
 #pragma once
 #include <Arduino.h>
 #include <math.h>
+#include "pump_duty.h"     // shared PWM floor/ceiling (both boards + PC)
 
 // ---------------------------------------------------------------------------
 // Leak-compensating hold ("hold_duty") - shared by node_direct and
@@ -22,9 +23,9 @@
 // taking turns. The shared duty servos on the NEEDIEST open chamber (largest
 // deficit): a proportional term reacts instantly to a deficit, a slow
 // integral base learns the steady leak. The duty never drops below DUTY_MIN
-// (150) while a held valve is open: below that the pump cannot keep up with
-// the leaky tubing anyway, so the floor keeps the delivery continuous rather
-// than letting the servo wind down and the pose sag. The pump is OFF only
+// (pump_duty::MIN, 180) while a held valve is open: below that the pump
+// cannot keep up with the leaky tubing anyway, so the floor keeps the delivery
+// continuous rather than letting the servo wind down and the pose sag. The pump is OFF only
 // when NO held valve is open (all chambers above target) - a pump running
 // into closed valves dead-heads the manifold, which the valves then cannot
 // open against.
@@ -65,9 +66,10 @@ constexpr uint32_t INTEG_MS       = 200;
 constexpr float    DEAD_KPA       = 0.1f;
 
 // Pump duty floor while any held valve is open (user requirement: the leaky
-// tubing needs at least this much delivery, continuously) and ceiling.
-constexpr uint8_t DUTY_MIN = 150;
-constexpr uint8_t DUTY_MAX = 255;
+// tubing needs at least this much delivery, continuously) and ceiling. Both
+// come from the shared pump_duty.h so the vacuum pull uses the same floor.
+constexpr uint8_t DUTY_MIN = pump_duty::MIN;
+constexpr uint8_t DUTY_MAX = pump_duty::FULL;
 
 template <int MAXN>
 struct Engine {

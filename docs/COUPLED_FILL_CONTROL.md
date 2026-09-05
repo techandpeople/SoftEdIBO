@@ -41,7 +41,13 @@ deflate), independent because the two manifolds are independent. State machine:
    min first, since the line falls). A chamber whose target the gauge cannot see
    (a deflate below the sensor floor) closes on its **per-chamber time budget**
    instead - `capMs`, sent by the PC as `ms` from the calibrated deflate curve
-   (0 = the tuning's `chamber_max_ms`). Spikes are rejected (see below). The
+   (0 = the tuning's `chamber_max_ms`) - and once its reading has bottomed out
+   at the gauge floor (`P_MIN - zero`, +/-`FLOOR_BAND_KPA`) the chamber is
+   latched **at-floor** (`floorMask`, `EV_AT_FLOOR`): the valve stays open but
+   the board's `recalcPumps` runs the vacuum pump at the reduced
+   `pump_duty::DEFLATE_BELOW_FLOOR` (180) while **every** open deflate valve is
+   at-floor (`Engine::lineAtFloor(valve_mask)`); one still-visible or manual
+   valve keeps the line at full duty. Spikes are rejected (see below). The
    whole round only ends at once on a safety path (`hard_max_kpa`,
    `round_max_ms`).
 3. **SETTLING** - entered **once**, after the **last** open valve closes (the
@@ -193,7 +199,7 @@ Wireless debugging over ESP-NOW is the only way to catch these on a battery node
 **`fw` marker.** The boot `node_*_ready` message carries `"fw":"..."`. **Bump it
 whenever the actuator logic changes** so a flash can be confirmed from the log -
 not bumping it (it sat at `round-min2`) cost a debug cycle of not knowing whether
-the OTA had taken. Current marker: `progressive-close-1` (both boards).
+the OTA had taken. Current marker: `vac-floor-1` (multiplexed) / `vac-floor-1-sw02` (direct).
 
 **Flashing.** OTA flashes the **prebuilt merged** `firmware/node_actuator/firmware-*.bin`.
 Rebuild them with `scripts/build-firmware.sh` - building into `.pio/` alone does
@@ -207,7 +213,8 @@ Rebuild them with `scripts/build-firmware.sh` - building into `.pio/` alone does
 - `capMs` / `chamber_max_ms` - per-chamber cumulative-open budget: the PC's `ms`
   (a calibrated deflate time) when sent, else 5 s. Also the only backstop for a
   deflate below the gauge floor, which the sensor cannot see (it clamps readings
-  at `pressure::FLOOR_KPA`, reported to the PC as `kpa_min`).
+  at `pressure::FLOOR_KPA`, reported to the PC as `kpa_min`); that part of the
+  pull runs at the 180 PWM floor rather than full duty.
 - `round_max_ms` / `seq_max_ms` - per-round and whole-sequence caps; the sequence
   cap aborts and closes any open valves.
 - `actuationWatchdog` - last-resort per-chamber timeout (now signed).

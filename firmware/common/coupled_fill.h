@@ -1,5 +1,6 @@
 #pragma once
 #include <Arduino.h>
+#include <math.h>
 
 // ---------------------------------------------------------------------------
 // Coupled-fill supervisor - shared by node_direct and node_multiplexed.
@@ -29,7 +30,12 @@
 //              cutoff must persist CUTOFF_DEBOUNCE reads per chamber. A target
 //              the gauge cannot see (deflate below the sensor floor) closes on
 //              its per-chamber time budget (capMs, from the PC's calibrated
-//              deflate curve) instead. A BLIND chamber (board with no pressure
+//              deflate curve) instead - and once its reading has BOTTOMED OUT
+//              at the gauge floor the chamber is flagged AT-FLOOR (floorMask):
+//              the pull goes on, but the board drops the vacuum pump to the
+//              reduced pump_duty::DEFLATE_BELOW_FLOOR while every open deflate
+//              valve is at the floor (the unsupervised part of the pull is
+//              gentler). A BLIND chamber (board with no pressure
 //              sensor populated - the PC sends "timed":1) is time-only both
 //              ways: its floating ADC reading is noise, so the gauge never
 //              opens, closes, or verifies it - only capMs does.
@@ -76,7 +82,13 @@ enum Event : uint8_t {
     EV_DONE         = 3,   // whole sequence finished (mask = 0)
     EV_ABORT        = 4,   // safety cap hit, sequence aborted (mask = was pending)
     EV_CHAMBER_DONE = 5,   // one chamber closed at its target (mask = still open)
+    EV_AT_FLOOR     = 6,   // a deflating chamber's gauge bottomed out (mask = at-floor set)
 };
+
+// A reading within this band above the chamber's gauge floor counts as
+// "bottomed out" - the ambient-zeroed reading sits at (P_MIN - zero) with a
+// little ADC noise once the chamber is at/below what the sensor can see.
+constexpr float FLOOR_BAND_KPA = 0.5f;
 
 // Bundle of board callbacks. Built at the call site with ops(...) so the lambda
 // types are deduced (no std::function, no heap - everything inlines).
@@ -121,6 +133,8 @@ struct Engine {
     uint32_t capMs[MAXN]    = {};  // per-chamber open-time budget (0 = tune.chamber_max_ms)
     uint8_t  overCnt[MAXN]  = {};  // per-chamber consecutive at-target reads (cutoff debounce)
     uint16_t blindMask      = 0;   // chambers running open-loop: gauge ignored, capMs closes
+    float    floorKpa[MAXN] = {};  // per-chamber gauge floor (lowest visible reading)
+    uint16_t floorMask      = 0;   // open deflate chambers whose gauge bottomed out (latched until close)
 
     void begin(uint8_t direction, const Tuning& t) { dir = direction; tune = t; }
 
@@ -151,14 +165,20 @@ struct Engine {
     // sensor populated - its ADC pin floats, so any reading is noise): the
     // gauge is ignored entirely, both for the in-round cutoff and the measure
     // verdict, and ``cap_ms`` (or the tuning backstop) is the only closer.
+    // ``floor_kpa`` is the lowest reading this chamber's gauge can produce
+    // (P_MIN minus its ambient zero); a deflate whose target lies below it is
+    // flagged at-floor once the reading gets there (see floorMask). Leave the
+    // default for inflate: nothing bottoms out on the way up.
     void request(int i, float target_kpa, float range_kpa, uint32_t cap_ms = 0,
-                 bool blind = false) {
+                 bool blind = false, float floor_kpa = -INFINITY) {
         if (i < 0 || i >= count) return;
-        target[i] = target_kpa;
-        range[i]  = range_kpa;
-        capMs[i]  = cap_ms;
+        target[i]   = target_kpa;
+        range[i]    = range_kpa;
+        capMs[i]    = cap_ms;
+        floorKpa[i] = floor_kpa;
         if (blind) blindMask |=  (uint16_t)(1u << i);
         else       blindMask &= ~(uint16_t)(1u << i);
+        floorMask &= ~(uint16_t)(1u << i);
         accumMs[i] = 0;
         bool wasEmpty = (pendingMask == 0);
         pendingMask |= (uint16_t)(1u << i);
@@ -180,8 +200,19 @@ struct Engine {
         if (i < 0 || i >= count) return;
         uint16_t bit = (uint16_t)(1u << i);
         pendingMask &= ~bit;
+        floorMask   &= ~bit;
         if (openMask & bit) { closeFn(i); openMask &= ~bit; }
         if (pendingMask == 0 && openMask == 0) phase = IDLE;
+    }
+
+    // True while at least one deflate valve is open AND every chamber the
+    // board lists as open (``valve_mask``, from its live valve mirror - manual
+    // and bench valves included) has bottomed out at its gauge floor: the
+    // whole vacuum line is past what the sensor can see, so the board may run
+    // the pump at the reduced below-floor duty. Any open valve NOT at the
+    // floor (still visibly falling, or opened by hand) keeps full duty.
+    bool lineAtFloor(uint16_t valve_mask) const {
+        return valve_mask != 0 && (valve_mask & ~floorMask) == 0;
     }
 
     // Hard reset (emergency stop / manual override takeover). Caller has already
@@ -190,6 +221,7 @@ struct Engine {
         phase = IDLE;
         pendingMask = 0;
         openMask = 0;
+        floorMask = 0;
     }
 
     // ---- internal: open every still-pending chamber together for a round ----
@@ -219,7 +251,8 @@ struct Engine {
     void closeOne(int i, uint32_t now, O& o) {
         accumMs[i] += now - openedMs[i];
         o.close(i);
-        openMask &= ~(uint16_t)(1u << i);
+        openMask  &= ~(uint16_t)(1u << i);
+        floorMask &= ~(uint16_t)(1u << i);
         overCnt[i] = 0;
         o.recalc();
         o.dbg(EV_CHAMBER_DONE, openMask);
@@ -238,9 +271,11 @@ struct Engine {
                 o.close(i);
             }
         }
+        uint16_t wasOpen = openMask;
+        openMask  = 0;
+        floorMask = 0;
         o.recalc();
-        o.dbg(EV_ROUND_END, openMask);
-        openMask = 0;
+        o.dbg(EV_ROUND_END, wasOpen);
         phase    = SETTLING;
         phaseMs  = now;
     }
@@ -255,6 +290,8 @@ struct Engine {
         if ((int32_t)(now - seqStartMs) >= (int32_t)tune.seq_max_ms) {
             for (int i = 0; i < count; i++)
                 if (openMask & (1u << i)) o.close(i);
+            openMask  = 0;
+            floorMask = 0;
             o.recalc();
             o.dbg(EV_ABORT, pendingMask);
             abort();
@@ -292,6 +329,18 @@ struct Engine {
                 if (blind) continue;
                 float k = o.readKpa(i);
                 if (dir == 0 && k >= tune.hard_max_kpa) { endAll = true; break; }
+                // Deflate past the gauge floor: the reading has bottomed out
+                // and the target lies below it, so from here the pull is
+                // time-only (capMs). Latch AT-FLOOR and let the board drop the
+                // vacuum pump to the reduced duty once every open valve is
+                // there (recalc consults lineAtFloor).
+                uint16_t bit = (uint16_t)(1u << i);
+                if (dir == 1 && !(floorMask & bit) && target[i] < floorKpa[i]
+                    && k <= floorKpa[i] + FLOOR_BAND_KPA) {
+                    floorMask |= bit;
+                    o.recalc();
+                    o.dbg(EV_AT_FLOOR, floorMask);
+                }
                 // Progressive close: every open chamber equalises with the line,
                 // so this chamber reading its own target means the line got there
                 // - it is done. Debounced per chamber so a spike can't close it.

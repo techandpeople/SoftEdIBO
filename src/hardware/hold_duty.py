@@ -14,8 +14,10 @@ from typing import Any
 
 from src.hardware.fill_scaling import interp_curve
 
-# Pump PWM floor/ceiling for a hold (8-bit). Must match the firmware engine.
-HOLD_DUTY_MIN = 150
+# Pump PWM floor/ceiling for a hold (8-bit). Must match the firmware's shared
+# ``pump_duty::MIN`` / ``pump_duty::FULL`` (firmware/common/pump_duty.h) - the
+# same floor the vacuum pump drops to for a deflate past the gauge floor.
+HOLD_DUTY_MIN = 180
 HOLD_DUTY_MAX = 255
 
 

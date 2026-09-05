@@ -360,7 +360,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
                     "Leak-compensating hold: keep this chamber AT its current "
                     "pressure despite leaks. The node opens the inflate valve "
                     "whenever the sensor reads below the level and adjusts "
-                    "the shared pump PWM in real time (never below 150 while "
+                    "the shared pump PWM in real time (never below 180 while "
                     "holding). Toggles on by itself once an Inflate or "
                     "Deflate finishes at a nonzero level, so the chamber stays "
                     "inflated until you deflate it. The dialog re-asserts the "

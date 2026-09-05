@@ -8,6 +8,7 @@
 #include "mux.h"
 #include "coupled_fill.h"   // shared coupled-line fill supervisor (both boards)
 #include "hold_duty.h"      // shared leak-compensating continuous hold (both boards)
+#include "pump_duty.h"      // shared PWM floor + below-floor deflate duty (both boards)
 
 // Per-chamber state + valve/pump coordination for node_multiplexed.
 //
@@ -29,7 +30,7 @@
 
 namespace chambers {
 
-constexpr uint8_t DEFAULT_DUTY = 255;   // full pump speed (8-bit PWM)
+constexpr uint8_t DEFAULT_DUTY = pump_duty::FULL;   // full pump speed (8-bit PWM)
 
 // One pump is enough flow for this many open valves; above it, spin another. With
 // 3 pressure + 3 vacuum pumps that caps at 3 active per direction (9 valves).
@@ -133,7 +134,11 @@ inline void holdAbort() {
 // never from chamber state - so a pump can only run while it has an open flow
 // path. Count-scaled for the common manifold: ceil(open_valves/VALVES_PER_PUMP)
 // pumps of each direction, capped at how many pumps that role has. Suspended
-// while a manual override drives the pumps directly (see main.cpp).
+// while a manual override drives the pumps directly (see main.cpp). The vacuum
+// pumps drop to pump_duty::DEFLATE_BELOW_FLOOR once EVERY open deflate valve is
+// past the gauge floor (the rest of that pull is time-only).
+inline bool deflateLineAtFloor();   // defined after the engines (needs deflateEng)
+
 inline void recalcPumps() {
     int openInf = 0, openDef = 0;
     bool nonHoldInflate = false;
@@ -151,7 +156,8 @@ inline void recalcPumps() {
     // manual override); a hold-only line runs at the calibrated equilibrium duty.
     uint8_t pDuty = nonHoldInflate ? DEFAULT_DUTY : holdPumpDuty;
     pumps::setRoleActiveCount(pumps::ROLE_PRESSURE, pCount, pDuty ? pDuty : DEFAULT_DUTY);
-    pumps::setRoleActiveCount(pumps::ROLE_VACUUM,   vCount, DEFAULT_DUTY);
+    uint8_t vDuty = deflateLineAtFloor() ? pump_duty::DEFLATE_BELOW_FLOOR : DEFAULT_DUTY;
+    pumps::setRoleActiveCount(pumps::ROLE_VACUUM,   vCount, vDuty);
 }
 
 // Median-of-three mux read for the control path: rejects a single-sample sensor
@@ -199,6 +205,20 @@ inline void enginesInit() {
     deflateEng.begin(1, TUNE_DEFLATE);
 }
 
+// Lowest ambient-zeroed reading chamber n's gauge can produce (sensor clamp at
+// P_MIN shifted by the chamber's tare zero) - see node_direct.
+inline float gaugeFloorKpa(int n) { return pressure::P_MIN - zeroKpa[n]; }
+
+// Every open (non-vented) deflate valve is a chamber the deflate engine flagged
+// at its gauge floor; a manual/bench deflate valve is never at-floor, so it
+// keeps the vacuum pumps at full duty.
+inline bool deflateLineAtFloor() {
+    uint16_t open = 0;
+    for (int i = 0; i < MAX_CHAMBERS; i++)
+        if (pca_valves::isOpen(i, 1) && !(ventMask & (1u << i))) open |= (uint16_t)(1u << i);
+    return deflateEng.lineAtFloor(open);
+}
+
 // Engine actuation primitive: open chamber i's valve for `dir` (closing the
 // opposite side). The engine recalcs pumps after a whole round opens.
 inline void engOpen(int i, uint8_t dir) {
@@ -241,7 +261,8 @@ inline void requestDeflate(int n, float target, uint8_t duty, uint32_t cap_ms = 
     if (reversed) recalcPumps();
     state[n].duty       = duty;
     state[n].target_kpa = target;
-    deflateEng.request(n, target, state[n].max_kpa - state[n].min_kpa, cap_ms, blind);
+    deflateEng.request(n, target, state[n].max_kpa - state[n].min_kpa, cap_ms, blind,
+                       gaugeFloorKpa(n));
 }
 
 inline void holdChamber(int n) {

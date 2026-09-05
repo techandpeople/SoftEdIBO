@@ -66,6 +66,19 @@ venting, so an unbounded deflate can pull a sealed chamber into vacuum.
 - `duty` (1-255, optional) is parsed and stored but currently **not** honoured
   on the engine path - the pumps run at full duty. Only the direct board's bench
   `test_run` drives a reduced PWM (used by the duty-curve calibration sweep).
+- **Deflate past the gauge floor runs at reduced PWM.** The engine tags a
+  deflating chamber *at-floor* (`coupled_fill::Engine::floorMask`) once its
+  reading has bottomed out at the lowest value its gauge can produce
+  (`P_MIN - zero`, within `FLOOR_BAND_KPA` = 0.5 kPa) **and** its target lies
+  below that. The valve stays open - the pull goes on until `capMs` - but
+  `recalcPumps` drops the vacuum pump from full duty to
+  `pump_duty::DEFLATE_BELOW_FLOOR` (= the shared **180** PWM floor,
+  `firmware/common/pump_duty.h`) as soon as **every** open deflate valve is
+  at-floor. Any open deflate valve that is still visibly falling, or was opened
+  by hand (manual / bench), keeps full duty on the shared line. Blind chambers
+  (`timed:1`, no sensor) never reduce - their manual empty time was measured at
+  full duty. The floor is the same one the hold servo never goes below (the
+  diaphragm pumps stall under ~180).
 
 ## Safety nets
 
@@ -86,7 +99,11 @@ Notes / honest gaps:
   and is the effective pressure cap while the sensor is healthy.
 - On **deflate** the (default) sensor is blind below the floor by design, so the
   time budget - the PC's calibrated deflate `ms`, else the 5 s `chamber_max_ms`
-  - is the real backstop, and it is **always** armed, even uncalibrated.
+  - is the real backstop, and it is **always** armed, even uncalibrated. The
+  below-floor part of that budget now runs at 180 PWM, not full: the PC's
+  `DeflateProfile.extrapolate_ms` still extends the full-duty tail slope past
+  the floor, so the same `ms` pulls **less** vacuum than before the change -
+  re-tune the wrinkle depth on the bench rather than trusting the old budgets.
 - `Skin` pushes `set_max_pressure` + `set_min_pressure` at construction **and
   re-pushes both before every actuation** (`Skin._push_limits`): ESP-NOW is
   fire-and-forget, so the one-shot push can be dropped and external tools can
@@ -136,7 +153,9 @@ pulling the manifold deep and leaving it there.)
 cannot see below atmosphere, so a vacuum deflate closes on **time** (`capMs`),
 not pressure. A full-duty vacuum pump run for seconds pulls well past the valve's
 ~47 kPa limit and seals that in - the lock is essentially unavoidable while the
-vacuum side is unmeasured and time-bounded.
+vacuum side is unmeasured and time-bounded. Dropping the pump to the 180 PWM
+floor once the gauge bottoms out (see above) slows that pull and narrows the
+window, but it does **not** bound it - only a vacuum-capable sensor does.
 
 **The fix the -40..+40 kPa sensors enable.** Once the vacuum side is *measured*,
 the coupled-fill engine closes deflate **closed-loop at the target**, and the

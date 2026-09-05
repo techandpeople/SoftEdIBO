@@ -157,7 +157,8 @@ class _HoldCtrl:
 def test_seed_hold_duty_clamps_to_floor():
     assert seed_hold_duty(None, 5.0) == HOLD_DUTY_MIN
     assert seed_hold_duty([[0.0, 40], [10.0, 140]], 5.0) == HOLD_DUTY_MIN
-    assert seed_hold_duty([[0.0, 140], [10.0, 200]], 5.0) == 170
+    assert seed_hold_duty([[0.0, 140], [10.0, 200]], 5.0) == HOLD_DUTY_MIN   # 170 < floor
+    assert seed_hold_duty([[0.0, 160], [10.0, 220]], 5.0) == 190
     assert seed_hold_duty([[0.0, 300]], 1.0) == 255
 
 
@@ -165,12 +166,12 @@ def test_hold_regulated_seeds_duty_from_curve():
     ctrl = _HoldCtrl()
     skin = Skin("shell", [{
         "controller": ctrl, "node_slot": 0, "max_pressure": 10.0,
-        "hold_duty_curve": [[0.0, 140], [10.0, 200]],
+        "hold_duty_curve": [[0.0, 160], [10.0, 220]],
     }])
     assert skin.hold_regulated(0, pct=50)      # 50% of 0..10 kPa -> 5 kPa
     call = ctrl.hold_calls[-1]
     assert call["kpa"] == 5.0
-    assert call["duty"] == 170                 # midpoint of 140..200
+    assert call["duty"] == 190                 # midpoint of 160..220
     assert call["timed"] is False
 
 

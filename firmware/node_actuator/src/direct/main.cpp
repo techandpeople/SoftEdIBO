@@ -107,7 +107,7 @@ void setup() {
     // below which pressure a deflate needs a time budget instead of the sensor.
     char ready_msg[160];
     snprintf(ready_msg, sizeof(ready_msg),
-             "{\"status\":\"node_direct_ready\",\"fw\":\"hold-2-sw02\",\"rgbw\":" LED_RGBW_JSON ",\"kpa_min\":%.0f}",
+             "{\"status\":\"node_direct_ready\",\"fw\":\"vac-floor-1-sw02\",\"rgbw\":" LED_RGBW_JSON ",\"kpa_min\":%.0f}",
              (double)pressure::FLOOR_KPA);
     se::broadcast(ready_msg);
 
