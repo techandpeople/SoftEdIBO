@@ -105,7 +105,10 @@ jobs:
 
       - name: Install PlatformIO
         if: steps.fwplan.outputs.components != ''
-        run: pip install platformio esptool
+        # Pinned: PlatformIO 6.2.0 pulls tool-scons 4.11.1, which dropped
+        # SCons.Tool.FortranCommon that the ESP-IDF builder still imports
+        # (gateway build fails with ModuleNotFoundError).
+        run: pip install "platformio==6.1.19" esptool
 
       # Cache only the DOWNLOAD cache (~/.platformio/.cache), never the extracted
       # install tree (~/.platformio/packages, platforms). Caching the whole tree

@@ -42,7 +42,7 @@ done
 want() { [[ " $COMPONENTS " == *" all "* || " $COMPONENTS " == *" $1 "* ]]; }
 
 if ! command -v pio >/dev/null && ! python -m platformio --version >/dev/null 2>&1; then
-    echo "ERROR: PlatformIO not found. Install with: pip install platformio" >&2
+    echo "ERROR: PlatformIO not found. Install with: pip install platformio==6.1.19" >&2
     exit 1
 fi
 
