@@ -187,3 +187,32 @@ def test_max_organs_for():
     assert max_organs_for("tree_round") == 1
     assert max_organs_for("unknown") == 3
     assert max_organs_for(None) == 3
+
+
+def test_carry_calibration_keeps_every_calibration_key():
+    saved = {"mac": "AA", "slot": 1, "max_pressure": 9.0,
+             "fill_profile": [[0, 0]], "fill_profiles": {"1": [[0, 0]]},
+             "deflate_profile": {"floor": -3}, "hold_duty_curve": [[1, 2]],
+             "leak_curve": [[3, 4]], "duty_curve": [[5, 6]], "fill_time_ms": None}
+    ch = {"mac": "AA", "slot": 1, "max_pressure": 7.0}
+    skincfg.carry_calibration(ch, skincfg.chambers_by_key([saved]).get(("AA", 1)))
+    for key in ("fill_profile", "fill_profiles", "deflate_profile",
+                "hold_duty_curve", "leak_curve", "duty_curve"):
+        assert ch[key] == saved[key]
+    assert ch["max_pressure"] == 7.0          # row-edited fields win
+    assert "fill_time_ms" not in ch           # None is not carried
+
+
+def test_carry_calibration_no_saved_chamber():
+    ch = {"mac": "AA", "slot": 0}
+    skincfg.carry_calibration(ch, None)
+    assert ch == {"mac": "AA", "slot": 0}
+
+
+def test_carry_unmanaged_skin_keys_keeps_foreign_keys_only():
+    saved = {"skin_id": "old", "name": "Belly", "organ": {"mux_ch": 3},
+             "touch": {"node_mac": "X"}, "sensor_grid": [[0]]}
+    entry = {"skin_id": "new", "chambers": []}
+    skincfg.carry_unmanaged_skin_keys(entry, saved)
+    assert entry == {"skin_id": "new", "chambers": [],
+                     "name": "Belly", "organ": {"mux_ch": 3}}

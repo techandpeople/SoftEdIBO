@@ -4,8 +4,8 @@ The gateway ESP32 is connected to the PC via USB/serial and relays
 commands to/from remote ESP32 nodes using the ESP-NOW protocol.
 
 Protocol format (JSON over serial):
-  PC -> Gateway:  {"target": "AA:BB:CC:DD:EE:01", "cmd": "inflate", "chamber": 0, "value": 255}
-  Gateway -> PC:  {"source": "AA:BB:CC:DD:EE:01", "type": "status", "chamber": 0, "pressure": 128}
+  PC -> Gateway:  {"target": "AA:BB:CC:DD:EE:01", "cmd": "inflate", "chamber": 0, "delta": 20}
+  Gateway -> PC:  {"source": "AA:BB:CC:DD:EE:01", "type": "status", "kpa": [3.2], "st": [0], ...}
 """
 
 import json
@@ -48,6 +48,9 @@ class Gateway:
         self._write_lock = threading.Lock()
         # WeakMethod refs so old controllers are GC'd after robot reconfiguration.
         self._callbacks: list[weakref.ref] = []
+        # Guards _callbacks: registered/removed on the GUI thread, iterated and
+        # pruned on the serial read thread.
+        self._callbacks_lock = threading.Lock()
         # Strong refs to raw serial taps (e.g. the serial monitor). Held strongly
         # because the consumer deregisters explicitly when it closes.
         self._raw_callbacks: list[Callable[[str, str], None]] = []
@@ -106,7 +109,8 @@ class Gateway:
         if self._scan_ref is None:
             return frozenset()
         ref = self._scan_ref
-        return frozenset(m for m, ts in self._last_seen.items() if ts >= ref)
+        # Snapshot first: the reader thread inserts newly seen MACs concurrently.
+        return frozenset(m for m, ts in list(self._last_seen.items()) if ts >= ref)
 
     def node_rgbw(self, mac: str) -> bool | None:
         """RGBW LED-ring variant a node reported (True/False), or None if unknown.
@@ -348,7 +352,8 @@ class Gateway:
 
     def on_message(self, callback: Callable[[dict[str, Any]], None]) -> None:
         """Register a callback for incoming messages from ESP32 nodes."""
-        self._callbacks.append(weakref.WeakMethod(callback))
+        with self._callbacks_lock:
+            self._callbacks.append(weakref.WeakMethod(callback))
 
     def remove_message_callback(self, callback: Callable[[dict[str, Any]], None]) -> None:
         """Deregister a callback previously passed to :meth:`on_message`.
@@ -356,9 +361,10 @@ class Gateway:
         Used by short-lived consumers (e.g. the OTA updater) that need to stop
         receiving messages deterministically rather than waiting for GC.
         """
-        self._callbacks = [
-            wr for wr in self._callbacks if wr() is not None and wr() != callback
-        ]
+        with self._callbacks_lock:
+            self._callbacks = [
+                wr for wr in self._callbacks if wr() is not None and wr() != callback
+            ]
 
     def on_raw(self, callback: Callable[[str, str], None]) -> None:
         """Register a tap for raw serial traffic.
@@ -409,6 +415,9 @@ class Gateway:
         except (json.JSONDecodeError, UnicodeDecodeError):
             logger.warning("Invalid JSON from gateway: %s", raw)
             return
+        if not isinstance(data, dict):
+            logger.warning("Non-object JSON from gateway: %s", raw)
+            return
         source = data.get("source")
         # "thymio" is the 802.15.4/C6 route tag, not an ESP-NOW node - keep it out of the
         # node list so it doesn't show up in Discover Nodes / the Add Node picker.
@@ -429,15 +438,23 @@ class Gateway:
         # command is visible in the console instead of failing silently.
         if data.get("type") == "error":
             logger.warning("Gateway error: %s", data)
-        dead: list[weakref.ref] = []
-        for wr in self._callbacks:
+        with self._callbacks_lock:
+            snapshot = list(self._callbacks)
+        pruned = False
+        for wr in snapshot:
             cb = wr()
             if cb is None:
-                dead.append(wr)
-            else:
+                pruned = True
+                continue
+            # One faulty listener must not take the read thread (and so every
+            # other listener) down with it.
+            try:
                 cb(data)
-        for d in dead:
-            self._callbacks.remove(d)
+            except Exception:
+                logger.exception("Gateway message callback failed")
+        if pruned:
+            with self._callbacks_lock:
+                self._callbacks = [wr for wr in self._callbacks if wr() is not None]
 
     def _read_loop(self) -> None:
         """Background thread that reads incoming serial data.
@@ -472,7 +489,12 @@ class Gateway:
                         # IDF logs off), which stalled WiFi-OTA staging.
                         if not raw.lstrip().startswith(b"{"):
                             continue
-                    self._dispatch_line(raw)
+                    try:
+                        self._dispatch_line(raw)
+                    except Exception:
+                        # Never let one bad line kill the reader: the app would
+                        # stay "connected" while receiving nothing.
+                        logger.exception("Failed to dispatch gateway line: %r", raw)
             except serial.SerialException:
                 logger.exception("Serial read error - gateway disconnected")
                 if self._serial is not None:

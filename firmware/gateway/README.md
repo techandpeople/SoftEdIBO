@@ -38,7 +38,8 @@ The gateway announces itself with an `"ap"` field on boot:
 The SSID/password can be changed at **runtime** (no reflash) via two
 gateway-local commands - JSON lines **without** a `"target"`, so the gateway
 handles them itself instead of forwarding over ESP-NOW. New values persist in
-NVS. The desktop app exposes this as **Tools -> Gateway WiFi AP...**.
+NVS. The desktop app exposes this in **Tools -> Update Nodes (OTA)...** (the AP
+network field + **Save AP**, auto-filled from the gateway).
 
 ```jsonc
 // PC => gateway
@@ -110,7 +111,7 @@ Two `"target"` values are special:
 
 **Gateway => PC** - every message from a node gets a `"source"` MAC added:
 ```json
-{"source":"AA:BB:CC:DD:EE:01","type":"status","chamber":0,"pressure":75,"kpa":6.00,"st":0,"vi":0,"vd":0}
+{"source":"AA:BB:CC:DD:EE:01","type":"status","kpa":[6.0,0.2,0.0],"st":[0,0,0],"vi":[0,0,0],"vd":[0,0,0]}
 {"source":"AA:BB:CC:DD:EE:01","type":"pong","rgbw":true,"kpa_min":0}
 {"source":"AA:BB:CC:DD:EE:01","type":"debug","ch":[...],"tx_ok":1520,"tx_fail":3,"drop":0,"up":342}
 {"status":"gateway_ready","mac":"AA:BB:CC:DD:EE:00","ap":"SoftEdIBO"}
@@ -120,7 +121,13 @@ A PC line that fails to parse (usually USB byte loss) is reported back as
 `{"type":"error","reason":"bad_cmd_json","len":N,"raw":"..."}` instead of being
 silently dropped, so a swallowed command (e.g. a missed `stop`) is visible.
 
-All `"pressure"` values are **0-100 %** of the node's configured maximum pressure.
+Actuator `status` is ONE batched frame per node: parallel per-chamber arrays
+`kpa[]` (kPa), `st[]` (0 idle, 1 inflating, 2 deflating) and `vi[]`/`vd[]`
+(actual inflate/deflate valve outputs). It carries no `pressure` % - the PC
+recomputes it from `kpa` against the configured range. Commands that take a
+`"value"` in % (`set_pressure`) mean 0-100 % of the chamber's configured
+[min, max] range; `set_max_pressure`/`set_min_pressure` take kPa.
+See [`../PROTOCOL.md`](../PROTOCOL.md) for the full command/reply reference.
 The `"debug"` response is only available from nodes flashed with the debug firmware.
 
 Maximum line length: **512 bytes** (`SERIAL_BUF_LEN` constant). It was raised

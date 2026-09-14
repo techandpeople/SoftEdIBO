@@ -330,6 +330,9 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                  for s in (getattr(r, "skins", None) or {}).values()]
         TrainTouchDialog(parent=self, gateway=self._gateway,
                          skins=skins).exec()
+        # Guided capture saves the touch threshold through its own Settings
+        # instance; reload ours so a later save here doesn't write the old one back.
+        self._settings.load()
 
     def _open_position_bench(self) -> None:
         """Tools => Touch Position Bench... - measure how finely a skin can

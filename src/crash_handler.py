@@ -29,7 +29,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import IO, Any
 
-from PySide6.QtCore import QMessageLogContext, QtMsgType, qInstallMessageHandler
+from PySide6.QtCore import (QMessageLogContext, QObject, QThread, QtMsgType,
+                            Signal, qInstallMessageHandler)
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from src.app_paths import APP_NAME, app_state_dir
@@ -52,6 +53,31 @@ def _persist_trace(trace_text: str, app_name: str) -> Path | None:
         return None
 
 
+class _GuiThreadDialog(QObject):
+    """Shows the crash dialog on the GUI thread.
+
+    Widgets may only be created on the GUI thread, but ``threading.excepthook``
+    runs on whichever worker crashed (e.g. the gateway reader). Created on the
+    GUI thread by :func:`install_exception_hooks`; emitting from a worker is
+    delivered through a queued connection.
+    """
+
+    requested = Signal(str, str, int)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.requested.connect(self._show)
+
+    @staticmethod
+    def _show(trace_text: str, message: str, icon: int) -> None:
+        box = QMessageBox(QMessageBox.Icon(icon), f"{APP_NAME} - Crash", message)
+        box.setDetailedText(trace_text)
+        box.exec()
+
+
+_gui_dialog: _GuiThreadDialog | None = None
+
+
 def _show_crash_dialog(trace_text: str, trace_path: Path | None,
                        message: str = "The application stopped with an unexpected error.",
                        *, icon: QMessageBox.Icon = QMessageBox.Icon.Critical) -> None:
@@ -66,9 +92,13 @@ def _show_crash_dialog(trace_text: str, trace_path: Path | None,
         print(trace_text, file=sys.stderr)
         return
 
-    box = QMessageBox(icon, f"{APP_NAME} - Crash", message)
-    box.setDetailedText(trace_text)
-    box.exec()
+    if QThread.currentThread() is app.thread():
+        _GuiThreadDialog._show(trace_text, message, icon.value)
+    elif _gui_dialog is not None:
+        _gui_dialog.requested.emit(trace_text, message, icon.value)
+    else:
+        # Off the GUI thread with no bridge installed: never touch widgets here.
+        print(message, file=sys.stderr)
 
 
 def _handle_exception(exc_type: type[BaseException], exc_value: BaseException, exc_tb: Any, app_name: str) -> None:
@@ -83,7 +113,13 @@ def _handle_exception(exc_type: type[BaseException], exc_value: BaseException, e
 
 
 def install_exception_hooks(app_name: str = APP_NAME) -> None:
-    """Install global exception hooks for main thread and worker threads."""
+    """Install global exception hooks for main thread and worker threads.
+
+    Call on the GUI thread after the QApplication exists, so worker-thread
+    crashes can be shown through the GUI-thread dialog bridge."""
+    global _gui_dialog
+    if _gui_dialog is None and QApplication.instance() is not None:
+        _gui_dialog = _GuiThreadDialog()
 
     def _sys_hook(exc_type: type[BaseException], exc_value: BaseException, exc_tb: Any) -> None:
         _handle_exception(exc_type, exc_value, exc_tb, app_name)
@@ -157,6 +193,15 @@ class NativeCrashLog:
                 logger.exception("Could not open the native crash log")
                 return None
         return self._file
+
+    def close(self) -> None:
+        """Close the stream (a no-op when it was never opened)."""
+        if self._file is not None:
+            try:
+                self._file.close()
+            except OSError:
+                logger.exception("Could not close the native crash log")
+            self._file = None
 
     def write(self, text: str) -> None:
         """Append text and flush - the process may abort right after."""

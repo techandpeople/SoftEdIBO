@@ -106,3 +106,21 @@ def test_bad_subscriber_does_not_break_others():
     router.handle_magnet({"act": [0]})
 
     assert seen == [(0, "press")]
+
+
+def test_unsubscribe_and_prune_deleted_qt_source():
+    router = TouchEventRouter.from_touch_config({"sensor_count": 2}, chamber_count=2)
+    events = _collect(router)
+
+    def dead(_chamber_id, _action):
+        raise RuntimeError("Signal source has been deleted")
+
+    router.subscribe(dead)
+    router.handle_magnet({"act": [0]})        # dead listener pruned, live one fires
+    assert events == [(0, "press")]
+    assert dead not in router._cbs
+
+    cb = router._cbs[0]
+    router.unsubscribe(cb)
+    router.handle_magnet({"act": []})
+    assert events == [(0, "press")]

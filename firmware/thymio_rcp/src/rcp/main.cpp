@@ -280,7 +280,7 @@ static void sniffPump() {
             hex[i * 2 + 1] = H[f.data[i] & 0x0F];
         }
         hex[n * 2] = '\0';
-        char line[288];
+        char line[384];   // 254 hex chars + JSON wrapper
         snprintf(line, sizeof(line),
                  "{\"type\":\"frame\",\"ch\":%u,\"rssi\":%d,\"lqi\":%u,\"len\":%u,"
                  "\"data\":\"%s\"}", f.channel, f.rssi, f.lqi, f.len, hex);
@@ -441,7 +441,9 @@ static void thTx(uint16_t addr, uint16_t msgType, uint16_t startAddr,
                  const int16_t* vals, uint8_t nvals) {
     static int16_t body[48];
     body[0] = (int16_t)startAddr;
-    if (nvals > 47) nvals = 47;
+    // thSend's frame buffer holds 22 header bytes + 2 per word in 96 B, i.e.
+    // startAddr + 36 values (current callers send at most 16).
+    if (nvals > 36) nvals = 36;
     for (uint8_t i = 0; i < nvals; i++) body[1 + i] = vals[i];
     thSend(addr, msgType, body, (uint8_t)(nvals + 1));
 }
@@ -695,7 +697,7 @@ static void thEmitRaw(const SniffFrame& f) {
     char hex[SNIFF_MAX_BYTES * 2 + 1];
     for (uint8_t i = 0; i < n; i++) { hex[i * 2] = H[f.data[i] >> 4]; hex[i * 2 + 1] = H[f.data[i] & 0x0F]; }
     hex[n * 2] = '\0';
-    char line[288];
+    char line[384];   // 254 hex chars + JSON wrapper
     snprintf(line, sizeof(line),
              "{\"type\":\"thymio_rx\",\"rssi\":%d,\"len\":%u,\"data\":\"%s\"}",
              f.rssi, f.len, hex);
@@ -771,7 +773,7 @@ static void thymioRxPump() {
     }
 }
 
-// Active discovery: broadcast LIST_NODES ~2 Hz and turn every reply into a
+// Active discovery: broadcast LIST_NODES at 10 Hz and turn every reply into a
 // {"type":"thymio_found","addr":"XXXX"}. A reply is any frame on our PAN whose
 // MAC source is a real robot (not the host, not broadcast) - its src IS the
 // address the app needs. The PC de-dups and orders by first-seen. Runs on the

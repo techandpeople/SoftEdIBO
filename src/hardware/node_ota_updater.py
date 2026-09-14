@@ -8,7 +8,7 @@ involved, so it works anywhere the gateway can reach the node.
 
 Protocol::
 
-    PC -> node  {"cmd":"ota_begin","size":N,"md5":"<hex>","chunk":144}
+    PC -> node  {"cmd":"ota_begin","size":N,"md5":"<hex>","chunk":96}
     node -> PC  {"type":"ota_ready"} | {"type":"ota_error","reason":...}
     PC -> node  {"cmd":"ota_data","seq":S,"data":"<base64>"}
     node -> PC  {"type":"ota_ack","seq":S}

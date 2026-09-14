@@ -199,7 +199,7 @@ Wireless debugging over ESP-NOW is the only way to catch these on a battery node
 **`fw` marker.** The boot `node_*_ready` message carries `"fw":"..."`. **Bump it
 whenever the actuator logic changes** so a flash can be confirmed from the log -
 not bumping it (it sat at `round-min2`) cost a debug cycle of not knowing whether
-the OTA had taken. Current marker: `vac-floor-1` (multiplexed) / `vac-floor-1-sw02` (direct).
+the OTA had taken. Current marker: `estop-1` (multiplexed) / `estop-1-sw02` (direct).
 
 **Flashing.** OTA flashes the **prebuilt merged** `firmware/node_actuator/firmware-*.bin`.
 Rebuild them with `scripts/build-firmware.sh` - building into `.pio/` alone does

@@ -86,6 +86,8 @@ class _Unit:
     # skin has no trained model - raw-touch `gesture_count` still works.
     gesture_counts: dict[str, int] = field(default_factory=dict)
     gesture_clf: Any = None
+    # The compensated-magnet callback this activity subscribed (undone on stop).
+    magnet_cb: Any = None
     # A phase jump requested from inside a per-press handler (touch_progress),
     # applied at the next tick so it never mutates the running aux list mid-run.
     pending_state: str | None = None
@@ -241,6 +243,7 @@ class ScriptedActivity(BaseActivity):
             self._thymio_call(unit, "set_motors", 0, 0)
             self._unsubscribe_impact(unit)
             self._unsubscribe_lifted(unit)
+            self._unsubscribe_touch(unit)
         self._units.clear()
         logger.info("ScriptedActivity %r stopped", self.name)
 
@@ -1014,8 +1017,26 @@ class ScriptedActivity(BaseActivity):
 
     def _subscribe_touch(self, unit: _Unit) -> None:
         from src.hardware.touch_source import subscribe_skin_magnet
-        subscribe_skin_magnet(unit.skin,
-                              lambda data, u=unit: self._on_magnet(u, data))
+        def cb(data: dict[str, Any], u: _Unit = unit) -> None:
+            self._on_magnet(u, data)
+        if subscribe_skin_magnet(unit.skin, cb):
+            unit.magnet_cb = cb
+
+    @staticmethod
+    def _unsubscribe_touch(unit: _Unit) -> None:
+        """Detach every sensor listener this activity attached to the unit, so a
+        stopped session's handlers (and its ML classifier) stop running on the
+        gateway thread - robots and skins are reused across sessions."""
+        if unit.magnet_cb is not None and unit.skin is not None:
+            from src.hardware.touch_source import unsubscribe_skin_magnet
+            unsubscribe_skin_magnet(unit.skin, unit.magnet_cb)
+            unit.magnet_cb = None
+        if unit.gesture_clf is not None:
+            unit.gesture_clf.detach()
+            unit.gesture_clf = None
+        for sensor in unit.organ_sensors:
+            sensor.detach()
+        unit.organ_sensors.clear()
 
     def _subscribe_gestures(self, unit: _Unit) -> None:
         """Attach a live ML gesture classifier so `gesture_count` can count

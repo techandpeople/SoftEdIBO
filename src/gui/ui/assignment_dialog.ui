@@ -26,6 +26,7 @@
    </item>
    <item>
     <widget class="QDialogButtonBox" name="button_box">
+     <property name="whatsThis"><string>OK starts the session with the ticked assignments; Skip starts it anyway and leaves unassigned units to be attributed on touch; Cancel returns without starting the session.</string></property>
      <property name="standardButtons"><set>QDialogButtonBox::Cancel|QDialogButtonBox::Ok</set></property>
     </widget>
    </item>

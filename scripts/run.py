@@ -10,7 +10,7 @@ from pathlib import Path
 
 os.environ.setdefault("QT_LOGGING_RULES", "qt.qpa.wayland.textinput=false")
 
-# QtWebEngine (Behaviour Editor's block canvas) runs a Chromium process that
+# QtWebEngine (Activity Editor's block canvas) runs a Chromium process that
 # hard-crashes on some Linux GPU drivers / Wayland-via-xcb setups. Force the
 # web view to render in software - plenty for a block editor - which avoids the
 # driver-dependent GPU crash. Override by exporting QTWEBENGINE_CHROMIUM_FLAGS.
@@ -101,8 +101,8 @@ def _fatal(msg: str) -> None:
 
 
 def main():
-    # Both required BEFORE the QApplication exists for the Behaviour Editor's
-    # QWebEngineView (Tools => Behaviour Editor...):
+    # Both required BEFORE the QApplication exists for the Activity Editor's
+    # QWebEngineView (Tools => Activity Editor...):
     #  1. shared OpenGL contexts (Qt requirement for the WebEngine widget);
     #  2. importing QtWebEngine itself - on PySide6/Linux, importing it AFTER
     #     the QApplication is created makes the web view segfault on open. The

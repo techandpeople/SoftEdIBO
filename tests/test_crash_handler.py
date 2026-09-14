@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import threading
+from types import SimpleNamespace
 
 from PySide6.QtCore import QMessageLogContext, QtMsgType
 
@@ -49,11 +51,13 @@ def test_open_then_write_appends_and_flushes(tmp_path, monkeypatch):
     log.write("second\n")
     assert log.path.read_text() == "first\nsecond\n"
     assert log.open() is stream           # opened once
+    log.close()
 
 
 def test_write_without_open_creates_file(tmp_path, monkeypatch):
     log = _log(tmp_path / "nested", monkeypatch)
     log.write("boom")
+    log.close()
     assert log.path.read_text() == "boom\n"
 
 
@@ -87,6 +91,7 @@ def test_bridge_fatal_writes_crash_log_and_shows_dialog(tmp_path, monkeypatch):
     trace, message = shown[0]
     assert "Could not initialize GLX" in trace and "Could not initialize GLX" in message
     assert list((tmp_path / "state").glob("crash-*.log"))   # timestamped copy
+    log.close()                           # the next start's process has no handle
     # The next start harvests exactly this crash.
     previous = log.take_previous()
     assert previous is not None and "Could not initialize GLX" in previous.text
@@ -102,3 +107,20 @@ def test_bridge_demotes_expected_warnings_to_debug(tmp_path, monkeypatch, caplog
     levels = {r.getMessage(): r.levelno for r in caplog.records if r.name == "qt"}
     assert levels["something else"] == logging.WARNING
     assert [lvl for msg, lvl in levels.items() if msg.startswith("QXcbIntegration")] == [logging.DEBUG]
+
+
+def test_crash_dialog_from_worker_thread_goes_through_gui_bridge(monkeypatch, qapp):
+    """A worker-thread crash must not build widgets off the GUI thread."""
+    emitted: list[tuple[str, str, int]] = []
+
+    bridge = SimpleNamespace(requested=SimpleNamespace(emit=lambda *args: emitted.append(args)))
+    monkeypatch.setattr(crash_handler, "_gui_dialog", bridge)
+    monkeypatch.setattr(crash_handler._GuiThreadDialog, "_show",
+                        staticmethod(lambda *_a: (_ for _ in ()).throw(AssertionError("widget built"))))
+
+    worker = threading.Thread(
+        target=crash_handler._show_crash_dialog, args=("trace", None, "boom"))
+    worker.start()
+    worker.join()
+
+    assert emitted and emitted[0][0] == "trace" and emitted[0][1] == "boom"

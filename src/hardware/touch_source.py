@@ -43,6 +43,16 @@ def subscribe_skin_magnet(skin: Any,
     return False
 
 
+def unsubscribe_skin_magnet(skin: Any,
+                            callback: Callable[[dict[str, Any]], None]) -> None:
+    """Undo :func:`subscribe_skin_magnet` (a no-op if it was never subscribed)."""
+    for owner in (getattr(skin, "touch_source", None),
+                  getattr(skin, "touch_controller", None)):
+        remove = getattr(owner, "remove_magnet_listener", None)
+        if remove is not None:
+            remove(callback)
+
+
 class CompensatedMagnetSource:
     """Subscribes once to a raw controller's magnet stream, compensates each
     message using live chamber levels, and fans it out to its own subscribers."""
@@ -65,6 +75,10 @@ class CompensatedMagnetSource:
             self._attached = True
             self._ctrl.on_magnet(self._handle)
 
+    def remove_magnet_listener(self, callback: Callable[[dict[str, Any]], None]) -> None:
+        """Deregister a callback passed to :meth:`on_magnet` (no-op if absent)."""
+        self._subs[:] = [cb for cb in self._subs if cb != callback]
+
     def set_threshold_ut(self, value: float) -> None:
         """Retune the compensator's activation threshold (uT) at runtime.
 
@@ -81,13 +95,13 @@ class CompensatedMagnetSource:
         except Exception:   # noqa: BLE001 - never let one bad reading kill the stream
             logger.exception("touch compensation failed; passing raw")
             out = data
-        dead: list[int] = []
-        for i, cb in enumerate(self._subs):
+        dead: list = []
+        for cb in list(self._subs):     # snapshot: listeners change on the GUI thread
             try:
                 cb(out)
             except RuntimeError:        # Qt signal source deleted - prune it
-                dead.append(i)
+                dead.append(cb)
             except Exception:           # noqa: BLE001 - a bad subscriber must not break others
                 logger.exception("compensated magnet callback failed")
-        for i in reversed(dead):
-            self._subs.pop(i)
+        if dead:
+            self._subs[:] = [cb for cb in self._subs if all(cb is not d for d in dead)]

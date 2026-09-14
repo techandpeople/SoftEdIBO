@@ -182,8 +182,9 @@ inline void computeAnimated_(uint8_t* oR, uint8_t* oG, uint8_t* oB, uint32_t now
 
 inline float fadeProgress_(uint32_t now) {
     if (fadeMs_ == 0) return 1.0f;
-    uint32_t e = now - fadeStart_;
-    return (e >= fadeMs_) ? 1.0f : (float)e / (float)fadeMs_;
+    int32_t e = (int32_t)(now - fadeStart_);
+    if (e <= 0) return 0.0f;
+    return ((uint32_t)e >= fadeMs_) ? 1.0f : (float)e / (float)fadeMs_;
 }
 
 // Stages 1-3: animate, cross-fade from the snapshot, remember the output, gamma+show.
@@ -289,7 +290,9 @@ inline void setPixel(int i, uint8_t r, uint8_t g, uint8_t b,
 
 inline void update() {
     uint32_t now = millis();
-    bool fading = fadeMs_ > 0 && (now - fadeStart_) < fadeMs_;
+    // SIGNED diffs below: set_led runs on the ESP-NOW receive task, so a start
+    // time can land a hair AFTER the `now` cached here.
+    bool fading = fadeMs_ > 0 && (int32_t)(now - fadeStart_) < (int32_t)fadeMs_;
     if (!fading && fadeWasActive_) { fadeWasActive_ = false; dirty_ = true; }
     if (fading) fadeWasActive_ = true;
 
@@ -306,8 +309,8 @@ inline void update() {
 
     // A bounded animation that has run its cycles goes dark and stays there.
     if (pattern_ != STATIC && cycles_ >= 0) {
-        uint32_t elapsed = now - start_;
-        if (elapsed >= (uint32_t)cycles_ * period_) {
+        int32_t elapsed = (int32_t)(now - start_);
+        if (elapsed >= 0 && (uint32_t)elapsed >= (uint32_t)cycles_ * period_) {
             bool wasFade = (pattern_ == FADE);
             pattern_ = STATIC;
             if (!wasFade) {   // FADE rests on its base colour (c1); others go dark

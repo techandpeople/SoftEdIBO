@@ -51,8 +51,25 @@ Fills are driven by the shared **coupled-fill engine**
 ([`common/coupled_fill.h`](common/coupled_fill.h)): co-active same-direction
 chambers open together, each closes progressively the moment the shared line
 reaches its target, then one settle + isolated verify round. Safety is
-time-based (per-chamber open cap 5 s - overridable per request via `ms` -
-per-round 6 s, whole-sequence 25 s, plus a 10 s actuation watchdog).
+time-based: per-chamber open cap 5 s (overridable per request via `ms`),
+per-round 6 s / whole-sequence 25 s on the direct board and 8 s / 45 s on the
+multiplexed board (`direct/chambers.h`, `multiplexed/chambers.h`), plus a 10 s
+actuation watchdog.
+
+`chamber: -1` on `inflate`/`deflate` carries the request's `ms`/`duty`/`timed`
+to every chamber on both boards. A chamber index outside the board's valid
+range (`0..2` on the direct board, `0..num_chambers-1` on the multiplexed
+board) is rejected - it no longer wraps to `-1` (all); a rejected
+`set_max_pressure`/`set_min_pressure` that carried a `seq` is NACKed with
+`err:"bad_chamber"`, anything else is dropped silently.
+
+**While emergency-stopped** (`stop` received, no `resume` yet) both boards drop
+every actuation command (`inflate`, `deflate`, `set_pressure`, `hold`,
+`hold_duty`, `valve_manual`, `pump_manual`, `vent`, `test_run`), so nothing is
+queued to run on re-arm. `set_max_pressure`/`set_min_pressure` still apply
+(and ack) because they only store a limit. `ping`, `tare`, LED commands,
+`configure` (multiplexed setup / magnet tuning), `rebaseline` and the direct
+board's `test_stop`/`status_rate` stay honoured.
 
 | `cmd` | Fields | Notes |
 |---|---|---|
@@ -64,12 +81,13 @@ per-round 6 s, whole-sequence 25 s, plus a 10 s actuation watchdog).
 | `set_min_pressure` | `chamber`, `value` (kPa), `seq`? | Same confirmed-delivery option as `set_max_pressure` |
 | `hold` | `chamber` (-1 = all) | Closes valves, drops the chamber from both engines (and from any `hold_duty`) |
 | `hold_duty` | `chamber` (-1 = all), `duty` (180-255), `kpa`?, `timed`?, `off`? | Leak-compensating regulated hold: the chamber's INFLATE valve opens while its gauge reads below `kpa` (0.25 kPa hysteresis) and closes above it, with the shared pressure pump servoed in real time (proportional + slow integral on the neediest open chamber) and never below 180 PWM (`pump_duty::MIN`, shared with the below-floor deflate pull) while a held valve is open; pump off only when every held valve is closed. `duty` seeds the servo. Different targets coexist on the shared line (each valve closes at its own level). `timed:1` (or no `kpa`) keeps the valve open at `duty` (sensorless boards). PC must re-send ~2 s as keepalive (6 s dead-man drops the hold). `off:1` drops it. Any inflate/deflate/set_pressure/hold on the chamber supersedes it; fill engines/manual/bench runs suspend it and it resumes after |
-| `stop` | - | Emergency stop: latch every pump off + valve closed; actuation commands are dropped until `resume` |
+| `stop` | - | Emergency stop: latch every pump off + valve closed; actuation commands are dropped until `resume` (limits still apply - see above) |
 | `resume` | - | Re-arm after `stop` |
+| `tare` | - | Zero the pressure sensors: capture each chamber's current reading (8-sample average) as its ambient zero and persist it in NVS. Non-actuating, honoured while stopped. The PC vents every chamber first (`vent`, Skin Config -> Zero Sensors). The direct board acks it (`{"type":"ack","cmd":"tare"}`); the multiplexed board does not, and bypasses the `configure` requirement for it |
 | `valve_manual` | `chamber`, `side` (0 = inflate, 1 = deflate), `open` (0/1) | Dev/bench override, bypasses the engine; 5 s dead-man auto-off + hard-limit cutoff |
 | `pump_manual` | `pump` (0 = inflate/pressure, 1 = deflate/vacuum), `on` (0/1) | Dev/bench override, same safety nets |
 | `vent` | `chamber` (-1 = all), `open` (0/1) | Bench vent: BOTH valves of the chamber open with the pumps kept off it (excluded from the pump recalc), so it equalises to atmosphere - neutralises an inflated or vacuumed chamber and drops any `hold_duty` on it. Manual-override rules: 5 s dead-man (PC keeps it alive), a `valve_manual` open on either side or any actuation ends it |
-| `set_led` | `color` ("#RRGGBB"), `pattern` ("off"/"solid"/"blink"/"pulse"/"comet"), `period_ms`, `count`, `fade_ms`?, `angle`?, `index`?, `ring`? | WS2812/SK6812 ring(s). `index` sets a single pixel; omit it for the whole ring. `period_ms`/`count` apply to blink/pulse/comet (count <= 0 = forever). Every change cross-fades over `fade_ms` (default 250 ms; 0 snaps). `angle` (0-360 deg) rotates the comet start. `ring` (0..2) selects one of the multiplexed board's three rings; omit/-1 = all (ignored by the direct board) |
+| `set_led` | `color` ("#RRGGBB"), `pattern` ("off"/"solid"/"blink"/"pulse"/"comet"/"fade"), `color2`?, `period_ms`, `count`, `fade_ms`?, `angle`?, `index`?, `ring`? | WS2812/SK6812 ring(s). `index` sets a single pixel; omit it for the whole ring. `period_ms`/`count` apply to blink/pulse/comet/fade (count <= 0 = forever). `"fade"` cross-fades `color` <-> `color2` (default black) on the node, one full cycle per `period_ms`. Every change cross-fades over `fade_ms` (default 250 ms; 0 snaps). `angle` (0-360 deg) rotates the comet start. `ring` (0..2) selects one of the multiplexed board's three rings; omit/-1 = all (ignored by the direct board) |
 | `set_led_halves` | `colors` (["#RRGGBB", ...], up to 8), `pattern`, `period_ms`, `count`, `fade_ms`?, `angle`?, `ring`? | Splits the ring into `len(colors)` equal contiguous arcs in ONE frame (e.g. half purple / half yellow), rendered from loop(). `pattern`/`period_ms` animate the whole split together; `"comet"` paints one comet per colour. `angle` rotates the split. Prefer this over a burst of per-pixel `set_led` frames - those call `strip.show()` once per pixel in the receive task and reset the node |
 | `debug` | - | Debug build only; reply: `{type:"debug",...}` |
 
@@ -91,14 +109,14 @@ bench `test_run` honors it (duty-curve calibration sweeps).
 | `cmd` | Fields | Notes |
 |---|---|---|
 | `rebaseline` | - | Re-zero (recapture the baseline of) all magnetic sensors |
-| `configure` | `act_threshold_ut`, `adaptive_baseline`, `baseline_tau_ms`, `stream_vec` | Set the uT activation threshold; opt-in adaptive baseline (tracks slow drift, frozen per-sensor while active); `stream_vec` toggles the 3-axis `vec` rows in the stream (RAM-only - re-send after a node reboot). All optional. Legacy `fullscale_mt`/`act_threshold` (fraction) still accepted |
+| `configure` | `act_threshold_ut`, `adaptive_baseline`, `baseline_tau_ms`, `stream_vec`, `osr`, `filter` | Set the uT activation threshold; opt-in adaptive baseline (tracks slow drift, frozen per-sensor while active); `stream_vec` toggles the 3-axis `vec` rows in the stream (RAM-only - re-send after a node reboot). `osr` (0-3) / `filter` (0-7) set the MLX90393 oversampling / digital filter (Adafruit enum indices; applied from the main loop, then the baseline is re-captured - keep hands off the skin). All optional. Legacy `fullscale_mt`/`act_threshold` (fraction) still accepted |
 
 ### Multiplexed-node only
 
 #### `configure`
 
-Required before any actuation command (`ping`, `stop`/`resume` and `debug`
-work regardless). Without it, the node replies
+Required before any actuation command (`ping`, `stop`/`resume`, `debug`,
+`tare` and `hold_duty` work regardless). Without it, the node replies
 `{type:"error", reason:"not_configured"}`. Re-send to change any field at
 runtime.
 
@@ -131,9 +149,9 @@ Each message arrives on the PC with a `source` field added by the gateway.
 | `type` / `status` | Fields | When |
 |---|---|---|
 | `status:"node_*_ready"` | `fw`, `rgbw`, `kpa_min` | Once at boot, ESP-NOW broadcast to `FF:FF:FF:FF:FF:FF` |
-| `status` | `chamber`, `pressure` (0-100 %), `kpa`, `st` (actuation: 0 idle, 1 inflating, 2 deflating), `vi`/`vd` (actual inflate/deflate valve output, 0/1) | Every 500 ms, one per chamber (faster during a `status_rate` window; the direct board also emits one the instant a chamber's state or valve output changes) |
+| `status` | `kpa[]` (kPa, 0.1 resolution), `st[]` (actuation: 0 idle, 1 inflating, 2 deflating), `vi[]`/`vd[]` (actual inflate/deflate valve output, 0/1) - parallel arrays indexed by chamber | ONE batched frame per node every 500 ms covering all chambers (3 on the direct board, `num_chambers` on the multiplexed board). No `pressure` % - the PC recomputes it from `kpa` against the configured range. The direct board also emits one the instant a chamber's state or valve output changes, sends faster during a `status_rate` window, and keeps reporting while stopped. The multiplexed board refreshes idle chamber pressure every `PRESSURE_CHECK_MS` (200 ms) so `kpa` stays live, but sends **no** status while emergency-stopped, unconfigured, not ready or in the PCA error state |
 | `pong` | `rgbw`, `kpa_min` | Reply to `ping` |
-| `ack` | `cmd`, `seq`?, `chamber`?, `ok`?, `err`? | Confirms a command was **applied**. **Both boards** ack `set_max_pressure`/`set_min_pressure` when the PC tagged them with a `seq`, echoing `seq`+`chamber`+`ok` (`ok:false`+`err`, e.g. `"bad_chamber"`, is a NACK) so the PC can retransmit a dropped safety limit - see [`../docs/ACK_RELIABILITY.md`](../docs/ACK_RELIABILITY.md). The direct board additionally acks `stop`/`resume`/`test_run`/`test_stop`/`status_rate` (no `seq`) |
+| `ack` | `cmd`, `seq`?, `chamber`?, `ok`?, `err`? | Confirms a command was **applied**. **Both boards** ack `set_max_pressure`/`set_min_pressure` when the PC tagged them with a `seq`, echoing `seq`+`chamber`+`ok` (`ok:false`+`err`, e.g. `"bad_chamber"`, is a NACK) so the PC can retransmit a dropped safety limit - see [`../docs/ACK_RELIABILITY.md`](../docs/ACK_RELIABILITY.md). The direct board additionally acks `stop`/`resume`/`tare`/`test_run`/`test_stop`/`status_rate` (no `seq`) |
 | `pumps` | `inf`, `def` (live pump PWM duty, 0-255) | Direct board only: with every status batch + the instant a duty changes |
 | `seq` | `inf_ph`/`inf_mask`, `def_ph`/`def_mask`, `ch[]` (`k`, `mx`) | Direct board only: engine-phase diagnostic after an Inflate/Deflate-All |
 | `dbg` | `ev` (`"rx"`/`"eng"`/`"dry"`), ... | Debug build only: valve-state-at-command, engine round/measure trace, dry-pump warnings |
@@ -194,7 +212,7 @@ no tank sensors.)
 |---|---|
 | `mag` | `[m1, ...]` - N per-sensor magnitudes (uT), baseline-subtracted |
 | `act` | `[idx, ...]` - indices of sensors whose `mag >= act_threshold_ut` |
-| `vec` | `[[dx,dy,dz], ...]` - per-sensor 3-axis deltas (whole uT); only when 3-axis streaming is on (`MAG_VECTOR` build or `configure stream_vec`). The announce then carries `"vec":1` |
+| `vec` | `[[dx,dy,dz], ...]` - per-sensor 3-axis deltas in uT: one decimal (0.1 uT) for components below 100 uT, whole uT above; only when 3-axis streaming is on (`MAG_VECTOR` build or `configure stream_vec`). The announce then carries `"vec":1` |
 
 Cadence: ~28 Hz (35 ms) on the standalone board; 100 ms (~10 Hz) on the direct
 actuator board, so the stream can't crowd out actuation commands. The magnet
@@ -221,10 +239,13 @@ The magnet sensor firmware broadcasts its configuration at the end of
 late-connecting PC still captures it):
 
 ```json
-{"status":"node_magnet_sensor_ready", "sensors": 4, "variant": "mlx90393"}
+{"status":"node_magnet_sensor_ready", "sensors": 4, "variant": "mlx90393", "fw": "magvec-1"}
 ```
 
-`"vec":1` is appended when 3-axis streaming is on. `ESP32Controller` caches
+`fw` is the magnet module's build marker; `"vec":1` is added when 3-axis
+streaming is on (from boot on the `vector` env / `-DMAG_VECTOR` build, or after
+`configure stream_vec:true`). A `ping` to the standalone board gets a bare
+`{"type":"pong"}` (no `rgbw`/`kpa_min` - it has no LEDs or chambers). `ESP32Controller` caches
 the payload on receipt (including the optional `magnets`/`geometry` keys,
 which the current firmware does not emit yet); read it later via
 `controller.magnet_geometry`.
@@ -268,6 +289,29 @@ nothing else changes.
 - `ready`, `configured` - booleans
 - `num_chambers`
 - `p_tank`, `v_tank` - mux channel indices assigned by autodetect
+
+### OTA firmware update (all ESP-NOW nodes)
+
+Every node includes the shared receiver [`common/se_ota.h`](common/se_ota.h);
+the PC side is `src/hardware/node_ota_updater.py` (ESP-NOW) and
+`src/hardware/wifi_ota_updater.py` (WiFi), driven from Tools -> Update Nodes
+(OTA)... The gateway relays these unchanged.
+
+| Direction | Payload | Notes |
+|---|---|---|
+| PC -> node | `{"cmd":"ota_begin","size":N,"md5":"<hex>","chunk":96}` | Starts an image; node replies `ota_ready` or `ota_error` (`begin_failed`) |
+| PC -> node | `{"cmd":"ota_data","seq":S,"data":"<base64>"}` | One chunk, `seq` 0,1,2,... `CHUNK_SIZE` = 96 raw bytes (the gateway->node relay drops payloads over ~190 B). Node writes only the expected `seq`, re-acks older ones, silently drops future ones |
+| PC -> node | `{"cmd":"ota_end"}` | Node verifies the MD5, arms an RTC "boot done" flag and reboots |
+| PC -> node | `{"cmd":"ota_wifi","ssid":"...","pass":"...","url":"http://.../fw"}` | Fast path (S3 gateway with PSRAM): node leaves ESP-NOW, joins the gateway SoftAP and HTTP-pulls the image staged via `ota_store_*`. The gateway injects its own `ssid`/`pass` when absent |
+| node -> PC | `{"type":"ota_ready"}` | Reply to `ota_begin` |
+| node -> PC | `{"type":"ota_ack","seq":S}` | Chunk `S` written (or already held) |
+| node -> PC | `{"type":"ota_wifi_start"}` | `ota_wifi` accepted; the node is going off the air |
+| node -> PC | `{"type":"ota_done"}` | Broadcast 4x by the **new** firmware after it boots - the only success signal (both paths) |
+| node -> PC | `{"type":"ota_error","reason":"..."}` | `begin_failed`, `not_active`, `bad_data`, `write_failed`, `verify_failed`, `bad_wifi_args` |
+
+A failed WiFi join/download reboots the node back into its current firmware.
+See [`gateway/README.md`](gateway/README.md) for the gateway-local
+`ota_store_*` staging commands.
 
 ### Non-JSON node output
 

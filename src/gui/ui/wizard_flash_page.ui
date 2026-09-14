@@ -23,6 +23,7 @@
      </item>
      <item>
       <widget class="QPushButton" name="refresh_btn">
+       <property name="whatsThis"><string>Rescan the serial ports and refresh the port list - use it after plugging the board in.</string></property>
        <property name="text"><string>Refresh</string></property>
       </widget>
      </item>
@@ -62,6 +63,7 @@
    </item>
    <item>
     <widget class="QPlainTextEdit" name="log">
+     <property name="whatsThis"><string>Output of the flashing tool. Check here for success or the error message if flashing fails.</string></property>
      <property name="readOnly"><bool>true</bool></property>
     </widget>
    </item>

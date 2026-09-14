@@ -25,7 +25,6 @@ class ESP32Controller:
         # shared per node). ``pump_count`` is set by the robot builder.
         self.fill_load = FillLoadTracker()
         self._last_status: dict[str, Any] = {}
-        self._touch_callbacks:    list[Callable[[int, int], None]] = []
         self._pressure_callbacks: list[Callable[[int, int], None]] = []
         self._magnet_callbacks: list[Callable[[dict[str, Any]], None]] = []
         self._organ_callbacks: list[Callable[[float, int], None]] = []
@@ -66,15 +65,15 @@ class ESP32Controller:
     def inflate(self, chamber: int, delta: int = 10,
                 ms: int | None = None, duty: int | None = None,
                 timed: bool = False) -> bool:
-        """Inflate a chamber by delta % of its max pressure (0-100).
+        """Inflate a chamber by delta % of its [min, max] range (0-100).
 
-        When ``ms`` is given, the node inflates for that many milliseconds
-        (time-based fill from a calibrated ``fill_time_ms``) instead of closing
-        the loop on the pressure sensor; the firmware still caps at 5 s and at
-        the chamber's HARD_MAX pressure.
+        When ``ms`` is given it becomes the chamber's open-time budget on the
+        node (from a calibrated fill curve); the target still closes on the
+        gauge. The firmware's round/sequence caps, the actuation watchdog and
+        the chamber's HARD_MAX pressure still bound it.
 
-        ``duty`` (1-255) optionally lowers the inflate pump's PWM duty so the
-        chamber fills more slowly; omit it (or pass None) for full speed.
+        ``duty`` (1-255) is forwarded as the requested pump PWM duty, but
+        neither board's pump control applies it on this path yet (FIXME.md).
 
         ``timed=True`` marks the node as having NO pressure sensor populated
         (bench board awaiting sensors): the firmware runs the fill fully
@@ -93,7 +92,7 @@ class ESP32Controller:
     def deflate(self, chamber: int, delta: int = 10,
                 ms: int | None = None, duty: int | None = None,
                 timed: bool = False) -> bool:
-        """Deflate a chamber by delta % of its max pressure (0-100).
+        """Deflate a chamber by delta % of its [min, max] range (0-100).
 
         When ``ms`` is given it becomes the chamber's open-time budget on the
         node - the closing authority for a target the gauge can't see (below the
@@ -158,10 +157,12 @@ class ESP32Controller:
             payload["kpa"] = round(float(kpa), 2)
         if timed:
             payload["timed"] = 1
+        # Sends happen under the lock so a keepalive re-assert can never land
+        # after a stop_hold "off" and re-arm a just-released hold.
         with self._holds_lock:
             self._holds[int(chamber)] = payload
             self._ensure_hold_keepalive()
-        return self.send_command("hold_duty", **payload)
+            return self.send_command("hold_duty", **payload)
 
     def stop_hold(self, chamber: int | None = None) -> None:
         """End a regulated hold (all of this node's holds when ``chamber`` is
@@ -172,10 +173,10 @@ class ESP32Controller:
                 self._holds.clear()
             else:
                 had = self._holds.pop(int(chamber), None) is not None
-        if had:
-            self.send_command("hold_duty",
-                              chamber=-1 if chamber is None else int(chamber),
-                              off=1)
+            if had:
+                self.send_command("hold_duty",
+                                  chamber=-1 if chamber is None else int(chamber),
+                                  off=1)
 
     def active_holds(self) -> list[int]:
         """Chambers currently under a PC-kept regulated hold."""
@@ -197,12 +198,11 @@ class ESP32Controller:
         while True:
             time.sleep(self._HOLD_KEEPALIVE_S)
             with self._holds_lock:
-                payloads = list(self._holds.values())
-                if not payloads:
+                if not self._holds:
                     self._hold_thread = None
                     return
-            for p in payloads:
-                self.send_command("hold_duty", **p)
+                for p in self._holds.values():
+                    self.send_command("hold_duty", **p)
 
     def emergency_stop(self) -> bool:
         """Latch every actuator on this node OFF - all pumps off, all valves closed.
@@ -223,10 +223,10 @@ class ESP32Controller:
 
     def set_pressure(self, chamber: int, value: int,
                      duty: int | None = None) -> bool:
-        """Set target pressure for a chamber as 0-100 % of that chamber max.
+        """Set target pressure for a chamber as 0-100 % of its [min, max] range.
 
-        ``duty`` (1-255) optionally lowers the pump's PWM duty so the chamber
-        approaches the target gently; the pressure cutoff still stops at target.
+        ``duty`` (1-255) is forwarded as the requested pump PWM duty, but
+        neither board's pump control applies it on this path yet (FIXME.md).
         """
         payload: dict[str, Any] = {"chamber": chamber, "value": value}
         if duty is not None:
@@ -307,19 +307,16 @@ class ESP32Controller:
             num_chambers: Active chamber count for this node.
             organ_channels: Mux channels carrying organ+cover circuits; the
                 index in this list becomes the ``slot`` in organ broadcasts.
+                ``[]`` clears them on the node; ``None`` leaves them unchanged.
         """
         payload: dict[str, Any] = {"num_chambers": int(num_chambers)}
-        if organ_channels:
+        if organ_channels is not None:
             payload["organ_channels"] = [int(c) for c in organ_channels]
         return self.send_command("configure", **payload)
 
     def debug(self) -> bool:
         """Request a debug snapshot from the node (debug firmware only)."""
         return self.send_command("debug")
-
-    def calibrate_sensor(self, sensor_id: int) -> bool:
-        """Request sensor calibration on the ESP32."""
-        return self.send_command("calibrate_sensor", sensor=sensor_id)
 
     def set_led_angles(self, angles: dict[int, float] | None) -> None:
         """Set the per-ring LED mounting angles (degrees) from the skin config.
@@ -357,8 +354,8 @@ class ESP32Controller:
         period_ms/count: animation timing - pulse/blink/fade cycle or comet revolution.
         index:   when given, set just that pixel (solid); otherwise the whole
                  ring. Per-pixel is used by the LED test panel.
-        ring:    multi-ring nodes (node_multiplexed: 4 rings) only - selects ring
-                 0..3; omitted addresses all rings. Single-ring nodes ignore it.
+        ring:    multi-ring nodes (node_multiplexed: 3 rings) only - selects ring
+                 0..2; omitted addresses all rings. Single-ring nodes ignore it.
         fade_ms: cross-fade time for this change. Every change cross-fades; the
                  node's default (~250 ms) applies when omitted, 0 snaps instantly.
         angle:   0-360 deg rotation of the split/comet around the ring (0 = default
@@ -419,14 +416,6 @@ class ESP32Controller:
             kwargs["angle"] = eff_angle
         return self.send_command("set_led_halves", **kwargs)
 
-    def on_touch(self, callback: Callable[[int, int], None]) -> None:
-        """Register a callback for touch sensor events.
-
-        Args:
-            callback: Called with (sensor_id, raw_value) on each reading.
-        """
-        self._touch_callbacks.append(callback)
-
     def on_pressure(self, callback: Callable[..., None]) -> None:
         """Register a callback for pressure status messages.
 
@@ -472,26 +461,32 @@ class ESP32Controller:
         """
         self._organ_callbacks.append(callback)
 
+    def remove_magnet_listener(self, callback: Callable[[dict[str, Any]], None]) -> None:
+        """Deregister a callback passed to :meth:`on_magnet` (no-op if absent)."""
+        self._magnet_callbacks[:] = [cb for cb in self._magnet_callbacks if cb != callback]
+
+    def remove_organ_listener(self, callback: Callable[[float, int], None]) -> None:
+        """Deregister a callback passed to :meth:`on_organ` (no-op if absent)."""
+        self._organ_callbacks[:] = [cb for cb in self._organ_callbacks if cb != callback]
+
     def get_last_status(self) -> dict[str, Any]:
         """Get the last known status of this ESP32 node."""
         return self._last_status.copy()
 
     @staticmethod
     def _call_callbacks(callbacks: list, *args: Any) -> None:
-        """Call each callback, pruning any whose Qt signal source has been deleted."""
-        dead: list[int] = []
-        for i, callback in enumerate(callbacks):
+        """Call each callback, pruning any whose Qt signal source has been deleted.
+
+        Iterates a snapshot and prunes by identity: listeners are added/removed
+        on the GUI thread while this runs on the gateway read thread."""
+        dead: list = []
+        for callback in list(callbacks):
             try:
                 callback(*args)
             except RuntimeError:
-                dead.append(i)
-        for i in reversed(dead):
-            callbacks.pop(i)
-
-    def _dispatch_touch(self, data: dict[str, Any]) -> None:
-        sensor_id = data.get("sensor", 0)
-        raw_value = data.get("value", 0)
-        self._call_callbacks(self._touch_callbacks, sensor_id, raw_value)
+                dead.append(callback)
+        if dead:
+            callbacks[:] = [cb for cb in callbacks if all(cb is not d for d in dead)]
 
     def _dispatch_status_batch(self, data: dict[str, Any]) -> None:
         """Expand a batched status frame into per-chamber dispatches.
@@ -569,9 +564,6 @@ class ESP32Controller:
                     k: data[k] for k in ready.geometry_keys if k in data}
                 logger.info("%s sensor ready from %s: %s",
                             ready.name, self.mac_address, self._magnet_geometry)
-
-            elif data.get("type") == "touch":
-                self._dispatch_touch(data)
 
             elif data.get("type") == "status" and isinstance(data.get("kpa"), list):
                 # Batched status: new firmware sends every chamber in one frame

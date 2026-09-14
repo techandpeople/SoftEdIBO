@@ -39,26 +39,31 @@
       </item>
       <item row="1" column="1">
        <widget class="QPushButton" name="fwd_btn">
+        <property name="whatsThis"><string>Drive both wheels forward at the Speed value. The robot keeps driving until you press Stop (or Stop All, or close the dialog).</string></property>
         <property name="text"><string>^ Forward</string></property>
        </widget>
       </item>
       <item row="2" column="0">
        <widget class="QPushButton" name="left_btn">
+        <property name="whatsThis"><string>Turn the robot left on the spot (left wheel backward, right wheel forward) at the Speed value, until you press Stop.</string></property>
         <property name="text"><string>&lt; Left</string></property>
        </widget>
       </item>
       <item row="2" column="1">
        <widget class="QPushButton" name="stop_btn">
+        <property name="whatsThis"><string>Stop both wheels. The top LED is left as it is - use Stop All to turn it off too.</string></property>
         <property name="text"><string>Stop</string></property>
        </widget>
       </item>
       <item row="2" column="2">
        <widget class="QPushButton" name="right_btn">
+        <property name="whatsThis"><string>Turn the robot right on the spot (left wheel forward, right wheel backward) at the Speed value, until you press Stop.</string></property>
         <property name="text"><string>Right ></string></property>
        </widget>
       </item>
       <item row="3" column="1">
        <widget class="QPushButton" name="back_btn">
+        <property name="whatsThis"><string>Drive both wheels backward at the Speed value, until you press Stop.</string></property>
         <property name="text"><string>v Back</string></property>
        </widget>
       </item>
@@ -77,6 +82,7 @@
       </item>
       <item>
        <widget class="QSpinBox" name="led_r_spin">
+        <property name="whatsThis"><string>Red channel of the top LED colour, 0 (off) to 32 (full). Sent to the robot when you press Apply.</string></property>
         <property name="maximum"><number>32</number></property>
         <property name="value"><number>32</number></property>
        </widget>
@@ -88,6 +94,7 @@
       </item>
       <item>
        <widget class="QSpinBox" name="led_g_spin">
+        <property name="whatsThis"><string>Green channel of the top LED colour, 0 (off) to 32 (full). Sent to the robot when you press Apply.</string></property>
         <property name="maximum"><number>32</number></property>
         <property name="value"><number>0</number></property>
        </widget>
@@ -99,17 +106,20 @@
       </item>
       <item>
        <widget class="QSpinBox" name="led_b_spin">
+        <property name="whatsThis"><string>Blue channel of the top LED colour, 0 (off) to 32 (full). Sent to the robot when you press Apply.</string></property>
         <property name="maximum"><number>32</number></property>
         <property name="value"><number>0</number></property>
        </widget>
       </item>
       <item>
        <widget class="QPushButton" name="led_apply_btn">
+        <property name="whatsThis"><string>Send the R/G/B values above to the Thymio's top LED.</string></property>
         <property name="text"><string>Apply</string></property>
        </widget>
       </item>
       <item>
        <widget class="QPushButton" name="led_off_btn">
+        <property name="whatsThis"><string>Turn the Thymio's top LED off. The R/G/B values are kept for the next Apply.</string></property>
         <property name="text"><string>Off</string></property>
        </widget>
       </item>
@@ -128,6 +138,7 @@
       </item>
       <item row="0" column="1">
        <widget class="QSpinBox" name="sys_spin">
+        <property name="whatsThis"><string>Which built-in Thymio sound Play system plays: 0-7 picks a sound, -1 stops the sound currently playing.</string></property>
         <property name="minimum"><number>-1</number></property>
         <property name="maximum"><number>7</number></property>
         <property name="value"><number>2</number></property>
@@ -135,6 +146,7 @@
       </item>
       <item row="0" column="2">
        <widget class="QPushButton" name="sys_play_btn">
+        <property name="whatsThis"><string>Play the selected built-in system sound on the Thymio (or stop the current sound when the value is -1).</string></property>
         <property name="text"><string>Play system</string></property>
        </widget>
       </item>
@@ -147,6 +159,7 @@
        <layout class="QHBoxLayout" name="tone_row">
         <item>
          <widget class="QSpinBox" name="tone_freq_spin">
+          <property name="whatsThis"><string>Frequency of the tone in Hz (50-10000) used by Play tone.</string></property>
           <property name="minimum"><number>50</number></property>
           <property name="maximum"><number>10000</number></property>
           <property name="singleStep"><number>50</number></property>
@@ -155,6 +168,7 @@
         </item>
         <item>
          <widget class="QSpinBox" name="tone_dur_spin">
+          <property name="whatsThis"><string>Duration of the tone in milliseconds (10-5000) used by Play tone.</string></property>
           <property name="minimum"><number>10</number></property>
           <property name="maximum"><number>5000</number></property>
           <property name="singleStep"><number>50</number></property>
@@ -165,6 +179,7 @@
       </item>
       <item row="1" column="2">
        <widget class="QPushButton" name="tone_play_btn">
+        <property name="whatsThis"><string>Play a tone of the chosen frequency and duration on the Thymio's speaker.</string></property>
         <property name="text"><string>Play tone</string></property>
        </widget>
       </item>
@@ -293,6 +308,7 @@
      </item>
      <item>
       <widget class="QPushButton" name="close_btn">
+       <property name="whatsThis"><string>Close the test. The wheels are stopped, the sensor stream is detached, the link is closed again if this dialog opened it, and the tuned impact threshold is saved to the robot config.</string></property>
        <property name="text"><string>Close</string></property>
       </widget>
      </item>

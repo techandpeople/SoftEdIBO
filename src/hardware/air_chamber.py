@@ -3,6 +3,7 @@
 import threading
 from enum import Enum
 
+from src.core.skin_config import DEFAULT_MAX_KPA, DEFAULT_MIN_KPA
 from src.hardware.units import kpa_to_pct
 
 
@@ -21,8 +22,8 @@ class AirChamber:
         self,
         chamber_id: int,
         esp32_mac: str,
-        max_pressure: float = 8.0,
-        min_pressure: float = 0.0,
+        max_pressure: float = DEFAULT_MAX_KPA,
+        min_pressure: float = DEFAULT_MIN_KPA,
     ):
         self.chamber_id = chamber_id
         self.esp32_mac = esp32_mac

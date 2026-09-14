@@ -18,8 +18,8 @@ constexpr float HARD_TANK_MIN_KPA             = -80.0f;
 constexpr float DEFAULT_CHAMBER_MAX_KPA =   8.0f;
 constexpr float DEFAULT_CHAMBER_MIN_KPA =   0.0f;
 // Effectively uncapped per-chamber (the unreliable gauge must not gate fills):
-// over-pressure is bounded by TIME - MAX_FILL_MS, the manual dead-man, and the
-// actuation watchdog - not by this ceiling. Kept in sync with
+// over-pressure is bounded by TIME - the coupled-fill round/sequence caps, the
+// manual dead-man, and the actuation watchdog - not by this ceiling. Kept in sync with
 // skin_config.MAX_ALLOWED_KPA. (The shared TANK caps above are unchanged.)
 constexpr float HARD_CHAMBER_MAX_KPA    =  100.0f;
 // Deepest vacuum a chamber may hold - valve-safe, derived from the sensor floor

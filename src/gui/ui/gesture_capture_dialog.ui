@@ -31,6 +31,7 @@
          <item row="0" column="1">
           <widget class="QComboBox" name="type_combo">
            <property name="toolTip"><string>Which skin type this dataset trains a model for (models/touch_&lt;type&gt;.joblib).</string></property>
+           <property name="whatsThis"><string>Skin type the captured dataset trains a model for (saved as models/touch_&lt;type&gt;.joblib). Auto-selected from the skin that owns the streaming touch node; changing it also loads that type's saved touch sensitivity. Start stays disabled until a type is chosen.</string></property>
           </widget>
          </item>
          <item row="1" column="0">
@@ -40,6 +41,7 @@
           <widget class="QComboBox" name="variant_combo">
            <property name="editable"><bool>true</bool></property>
            <property name="toolTip"><string>Optional silicone format - used as a touch feature so one model can adapt across formats. Leave blank if unsure.</string></property>
+           <property name="whatsThis"><string>Silicone format of the skin being touched. Stored with every sample as a touch feature, so one model can adapt across formats. Leave blank if unsure.</string></property>
           </widget>
          </item>
          <item row="2" column="0">
@@ -51,6 +53,7 @@
            <property name="maximum"><number>50</number></property>
            <property name="value"><number>5</number></property>
            <property name="toolTip"><string>How many times to perform each selected gesture.</string></property>
+           <property name="whatsThis"><string>How many repetitions of each ticked gesture the capture prompts for. More repetitions give a better model and a more reliable accuracy estimate.</string></property>
           </widget>
          </item>
         </layout>
@@ -84,6 +87,7 @@
          </item>
          <item>
           <widget class="QPushButton" name="start_btn">
+           <property name="whatsThis"><string>Start the guided capture: the sensor stream is recorded and the app prompts one gesture at a time until every repetition is done, then trains a model and shows the results. Enabled once a touch node is streaming, a skin type is chosen and at least one gesture is ticked.</string></property>
            <property name="enabled"><bool>false</bool></property>
            <property name="text"><string>Start</string></property>
           </widget>
@@ -160,6 +164,7 @@
         <layout class="QHBoxLayout" name="capture_buttons">
          <item>
           <widget class="QPushButton" name="cancel_btn">
+           <property name="whatsThis"><string>Abort the capture and close the dialog without training. No labels or model are written.</string></property>
            <property name="text"><string>Cancel</string></property>
           </widget>
          </item>
@@ -172,6 +177,7 @@
          <item>
           <widget class="QPushButton" name="undo_btn">
            <property name="toolTip"><string>Discard the last captured gesture and prompt it again (fumbled a repetition).</string></property>
+           <property name="whatsThis"><string>Discard the last captured gesture and prompt for it again - use it when you fumbled a repetition.</string></property>
            <property name="text"><string>Undo last</string></property>
           </widget>
          </item>
@@ -193,10 +199,13 @@
         </widget>
        </item>
        <item>
-        <widget class="QTableWidget" name="confusion_table"/>
+        <widget class="QTableWidget" name="confusion_table">
+         <property name="whatsThis"><string>Cross-validated confusion matrix of the new model: each row is the gesture you performed, each column the gesture the model predicted. Green cells on the diagonal are correct; red cells show which gestures get mixed up.</string></property>
+        </widget>
        </item>
        <item>
         <widget class="QPlainTextEdit" name="report_text">
+         <property name="whatsThis"><string>Training log for the captured dataset (sample counts and per-gesture scores), plus the name of the saved recording - it can be reopened and re-labelled later in Train Touch.</string></property>
          <property name="readOnly"><bool>true</bool></property>
          <property name="styleSheet"><string>font-family: monospace;</string></property>
         </widget>
@@ -211,6 +220,7 @@
          </item>
          <item>
           <widget class="QPushButton" name="close_btn">
+           <property name="whatsThis"><string>Close the dialog. The trained model and the captured dataset are already saved.</string></property>
            <property name="text"><string>Close</string></property>
           </widget>
          </item>

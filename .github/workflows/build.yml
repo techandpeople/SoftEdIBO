@@ -565,7 +565,7 @@ jobs:
             | `node_direct-debug.bin` | `node_direct` | Same as above with Serial logs (`DEBUG_BUILD`) |
             | `node_direct-rgbw-release.bin` | `node_direct` | RGBW LED-ring build (SK6812 NeoPixels) |
             | `node_direct-rgbw-debug.bin` | `node_direct` | RGBW build with Serial logs |
-            | `node_multiplexed-release.bin` | `node_multiplexed` | Up to 12 chambers, multiplexed valves/sensors, optional shared pressure/vacuum tanks, runtime-sized |
+            | `node_multiplexed-release.bin` | `node_multiplexed` | Up to 12 chambers, multiplexed valves/sensors, shared pump banks pushing straight into the chambers (no reservoir tanks), runtime-sized |
             | `node_multiplexed-debug.bin` | `node_multiplexed` | Same as above with Serial logs (`DEBUG_BUILD`) |
             | `node_multiplexed-rgbw-release.bin` | `node_multiplexed` | RGBW LED-ring build (SK6812 NeoPixels) |
             | `node_multiplexed-rgbw-debug.bin` | `node_multiplexed` | RGBW build with Serial logs |

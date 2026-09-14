@@ -30,7 +30,6 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox,
     QHeaderView,
-    QMessageBox,
     QTableWidgetItem,
     QWidget,
 )
@@ -509,4 +508,7 @@ class GestureCaptureDialog(BaseDialog, Ui_GestureCaptureDialog):
         remove = getattr(self._gateway, "remove_message_callback", None)
         if remove is not None:
             remove(self._on_gateway_message)
+        if self._bound_skin is not None:
+            from src.hardware.touch_source import unsubscribe_skin_magnet
+            unsubscribe_skin_magnet(self._bound_skin, self._comp_magnet.emit)
         self._stop_recording()

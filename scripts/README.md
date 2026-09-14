@@ -15,6 +15,10 @@ Full protocol + reproduction notes: **[docs/THYMIO_WIRELESS_CONTROL.md](../docs/
 | `thymio_tx.py` | send a raw 802.15.4 frame hex (low-level replay/forge) via the C6's `tx` |
 | `thymio_sniff_capture.py` | raw `esp_ieee802154` promiscuous sniffer via the C6 - `--scan` finds the channel, `--debug` prints frames live, `--ch N` locks one. (The **raw C6** sniffer sees the Thymio; the Sonoff/OpenThread one filters it out.) |
 | `thymio_jog.py` | drive a Thymio via the **RF dongle** (thymiodirect) - the working-today path, and a traffic source to sniff |
+| `thymio_signal_test.py` | measure a gateway's RF link to a Thymio (reply rate + RSSI via the C6's active discovery) - run once per gateway/antenna and compare |
+| `thymio_sniff_emit.py` | independent-sniffer test with a SECOND gateway: counts the Thymio's on-air sensor-emit frames to tell a dying C6 receiver from a de-associating Thymio RF module |
+| `thymio_emit_test.py` | USB isolation test: loads the C6's sensor-push Aseba bytecode over the Thymio's micro-USB cable and counts emitted events for 30 s |
+| `thymio_impact_bench.py` | USB bench for the on-board impact-detection Aseba program (hardware tap + acc peak-hold); dumps the bytecode words to bake into the C6 firmware |
 
 **Sound:** `--sound 2` plays a built-in system sound (0-7, -1 stops); `--tone 700 30` plays a
 700 Hz tone for 30/60 s. The C6 loads a tiny Aseba program (SET_BYTECODE + RUN) that calls the
@@ -58,8 +62,10 @@ rarely move.
 | `run.py` | launch the GUI app (sets the Qt env - `xcb` platform, shared GL contexts, WebEngine flags - then starts the app) |
 | `build-firmware.sh` | build the bundled node/gateway firmware bins for OTA |
 | `ota_c6_wifi.py` | one-command WiFi-OTA of the gateway's C6 (Thymio RCP) |
-| `discover_nodes.py` | scan for ESP-NOW nodes via the gateway |
 | `emergency-flash.sh` | cable-flash a bricked node through a second ESP as a serial bridge |
 | `compile_ui.sh` | compile Qt Designer `.ui` files to `ui_*.py` |
-| `fetch_blockly.sh` | vendor Blockly for the Behaviour Editor |
+| `fetch_blockly.sh` | vendor Blockly for the Activity Editor |
 | `label_touches.py`, `train_touch_model.py` | touch-sensor dataset labelling + ML training |
+| `touch_position_bench.py` | touch-position feasibility bench (Phase 0): guided grid/pattern capture on a skin + analysis report; CLI mirror of Tools -> Touch Position Bench... (docs/TOUCH_POSITION_ML_PLAN.md) |
+| `draw_icon.py` | draw `softedibo.png` (the app artwork) from vector code |
+| `make_icon.py` | regenerate the multi-size Windows `softedibo.ico` from `softedibo.png` |

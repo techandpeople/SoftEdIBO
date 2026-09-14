@@ -153,6 +153,7 @@
      </item>
      <item>
       <widget class="QPushButton" name="close_btn">
+       <property name="whatsThis"><string>Close the test. Manual pump/valve overrides, holds and continuous runs are stopped, and a node left latched by STOP ALL is re-armed.</string></property>
        <property name="text"><string>Close</string></property>
       </widget>
      </item>

@@ -13,7 +13,7 @@
  *   {"target":"FF:FF:FF:FF:FF:FF","cmd":"ping"}   <- broadcast scan
  *
  * Gateway => PC (serial, newline-terminated JSON):
- *   {"source":"AA:BB:CC:DD:EE:01","type":"status","chamber":0,"pressure":75}
+ *   {"source":"AA:BB:CC:DD:EE:01","type":"status","kpa":[3.2,0.0],"st":[0,0],"vi":[0,0],"vd":[0,0]}
  *   {"status":"gateway_ready","mac":"AA:BB:CC:DD:EE:00"}
  */
 
@@ -619,6 +619,8 @@ static void processLine(const char* line, size_t len) {
                 // overruns the radio TX queue and drops frames, so only some
                 // chambers actuate. sendPaced waits for each TX before the next.
                 se::sendPaced(mac, reinterpret_cast<const uint8_t*>(payload), plen);
+            else   // too big for one ESP-NOW frame: tell the PC instead of dropping silently
+                usbWriteLine("{\"type\":\"error\",\"reason\":\"payload_too_long\"}");
             cJSON_free(payload);
         }
     }
@@ -679,7 +681,7 @@ extern "C" void app_main(void) {
 #ifdef GATEWAY_AP
     snprintf(ready, sizeof(ready),
              "{\"status\":\"gateway_ready\",\"mac\":\"%s\",\"ap\":\"%s\"}",
-             mac, GATEWAY_AP_SSID);
+             mac, s_apSsid);   // the live (NVS-overridden) SSID, not the default
 #else
     snprintf(ready, sizeof(ready),
              "{\"status\":\"gateway_ready\",\"mac\":\"%s\"}", mac);

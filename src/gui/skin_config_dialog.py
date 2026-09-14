@@ -202,13 +202,17 @@ class _ChamberRow(QWidget):
             self._mode_combo.currentData(),
         )
 
+    def is_sensorless(self) -> bool:
+        """True while the selected node is flagged as having no pressure sensors."""
+        return self._mac_combo.currentText() in self._sensorless_macs
+
     def get_manual_times(self) -> tuple[int | None, int | None]:
         """Manual (fill_ms, empty_ms) for a sensorless node, else (None, None).
 
         Only meaningful while the selected node is flagged as having no
         pressure sensors - a populated node keeps its calibrated curves and
         must not pick up stale manual values."""
-        if self._mac_combo.currentText() not in self._sensorless_macs:
+        if not self.is_sensorless():
             return None, None
         return (self._fill_ms_spin.value() or None,
                 self._empty_ms_spin.value() or None)
@@ -996,12 +1000,12 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         touch_entry: dict = {"node_mac": touch_mac,
                              "sensor_count": int(self._sensor_count_spin.value())}
         # Preserve touch sub-config this dialog does not edit (written elsewhere:
-        # the touch-coupling calibration tool, the tuning panel) so a skin save
-        # doesn't wipe the measured coupling matrix or routing.
+        # the touch-coupling calibration tool, the tuning panel - coupling
+        # matrix, routing, per-skin thresholds, the sensor profile) so a skin
+        # save doesn't wipe it.
         prev_touch = self._load_skin_cfg().get("touch") or {}
-        for key in ("coupling", "compensation", "sensor_to_chamber"):
-            if key in prev_touch:
-                touch_entry[key] = prev_touch[key]
+        for key, value in prev_touch.items():
+            touch_entry.setdefault(key, value)
         skin_entry["touch"] = touch_entry
 
     def _rebuild_palette(self) -> None:
@@ -1063,10 +1067,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
             mac = node_cfg.get("mac", "")
             if payload is None or not mac:
                 continue
-            kwargs = {"num_chambers": payload["num_chambers"]}
-            if payload["organ_channels"]:
-                kwargs["organ_channels"] = payload["organ_channels"]
-            self._gateway.send(mac, "configure", **kwargs)
+            self._gateway.send(mac, "configure", **payload)
 
     def _on_test(self) -> None:
         macs = list({row.get_values()[0] for row in self._rows
@@ -1078,11 +1079,10 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         self._claim_board()
         skin_id = self.skin_id_edit.text().strip() or "preview"
         mac = macs[0]
-        # Fill calibration (fill_profile/fill_time_ms) is not edited in the rows,
-        # so carry it over from the saved skin, keyed by (mac, slot) - the test
-        # dialog needs it to inflate time-mode chambers by their time window.
-        prev = {(c.get("mac"), int(c.get("slot", 0))): c
-                for c in self._load_skin_cfg().get("chambers", [])}
+        # Fill calibration is not edited in the rows, so carry it over from the
+        # saved skin, keyed by (mac, slot) - the test dialog needs it to inflate
+        # time-mode chambers by their time window.
+        prev = skincfg.chambers_by_key(self._load_skin_cfg().get("chambers", []))
         chambers: list[dict] = []
         for row in self._rows:
             m, s, max_p, min_p, mode = row.get_values()
@@ -1090,12 +1090,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
                 continue
             cfg = {"slot": int(s), "max_pressure": float(max_p),
                    "min_pressure": float(min_p), "fill_mode": mode}
-            saved = prev.get((m, int(s)))
-            if saved:
-                if saved.get("fill_profile") is not None:
-                    cfg["fill_profile"] = saved["fill_profile"]
-                if saved.get("fill_time_ms") is not None:
-                    cfg["fill_time_ms"] = saved["fill_time_ms"]
+            skincfg.carry_calibration(cfg, prev.get((m, int(s))))
             # Manual open-loop times (sensorless node) straight from the row,
             # so the bench can drive the chamber before the skin is saved.
             fill_ms, empty_ms = row.get_manual_times()
@@ -1149,24 +1144,38 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         Builds the chamber list from the current (possibly unsaved) rows so the
         user can calibrate before committing the skin. Only actuator-typed nodes
         are included - magnet/sensor nodes have nothing to inflate."""
+        from src.hardware.fill_calibration import iter_actuator_chambers
         node_types = {n.get("mac"): n.get("node_type")
                       for n in self._robot_nodes()}
         skin_id = self.skin_id_edit.text().strip() or "(unsaved)"
+        # Start from the saved chamber (stored curves, skin type, range) so the
+        # dialog seeds, templates and live % work as from the Tools menu; the
+        # unsaved row values are laid on top.
+        saved = {(c["mac"], c["slot"]): c
+                 for c in iter_actuator_chambers(self._settings.data)
+                 if c["skin_id"] == skin_id}
         chambers: list[dict] = []
         for row in self._rows:
-            mac, slot, _max_p, _min_p, _mode = row.get_values()
+            mac, slot, max_p, min_p, mode = row.get_values()
             if not mac:
                 continue
-            if node_types.get(mac) not in ("node_direct", "node_multiplexed"):
+            if node_types.get(mac) not in skincfg.ACTUATOR_NODE_TYPES:
                 continue
-            chambers.append({
-                "robot_id": self._robot_type,
+            ch = dict(saved.get((mac, int(slot)), {}))
+            ch.update({
+                "robot_id": ch.get("robot_id") or self._robot_type,
                 "skin_id": skin_id,
+                "skin_type": self.skin_type_combo.currentData() or "",
+                "skin_variant": self.skin_variant_combo.currentData() or "",
                 "mac": mac,
                 "slot": int(slot),
                 "node_type": node_types.get(mac),
-                "fill_time_ms": None,
+                "fill_mode": mode,
+                "max_pressure": float(max_p),
+                "min_pressure": float(min_p),
             })
+            ch.setdefault("fill_time_ms", None)
+            chambers.append(ch)
         if not chambers:
             QMessageBox.warning(
                 self, "Calibrate Fill",
@@ -1184,14 +1193,14 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         out: dict[str, list[int]] = {}
         for row in self._rows:
             mac, slot, _max_p, _min_p, _mode = row.get_values()
-            if mac and node_types.get(mac) in ("node_direct", "node_multiplexed"):
+            if mac and node_types.get(mac) in skincfg.ACTUATOR_NODE_TYPES:
                 out.setdefault(mac, []).append(int(slot))
         return out
 
     def _on_zero_sensors(self) -> None:
         """Zero the pressure sensors at ambient: vent every chamber to atmosphere
-        (no pump - alternating the deflate/inflate valve so both inflated and
-        vacuumed chambers reach ambient), then tell the node to capture that as
+        (firmware ``vent``: both valves open, no pump, so inflated and vacuumed
+        chambers both reach ambient), then tell the node to capture that as
         its per-chamber zero (persisted). Fixes the sensor's few-kPa offset so a
         vented chamber reads 0 kPa system-wide."""
         macs = self._actuator_chambers()
@@ -1200,27 +1209,18 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
                 self, "Zero Sensors",
                 "Add at least one chamber on an actuator node first.")
             return
-        # Alternate the open side each cycle: DEFLATE (side 1) lets an inflated
-        # chamber bleed OUT (through the off vacuum pump); INFLATE (side 0) lets a
-        # vacuumed one draw air IN (through the off inflate pump). With the pumps
-        # off each manifold's path to atmosphere is one-way, so a single side
-        # can't vent both cases - and this board only allows one side open at once
-        # (opening one closes the other), hence the alternation. No pump runs, so
-        # nothing is pressurised - safe with the actuation watchdog and the 5 s
-        # manual dead-man.
-        side = [1]
+        # No pump runs, so nothing is pressurised - safe with the actuation
+        # watchdog and the 5 s manual dead-man the re-send keeps alive.
 
         def _vent() -> None:
             for mac, slots in macs.items():
                 for slot in slots:
-                    self._gateway.send(mac, "valve_manual", chamber=slot,
-                                       side=side[0], open=1)
-            side[0] ^= 1
+                    self._gateway.send(mac, "vent", chamber=slot, open=1)
 
         _vent()
         self.zero_btn.setEnabled(False)
         self.zero_btn.setText("Venting...")
-        # Alternate + refresh every 2 s (well within the 5 s manual dead-man).
+        # Refresh every 2 s (well within the 5 s manual dead-man).
         keepalive = QTimer(self)
         keepalive.setInterval(2000)
         keepalive.timeout.connect(_vent)
@@ -1231,10 +1231,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
             for mac, slots in macs.items():
                 self._gateway.send(mac, "tare")
                 for slot in slots:                # close BOTH sides
-                    self._gateway.send(mac, "valve_manual", chamber=slot,
-                                       side=0, open=0)
-                    self._gateway.send(mac, "valve_manual", chamber=slot,
-                                       side=1, open=0)
+                    self._gateway.send(mac, "vent", chamber=slot, open=0)
             self.zero_btn.setText("Zero Sensors")
             self.zero_btn.setEnabled(self._gateway.is_connected)
             QMessageBox.information(
@@ -1244,8 +1241,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
                 "kPa higher for the same setpoint - re-check max pressures if "
                 "needed.")
 
-        # Let the chambers settle at atmosphere (~4 deflate/inflate alternations,
-        # covering both inflated and vacuumed chambers) before capturing the zero.
+        # Let the chambers settle at atmosphere before capturing the zero.
         QTimer.singleShot(8000, _capture)
 
     # ------------------------------------------------------------------
@@ -1256,22 +1252,21 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         """Read each chamber row into a list of dicts. Returns None and
         warns if any row is missing its MAC.
 
-        Fill calibration (``fill_profile``/``fill_time_ms``) is not edited here -
-        it is written by the Calibrate Fill dialog - so it is carried over from
-        the saved skin, keyed by (mac, slot), instead of being dropped on save."""
-        prev = {(c.get("mac"), int(c.get("slot", 0))): c
-                for c in self._load_skin_cfg().get("chambers", [])}
+        Fill calibration (``skincfg.CALIBRATION_KEYS``) is not edited here - it
+        is written by the Calibrate Fill dialog - so it is carried over from the
+        saved skin, keyed by (mac, slot), instead of being dropped on save."""
+        prev = skincfg.chambers_by_key(self._load_skin_cfg().get("chambers", []))
         chambers: list[dict] = []
         for row in self._rows:
             m, s, p, mn, fm = row.get_values()
             ch: dict = {"mac": m, "slot": s, "max_pressure": p,
                         "min_pressure": mn, "fill_mode": fm}
             saved = prev.get((m, int(s)))
-            if saved:
-                if saved.get("fill_profile") is not None:
-                    ch["fill_profile"] = saved["fill_profile"]
-                if saved.get("fill_time_ms") is not None:
-                    ch["fill_time_ms"] = saved["fill_time_ms"]
+            skincfg.carry_calibration(ch, saved)
+            # A populated node hides the manual empty time; keep the saved one
+            # so toggling the sensor flag back doesn't find it wiped.
+            if saved and not row.is_sensorless() and saved.get("empty_time_ms"):
+                ch["empty_time_ms"] = saved["empty_time_ms"]
             # Manual open-loop times, editable in the row for a sensorless
             # node (they override any carried-over calibrated scalar).
             fill_ms, empty_ms = row.get_manual_times()
@@ -1359,6 +1354,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         skin_entry = skincfg.build_skin_entry(
             skin_id, chambers, skin_type, skin_variant)
         self._apply_layout_and_touch(skin_entry)
+        skincfg.carry_unmanaged_skin_keys(skin_entry, self._load_skin_cfg())
         # Organs are only meaningful on organ-bearing variants; drop otherwise.
         organs = self._organs_from_rows() if variant_has_organs(skin_variant) else []
         skincfg.apply_organs(skin_entry, organs)

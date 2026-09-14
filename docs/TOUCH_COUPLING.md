@@ -100,8 +100,9 @@ Three robustness layers on top of the plain subtraction:
   and takes the residual's norm - the physically correct model. Falls back to
   scalar per reading whenever either side lacks vectors.
 
-- **Core:** `src/core/touch_compensation.py` (`ChamberCoupling` +
-  `TransitionGuard` + `TouchCompensator`, pure/tested) - curve interpolation,
+- **Core:** `src/core/touch_compensation.py` (`CouplingState` +
+  `GridCompensation` + `TransitionGuard` + `TouchCompensator`, pure/tested) -
+  multilinear offset interpolation over the measured states,
   offset subtraction, `act` recompute (``threshold_ut`` + margin + guard), and
   an opt-in ``suppress_pct`` fallback (blank a sensor while a strongly-coupled
   chamber is at/above a level - the "ignore touch while inflated/vacuum" last

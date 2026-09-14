@@ -21,25 +21,6 @@ using se::node::gatewayKnown;
 inline uint32_t cmdDropped = 0;
 #endif
 
-inline void sendStatus(int ch, float kpa) {
-    if (!gatewayKnown) return;
-    int  pct = units::kpaToPct(kpa, chambers::state[ch].min_kpa, chambers::state[ch].max_kpa);
-    // "st" is the real actuation state (0 idle, 1 inflating, 2 deflating) so the
-    // PC reflects whether a pump is actually driving the chamber rather than
-    // inferring it from pressure-vs-target (which never settles with pumps off).
-    // "vi"/"vd" are the ACTUAL inflate/deflate valve outputs (chambers::valveOpen,
-    // the mirror every valve write goes through), so the PC shows a valve as open
-    // whoever opened it - a manual toggle, an inflate/deflate, the closed-loop
-    // control, or the firmware's own dead-man closing it again.
-    char buf[96];
-    int  len = snprintf(buf, sizeof(buf),
-                        "{\"type\":\"status\",\"chamber\":%d,\"pressure\":%d,\"kpa\":%.2f,\"st\":%d,\"vi\":%d,\"vd\":%d}",
-                        ch, pct, kpa, (int)chambers::state[ch].state,
-                        chambers::valveOpen[ch * 2 + 0] ? 1 : 0,
-                        chambers::valveOpen[ch * 2 + 1] ? 1 : 0);
-    esp_now_send(gatewayMac, reinterpret_cast<uint8_t*>(buf), len);
-}
-
 // Batched status: every chamber in ONE frame (parallel arrays), instead of one
 // esp_now_send per chamber. Cuts status frame count NUM_CHAMBERSx - the biggest win
 // during a status_rate fast window - freeing ESP-NOW airtime that the Thymio's
@@ -47,9 +28,8 @@ inline void sendStatus(int ch, float kpa) {
 // redundant, the PC recomputes it from "kpa" against the configured range (kpa is
 // authoritative - see air_chamber.py), and dropping it keeps even a full 12-chamber
 // frame (~200 B) under the 250 B ESP-NOW limit, so it is ALWAYS a single frame (no
-// splitting). kpa at 0.1 kPa - finer than the sensor noise. Compatible both ways: an old
-// PC ignores it (no "chamber" field); an old node still sends the scalar frame the new PC
-// also parses. Keep sendStatus() (scalar) for any single-chamber callers.
+// splitting). kpa at 0.1 kPa - finer than the sensor noise. The PC still parses the old
+// scalar per-chamber frame for nodes flashed before batching.
 inline void sendStatusAll() {
     if (!gatewayKnown) return;
     char buf[224];
@@ -233,17 +213,15 @@ inline void sendDebug() {
 }
 #endif
 
-// Actuation commands that a ``chamber == -1`` target fans out to every chamber in
-// parallel (one frame, not one per chamber). Inflate and Deflate are NOT here -
-// "Inflate/Deflate All" run the two-phase chambers::inflateAll / deflateAll (coarse
-// parallel + isolated finish when 2+ chambers actuate) because the in-line gauges
-// read the shared line, not each chamber, while several valves are open. Only
-// set_pressure / hold-all stay a plain fan-out (no precise per-chamber target on the
-// coupled line). Limit commands (set_max/set_min) and the manual bench controls are
+// Actuation commands that a ``chamber == -1`` target fans out to every chamber
+// (one frame, not one per chamber). Each chamber goes through applyChamberCmd, and
+// the coupled-fill engine groups the co-active same-direction requests into one
+// round itself. Limit commands (set_max/set_min) and the manual bench controls are
 // excluded; they stay single-target.
 inline bool isFanOut(cmd_queue::CmdType t) {
     using namespace cmd_queue;
-    return t == CMD_SET_PRESSURE || t == CMD_HOLD;
+    return t == CMD_INFLATE || t == CMD_DEFLATE
+        || t == CMD_SET_PRESSURE || t == CMD_HOLD;
 }
 
 // Apply one already-parsed command to a single (assumed valid) chamber ``n``.
@@ -379,7 +357,9 @@ inline void process(const cmd_queue::Cmd& c) {
     if (c.type == CMD_TARE) { chambers::tare(); sendAck("tare"); return; }
 
     // While latched stopped, drop every actuation command so nothing re-actuates.
-    if (chambers::stopped) return;
+    // set_max/set_min only store a limit (and may only hold a chamber), so they
+    // still apply and ack - otherwise the PC's confirmer retries into silence.
+    if (chambers::stopped && c.type != CMD_SET_MAX && c.type != CMD_SET_MIN) return;
 
     // Start a continuous bench-test run (param = direction). Targetless, so it
     // must be handled before the per-chamber index guard below. The bench test
@@ -417,24 +397,15 @@ inline void process(const cmd_queue::Cmd& c) {
     }
 #endif
 
-    // chamber == -1 actuates EVERY chamber. Inflate/Deflate-All request every
-    // chamber that still needs to move; the engine batches them into one coupled
-    // round (open together -> fill to lowest target -> close -> measure isolated).
+    // chamber == -1 actuates EVERY chamber through the same per-chamber path as a
+    // single target (so ms/duty/timed are honoured); the engine batches the
+    // requests into one coupled round (open together -> fill to lowest target ->
+    // close -> measure isolated).
     int n = c.chamber;
-    if (n == -1 && c.type == CMD_INFLATE) {
-        chambers::inflateAll(c.param);
-        sendSeq();              // wireless diagnostic: engine phase + pending masks
-        return;
-    }
-    if (n == -1 && c.type == CMD_DEFLATE) {
-        chambers::deflateAll(c.param);
-        sendSeq();
-        return;
-    }
     if (n == -1 && isFanOut(c.type)) {
-        // set_pressure / hold-all fan out per chamber; each routes through the
-        // engine (which groups co-active same-direction chambers itself).
         for (int i = 0; i < NUM_CHAMBERS; i++) applyChamberCmd(i, c);
+        if (c.type == CMD_INFLATE || c.type == CMD_DEFLATE)
+            sendSeq();          // wireless diagnostic: engine phase + pending masks
         return;
     }
     if (c.type == CMD_VENT) {
@@ -471,25 +442,25 @@ inline void parseAndQueue(const uint8_t* data, int len) {
     Cmd c{};
 
     if      (strcmp(cmd, "ping") == 0)             { c.type = CMD_PING;         c.chamber = -1; }
-    else if (strcmp(cmd, "inflate") == 0)           { c.type = CMD_INFLATE;      c.chamber = doc["chamber"] | -1; c.param = doc["delta"] | 10; c.fill_ms = doc["ms"] | 0; c.duty = doc["duty"] | 0; c.timed = doc["timed"] | 0; }
-    else if (strcmp(cmd, "deflate") == 0)           { c.type = CMD_DEFLATE;      c.chamber = doc["chamber"] | -1; c.param = doc["delta"] | 10; c.fill_ms = doc["ms"] | 0; c.duty = doc["duty"] | 0; c.timed = doc["timed"] | 0; }
-    else if (strcmp(cmd, "set_pressure") == 0)      { c.type = CMD_SET_PRESSURE; c.chamber = doc["chamber"] | -1; c.param = doc["value"] | 0; c.duty = doc["duty"] | 0; }
-    else if (strcmp(cmd, "set_max_pressure") == 0)  { c.type = CMD_SET_MAX;      c.chamber = doc["chamber"] | -1; c.param_kpa = doc["value"] | chambers::DEFAULT_MAX_KPA; c.seq = doc["seq"] | NO_SEQ; }
-    else if (strcmp(cmd, "set_min_pressure") == 0)  { c.type = CMD_SET_MIN;      c.chamber = doc["chamber"] | -1; c.param_kpa = doc["value"] | chambers::DEFAULT_MIN_KPA; c.seq = doc["seq"] | NO_SEQ; }
-    else if (strcmp(cmd, "hold") == 0)              { c.type = CMD_HOLD;         c.chamber = doc["chamber"] | -1; }
+    else if (strcmp(cmd, "inflate") == 0)           { c.type = CMD_INFLATE;      c.chamber = chamberArg(doc["chamber"] | -1); c.param = doc["delta"] | 10; c.fill_ms = doc["ms"] | 0; c.duty = doc["duty"] | 0; c.timed = doc["timed"] | 0; }
+    else if (strcmp(cmd, "deflate") == 0)           { c.type = CMD_DEFLATE;      c.chamber = chamberArg(doc["chamber"] | -1); c.param = doc["delta"] | 10; c.fill_ms = doc["ms"] | 0; c.duty = doc["duty"] | 0; c.timed = doc["timed"] | 0; }
+    else if (strcmp(cmd, "set_pressure") == 0)      { c.type = CMD_SET_PRESSURE; c.chamber = chamberArg(doc["chamber"] | -1); c.param = doc["value"] | 0; c.duty = doc["duty"] | 0; }
+    else if (strcmp(cmd, "set_max_pressure") == 0)  { c.type = CMD_SET_MAX;      c.chamber = chamberArg(doc["chamber"] | -1); c.param_kpa = doc["value"] | chambers::DEFAULT_MAX_KPA; c.seq = doc["seq"] | NO_SEQ; }
+    else if (strcmp(cmd, "set_min_pressure") == 0)  { c.type = CMD_SET_MIN;      c.chamber = chamberArg(doc["chamber"] | -1); c.param_kpa = doc["value"] | chambers::DEFAULT_MIN_KPA; c.seq = doc["seq"] | NO_SEQ; }
+    else if (strcmp(cmd, "hold") == 0)              { c.type = CMD_HOLD;         c.chamber = chamberArg(doc["chamber"] | -1); }
     // Leak-compensating hold: {"cmd":"hold_duty","chamber":n,"duty":D,"kpa":K?,
     // "timed":1?} starts/refreshes (the PC re-sends ~2 s as keepalive); "off":1
     // drops it (chamber -1 = all). No "kpa" (or "timed":1) = duty-only, no trim.
-    else if (strcmp(cmd, "hold_duty") == 0)         { c.type = CMD_HOLD_DUTY;    c.chamber = doc["chamber"] | -1; c.duty = doc["duty"] | 0; c.param = doc["off"] | 0; c.timed = doc["timed"] | 0; c.param_kpa = doc["kpa"].is<float>() ? doc["kpa"].as<float>() : NAN; }
+    else if (strcmp(cmd, "hold_duty") == 0)         { c.type = CMD_HOLD_DUTY;    c.chamber = chamberArg(doc["chamber"] | -1); c.duty = doc["duty"] | 0; c.param = doc["off"] | 0; c.timed = doc["timed"] | 0; c.param_kpa = doc["kpa"].is<float>() ? doc["kpa"].as<float>() : NAN; }
     else if (strcmp(cmd, "stop") == 0)              { c.type = CMD_STOP;         c.chamber = -1; }
     else if (strcmp(cmd, "resume") == 0)            { c.type = CMD_RESUME;       c.chamber = -1; }
-    else if (strcmp(cmd, "test_run") == 0)          { c.type = CMD_TEST_RUN;     c.chamber = doc["chamber"] | -1; c.param = doc["dir"] | 0; c.duty = doc["duty"] | 0; }  // 0=inflate, 1=deflate; chamber -1 = all; duty 0 = full
+    else if (strcmp(cmd, "test_run") == 0)          { c.type = CMD_TEST_RUN;     c.chamber = chamberArg(doc["chamber"] | -1); c.param = doc["dir"] | 0; c.duty = doc["duty"] | 0; }  // 0=inflate, 1=deflate; chamber -1 = all; duty 0 = full
     else if (strcmp(cmd, "test_stop") == 0)         { c.type = CMD_TEST_STOP;    c.chamber = -1; }
     else if (strcmp(cmd, "status_rate") == 0)       { c.type = CMD_STATUS_RATE;  c.chamber = -1; c.param = doc["ms"] | 0; c.fill_ms = doc["ttl"] | 0; }  // ms<=0/ttl<=0 = revert to default
     else if (strcmp(cmd, "tare") == 0)              { c.type = CMD_TARE;         c.chamber = -1; }
     else if (strcmp(cmd, "valve_manual") == 0) {
         c.type = CMD_VALVE_MANUAL;
-        c.chamber = doc["chamber"] | -1;
+        c.chamber = chamberArg(doc["chamber"] | -1);
         c.param = doc["side"] | 0;     // 0=inflate, 1=deflate
         c.cfg_chambers = doc["open"] | 0;
     }
@@ -502,7 +473,7 @@ inline void parseAndQueue(const uint8_t* data, int len) {
     // chamber open, no pump (manual-override dead-man; PC keeps it alive).
     else if (strcmp(cmd, "vent") == 0) {
         c.type = CMD_VENT;
-        c.chamber = doc["chamber"] | -1;
+        c.chamber = chamberArg(doc["chamber"] | -1);
         c.cfg_chambers = doc["open"] | 0;
     }
 #ifdef DEBUG_BUILD

@@ -126,6 +126,7 @@
    </item>
    <item>
     <widget class="QDialogButtonBox" name="button_box">
+     <property name="whatsThis"><string>Close the dialog. A flash still in progress is stopped.</string></property>
      <property name="standardButtons"><set>QDialogButtonBox::Close</set></property>
     </widget>
    </item>

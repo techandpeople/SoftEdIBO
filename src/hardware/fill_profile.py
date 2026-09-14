@@ -144,9 +144,9 @@ class FillProfile:
         return [[int(round(ms)), round(pct, 1)] for ms, pct in self._pts]
 
 
-# Hard ceiling for a single deflate window (mirrors the firmware
-# fill_control.h MAX_DEFLATE_MS): the vacuum pump is active and the gauge may be
-# blind below its floor, so any extrapolated open-loop time is capped here.
+# Hard ceiling for a single deflate window (the firmware's per-chamber deflate
+# budget, TUNE_DEFLATE.chamber_max_ms): the vacuum pump is active and the gauge
+# may be blind below its floor, so any extrapolated open-loop time is capped here.
 MAX_DEFLATE_MS = 5000.0
 
 

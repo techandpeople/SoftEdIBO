@@ -73,19 +73,31 @@ hospital study's behaviours. Two layers:
   with a cooperative sequence scheduler (`wait` / `wait_for_touch` suspend a
   running sequence). The verb set lives in
   [`catalog.py`](../src/activities/catalog.py) - actions (`set_led`,
-  `set_led_halves`, `fade`, `beat`, `inflate`/`deflate`/`set_pressure`,
-  `stop`, `log`, and the Thymio wheel/LED/sound verbs `thymio_drive` /
-  `thymio_leds` / `thymio_sound`), control flow (`sequence`, `repeat`,
-  `for_each_chamber`, `if_robot`, `wait`, `wait_for_touch`) and conditions
-  (`elapsed_ms`, `touch_count`, `on_impact`, `on_lifted`, `organs`,
-  `robot_is`, `any`/`all`/`not`, `always`). The catalogue is the single source
+  `set_led_halves`, `fade`, `touch_progress`, `beat`,
+  `inflate`/`deflate`/`set_pressure`, `stop`, `log`, and the Thymio
+  wheel/LED/sound verbs `thymio_drive` / `thymio_leds` / `thymio_sound`),
+  control flow (`sequence`, `repeat`, `for_each_chamber`, `if_robot`, `wait`,
+  `wait_for_touch`) and conditions (`elapsed_ms`, `touch_count`,
+  `gesture_count`, `on_impact`, `on_lifted`, `organs`, `robot_is`,
+  `any`/`all`/`not`, `always`). The catalogue is the single source
   of truth and also drives the editor blocks. Specs are validated by
   `validate_spec` (`wrinkle` is deprecated - accepted in saved specs as an
   alias of `deflate`).
 
-  `inflate`/`set_pressure`/`beat` also take an optional `duty` (1-255): the pump
-  PWM, lower = a gentler / lower-energy stroke, `0` = full speed. Unlike
-  `period_ms` it needs no fill calibration, so it tunes a beat's energy directly.
+  `touch_progress` fills an LED ring one arc per `per` touches (from `bg_color`
+  to `on_color`, `segments` arcs) and optionally jumps to phase `to` once full;
+  `gesture_count` is true after `min` gestures of `kind` - `touch` (any press,
+  no model) or an ML class `tap` / `press` / `compressions` (needs a trained
+  model for the skin type).
+
+  `inflate`/`set_pressure`/`beat` also take an optional `power` (1-5, default 5)
+  and `duty` (1-255): `power` is the friendly dial, mapped at runtime onto the
+  skin type's calibrated duty range (1 = the Min power PWM from Calibrate Fill,
+  5 = full) and overriding `duty` when both are set; `duty` is the raw pump PWM
+  (`0` = full speed). **Caveat:** the firmware currently parses but does not
+  apply a per-request `duty` on the engine path - pumps run at full duty (see
+  [firmware/PROTOCOL.md](../firmware/PROTOCOL.md) and `FIXME.md`), so both
+  fields have no effect on real hardware today.
   The LED verbs `set_led` / `set_led_halves` / `fade` take an optional `ring`
   (`"all"` default, or `0..2`): the multiplexed board defines **three independent
   24-LED rings** that can animate separately (Tree populates all three, one per
@@ -290,9 +302,14 @@ need to know *all good* vs *not all good*, not which organ is missing.
 The choice is exposed as a preset parameter (`organ_readout_mode`:
 `per_organ` or `aggregate`).
 
-### WS2818 LED control
+### WS2818 LED control (historical)
 
-Both firmwares accept new ESP-NOW commands:
+> **Historical.** The shipped LEDs are WS2812/SK6812 rings, and the firmware
+> patterns are `off` / `solid` / `blink` / `pulse` / `comet` / `fade` (plus
+> `set_led_halves`) - there is no `breathe` or `rainbow`. The current wire
+> format is in [firmware/PROTOCOL.md](../firmware/PROTOCOL.md).
+
+The original plan had both firmwares accept:
 
 | `cmd` | Fields | Notes |
 |-------|--------|-------|
@@ -612,7 +629,12 @@ declarative_activities
 - `transitions[].when` is a tree of condition nodes. Each node has a
   `type` (looked up in the condition catalogue) and a `params` dict.
 
-### Action catalogue (initial, extensible)
+### Action catalogue (initial, extensible - historical)
+
+> Historical design sketch. `breathe` / `stop_breathing` and the `organ_match`
+> condition below were never shipped as such, and the LED patterns are
+> `off`/`solid`/`blink`/`pulse`/`comet`/`fade`; the live verb set is
+> [`catalog.py`](../src/activities/catalog.py).
 
 | `action` | Params | Effect |
 |----------|--------|--------|

@@ -10,8 +10,11 @@ design see [docs/TOUCH_POSITION_TRACKING.md](docs/TOUCH_POSITION_TRACKING.md) an
 
 ## 1. Skins: shape (`skin_type`) and silicone (`skin_variant`)
 
-Each skin is described by two independent fields in `config/settings.yaml`
-(set them in the GUI: **Robot config -> skin -> "Skin type"** and **"Silicone"**):
+Each skin is described by two independent fields in the settings file (set them
+in the GUI: **Robot config -> skin -> "Skin type"** and **"Silicone"**). The app
+uses the user copy, `~/.local/share/SoftEdIBO/config/settings.yaml`
+(`%APPDATA%\SoftEdIBO\config\settings.yaml` on Windows), copied from the repo's
+`config/settings.yaml` on first run:
 
 - **`skin_type`** - the shape, which fixes the sensor layout and selects the
   touch-gesture model. Registered in
@@ -121,48 +124,60 @@ a quick threshold tune (no ML, no dataset):
 
 ---
 
-## 6. Chamber fill times
+## 6. Chamber fill calibration
 
-**Tools -> Calibrate Fill Times...** measures, per chamber, its **time->pressure
-fill curve** - how pressure climbs while the inflate valve is held open, with
-the pressure sensor as ground truth - and saves it as the chamber's
-`fill_profile` in `config/settings.yaml`. Run it once per build / after
-silicone changes:
+Chambers are **targeted by pressure**: the firmware's coupled-fill engine opens
+the co-active chambers together and closes each one the moment its gauge reaches
+the target (see [docs/COUPLED_FILL_CONTROL.md](docs/COUPLED_FILL_CONTROL.md) and
+[docs/PRESSURE_AND_FILL_SAFETY.md](docs/PRESSURE_AND_FILL_SAFETY.md)). The
+calibration curves do not replace that loop - they give each request a
+**time budget** (`ms`, the engine's per-chamber open-time cap), which is the
+closing authority only where the gauge cannot see (a deflate below the sensor
+floor, e.g. wrinkles) and a safety bound everywhere else.
 
-1. Connect the gateway and power the nodes (do this **outside** a running
-   session).
-2. Open the dialog, **Calibrate all** (or per chamber). Each chamber deflates
-   to empty, then sweeps in one continuous pass: the inflate valve is held open
-   while the node streams pressure at a fast cadence, each reading becoming a
-   curve point. The result (and the chamber's fill-order rank) appears per row;
-   the list **scrolls** when there are many chambers.
-3. **Save**.
+**Tools -> Calibrate Fill Times...** (or **Configure Skin -> Calibrate Fill**,
+scoped to one skin) measures, per chamber:
 
-Curves are also stored as per-type templates (keyed by `skin_type` +
-`skin_variant` under `fill_profiles_by_type`), so a chamber without its own
-measurement can fall back to the curve measured on an identical skin.
+- **Calibrate all** - the **time->pressure fill curve**: each chamber sweeps from
+  empty in one continuous pass while the node streams pressure at a fast cadence
+  (**Detail**). Saved as the chamber's `fill_profile`; also ranks which chamber
+  fills first. An inflate's `ms` is interpolated from it and scaled by the
+  node's concurrent load, `x max(1, active_chambers / pumps)`.
+- **Duty curves** - fill speed at several pump PWM duties, so the activity
+  editor's "over (ms)" slow-fill can pick a duty from measured data (note: the
+  firmware engine path does not apply a requested `duty` yet - see FIXME.md).
+  **Min power PWM** sets the duty that power level 1 maps to (level 5 = 255;
+  diaphragm pumps stall below ~180).
+- **Deflate curves** - the falling vacuum curve down to the sensor floor, which
+  times the deflates the gauge cannot supervise.
+- **Hold/leak curves** - the pump PWM that balances each chamber's leak at
+  several levels (hold curve) plus the natural pressure decay (leak curve).
+  Needs pressure sensors on the node.
 
-You can also calibrate just one skin from **Configure Skin -> Calibrate Fill**
-(same dialog, scoped to that skin's chambers) - handy after editing a single
-skin without re-running everything.
+Run it once per build / after silicone changes, with the gateway connected,
+outside a running session and with hands clear; then **Save** (or **Apply** to
+keep the dialog open). **Save as skin-type template** stores the curves under
+`fill_profiles_by_type` (keyed by `skin_type` + `skin_variant`), so every skin of
+that type inherits them unless it has its own override. Between sweeps the
+chambers vent to ambient with the firmware `vent` command (both valves open,
+pumps off).
 
-A hard **5 s ceiling** and the firmware `HARD_MAX` pressure cutoff always apply,
-so a stuck/unplugged sensor can't run a pump indefinitely.
+> Continuous calibration currently needs the direct board (`test_run` /
+> `status_rate` are not ported to the multiplexed board yet), so Calibrate Fill
+> is disabled for `node_multiplexed` chambers.
 
-**At runtime**, a chamber with a calibrated curve inflates **by time** so it
-doesn't depend on the laggy multiplexed pressure sensor. The open-valve window
-is interpolated from the curve (current level -> target), then scaled by the
-node's concurrent load - `x max(1, active_chambers / pumps)` - because the
-pumps are shared per node, so chambers inflating together fill each other
-slower. A lone chamber (or up to `pump_count` at once) keeps its measured time;
-the PC recomputes this automatically as chambers start and stop. The firmware
-then **maintains the level against slow leaks**: while idle it keeps reading
-pressure and tops the chamber back up if it droops - but only on a *drop*, so a
-child pressing the skin (which *raises* pressure) never triggers a top-up.
-Chambers without a calibrated curve keep the classic pressure-target behaviour
-(a legacy scalar `fill_time_ms` is still honoured, as a linear curve).
+**Leak compensation** is the `hold_duty` regulated hold: after every
+inflate/deflate settles at a positive level, the app automatically asks the
+node to hold it there - the inflate valve reopens whenever the gauge droops
+below the level and the shared pump is servoed (never below 180 PWM), seeded
+from the hold curve. Any new actuation on the chamber drops the hold first.
+Vacuum poses (wrinkles) and sensorless boards are not auto-held.
+
+Safety always applies regardless of calibration: a 5 s per-chamber open cap
+(when no `ms` is sent), per-round / per-sequence caps, a 10 s actuation watchdog,
+and the per-chamber `max_pressure` clamp.
 
 When you start a session on real hardware, if any selected chamber has no
 calibrated fill curve you're prompted to **calibrate now** (or start anyway with
-the pressure-based fallback). Calibrating there rebuilds the robots so the new
-curves take effect - just start the session again.
+plain pressure targeting and the 5 s cap). Calibrating there rebuilds the robots
+so the new curves take effect - just start the session again.

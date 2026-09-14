@@ -22,6 +22,18 @@ Author layouts as Qt Designer `.ui` in `src/gui/ui/`, compile with
 globs `src/gui/ui/*.ui`). Never hand-build a layout in Python. Every control
 gets a `whatsThis` (feeds the "?" help mode; `toolTip` is the fallback).
 
+**Known debt (existing exceptions, do not copy):** a few controls are still
+added in Python on top of their `.ui` and should move into it when those files
+are next touched:
+
+- `main_window.py` - most **Tools** menu actions (Activity Editor, Update Nodes
+  (OTA), Touch Gestures, Touch Position Bench, Calibrate Fill Times, Calibrate
+  Touch Coupling, Emergency Flash) are `QAction`s created in `__init__`.
+- `session_setup_dialog.py` - the simulation-mode and record-sensor-streams
+  checkboxes.
+- `settings_dialog.py` - the "SoftEdIBO Gateway" and "Recordings" groups
+  (`_build_gateway_section` / `_build_recordings_section`).
+
 ### The `monitor/` subpackage
 
 Live monitor widgets (`src/gui/monitor/`) used to be hand-built in Python because

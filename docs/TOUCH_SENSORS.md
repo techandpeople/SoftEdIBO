@@ -58,6 +58,34 @@ Collaborators ask the registry instead of branching on `"magnet"`:
 
 A skeleton `CapacitiveSensorProfile` already exists in `touch_profiles.py`,
 deliberately **not registered** so it changes nothing until its firmware exists.
+
+### Hardware status (sister repo)
+
+The capacitive boards are designed in the sister repo **HospitalForRobots**
+(`PCBS_DIAS/`), not here, and do not match the placeholder shapes below
+(an ESP-NOW `node_capacitive_sensor`, or folding into `node_direct`):
+
+- **Pad boards, one per robot body - passive, no MCU.** Each pad feeds an
+  OPA365 transimpedance amplifier; the amplifier outputs go through TMUX1208 8:1
+  analog muxes. The header carries the mux select lines `A0`-`A2` + `EN`, one
+  analog `OUT` per mux, `Vref`, `VDD` and `GND`.
+  - `thymio/Placa` - 32 diamond pads, 4 muxes, 1x11 header.
+  - `turtle/square` - 32 triangular pads, 4 muxes, 1x11 header.
+  - `turtle/rectangle` - 8 pads, 1 mux, 1x08 header.
+  - `tree/Placa` - 8 pads, 1 mux, 1x08 header.
+- **Thymio "Cerebro" board** (under `thymio/`) - STM32G4 MCU with USB-C and a
+  battery charger; no radio. No firmware exists for it yet.
+- **Sensing is body-coupled:** the signal is injected from a wearable wristband
+  (`Pulseira` v3, ESP32-C3, "CapInject"), so only a person wearing the band
+  registers a touch.
+
+Consequences for this app: the channel counts (8 or 32 pads per skin) differ
+from the 4-sensor magnet geometry in
+[`src/hardware/skin_geometry.py`](../src/hardware/skin_geometry.py), and there
+is no transport to the PC yet. Capacitive therefore stays unregistered and
+inert; the steps below are the generic seam, to be revisited once that
+firmware and transport exist.
+
 To bring it online:
 
 1. **Firmware.** Two shapes, both handled by one profile:

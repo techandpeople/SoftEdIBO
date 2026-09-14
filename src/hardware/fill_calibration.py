@@ -27,6 +27,7 @@ from __future__ import annotations
 from typing import Any
 
 from src.core import skin_config
+from src.core.node_sharing import robot_id_of
 from src.hardware.fill_profile import DeflateProfile, FillProfile
 from src.hardware.fill_scaling import FULL_DUTY, MIN_PUMP_DUTY
 
@@ -418,7 +419,17 @@ class MultiChamberFillCalibrator:
 # ---------------------------------------------------------------------------
 
 # Node types that actuate chambers (and so have fill curves to calibrate).
-ACTUATOR_NODE_TYPES = ("node_direct", "node_multiplexed")
+ACTUATOR_NODE_TYPES = skin_config.ACTUATOR_NODE_TYPES
+
+# Node types whose firmware has the bench commands every calibration sweep
+# drives (``test_run``/``test_stop``, ``status_rate`` fast telemetry, ``pumps``
+# frames). The multiplexed board lacks them until they are ported (FIXME.md).
+BENCH_CALIBRATION_NODE_TYPES = ("node_direct",)
+
+
+def supports_bench_calibration(chamber: dict) -> bool:
+    """True if the chamber's node firmware can run the calibration sweeps."""
+    return chamber.get("node_type") in BENCH_CALIBRATION_NODE_TYPES
 
 
 def combo_key(slots: Any) -> str:
@@ -462,7 +473,7 @@ def iter_actuator_chambers(settings_data: dict) -> list[dict]:
                 profile = ch.get("fill_profile")
                 fill_ms = ch.get("fill_time_ms")
                 out.append({
-                    "robot_id": robot.get("id", ""),
+                    "robot_id": robot_id_of(robot),
                     "skin_id": skin.get("skin_id", ""),
                     "skin_type": skin.get("skin_type", ""),
                     "skin_variant": skin.get("skin_variant", ""),
@@ -477,8 +488,10 @@ def iter_actuator_chambers(settings_data: dict) -> list[dict]:
                     "fill_time_ms": fill_ms,
                     # Pressure range, so the calibration dialog can recompute a
                     # live % from the (authoritative) kPa of batched status frames.
-                    "max_pressure": float(ch.get("max_pressure", 8.0)),
-                    "min_pressure": float(ch.get("min_pressure", 0.0)),
+                    "max_pressure": float(ch.get("max_pressure",
+                                                 skin_config.DEFAULT_MAX_KPA)),
+                    "min_pressure": float(ch.get("min_pressure",
+                                                 skin_config.DEFAULT_MIN_KPA)),
                     "hold_duty_curve": ch.get("hold_duty_curve"),
                     "leak_curve": ch.get("leak_curve"),
                     "calibrated": bool(profile) or bool(fill_ms),
@@ -838,7 +851,10 @@ def chambers_missing_calibration(settings_data: dict) -> list[dict]:
     pre-activity guard to offer calibration.
 
     Chambers set to ``pressure`` fill mode inflate closed-loop on the gauge
-    sensor and need no calibration, so they are never flagged."""
+    sensor and need no calibration, so they are never flagged. A chamber that
+    inherits its skin type's template curve counts as calibrated."""
     return [c for c in iter_actuator_chambers(settings_data)
             if not c["calibrated"]
-            and c["fill_mode"] != skin_config.FILL_MODE_PRESSURE]
+            and c["fill_mode"] != skin_config.FILL_MODE_PRESSURE
+            and not get_type_profile(settings_data, c["skin_type"],
+                                     c["skin_variant"], c["slot"])]

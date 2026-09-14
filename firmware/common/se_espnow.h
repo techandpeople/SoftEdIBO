@@ -5,7 +5,7 @@
  * Single source of truth for the ESP-NOW / MAC / radio plumbing used by every
  * firmware in this repo. Compiles under BOTH frameworks:
  *   - Arduino  (node_direct, node_multiplexed)
- *   - ESP-IDF  (gateway, e.g. Seeed XIAO ESP32-C6)
+ *   - ESP-IDF  (gateway, Seeed XIAO ESP32-S3)
  *
  * The only framework-specific part is radio bring-up, guarded by ARDUINO.
  * Everything else is plain ESP-IDF API (esp_now_*), which Arduino re-exports,
@@ -223,7 +223,7 @@ inline void toGateway(const char* s) {
 inline void sendAck(const char* cmd, uint16_t seq, int chamber,
                     bool ok, const char* err = nullptr) {
     if (!gatewayKnown) return;
-    char buf[96];
+    char buf[128];   // worst case (5-digit seq, err, -128 chamber) is ~100 B
     int len = snprintf(buf, sizeof(buf),
         "{\"type\":\"ack\",\"cmd\":\"%s\",\"seq\":%u,\"chamber\":%d,\"ok\":%s",
         cmd, (unsigned)seq, chamber, ok ? "true" : "false");
@@ -231,6 +231,7 @@ inline void sendAck(const char* cmd, uint16_t seq, int chamber,
         len += snprintf(buf + len, sizeof(buf) - len, ",\"err\":\"%s\"", err);
     if (len > 0 && len < (int)sizeof(buf))
         len += snprintf(buf + len, sizeof(buf) - len, "}");
+    if (len <= 0 || len >= (int)sizeof(buf)) return;   // never send truncated JSON
     esp_now_send(gatewayMac, reinterpret_cast<uint8_t*>(buf), len);
 }
 

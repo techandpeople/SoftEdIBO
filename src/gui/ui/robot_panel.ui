@@ -22,6 +22,7 @@
         <property name="text"><string>(re)</string></property>
         <property name="maximumWidth"><number>28</number></property>
         <property name="toolTip"><string>Refresh serial port list</string></property>
+        <property name="whatsThis"><string>Rescan the serial ports and refresh the port list - use it after plugging in the gateway.</string></property>
        </widget>
       </item>
       <item>
@@ -73,6 +74,7 @@
      <layout class="QVBoxLayout" name="turtle_layout">
       <item>
        <widget class="QTreeWidget" name="turtles_tree">
+        <property name="whatsThis"><string>Configured Turtles with their nodes and skins. Double-click a node or skin to edit it (double-click a robot to rename it); right-click for Rename/Delete, or press Delete to remove the selected item. Use + Node / + Skin on a robot row to add one.</string></property>
         <property name="headerHidden"><bool>true</bool></property>
         <property name="rootIsDecorated"><bool>true</bool></property>
         <column><property name="text"><string notr="true">Name</string></property></column>
@@ -95,6 +97,7 @@
      <layout class="QVBoxLayout" name="tree_layout">
       <item>
        <widget class="QTreeWidget" name="trees_tree">
+        <property name="whatsThis"><string>Configured Trees with their nodes and branch skins. Double-click a node or skin to edit it (double-click a robot to rename it); right-click for Rename/Delete, or press Delete to remove the selected item. Use + Node / + Skin on a robot row to add one.</string></property>
         <property name="headerHidden"><bool>true</bool></property>
         <property name="rootIsDecorated"><bool>true</bool></property>
         <column><property name="text"><string notr="true">Name</string></property></column>
@@ -117,6 +120,7 @@
      <layout class="QVBoxLayout" name="thymio_layout">
       <item>
        <widget class="QTreeWidget" name="thymio_tree">
+        <property name="whatsThis"><string>Configured Thymios with their nodes and skins. Double-click a robot to configure it, or a node or skin to edit it; right-click for Configure/Delete, or press Delete to remove the selected item. Use + Node / + Skin on a robot row to add one.</string></property>
         <property name="headerHidden"><bool>true</bool></property>
         <property name="rootIsDecorated"><bool>true</bool></property>
         <column><property name="text"><string notr="true">Name</string></property></column>

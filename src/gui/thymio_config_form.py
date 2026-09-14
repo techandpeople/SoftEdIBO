@@ -1,7 +1,6 @@
 """Shared per-Thymio configuration form (ID, skin node MAC, wireless transport).
 
-One widget, two hosts: the robot panel's quick add/configure dialog and the
-per-robot RobotConfigDialog both embed this form, so the Thymio schema
+Embedded in the robot panel's add/configure dialog, so the Thymio schema
 (``thymio_id``/``wireless``/``wireless_via``/``node_id``/``channel``/
 ``thymio_addr``) is defined in exactly one place. Layout and help strings live
 in ``ui/thymio_config_form.ui``. The robot's skin nodes are NOT configured
@@ -9,8 +8,8 @@ here - they are their own entries (robot panel "+ Node" -> ``cfg["nodes"]``).
 
 The Discover button has the gateway's C6 broadcast a LIST_NODES query and fills
 the address field with a robot that answers; the gateway is fetched lazily via
-the injected ``gateway_provider`` so the form works both where a live robot
-exists (RobotConfigDialog) and where only the panel's gateway does (RobotPanel).
+the injected ``gateway_provider``, so it works with just the panel's gateway
+(RobotPanel).
 The From-cable button reads the address off a USB-cabled Thymio instead - no
 gateway, for a robot not yet paired to this network.
 """

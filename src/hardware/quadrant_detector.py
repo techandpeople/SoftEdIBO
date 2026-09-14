@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import math
 import logging
-from typing import List, Tuple, Dict, Any, Optional, Sequence
+from typing import List, Tuple, Dict, Any
 from enum import Enum
 
 logger = logging.getLogger(__name__)

@@ -58,6 +58,10 @@ class TouchEventRouter:
         """Register ``callback(chamber_id, action)`` for each press/release."""
         self._cbs.append(callback)
 
+    def unsubscribe(self, callback: Callable[[int, str], None]) -> None:
+        """Deregister a callback passed to :meth:`subscribe` (no-op if absent)."""
+        self._cbs[:] = [cb for cb in self._cbs if cb != callback]
+
     def attach(self, touch_controller: Any) -> None:
         """Start consuming ``on_magnet`` events from ``touch_controller`` (a no-op
         when it is missing or exposes no ``on_magnet``)."""
@@ -84,8 +88,13 @@ class TouchEventRouter:
 
     def _dispatch(self, sensor_idx: int, action: str) -> None:
         chamber_id = self._sensor_to_chamber.get(sensor_idx, sensor_idx)
-        for cb in self._cbs:
+        dead: list = []
+        for cb in list(self._cbs):      # snapshot: listeners change on the GUI thread
             try:
                 cb(chamber_id, action)
+            except RuntimeError:        # Qt signal source deleted (widget gone) - prune it
+                dead.append(cb)
             except Exception:   # noqa: BLE001 - a bad subscriber must not break others
                 logger.exception("touch_event callback failed (%s)", self._name)
+        if dead:
+            self._cbs[:] = [cb for cb in self._cbs if all(cb is not d for d in dead)]

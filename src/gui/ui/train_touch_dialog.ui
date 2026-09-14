@@ -24,10 +24,13 @@
         </widget>
        </item>
        <item>
-        <widget class="QListWidget" name="rec_list"/>
+        <widget class="QListWidget" name="rec_list">
+         <property name="whatsThis"><string>Recordings loaded into this dialog. Select one to show and label its touches in the table on the right. Train uses every loaded recording that has at least one label.</string></property>
+        </widget>
        </item>
        <item>
         <widget class="QPushButton" name="add_btn">
+         <property name="whatsThis"><string>Load a session sensor-stream recording (.jsonl). Its touches are segmented into the table, with gesture labels pre-filled from the session's live tags when the database has them.</string></property>
          <property name="text"><string>Add recording...</string></property>
         </widget>
        </item>
@@ -45,6 +48,7 @@
          <item>
           <widget class="QComboBox" name="type_combo">
            <property name="toolTip"><string>Auto-selected from the recording. Change it to (re)tag this recording or to target model import/export.</string></property>
+           <property name="whatsThis"><string>Skin type of the selected recording, auto-selected from its header. Change it to tag an old recording that has no skin type; it also picks which model slot Import/Export model use.</string></property>
           </widget>
          </item>
          <item>
@@ -57,6 +61,7 @@
        </item>
        <item>
         <widget class="QTableWidget" name="table">
+         <property name="whatsThis"><string>The touches found in the selected recording: source node, start time, duration, group and gesture label. Pick a label in the Gesture column for each touch you want to train on; select several rows (Ctrl/Shift-click) to group or ungroup them.</string></property>
          <column><property name="text"><string>Source</string></property></column>
          <column><property name="text"><string>Start (ms)</string></property></column>
          <column><property name="text"><string>Dur (ms)</string></property></column>
@@ -69,11 +74,13 @@
          <item>
           <widget class="QPushButton" name="group_btn">
            <property name="toolTip"><string>Merge the selected touches into one gesture (e.g. a double/triple tap) sharing one label.</string></property>
+           <property name="whatsThis"><string>Merge the selected touches (at least two) into one gesture, e.g. a double or triple tap. Grouped touches share one label - changing it on one row changes the whole group.</string></property>
            <property name="text"><string>Group selected</string></property>
           </widget>
          </item>
          <item>
           <widget class="QPushButton" name="ungroup_btn">
+           <property name="whatsThis"><string>Split the selected touches out of their group so each can be labelled on its own again.</string></property>
            <property name="text"><string>Ungroup selected</string></property>
           </widget>
          </item>
@@ -89,11 +96,13 @@
         <layout class="QHBoxLayout" name="csv_row">
          <item>
           <widget class="QPushButton" name="import_csv_btn">
+           <property name="whatsThis"><string>Load gesture labels and groups from a labels CSV into the selected recording. Rows are matched by source node and start time.</string></property>
            <property name="text"><string>Import CSV...</string></property>
           </widget>
          </item>
          <item>
           <widget class="QPushButton" name="export_csv_btn">
+           <property name="whatsThis"><string>Save the selected recording's labels and groups to a CSV file (by default next to the recording), to back them up or edit them elsewhere.</string></property>
            <property name="text"><string>Export CSV...</string></property>
           </widget>
          </item>
@@ -106,12 +115,14 @@
          <item>
           <widget class="QPushButton" name="import_model_btn">
            <property name="toolTip"><string>Copy a trained .joblib into this skin type's model slot.</string></property>
+           <property name="whatsThis"><string>Copy a trained .joblib model file into the selected skin type's model slot, replacing the existing model after confirmation.</string></property>
            <property name="text"><string>Import model...</string></property>
           </widget>
          </item>
          <item>
           <widget class="QPushButton" name="export_model_btn">
            <property name="toolTip"><string>Save the trained model for the selected skin type to a file.</string></property>
+           <property name="whatsThis"><string>Save the trained model of the selected skin type to a .joblib file, e.g. to copy it to another machine.</string></property>
            <property name="text"><string>Export model...</string></property>
           </widget>
          </item>
@@ -126,6 +137,7 @@
      <item>
       <widget class="QPushButton" name="capture_btn">
        <property name="toolTip"><string>Collect a fresh training set live: the app prompts each gesture and you perform it a few times, then trains and shows the accuracy. Needs a connected gateway with a touch node.</string></property>
+       <property name="whatsThis"><string>Collect a fresh training set live instead of labelling old recordings: the app prompts each gesture, you perform it a few times, then it trains and shows the accuracy. Needs a connected gateway with a touch node.</string></property>
        <property name="text"><string>Guided live capture...</string></property>
       </widget>
      </item>
@@ -137,6 +149,7 @@
      </item>
      <item>
       <widget class="QPushButton" name="train_btn">
+       <property name="whatsThis"><string>Train one gesture model per skin type from every loaded recording's labels. Training runs in the background; progress and accuracy are written to the report below.</string></property>
        <property name="text"><string>Train models</string></property>
       </widget>
      </item>
@@ -149,6 +162,7 @@
    </item>
    <item>
     <widget class="QPlainTextEdit" name="log">
+     <property name="whatsThis"><string>Progress and results: recordings loaded, label imports/exports and the training report with each model's accuracy.</string></property>
      <property name="maximumSize">
       <size><width>16777215</width><height>150</height></size>
      </property>

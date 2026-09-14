@@ -42,6 +42,7 @@
      </item>
      <item>
       <widget class="QDialogButtonBox" name="button_box">
+       <property name="whatsThis"><string>OK uses the selected address for this robot (enabled once one is selected); Cancel closes without changing it. Closing stops the scan.</string></property>
        <property name="standardButtons"><set>QDialogButtonBox::Cancel|QDialogButtonBox::Ok</set></property>
       </widget>
      </item>

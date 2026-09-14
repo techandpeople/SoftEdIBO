@@ -78,6 +78,7 @@
      </item>
      <item>
       <widget class="QPushButton" name="cancel_btn">
+       <property name="whatsThis"><string>Close this window without saving changes made since the last Save or Apply.</string></property>
        <property name="text"><string>Cancel</string></property>
       </widget>
      </item>

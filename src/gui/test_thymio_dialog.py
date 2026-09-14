@@ -49,6 +49,7 @@ class TestThymioDialog(BaseDialog, Ui_TestThymioDialog):
         self._knocks = 0
         self._lifted = False              # last-seen lift state (from the lift stream)
         self._we_connected = False        # did WE open the link (so we close it)?
+        self._closed = False              # set on close; a late connect undoes itself
 
         self.setWindowTitle(f"Test Thymio - {robot.name}")
         self.intro_label.setText(f"<b>{robot.name}</b>")
@@ -91,6 +92,11 @@ class TestThymioDialog(BaseDialog, Ui_TestThymioDialog):
                   on_error=self._on_connect_failed, parent=self)
 
     def _on_connected(self, ok: bool) -> None:
+        if ok and self._closed:
+            # The dialog closed while the link was still coming up: _on_closed
+            # already ran, so close the link we just opened ourselves.
+            self._robot.disconnect()
+            return
         if ok:
             self._we_connected = True
             self.status_label.setText("Connected.")
@@ -209,6 +215,7 @@ class TestThymioDialog(BaseDialog, Ui_TestThymioDialog):
     # ------------------------------------------------------------------
 
     def _on_closed(self) -> None:
+        self._closed = True
         self._robot.remove_sensors_listener(self._sensors_cb)
         self._robot.remove_impact_listener(self._impact_cb)
         self._robot.remove_lifted_listener(self._lifted_cb)

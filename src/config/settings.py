@@ -131,7 +131,8 @@ class Settings:
     @property
     def gateway_port(self) -> str:
         """Serial port for the SoftEdIBO gateway."""
-        default = "COM3" if sys.platform == "win32" else "/dev/ttyUSB0"
+        # The S3 gateway enumerates as USB-Serial/JTAG (CDC-ACM) on Linux.
+        default = "COM3" if sys.platform == "win32" else "/dev/ttyACM0"
         return self._data.get("gateway", {}).get("serial_port", default)
 
     @property

@@ -11,7 +11,6 @@ from __future__ import annotations
 import csv
 import json
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 
 from src.ml.training import segments_of   # re-use the recording segmenter
@@ -157,7 +156,3 @@ def label_map(rows: list[LabelRow]) -> dict:
     return {(r.source, round(r.start_ms)):
             (r.skin_type, r.skin_variant, r.label, r.group_id)
             for r in rows if r.label}
-
-
-def _epoch_ms(iso: str) -> float:
-    return datetime.fromisoformat(iso).timestamp() * 1000.0

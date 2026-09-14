@@ -46,6 +46,7 @@
           <item row="1" column="1">
            <widget class="QComboBox" name="skin_type_combo">
             <property name="toolTip"><string>Skin type for this robot. Determines the shape and sensor layout (from src/hardware/skin_geometry.py) and selects the touch-gesture model.</string></property>
+            <property name="whatsThis"><string>Skin type of this skin. It sets the outline and sensor layout of the preview, which silicone variants are offered and which touch-gesture model is used. Hidden when the robot has only one skin type.</string></property>
            </widget>
           </item>
           <item row="2" column="0">
@@ -56,6 +57,7 @@
           <item row="2" column="1">
            <widget class="QComboBox" name="skin_variant_combo">
             <property name="toolTip"><string>Silicone format of this skin (different chamber sizes per variant). Used as a touch-gesture ML feature.</string></property>
+            <property name="whatsThis"><string>Silicone format of this skin (the variants depend on the skin type). Organs can only be placed on organ-bearing variants, and the variant is used as a touch-gesture ML feature.</string></property>
            </widget>
           </item>
          </layout>
@@ -115,6 +117,7 @@
      <item>
       <widget class="QPushButton" name="calib_btn">
        <property name="toolTip"><string>Measure this skin's chamber fill times against the pressure sensor.</string></property>
+       <property name="whatsThis"><string>Open Calibrate Fill for this skin's chambers (only those on actuator nodes, even if unsaved) to measure how long each takes to fill against the pressure sensor. Needs a connected gateway.</string></property>
        <property name="text"><string>Calibrate Fill</string></property>
       </widget>
      </item>
@@ -139,6 +142,7 @@
      </item>
      <item>
       <widget class="QPushButton" name="cancel_btn">
+       <property name="whatsThis"><string>Close this window without saving changes made since the last Save or Apply.</string></property>
        <property name="text"><string>Cancel</string></property>
       </widget>
      </item>

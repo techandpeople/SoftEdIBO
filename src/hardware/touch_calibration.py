@@ -26,6 +26,7 @@ from src.core.skin_config import (
     MAGNET_NODE_TYPES,
     YAML_KEY,
 )
+from src.core.node_sharing import robot_id_of
 from src.core.touch_compensation import coupling_to_config
 from src.core.touch_coupling import (
     ACTIVE_MIN,
@@ -153,7 +154,7 @@ def iter_touch_skins(settings_data: dict) -> list[dict]:
             chambers = skin.get("chambers") or []
             comp = touch.get("compensation") or {}
             out.append({
-                "robot_id": robot.get("id", ""),
+                "robot_id": robot_id_of(robot),
                 "skin_id": skin.get("skin_id", ""),
                 "touch_mac": tmac,
                 "chamber_mac": chambers[0].get("mac") if chambers else None,
@@ -172,7 +173,7 @@ def iter_touch_skins(settings_data: dict) -> list[dict]:
 
 def _find_skin(settings_data: dict, robot_id: str, skin_id: str) -> dict | None:
     for robot in _iter_robots(settings_data):
-        if robot.get("id", "") != robot_id:
+        if robot_id_of(robot) != robot_id:
             continue
         for skin in robot.get("skins") or []:
             if skin.get("skin_id", "") == skin_id:

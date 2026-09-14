@@ -59,6 +59,7 @@
       </item>
       <item>
        <widget class="QListWidget" name="robots_list">
+        <property name="whatsThis"><string>Every configured robot with its live status. Tick the robots taking part. Robots that share one board (e.g. the Turtle and the Tree) cannot both be ticked - OK stays disabled until one is unticked.</string></property>
         <property name="visible"><bool>false</bool></property>
         <property name="selectionMode">
          <enum>QAbstractItemView::SelectionMode::MultiSelection</enum>
@@ -90,13 +91,16 @@
        </widget>
       </item>
       <item>
-       <widget class="QListWidget" name="participants_list"/>
+       <widget class="QListWidget" name="participants_list">
+        <property name="whatsThis"><string>Registered participants. Tick everyone taking part in this session.</string></property>
+       </widget>
       </item>
      </layout>
     </widget>
    </item>
    <item>
     <widget class="QDialogButtonBox" name="button_box">
+     <property name="whatsThis"><string>OK continues to start the session with the ticked robots and participants; Cancel closes without starting. OK is disabled while two ticked robots share a board.</string></property>
      <property name="standardButtons">
       <set>QDialogButtonBox::StandardButton::Cancel|QDialogButtonBox::StandardButton::Ok</set>
      </property>

@@ -7,7 +7,7 @@
  * is the node-side counterpart of src/hardware/node_ota_updater.py.
  *
  * The PC drives the whole transfer; the node only writes flash + ACKs:
- *   PC -> node  {"cmd":"ota_begin","size":N,"md5":"<hex>","chunk":144}
+ *   PC -> node  {"cmd":"ota_begin","size":N,"md5":"<hex>","chunk":96}
  *   node -> PC  {"type":"ota_ready"}            | {"type":"ota_error","reason":..}
  *   PC -> node  {"cmd":"ota_data","seq":S,"data":"<base64>"}   (seq 0,1,2,...)
  *   node -> PC  {"type":"ota_ack","seq":S}      | {"type":"ota_error","reason":..}
@@ -16,7 +16,7 @@
  *               broadcasts {"type":"ota_done"} from checkBootDone() once it
  *               actually boots  | {"type":"ota_error","reason":"verify_failed"}
  *
- * Chunks are written inline in the ESP-NOW recv callback (WiFi task). A 144-byte
+ * Chunks are written inline in the ESP-NOW recv callback (WiFi task). A 96-byte
  * flash write is a few ms - acceptable, and far simpler than buffering through a
  * queue. Integrity is verified by Update via the MD5 supplied in ota_begin, and
  * success is confirmed only after the new image boots (not before the reboot),

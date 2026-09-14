@@ -16,7 +16,7 @@ from src.gui.robot_panel import RobotPanel
 from src.gui.session_panel import SessionPanel
 from src.gui.session_setup_dialog import SessionSetupDialog
 from src.hardware.gateway import Gateway
-from src.robots.base_robot import BaseRobot, RobotStatus
+from src.robots.base_robot import RobotStatus
 from src.robots.turtle.turtle_robot import TurtleRobot
 
 
@@ -176,10 +176,16 @@ class TestRobotPanel:
         assert panel.thymio_tree.topLevelItemCount() == 0
 
     def test_refresh_populates_turtle_list(self, qtbot):
-        panel = RobotPanel(Gateway("/dev/null"), _mock_settings())
+        # The trees are built from the configured robots in settings, so the
+        # config must list the two turtles for the refresh to show them.
+        settings = _mock_settings()
+        settings.data["robots"]["turtles"] = [
+            {"id": "Turtle-1", "nodes": [], "skins": []},
+            {"id": "Turtle-2", "nodes": [], "skins": []}]
+        panel = RobotPanel(Gateway("/dev/null"), settings)
         qtbot.addWidget(panel)
         panel.refresh([_mock_turtle("Turtle-1"), _mock_turtle("Turtle-2")])
-        assert panel.turtles_tree.topLevelItemCount() == 0
+        assert panel.turtles_tree.topLevelItemCount() == 2
         assert panel.trees_tree.topLevelItemCount() == 0
         assert panel.thymio_tree.topLevelItemCount() == 0
 

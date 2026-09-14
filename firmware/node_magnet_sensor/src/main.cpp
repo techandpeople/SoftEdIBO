@@ -20,7 +20,8 @@
  *
  * 3-axis streaming: build [env:vector] (-DMAG_VECTOR) to stream "vec" from
  * boot, or toggle at runtime with {"cmd":"configure","stream_vec":true}.
- * [env:release] + no configure = byte-for-byte the previous scalar protocol.
+ * [env:release] + no configure = the previous scalar protocol (the announce now
+ * also carries a "fw" marker).
  */
 
 #include <Arduino.h>

@@ -9,7 +9,7 @@ event loop: ticks are pumped manually and the clock is monkeypatched.
 import os
 import tempfile
 from datetime import datetime
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -60,7 +60,7 @@ class _FakeSkin:
         self.pressures: list[tuple] = []
         self.duties: list[tuple] = []
         self.touch = None
-        self.touch_controller = None
+        self.touch_controller: Any = None
         self._ctrl = controller
 
     def set_pressure(self, chamber_id, value, period_ms=0, duty=None):
@@ -953,3 +953,18 @@ def test_robot_is_condition_gates_transition(clock):
     _start(act2, turtle_unit)
     act2._on_tick()
     assert act2.unit_state(_unit(act2).unit_id) == "s1"
+
+
+def test_stop_detaches_magnet_listener(clock):
+    """Robots and skins outlive a session: stop() must unsubscribe the touch
+    handler, or every past session keeps reacting on the gateway thread."""
+    from src.hardware.simulated_magnet_sensor import SimulatedMagnetSensor
+    activity, _ctrl, skin, robot = _condition_a()
+    board = SimulatedMagnetSensor("AA:BB:CC:DD:EE:FF")
+    skin.touch_controller = board
+    _start(activity, robot)
+    assert len(board._magnet_callbacks) == 1
+
+    activity.stop()
+
+    assert board._magnet_callbacks == []
