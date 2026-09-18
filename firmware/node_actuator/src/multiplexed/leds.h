@@ -194,9 +194,19 @@ inline float fadeProgress_(const Ring& R, uint32_t now) {
     return ((uint32_t)e >= R.fadeMs) ? 1.0f : (float)e / (float)R.fadeMs;
 }
 
+// A ring whose provisional data pin is also a sensor-mux select line is never
+// driven: begin()/show() would take the pin over and freeze that select bit, so
+// the mux could no longer reach half its channels (pressure sensors vanish).
+// TODO(hardware): drop this once the PCB gives every ring a free GPIO.
+inline bool ringUsable(int k) {
+    int pin = LED_PINS[k];
+    return pin != SMUX_S0 && pin != SMUX_S1 && pin != SMUX_S2 && pin != SMUX_S3;
+}
+
 // Stages 1-3 for ring k: animate, cross-fade from the snapshot, remember the
 // output, gamma+show. The only caller of show() outside hardware_init.
 inline void renderRing_(int k, uint32_t now) {
+    if (!ringUsable(k)) return;
     Adafruit_NeoPixel& s = strips[k];
     Ring& R = rings[k];
     int n = (int)s.numPixels();
@@ -216,6 +226,7 @@ inline void renderRing_(int k, uint32_t now) {
 inline void hardware_init() {
     uint32_t now = millis();
     for (int k = 0; k < NUM_RINGS; k++) {
+        if (!ringUsable(k)) continue;
         strips[k].begin();
         strips[k].setBrightness(255);
         renderRing_(k, now);   // setup() context - the one show() outside update()

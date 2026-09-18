@@ -163,9 +163,8 @@ bool isDisconnectedRail(int raw) {
     return raw < 40 || raw > 4055;
 }
 
-void detectSensors(int valid_channels[], int& valid_count, int tank_candidates[], int& tank_count) {
+void detectSensors(int valid_channels[], int& valid_count) {
     valid_count = 0;
-    tank_count = 0;
 
     for (int ch = 0; ch < mux::MUX_CHANNELS; ch++) {
         int raw = mux::readRaw(ch);
@@ -185,16 +184,14 @@ void detectSensors(int valid_channels[], int& valid_count, int tank_candidates[]
         valid_channels[valid_count++] = ch;
     }
 
-    config::state.num_chambers = min(valid_count, MAX_CHAMBERS);
-    for (int i = 0; i < config::state.num_chambers; i++) {
-        config::state.chamber_mux_ch[i] = valid_channels[i];
-    }
-    for (int i = config::state.num_chambers; i < MAX_CHAMBERS; i++) {
-        config::state.chamber_mux_ch[i] = -1;
-    }
-
-    for (int i = config::state.num_chambers; i < valid_count; i++) {
-        tank_candidates[tank_count++] = valid_channels[i];
+    // Fixed mapping: chamber i reads mux channel Ii (PSENSOR i+1), the same
+    // index its valves use (UNL 2i+1 / 2i+2). The scan above is diagnostic only:
+    // packing the responders into chambers 0..n-1 put a sensor under the wrong
+    // chamber's valves and left a chamber blind whenever one read out of range
+    // at boot (unsoldered, noisy, or not yet settled).
+    config::state.num_chambers = max(1, min(valid_count, MAX_CHAMBERS));
+    for (int i = 0; i < MAX_CHAMBERS; i++) {
+        config::state.chamber_mux_ch[i] = i;
     }
 
     char channels[96] = {0};
@@ -202,7 +199,7 @@ void detectSensors(int valid_channels[], int& valid_count, int tank_candidates[]
     for (int i = 0; i < valid_count && pos < static_cast<int>(sizeof(channels)) - 8; i++) {
         pos += snprintf(channels + pos, sizeof(channels) - pos, "%s%d", i == 0 ? "" : ",", valid_channels[i]);
     }
-    LOG("TODO: valid sensors detected at mux channels: %s - confirm\n", channels);
+    LOG("Sensors responding at mux channels: %s\n", channels);
 }
 
 // No reservoir tanks: the pumps push directly into the chambers, so their role
@@ -792,10 +789,8 @@ void onReceived(const uint8_t* mac_addr, const uint8_t* data, int len) {
 void autodetect() {
     int valid_channels[16] = {};
     int valid_count = 0;
-    int tank_candidates[4] = {};
-    int tank_count = 0;
 
-    detectSensors(valid_channels, valid_count, tank_candidates, tank_count);
+    detectSensors(valid_channels, valid_count);
     assignDefaultPumpRoles();
 
     config::state.ready = true;
@@ -844,7 +839,7 @@ void setup() {
     // doesn't yet know the gateway's MAC).
     char ready_msg[160];
     snprintf(ready_msg, sizeof(ready_msg),
-             "{\"status\":\"node_multiplexed_ready\",\"fw\":\"estop-1\",\"rgbw\":" LED_RGBW_JSON ",\"kpa_min\":%.0f}",
+             "{\"status\":\"node_multiplexed_ready\",\"fw\":\"muxmap-1\",\"rgbw\":" LED_RGBW_JSON ",\"kpa_min\":%.0f}",
              (double)pressure::FLOOR_KPA);
     se::broadcast(ready_msg);
 
