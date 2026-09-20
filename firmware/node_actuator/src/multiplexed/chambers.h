@@ -57,6 +57,30 @@ struct Chamber {
 inline Chamber state[MAX_CHAMBERS];
 inline float   cachedKpa[MAX_CHAMBERS] = {};
 
+// Telemetry window: every gauge read since the last status frame, per chamber.
+// The mux reads the chambers one after another, so a status built from only the
+// latest read reports one noisy sample; the window mean uses all of them.
+inline float    kpaSum[MAX_CHAMBERS] = {};
+inline uint16_t kpaCnt[MAX_CHAMBERS] = {};
+
+// Store a fresh (median, ambient-zeroed) read: it becomes the live value the
+// guards use and joins the telemetry window.
+inline float recordKpa(int i, float k) {
+    cachedKpa[i] = k;
+    kpaSum[i] += k;
+    if (++kpaCnt[i] == UINT16_MAX) { kpaSum[i] = k; kpaCnt[i] = 1; }
+    return k;
+}
+
+// Mean of the window for the status frame, then start a new window. Falls back
+// to the live value when nothing was read since the last frame.
+inline float takeWindowKpa(int i) {
+    float k = kpaCnt[i] ? kpaSum[i] / kpaCnt[i] : cachedKpa[i];
+    kpaSum[i] = 0.0f;
+    kpaCnt[i] = 0;
+    return k;
+}
+
 // Per-chamber ambient zero (kPa) - the pressure sensor has no zero calibration,
 // so at atmosphere it reads a few kPa of offset. Subtracting this per chamber
 // makes gauge 0 == atmosphere everywhere. Captured vented by tare(), NVS-backed.
@@ -279,7 +303,7 @@ inline void holdChamber(int n) {
 // side effect of the engine's reads.
 inline void controlTick(uint32_t now) {
     inflateEng.count = deflateEng.count = (uint8_t)config::state.num_chambers;
-    auto rd = [](int i) -> float { float k = readKpaMedian(i); cachedKpa[i] = k; return k; };
+    auto rd = [](int i) -> float { return recordKpa(i, readKpaMedian(i)); };
     auto op = [](int i, uint8_t d) { engOpen(i, d); };
     auto cl = [](int i) { stop(i); };
     auto rc = []() { recalcPumps(); };
@@ -313,7 +337,7 @@ inline void holdTick(uint32_t now, bool busy) {
         now, busy,
         [](int i) { pca_valves::setChamberValve(i, true,  false); },
         [](int i) { pca_valves::setChamberValve(i, false, false); },
-        [](int i) -> float { float k = readKpaMedian(i); cachedKpa[i] = k; return k; });
+        [](int i) -> float { return recordKpa(i, readKpaMedian(i)); });
     if (holdEng.openMask != holdValveMask || d != holdPumpDuty) {
         holdValveMask = holdEng.openMask;
         holdPumpDuty  = d;
