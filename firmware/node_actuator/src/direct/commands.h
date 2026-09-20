@@ -64,6 +64,22 @@ inline void sendPong() {
     esp_now_send(gatewayMac, reinterpret_cast<uint8_t*>(pong), len);
 }
 
+#ifdef DEBUG_BUILD
+// Raw ADC counts of the three gauge pins, once per status. Same frame as the
+// multiplexed board's: lets the two boards' sensors be compared before any kPa
+// conversion (the kPa status clamps at the gauge floor and hides the offset).
+inline void sendRawAdc() {
+    if (!gatewayKnown) return;
+    char buf[64];
+    int len = snprintf(buf, sizeof(buf), "{\"type\":\"raw\",\"adc\":[");
+    for (int i = 0; i < NUM_CHAMBERS; i++)
+        len += snprintf(buf + len, sizeof(buf) - len, "%s%d", i ? "," : "",
+                        pressure::readRawAdc(PSENSOR_PINS[i]));
+    len += snprintf(buf + len, sizeof(buf) - len, "]}");
+    esp_now_send(gatewayMac, reinterpret_cast<uint8_t*>(buf), len);
+}
+#endif
+
 // Echo back that a command actually reached the node (used to tell a lost
 // gateway->node ESP-NOW frame apart from a frame that arrived but didn't act).
 inline void sendAck(const char* cmd) {

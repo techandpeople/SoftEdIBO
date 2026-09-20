@@ -245,6 +245,7 @@ void loop() {
         commands::sendStatusAll();
         commands::sendPumps();   // live pump state (debug: stop-latency hunt)
 #ifdef DEBUG_BUILD
+        commands::sendRawAdc();
         commands::checkDryPumps();   // warn if a pump spins with no open valve
 #endif
     }
