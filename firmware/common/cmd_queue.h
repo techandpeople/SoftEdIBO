@@ -16,7 +16,8 @@ enum CmdType : uint8_t {
     // cfg_chambers = open (0/1). Manual-override rules (dead-man) apply.
     CMD_VENT,
     // Continuous bench test: latch one pump + all of its valves wide open,
-    // ignoring pressure + the dead-man, until stopped (node_direct only).
+    // ignoring pressure + the manual dead-man, until stopped or its own ~3 s
+    // keepalive lapses (node_direct only).
     CMD_TEST_RUN, CMD_TEST_STOP,
     // Emergency stop: latch all actuators off until re-armed.
     CMD_STOP, CMD_RESUME,
@@ -36,12 +37,20 @@ enum CmdType : uint8_t {
 #endif
 };
 
+// Narrow a JSON "chamber" to the int8_t field. -1 means "every chamber";
+// anything outside -1..127 becomes 127 (never a valid index) so the per-board
+// range check rejects it instead of it wrapping to -1 (all chambers) or to
+// another negative value that some handlers also treat as "all".
+inline int8_t chamberArg(long v) {
+    return (v < -1 || v > 127) ? (int8_t)127 : (int8_t)v;
+}
+
 struct Cmd {
     CmdType  type;
     int8_t   chamber;       // chamber index
     int16_t  param;         // delta or value (percent), or valve side / pump idx
     uint8_t  duty;          // inflate/deflate: pump PWM duty 0-255 (0 = unset -> full)
-    uint32_t fill_ms;       // inflate: time-based fill window (ms; 0 = pressure-based)
+    uint32_t fill_ms;       // inflate/deflate: per-chamber open-time budget (ms; 0 = engine default cap)
     uint8_t  timed;         // inflate/deflate: 1 = open-loop ("timed":1) - the board has
                             // no pressure sensor populated, run purely on fill_ms and
                             // ignore the (floating, noise) gauge readings entirely

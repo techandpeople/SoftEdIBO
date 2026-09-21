@@ -11,18 +11,20 @@ shared fill supervisor lives in `firmware/common/coupled_fill.h`.
 > the chambers share one check-valve-less line and the gauges read the shared
 > line while coupled. See `docs/COUPLED_FILL_CONTROL.md`. The pressure model,
 > the vacuum blind spot and the caps below still apply. The older open-loop
-> time-based `ms` fill (`firmware/common/fill_control.h`) is fully superseded:
-> that header still exists but nothing includes it anymore.
+> time-based `ms` fill (`fill_control.h`) is gone; its idle leak top-up was
+> reimplemented as the `hold_duty` regulated hold (`firmware/common/hold_duty.h`).
 
-## Pressure baseline - there is none in software
+## Pressure baseline - hardware gauge + persisted tare
 
 The XGZP6847A is read as a **gauge** sensor (`pressure.h`): it measures chamber
 pressure **relative to atmosphere** by hardware (its reference port vents to
 ambient). So:
 
-- The zero is atmospheric **automatically and continuously** - no software tare
-  is needed (unlike the magnet sensor, which does capture a baseline). A chamber
-  at rest reads ~0 kPa regardless of whether it vents to atmosphere.
+- The zero is atmospheric by hardware, but each sensor carries a few-kPa
+  offset. The `tare` command (Skin Config -> **Zero Sensors**, which first vents
+  every chamber with `vent`) captures each chamber's reading at ambient as its
+  zero and persists it in NVS; every reading is then ambient-zeroed, so a vented
+  chamber reads 0 kPa.
 - **Blind spot:** `voltageToPressure` clamps readings to the sensor's physical
   range `[SENSOR_KPA_MIN, SENSOR_KPA_MAX]` - build flags, default 0..100 kPa -
   so the default sensor **cannot see below atmosphere**: any vacuum reads as the
@@ -105,11 +107,14 @@ Notes / honest gaps:
   the floor, so the same `ms` pulls **less** vacuum than before the change -
   re-tune the wrinkle depth on the bench rather than trusting the old budgets.
 - `Skin` pushes `set_max_pressure` + `set_min_pressure` at construction **and
-  re-pushes both before every actuation** (`Skin._push_limits`): ESP-NOW is
-  fire-and-forget, so the one-shot push can be dropped and external tools can
-  leave a stale limit on the node (observed: a 20 kPa chamber inflated to
-  ~50 kPa via repeated "+"). End-to-end command ACKs are designed but not
-  implemented - see `docs/ACK_RELIABILITY.md`.
+  re-pushes both before every actuation** (`Skin._push_limits`): external
+  tools can leave a stale limit on the node (observed: a 20 kPa chamber
+  inflated to ~50 kPa via repeated "+"). The construction-time push is
+  **confirmed** on both boards - the node acks `set_max`/`set_min` after
+  applying them and `CommandConfirmer` retransmits a dropped one; the
+  pre-actuation re-push stays fire-and-forget as a backstop. Seq-confirmed
+  `stop`/`resume`/`configure` and the Tier-1 gateway retry are still TODO -
+  see `docs/ACK_RELIABILITY.md`.
 - The PC never trusts the firmware's `pressure` % field (computed against
   whatever limits the node currently holds, which lag the PC config): it
   recomputes % from the reported `kpa` against the configured range

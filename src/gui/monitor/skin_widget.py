@@ -26,7 +26,6 @@ class SkinWidget(QGroupBox):
     """Widget for a single Skin - one ChamberWidget per AirChamber."""
 
     touch_event   = Signal(str, int, str)  # (skin_id, chamber_id, action)
-    _sensor_pulse = Signal(int)            # thread-safe bridge -> pulse_sensor
     _touch_log    = Signal(int, str)       # thread-safe bridge -> touch_event log
 
     def __init__(self, skin: Skin) -> None:
@@ -56,20 +55,9 @@ class SkinWidget(QGroupBox):
         has_touch_stream = callable(getattr(touch_ctrl, "on_magnet", None))
         if skin.chamber_grid or (skin.touch or {}).get("node_mac") or has_touch_stream:
             self._grid_view = SkinGridView(skin)
+            # The grid view lights touched sensors itself from the magnet
+            # stream's ``act`` set (see SkinGridView).
             top.addWidget(self._grid_view, alignment=Qt.AlignmentFlag.AlignCenter)
-            # Mirror real-hardware touch events as yellow pulses on the grid.
-            # Use a Signal bridge so the gateway thread never calls Qt directly.
-            touch_ctrl = getattr(skin, "touch_controller", None)
-            if touch_ctrl is not None:
-                on_touch = getattr(touch_ctrl, "on_touch", None)
-                if on_touch is not None:
-                    # Force QueuedConnection for the same reason as _magnet_msg:
-                    # gateway thread is a Python thread, not QThread.
-                    self._sensor_pulse.connect(
-                        self._grid_view.pulse_sensor,
-                        Qt.ConnectionType.QueuedConnection,
-                    )
-                    on_touch(lambda sensor_id, _raw: self._sensor_pulse.emit(sensor_id))
         if self._has_organs:
             self._organ_panel = OrganPanel(skin)
             top.addWidget(self._organ_panel, alignment=Qt.AlignmentFlag.AlignTop)

@@ -47,6 +47,7 @@
      <property name="toolTip"><string>Activation threshold for Q1 (TL) in uT.
 Set above resting value and below touch peak.
 Re-zero sensors first so rest values are near 0.</string></property>
+     <property name="whatsThis"><string>Activation threshold for quadrant Q1 (top left) in uT, applied to the live detector immediately. Set it above the resting value and below a touch peak; re-zero the sensors first so rest reads near 0. Runtime only - not saved.</string></property>
      <property name="decimals"><number>0</number></property>
      <property name="maximum"><double>2000.000000000000000</double></property>
      <property name="singleStep"><double>10.000000000000000</double></property>
@@ -58,6 +59,7 @@ Re-zero sensors first so rest values are near 0.</string></property>
      <property name="toolTip"><string>Activation threshold for Q2 (TR) in uT.
 Set above resting value and below touch peak.
 Re-zero sensors first so rest values are near 0.</string></property>
+     <property name="whatsThis"><string>Activation threshold for quadrant Q2 (top right) in uT, applied to the live detector immediately. Set it above the resting value and below a touch peak; re-zero the sensors first so rest reads near 0. Runtime only - not saved.</string></property>
      <property name="decimals"><number>0</number></property>
      <property name="maximum"><double>2000.000000000000000</double></property>
      <property name="singleStep"><double>10.000000000000000</double></property>
@@ -69,6 +71,7 @@ Re-zero sensors first so rest values are near 0.</string></property>
      <property name="toolTip"><string>Activation threshold for Q3 (BL) in uT.
 Set above resting value and below touch peak.
 Re-zero sensors first so rest values are near 0.</string></property>
+     <property name="whatsThis"><string>Activation threshold for quadrant Q3 (bottom left) in uT, applied to the live detector immediately. Set it above the resting value and below a touch peak; re-zero the sensors first so rest reads near 0. Runtime only - not saved.</string></property>
      <property name="decimals"><number>0</number></property>
      <property name="maximum"><double>2000.000000000000000</double></property>
      <property name="singleStep"><double>10.000000000000000</double></property>
@@ -80,6 +83,7 @@ Re-zero sensors first so rest values are near 0.</string></property>
      <property name="toolTip"><string>Activation threshold for Q4 (BR) in uT.
 Set above resting value and below touch peak.
 Re-zero sensors first so rest values are near 0.</string></property>
+     <property name="whatsThis"><string>Activation threshold for quadrant Q4 (bottom right) in uT, applied to the live detector immediately. Set it above the resting value and below a touch peak; re-zero the sensors first so rest reads near 0. Runtime only - not saved.</string></property>
      <property name="decimals"><number>0</number></property>
      <property name="maximum"><double>2000.000000000000000</double></property>
      <property name="singleStep"><double>10.000000000000000</double></property>
@@ -98,6 +102,7 @@ Re-zero sensors first so rest values are near 0.</string></property>
       <widget class="QDoubleSpinBox" name="hyst_spin">
        <property name="toolTip"><string>Schmitt-trigger drop-out margin (uT).
 A sensor deactivates at (threshold - hysteresis), preventing flicker.</string></property>
+       <property name="whatsThis"><string>Drop-out margin in uT: a quadrant turns off only when it falls below (threshold - hysteresis), so a touch hovering near the threshold does not flicker. Runtime only - not saved.</string></property>
        <property name="decimals"><number>0</number></property>
        <property name="maximum"><double>500.000000000000000</double></property>
        <property name="singleStep"><double>5.000000000000000</double></property>
@@ -114,12 +119,14 @@ A sensor deactivates at (threshold - hysteresis), preventing flicker.</string></
       <widget class="QPushButton" name="apply_btn">
        <property name="toolTip"><string>Send configure to the touch node
 (this skin type's saved sensitivity, or 300 uT if none saved)</string></property>
+       <property name="whatsThis"><string>Send this skin type's saved touch sensitivity (or 300 uT if none is saved) to the touch node as its activation threshold.</string></property>
        <property name="text"><string>Apply to node</string></property>
       </widget>
      </item>
      <item>
       <widget class="QPushButton" name="rebaseline_btn">
        <property name="toolTip"><string>Tell the touch node to recapture its baseline (ESP-NOW rebaseline)</string></property>
+       <property name="whatsThis"><string>Tell the touch node to recapture its resting baseline so the sensors read near 0 again. Keep hands off the skin while it does.</string></property>
        <property name="text"><string>Re-zero sensors</string></property>
       </widget>
      </item>

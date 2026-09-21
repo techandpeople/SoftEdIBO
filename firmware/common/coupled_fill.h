@@ -265,7 +265,9 @@ struct Engine {
     // ---- internal: close all open valves, accrue their open time, go settle ----
     template <class O>
     void endRound(uint32_t now, O& o) {
-        for (int i = 0; i < count; i++) {
+        // MAXN, not count: a configure that lowered count mid-round must not
+        // strand a valve above it open.
+        for (int i = 0; i < MAXN; i++) {
             if (openMask & (1u << i)) {
                 accumMs[i] += now - openedMs[i];
                 o.close(i);
@@ -288,7 +290,7 @@ struct Engine {
 
         // Whole-sequence safety cap: slam any open valves shut and give up.
         if ((int32_t)(now - seqStartMs) >= (int32_t)tune.seq_max_ms) {
-            for (int i = 0; i < count; i++)
+            for (int i = 0; i < MAXN; i++)   // MAXN: see endRound
                 if (openMask & (1u << i)) o.close(i);
             openMask  = 0;
             floorMask = 0;

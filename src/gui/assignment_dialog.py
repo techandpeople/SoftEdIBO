@@ -152,7 +152,7 @@ class AssignmentDialog(BaseDialog, Ui_AssignmentDialog):
             for cb in p_checks.values():
                 cb.setChecked(False)
 
-        for idx, (pid, p_checks) in enumerate(robot_checks.items()):
+        for idx, p_checks in enumerate(robot_checks.values()):
             uid = units[idx % len(units)]
             p_checks[uid].setChecked(True)
 

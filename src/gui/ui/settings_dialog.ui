@@ -42,15 +42,15 @@
      <property name="enabled"><bool>false</bool></property>
      <layout class="QFormLayout" name="pg_form">
       <item row="0" column="0"><widget class="QLabel"><property name="text"><string>Host:</string></property></widget></item>
-      <item row="0" column="1"><widget class="QLineEdit" name="pg_host_edit"/></item>
+      <item row="0" column="1"><widget class="QLineEdit" name="pg_host_edit"><property name="whatsThis"><string>Host name or IP address of the PostgreSQL server.</string></property></widget></item>
       <item row="1" column="0"><widget class="QLabel"><property name="text"><string>Port:</string></property></widget></item>
-      <item row="1" column="1"><widget class="QSpinBox" name="pg_port_spin"><property name="minimum"><number>1</number></property><property name="maximum"><number>65535</number></property></widget></item>
+      <item row="1" column="1"><widget class="QSpinBox" name="pg_port_spin"><property name="whatsThis"><string>TCP port the PostgreSQL server listens on (5432 by default).</string></property><property name="minimum"><number>1</number></property><property name="maximum"><number>65535</number></property></widget></item>
       <item row="2" column="0"><widget class="QLabel"><property name="text"><string>Database:</string></property></widget></item>
-      <item row="2" column="1"><widget class="QLineEdit" name="pg_name_edit"/></item>
+      <item row="2" column="1"><widget class="QLineEdit" name="pg_name_edit"><property name="whatsThis"><string>Name of the database on the PostgreSQL server that holds the SoftEdIBO data.</string></property></widget></item>
       <item row="3" column="0"><widget class="QLabel"><property name="text"><string>User:</string></property></widget></item>
-      <item row="3" column="1"><widget class="QLineEdit" name="pg_user_edit"/></item>
+      <item row="3" column="1"><widget class="QLineEdit" name="pg_user_edit"><property name="whatsThis"><string>PostgreSQL user name used to connect.</string></property></widget></item>
       <item row="4" column="0"><widget class="QLabel"><property name="text"><string>Password:</string></property></widget></item>
-      <item row="4" column="1"><widget class="QLineEdit" name="pg_password_edit"><property name="echoMode"><enum>QLineEdit::Password</enum></property></widget></item>
+      <item row="4" column="1"><widget class="QLineEdit" name="pg_password_edit"><property name="whatsThis"><string>Password for the PostgreSQL user. Stored in settings.yaml in plain text.</string></property><property name="echoMode"><enum>QLineEdit::Password</enum></property></widget></item>
      </layout>
     </widget>
    </item>
@@ -62,6 +62,7 @@
    </item>
    <item>
     <widget class="QDialogButtonBox" name="button_box">
+     <property name="whatsThis"><string>Save writes these settings to settings.yaml and closes the window; Apply writes them but keeps the window open; Cancel closes without saving. Database changes take effect on next launch.</string></property>
      <property name="standardButtons"><set>QDialogButtonBox::Apply|QDialogButtonBox::Cancel|QDialogButtonBox::Save</set></property>
     </widget>
    </item>

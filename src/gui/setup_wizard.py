@@ -88,7 +88,7 @@ NODE_TYPE_FIRMWARES: dict[str, dict[str, Path]] = {
 # Human-readable labels for the wizard's node-type picker.
 _NODE_TYPE_LABELS: dict[str, str] = {
     "node_direct":         "node_direct  (3 chambers, GPIO valves, onboard pumps, LED ring)",
-    "node_multiplexed":    "node_multiplexed  (up to 12 chambers, optional pressure/vacuum tanks)",
+    "node_multiplexed":    "node_multiplexed  (up to 12 chambers, multiplexed valves, shared pump banks)",
     "node_magnet_sensor":  "node_magnet_sensor  (4x MLX90393 magnetic touch board)",
 }
 

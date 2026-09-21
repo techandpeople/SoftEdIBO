@@ -41,7 +41,8 @@ def test_save_participant(db):
         participant_id="p-001", alias="Alice", age=8
     )
     db.save_participant(participant)
-    # No error means success
+    saved = db.get_all_participants()
+    assert [(p.participant_id, p.alias, p.age) for p in saved] == [("p-001", "Alice", 8)]
 
 
 def test_log_and_get_events(db):

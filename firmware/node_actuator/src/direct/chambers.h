@@ -328,26 +328,6 @@ inline void holdChamber(int n) {
     recalcPumps();
 }
 
-// "Inflate/Deflate All": request every chamber that still needs to move; the
-// engine batches them into one coupled round. ``deltaPct`` is percent of range.
-inline void inflateAll(int16_t deltaPct) {
-    for (int i = 0; i < NUM_CHAMBERS; i++) {
-        float delta  = (state[i].max_kpa - state[i].min_kpa)
-                     * constrain((int)deltaPct, 0, 100) / 100.0f;
-        float target = min(cachedKpa[i] + delta, state[i].max_kpa);
-        if (cachedKpa[i] < target) requestInflate(i, target, DEFAULT_INFLATE_DUTY);
-    }
-}
-
-inline void deflateAll(int16_t deltaPct) {
-    for (int i = 0; i < NUM_CHAMBERS; i++) {
-        float delta  = (state[i].max_kpa - state[i].min_kpa)
-                     * constrain((int)deltaPct, 0, 100) / 100.0f;
-        float target = max(cachedKpa[i] - delta, state[i].min_kpa);
-        if (cachedKpa[i] > target) requestDeflate(i, target, DEFAULT_DEFLATE_DUTY);
-    }
-}
-
 // Drive both engines. Call every loop(); cheap when idle. The engine reads each
 // chamber's gauge (median-filtered) only while a round is filling/measuring, and
 // refreshes cachedKpa as a side effect so telemetry stays current.

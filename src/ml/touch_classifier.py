@@ -113,6 +113,11 @@ class LiveTouchClassifier:
         from src.hardware.touch_source import subscribe_skin_magnet
         return subscribe_skin_magnet(self._skin, self._handle_magnet)
 
+    def detach(self) -> None:
+        """Stop consuming the skin's magnet stream (undo :meth:`attach`)."""
+        from src.hardware.touch_source import unsubscribe_skin_magnet
+        unsubscribe_skin_magnet(self._skin, self._handle_magnet)
+
     def _handle_magnet(self, data: dict) -> None:
         import time
         now_ms = time.monotonic() * 1000.0

@@ -33,7 +33,8 @@ The main window only builds the pieces::
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Callable, Iterable
+from contextlib import contextmanager
+from typing import TYPE_CHECKING, Callable, Iterable, Iterator
 
 from PySide6.QtCore import QEvent, QObject, Qt, Signal
 from PySide6.QtGui import QKeyEvent
@@ -212,6 +213,25 @@ class EmergencyStopController(QObject):
     @property
     def is_stopped(self) -> bool:
         return self._stopped
+
+    @contextmanager
+    def panic_key_suspended(self) -> Iterator[None]:
+        """Take the app-wide panic-key filter down for the duration of the block.
+
+        Needed around the Activity Editor: its QWebEngineView is a QQuickWidget
+        underneath and PySide6 segfaults marshalling the QtQuick objects that
+        an app-wide Python event filter gets to see. The editor drives no
+        chambers, so losing the panic key while it is open is harmless - and
+        it is modal, so the rest of the UI is blocked anyway.
+        """
+        app = QApplication.instance()
+        if app is not None:
+            app.removeEventFilter(self._key_filter)
+        try:
+            yield
+        finally:
+            if app is not None:
+                app.installEventFilter(self._key_filter)
 
     def stop(self) -> None:
         """Halt everything: pumps off + valves closed on all nodes, session frozen.

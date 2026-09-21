@@ -6,7 +6,7 @@ selected at build time via `build_src_filter`:
 | Variant | Sources | `node_type` | Description |
 |---------|---------|-------------|-------------|
 | `direct` | `src/direct/` | `node_direct` | 3 chambers, GPIO valves via ULN2803A, onboard pumps via DRV3297; optional folded-in MLX90393 magnet/touch module (auto-detected) |
-| `multiplexed` | `src/multiplexed/` | `node_multiplexed` | Up to 12 chambers, muxed valves/sensors (2x PCA9685 + 74HC4067), shared pump banks (no reservoir tanks in the current build), 4 LED rings |
+| `multiplexed` | `src/multiplexed/` | `node_multiplexed` | Up to 12 chambers, muxed valves/sensors (2x PCA9685 + 74HC4067), shared pump banks (no reservoir tanks in the current build), 3 LED rings (`NUM_RINGS`) |
 
 Each variant has a release env, a `*_debug` env (adds Serial logs + the
 `debug` command, `-DDEBUG_BUILD`), and `*_rgbw` / `*_rgbw_debug` envs for
@@ -38,7 +38,8 @@ ESP-NOW/MAC/radio plumbing and the common helpers come from `firmware/common`
   boards drive their fills through) so the two boards can't drift.
 - `se_ota.h` - OTA receiver (ESP-NOW chunk stream + WiFi pull).
 - `se_magnet.h` - MLX90393 magnet/touch module (direct board folds it in).
-- `units.h`, `pressure.h`, `dbg.h`, `cmd_queue.h` - shared by both variants.
+- `hold_duty.h` - leak-compensating regulated hold (`hold_duty` command).
+- `units.h`, `pressure.h`, `pump_duty.h`, `dbg.h`, `cmd_queue.h` - shared by both variants.
 
 Variant-specific modules (`pins.h`, `chambers.h`, `commands.h`, `leds.h`,
 `organ.h`, `magnet.h`, `mux.h`, `pca_valves.h`, `pumps.h`, `config.h`) live
@@ -57,7 +58,8 @@ sensor floor, timed from the PC's calibrated deflate curve).
 
 Safety is **time-based** (the gauge is unreliable and blind below its floor):
 per-chamber cumulative open cap 5 s (`chamber_max_ms`, overridden per request
-by `ms`), per-round cap 6 s, whole-sequence cap 25 s, a 10 s actuation
+by `ms`), per-round cap 6 s (direct) / 8 s (multiplexed), whole-sequence cap
+25 s (direct) / 45 s (multiplexed), a 10 s actuation
 watchdog (`ACTUATION_TIMEOUT_MS`), and a 5 s dead-man on the manual/bench
 paths. `HARD_MAX/MIN_KPA` (+/-100) is effectively uncapped - a single-sample
 inflate cut kept only for a sane gauge. Full model:

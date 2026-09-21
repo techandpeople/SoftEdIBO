@@ -39,7 +39,7 @@ tiers are complementary; Tier 1 can be added later as blanket coverage.
 ## What exists today (build on, don't reinvent)
 
 - `commands::sendAck(cmd)` -> `{"type":"ack","cmd":"<cmd>"}` - **direct node only**,
-  no seq, no chamber. Still sent for `stop`/`resume`/`test_run`/`test_stop`/
+  no seq, no chamber. Still sent for `stop`/`resume`/`tare`/`test_run`/`test_stop`/
   `status_rate` ([firmware/node_actuator/src/direct/commands.h]); left as-is.
 - The seq-carrying limit ack now lives in `common/` as `se::node::sendAck(cmd,
   seq, chamber, ok, err)` ([firmware/common/se_espnow.h]), wired into **both**
@@ -51,7 +51,7 @@ tiers are complementary; Tier 1 can be added later as blanket coverage.
   callback before the next frame, fixing burst drops) - pacing only, **not** a
   retry, so Tier 1 remains unimplemented.
 - OTA already implements a full ack+seq+timeout+retry exchange on the PC
-  ([src/hardware/node_ota_updater.py], `_handle` + `_wait_for`) - the reference
+  ([src/hardware/node_ota_updater.py], `_handle` + `_wait_terminal`) - the reference
   pattern: a read-thread handler records acks under a lock and sets a
   `threading.Event`; a worker loops with a deadline.
 - `cmd_queue::Cmd` is **shared** across both nodes ([firmware/common/cmd_queue.h]);
@@ -188,6 +188,6 @@ apply + jitter), 3 retries (~800 ms worst case). On final failure:
 3. **`set_pressure` stays fire-and-forget (not confirmed).** The re-push only
    sends `set_max`/`set_min` (limits) - it never opens a valve, so it does not
    worsen leak behaviour. Valve activity under leaks comes from the firmware's
-   deliberate, self-throttled `maintainTick` top-up (`hold_kpa - LEAK_MARGIN_KPA`),
-   independent of acks/re-push. So confirming `set_pressure` buys nothing here and
+   `hold_duty` regulated hold (`firmware/common/hold_duty.h`, which replaced the
+   old `fill_control.h` `maintainTick` top-up), independent of acks/re-push. So confirming `set_pressure` buys nothing here and
    only adds latency. (Decided.)

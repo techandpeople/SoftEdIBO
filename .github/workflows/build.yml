@@ -105,7 +105,10 @@ jobs:
 
       - name: Install PlatformIO
         if: steps.fwplan.outputs.components != ''
-        run: pip install platformio esptool
+        # Pinned: PlatformIO 6.2.0 pulls tool-scons 4.11.1, which dropped
+        # SCons.Tool.FortranCommon that the ESP-IDF builder still imports
+        # (gateway build fails with ModuleNotFoundError).
+        run: pip install "platformio==6.1.19" esptool
 
       # Cache only the DOWNLOAD cache (~/.platformio/.cache), never the extracted
       # install tree (~/.platformio/packages, platforms). Caching the whole tree
@@ -565,7 +568,7 @@ jobs:
             | `node_direct-debug.bin` | `node_direct` | Same as above with Serial logs (`DEBUG_BUILD`) |
             | `node_direct-rgbw-release.bin` | `node_direct` | RGBW LED-ring build (SK6812 NeoPixels) |
             | `node_direct-rgbw-debug.bin` | `node_direct` | RGBW build with Serial logs |
-            | `node_multiplexed-release.bin` | `node_multiplexed` | Up to 12 chambers, multiplexed valves/sensors, optional shared pressure/vacuum tanks, runtime-sized |
+            | `node_multiplexed-release.bin` | `node_multiplexed` | Up to 12 chambers, multiplexed valves/sensors, shared pump banks pushing straight into the chambers (no reservoir tanks), runtime-sized |
             | `node_multiplexed-debug.bin` | `node_multiplexed` | Same as above with Serial logs (`DEBUG_BUILD`) |
             | `node_multiplexed-rgbw-release.bin` | `node_multiplexed` | RGBW LED-ring build (SK6812 NeoPixels) |
             | `node_multiplexed-rgbw-debug.bin` | `node_multiplexed` | RGBW build with Serial logs |

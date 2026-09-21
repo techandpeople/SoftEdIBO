@@ -330,6 +330,9 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                  for s in (getattr(r, "skins", None) or {}).values()]
         TrainTouchDialog(parent=self, gateway=self._gateway,
                          skins=skins).exec()
+        # Guided capture saves the touch threshold through its own Settings
+        # instance; reload ours so a later save here doesn't write the old one back.
+        self._settings.load()
 
     def _open_position_bench(self) -> None:
         """Tools => Touch Position Bench... - measure how finely a skin can
@@ -383,22 +386,13 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         editor is actually opened. The connected robots are passed in so the
         editor can preview picked LED colours on them live.
 
-        The app-wide event filter (the "0" panic key) is removed for the
-        editor's lifetime: PySide6 crashes marshalling QtWebEngine's internal
-        QtQuick objects through a Python global event filter (hover events over
-        the web view). The editor drives no chambers and clears its LED preview
-        on close, so losing the panic key while it is open is harmless - the
-        modal already blocks the rest of the UI anyway."""
+        The app-wide "0" panic-key filter is suspended for the editor's
+        lifetime - see EmergencyStopController.panic_key_suspended for why
+        (PySide6 segfaults on QtQuick objects reaching a Python app filter)."""
         from src.gui.activity_editor_dialog import ActivityEditorDialog
-        app = QApplication.instance()
-        if app is not None:
-            app.removeEventFilter(self)
-        try:
+        with self._estop.panic_key_suspended():
             ActivityEditorDialog(self._db, parent=self,
                                  robots=self._robots).exec()
-        finally:
-            if app is not None:
-                app.installEventFilter(self)
 
     def _on_settings_saved(self) -> None:
         """Apply settings changes that don't require a restart."""

@@ -19,10 +19,11 @@ All entries must share the same ``controller`` (single-MAC invariant).
 
 import logging
 import time
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 from src.core.skin_config import (
-    DEFAULT_FILL_MODE, FILL_MODE_PRESSURE, normalize_fill_mode)
+    DEFAULT_FILL_MODE, DEFAULT_MAX_KPA, DEFAULT_MIN_KPA, FILL_MODE_PRESSURE,
+    normalize_fill_mode)
 from src.hardware.air_chamber import AirChamber, ChamberState
 from src.hardware.fill_calibration import combo_key, parse_combo_key
 from src.hardware.fill_profile import DeflateProfile, FillProfile
@@ -278,8 +279,8 @@ class Skin:
             ch = AirChamber(
                 chamber_id=local_idx,
                 esp32_mac=self.mac,
-                max_pressure=float(inp.get("max_pressure", 8.0)),
-                min_pressure=float(inp.get("min_pressure", 0.0)),
+                max_pressure=float(inp.get("max_pressure", DEFAULT_MAX_KPA)),
+                min_pressure=float(inp.get("min_pressure", DEFAULT_MIN_KPA)),
             )
             self._chambers[local_idx] = ch
 
@@ -677,12 +678,10 @@ class Skin:
             chamber.state = ChamberState.INFLATED
 
         # Already at (or above) the requested level: there is nothing to inflate.
-        # The firmware ``inflate`` path runs the pump for one control cycle per
-        # command regardless of current pressure (it only stops at the next
-        # pressure check), so holding ``+`` at the cap over-inflates past the
-        # limit a pulse at a time. The firmware guards ``set_pressure`` this way
-        # but not ``inflate``; mirror it here so the relative inflate can't push
-        # past where we already are.
+        # Both boards' ``inflate`` now skip a chamber already at its target, but
+        # an old firmware ran one pump pulse per command, so holding ``+`` at the
+        # cap over-inflated a pulse at a time. Guarding here too keeps that safe
+        # and saves the radio traffic.
         if chamber.pressure >= new_target:
             return True
 
@@ -802,6 +801,10 @@ class Skin:
         ``"press"`` or ``"release"``. Fires on the gateway thread - marshal to
         the GUI thread before touching Qt."""
         self._touch_router.subscribe(callback)
+
+    def remove_touch_event_listener(self, callback: Callable[[int, str], None]) -> None:
+        """Deregister a callback passed to :meth:`on_touch_event`."""
+        self._touch_router.unsubscribe(callback)
 
     def on_magnet(self, callback: Callable[[dict[str, Any]], None]) -> bool:
         """Register ``callback(data)`` for this skin's compensated magnet stream.

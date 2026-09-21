@@ -40,15 +40,19 @@
    <addaction name="menuHelp"/>
   </widget>
   <action name="actionSettings">
+   <property name="whatsThis"><string>Open the application settings: database backend, gateway USB port and auto-connect, and the recordings folder.</string></property>
    <property name="text"><string>Settings...</string></property>
   </action>
   <action name="actionFlashFirmware">
+   <property name="whatsThis"><string>Open the setup wizard to flash firmware over USB onto the gateway and/or the nodes.</string></property>
    <property name="text"><string>Flash Firmware...</string></property>
   </action>
   <action name="actionCheckForUpdates">
+   <property name="whatsThis"><string>Check online for a newer SoftEdIBO release and offer to download and install it. Only works in an installed release build; nothing happens when running from source.</string></property>
    <property name="text"><string>Check for Updates...</string></property>
   </action>
   <action name="actionAbout">
+   <property name="whatsThis"><string>Show the SoftEdIBO version and build information.</string></property>
    <property name="text"><string>About SoftEdIBO...</string></property>
   </action>
  </widget>

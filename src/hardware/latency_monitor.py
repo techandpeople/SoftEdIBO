@@ -65,7 +65,8 @@ class LatencyMonitor:
         now = time.monotonic()
         for mac, sent in list(self._pending.items()):
             if now - sent > self._timeout_s:
-                del self._pending[mac]
+                # pop, not del: the reader thread may pop the same pong concurrently.
+                self._pending.pop(mac, None)
                 if self._latency.get(mac) is not None:
                     self._latency[mac] = None
                     self._notify(mac, None)

@@ -9,15 +9,17 @@
 // Two PCA9685 PWM expanders drive 3x ULN2803A -> 24 valve outputs (UNL1..24).
 //
 // Mapping (verified from netlist):
-//   PCA #1 (8 chambers): UNL[i+1] = pca1.LED[i]   for i = 0..15        (sequential)
-//   PCA #2 (4 chambers): UNL[24-i] = pca2.LED[i]  for i = 0..7         (REVERSED)
+//   PCA #1 LED0-7  -> U6  -> UNL[i+1]  = pca1.LED[i]  for i = 0..7    (sequential)
+//   PCA #1 LED8-15 -> U8  -> UNL[24-i] = pca1.LED[i]  for i = 8..15   (REVERSED)
+//   PCA #2 LED0-7  -> U20 -> UNL[24-i] = pca2.LED[i]  for i = 0..7    (REVERSED)
 //
 // Per-chamber valve assignment:
 //   chamber c (0..11): inflate = UNL[c*2 + 1], deflate = UNL[c*2 + 2]
 //
 // On the firmware's PCA channels:
-//   c < 8    -> pca1 channels (c*2)   inflate, (c*2 + 1) deflate
-//   c >= 8   -> pca2 channels (23-2c) inflate, (22-2c)   deflate    (REVERSED)
+//   c < 4       -> pca1 channels (c*2)   inflate, (c*2 + 1) deflate
+//   4 <= c < 8  -> pca1 channels (23-2c) inflate, (22-2c)   deflate    (REVERSED)
+//   c >= 8      -> pca2 channels (23-2c) inflate, (22-2c)   deflate    (REVERSED)
 
 namespace pca_valves {
 
@@ -110,16 +112,17 @@ inline void setChamberValve(int chamber, bool inflate_open, bool deflate_open) {
         valveOpen[chamber * 2 + 0] = inflate_open;
         valveOpen[chamber * 2 + 1] = deflate_open;
     }
-    if (chamber < 8) {
+    if (chamber < 4) {
         setBinary(pca1, chamber * 2,     inflate_open);
         setBinary(pca1, chamber * 2 + 1, deflate_open);
     } else {
-        // U21 inputs are wired in REVERSED order (see netlist comment above).
-        int c = chamber;  // 8..11
-        int inf_chan = 23 - 2 * c;       // 7, 5, 3, 1
-        int def_chan = 22 - 2 * c;       // 6, 4, 2, 0
-        setBinary(pca2, inf_chan, inflate_open);
-        setBinary(pca2, def_chan, deflate_open);
+        // U8 and U20 inputs are wired in REVERSED order (see netlist comment above):
+        // chambers 4..7 -> pca1 channels 15/14 .. 9/8, 8..11 -> pca2 7/6 .. 1/0.
+        int c = chamber;
+        int inf_chan = 23 - 2 * c;
+        int def_chan = 22 - 2 * c;
+        setBinary(c < 8 ? pca1 : pca2, inf_chan, inflate_open);
+        setBinary(c < 8 ? pca1 : pca2, def_chan, deflate_open);
     }
 }
 

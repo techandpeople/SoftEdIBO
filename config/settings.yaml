@@ -83,7 +83,7 @@ robots:
 #       channel: 25       # gateway only: 802.15.4 channel
 #       thymio_addr: 6a25 # gateway only: this Thymio's short address (hex);
 #                         # blank = C6 default. Robot Config -> Discover... fills it.
-#       # Optional air-chamber skin(s) on top, same shape as turtle_trees above
+#       # Optional air-chamber skin(s) on top, same shape as the turtles/trees example above
 #       # (nodes are added from the robot panel's "+ Node"):
 #       # nodes: [...]
 #       # skins: [...]

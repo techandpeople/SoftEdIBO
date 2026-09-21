@@ -81,7 +81,8 @@ class _OTAWorker(QThread):
 
     def _make_updater(self, mac: str, path: Path) -> NodeOTAUpdater | WifiOTAUpdater:
         # WiFi updaters carry no AP credentials: the gateway injects its own
-        # stored ssid/pass (Tools -> Gateway WiFi AP...) while forwarding ota_wifi.
+        # stored ssid/pass (set in this dialog's AP section) while forwarding
+        # ota_wifi.
         on_progress = lambda p, m=mac: self.progress.emit(m, p)
         on_log = lambda s, m=mac: self.status.emit(m, s)
         if mac == _C6_KEY:
@@ -106,6 +107,8 @@ class _OTAWorker(QThread):
                 continue
             self.status.emit(mac, "Starting...")
             self._current = self._make_updater(mac, path)
+            if self._cancelled:          # cancel() raced the updater's creation
+                self._current.cancel()
             ok, msg = self._current.run()
             self.status.emit(mac, ("ok " if ok else "FAIL ") + msg)
         self._current = None
@@ -154,6 +157,8 @@ class OTAUpdateDialog(BaseDialog, Ui_OTAUpdateDialog):
         # Non-blocking refresh of the online column.
         self._message_received.connect(self._handle_gateway_message)
         self._gateway.on_message(self._on_gateway_message)
+        self.finished.connect(
+            lambda _=0: self._gateway.remove_message_callback(self._on_gateway_message))
         if self._gateway.is_connected:
             self._gateway.scan()
             QTimer.singleShot(2000, self._refresh_online)

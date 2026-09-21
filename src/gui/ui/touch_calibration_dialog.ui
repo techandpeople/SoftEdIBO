@@ -168,6 +168,7 @@
      </item>
      <item>
       <widget class="QSpinBox" name="suppress_spin">
+       <property name="whatsThis"><string>Chamber level (percent of its range) at or above which a strongly-coupled sensor is ignored. Only used while the checkbox is ticked; saved with the compensation settings.</string></property>
        <property name="minimum"><number>1</number></property>
        <property name="maximum"><number>100</number></property>
        <property name="suffix"><string> %</string></property>

@@ -304,6 +304,7 @@
          </item>
          <item>
           <widget class="QPushButton" name="close_btn">
+           <property name="whatsThis"><string>Close the bench. The report is already saved; the node's 3-axis stream is switched back off.</string></property>
            <property name="text"><string>Close</string></property>
           </widget>
          </item>

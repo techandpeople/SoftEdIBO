@@ -60,6 +60,7 @@
      </item>
      <item>
       <widget class="QPushButton" name="close_btn">
+       <property name="whatsThis"><string>Close the monitor. The gateway stays connected.</string></property>
        <property name="text"><string>Close</string></property>
       </widget>
      </item>

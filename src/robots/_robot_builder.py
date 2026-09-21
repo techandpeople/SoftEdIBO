@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from src.core.skin_config import DEFAULT_MAX_KPA, DEFAULT_MIN_KPA
 from src.hardware.skin import Skin
 
 logger = logging.getLogger(__name__)
@@ -47,8 +48,10 @@ def multiplexed_configure(node_cfg: dict[str, Any]) -> dict[str, Any] | None:
         "num_chambers": max(1, min(int(node_cfg.get("max_slots", 12)), 16)),
         # Mux channels carrying organ+cover circuits (index = slot in the
         # firmware's organ broadcasts). Convention: highest channels first
-        # (I13..I15) so they stay clear of the chamber autodetect.
-        "organ_channels": [int(c) for c in node_cfg.get("organ_channels", [])] or None,
+        # (I13..I15) so they stay clear of the chamber autodetect. Always a
+        # list, even empty: the Turtle and Tree share this board, and an omitted
+        # key leaves the other robot's organ channels active on the node.
+        "organ_channels": [int(c) for c in node_cfg.get("organ_channels", [])],
     }
 
 
@@ -157,8 +160,8 @@ def _build_one_skin(skin_cfg: dict[str, Any],
     chamber_inputs = [
         {"controller":   ctrl,
          "node_slot":    int(ch["slot"]),
-         "max_pressure": float(ch.get("max_pressure", 8.0)),
-         "min_pressure": float(ch.get("min_pressure", 0.0)),
+         "max_pressure": float(ch.get("max_pressure", DEFAULT_MAX_KPA)),
+         "min_pressure": float(ch.get("min_pressure", DEFAULT_MIN_KPA)),
          "fill_time_ms": ch.get("fill_time_ms"),
          "fill_profile": ch.get("fill_profile"),
          "fill_profiles": ch.get("fill_profiles"),

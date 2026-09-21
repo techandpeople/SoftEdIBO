@@ -31,7 +31,7 @@ S2->Q3 (bottom-left), S3->Q4 (bottom-right)** - matches the PC `QuadrantDetector
 late-connecting PC still sees it - and sent even if no sensor responds, so a
 board with dead sensors stays visible in scans):
 ```json
-{"status":"node_magnet_sensor_ready","sensors":4,"variant":"mlx90393"}
+{"status":"node_magnet_sensor_ready","sensors":4,"variant":"mlx90393","fw":"magvec-1"}
 ```
 
 **Stream** (~28 Hz, to the gateway once it is known):
@@ -44,7 +44,7 @@ board with dead sensors stays visible in scans):
 
 **3-axis streaming:** the stream message can additionally carry
 `"vec":[[dx,dy,dz],...]` - the per-sensor baseline-subtracted field delta in
-whole uT - and the boot announce then gains `"vec":1`. `mag`/`act` are
+uT (one decimal for components below 100 uT, whole uT above) - and the boot announce then gains `"vec":1`. `mag`/`act` are
 unchanged, so the PC pipeline is unaffected; the direction information enables
 vector touch compensation and richer offline analysis (`docs/TOUCH_COUPLING.md`).
 Two ways to turn it on: the `[env:vector]` build (`-DMAG_VECTOR`) enables it
@@ -63,6 +63,7 @@ boards. This file only wires the buses, command dispatch and OTA.
 {"cmd":"rebaseline"}                            // re-zero all sensors now
 {"cmd":"configure","act_threshold_ut":100}      // uT at/above which a sensor is "active"
 {"cmd":"configure","adaptive_baseline":true,"baseline_tau_ms":2000}
+{"cmd":"configure","osr":2,"filter":3}          // MLX90393 oversampling 0-3 / filter 0-7; re-captures the baseline
 ```
 Legacy `configure` fields (`fullscale_mt`, `act_threshold` as a 0..1 fraction) are
 still accepted, converted to `act_threshold_ut = act_threshold x fullscale_mt`.

@@ -22,6 +22,7 @@ from typing import Any
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import QMessageBox, QWidget
 
+from src.core.skin_config import DEFAULT_MAX_KPA, DEFAULT_MIN_KPA
 from src.gui.base_dialog import BaseDialog
 from src.gui.calibration_indicator import CalibrationLedIndicator
 from src.gui.ui_touch_calibration_dialog import Ui_TouchCalibrationDialog
@@ -112,7 +113,8 @@ class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
         self._msg.connect(self._on_msg, Qt.ConnectionType.QueuedConnection)
         if gateway is not None:
             gateway.on_message(self._on_gateway_message)
-        self.finished.connect(lambda _=0: self._stop())
+        # finished covers accept/reject/Esc too (closeEvent does not).
+        self.finished.connect(self._on_finished)
 
     # ------------------------------------------------------------------
     # Sweep driving
@@ -418,10 +420,18 @@ class TouchCalibrationDialog(BaseDialog, Ui_TouchCalibrationDialog):
             # *vented* chamber at atmosphere reads ~20-25 % and would look inflated
             # - turning every state into a spurious triple and firing a false
             # "did not vent" warning. Coupling cares about inflation above ambient.
-            _lo, hi = skin["limits"].get(ch, (0.0, 8.0))
+            _lo, hi = skin["limits"].get(ch, (DEFAULT_MIN_KPA, DEFAULT_MAX_KPA))
             self._pressures[ch] = float(kpa_to_pct(kpa - self._tare[ch], 0.0, hi))
         elif isinstance(pct, (int, float)):
             self._pressures[ch] = float(pct)
+
+    def _on_finished(self, _result: int = 0) -> None:
+        """Stop the sweep and detach from the gateway: an exec()'d dialog stays
+        alive after closing and would otherwise keep handling every frame."""
+        self._active = False
+        self._stop()
+        if self._gateway is not None:
+            self._gateway.remove_message_callback(self._on_gateway_message)
 
     def closeEvent(self, ev) -> None:   # noqa: N802 (Qt override)
         self._active = False

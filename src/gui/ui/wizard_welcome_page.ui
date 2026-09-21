@@ -16,17 +16,20 @@
      <layout class="QVBoxLayout" name="choice_layout">
       <item>
        <widget class="QRadioButton" name="rb_both">
+        <property name="whatsThis"><string>Flash the gateway first, then one or more nodes, in one pass. Pick this when setting up a new system.</string></property>
         <property name="text"><string>Gateway and node(s)  (flash the gateway, then one or more nodes)</string></property>
         <property name="checked"><bool>true</bool></property>
        </widget>
       </item>
       <item>
        <widget class="QRadioButton" name="rb_gateway">
+        <property name="whatsThis"><string>Flash only the SoftEdIBO gateway board (the USB board that talks to the nodes), then finish.</string></property>
         <property name="text"><string>Gateway only  (the SoftEdIBO gateway board)</string></property>
        </widget>
       </item>
       <item>
        <widget class="QRadioButton" name="rb_node">
+        <property name="whatsThis"><string>Skip the gateway and flash one or more nodes (node_direct, node_multiplexed or node_magnet_sensor) - e.g. to replace or update a single board.</string></property>
         <property name="text"><string>Node(s) only  (node_direct, node_multiplexed or node_magnet_sensor)</string></property>
        </widget>
       </item>

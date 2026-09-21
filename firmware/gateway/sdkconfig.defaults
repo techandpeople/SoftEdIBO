@@ -1,4 +1,5 @@
-# SoftEdIBO gateway - ESP-IDF defaults (XIAO ESP32-C6).
+# SoftEdIBO gateway - ESP-IDF defaults shared by every target (the XIAO ESP32-S3
+# build layers sdkconfig.defaults.esp32s3 on top).
 #
 # The firmware owns the USB-Serial/JTAG peripheral directly via the
 # usb_serial_jtag driver, so disable the IDF console to avoid contention on it.

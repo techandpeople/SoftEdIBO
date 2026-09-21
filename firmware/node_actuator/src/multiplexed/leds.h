@@ -189,13 +189,24 @@ inline void computeAnimated_(const Ring& R, int n,
 
 inline float fadeProgress_(const Ring& R, uint32_t now) {
     if (R.fadeMs == 0) return 1.0f;
-    uint32_t e = now - R.fadeStart;
-    return (e >= R.fadeMs) ? 1.0f : (float)e / (float)R.fadeMs;
+    int32_t e = (int32_t)(now - R.fadeStart);
+    if (e <= 0) return 0.0f;
+    return ((uint32_t)e >= R.fadeMs) ? 1.0f : (float)e / (float)R.fadeMs;
+}
+
+// A ring whose provisional data pin is also a sensor-mux select line is never
+// driven: begin()/show() would take the pin over and freeze that select bit, so
+// the mux could no longer reach half its channels (pressure sensors vanish).
+// TODO(hardware): drop this once the PCB gives every ring a free GPIO.
+inline bool ringUsable(int k) {
+    int pin = LED_PINS[k];
+    return pin != SMUX_S0 && pin != SMUX_S1 && pin != SMUX_S2 && pin != SMUX_S3;
 }
 
 // Stages 1-3 for ring k: animate, cross-fade from the snapshot, remember the
 // output, gamma+show. The only caller of show() outside hardware_init.
 inline void renderRing_(int k, uint32_t now) {
+    if (!ringUsable(k)) return;
     Adafruit_NeoPixel& s = strips[k];
     Ring& R = rings[k];
     int n = (int)s.numPixels();
@@ -215,6 +226,7 @@ inline void renderRing_(int k, uint32_t now) {
 inline void hardware_init() {
     uint32_t now = millis();
     for (int k = 0; k < NUM_RINGS; k++) {
+        if (!ringUsable(k)) continue;
         strips[k].begin();
         strips[k].setBrightness(255);
         renderRing_(k, now);   // setup() context - the one show() outside update()
@@ -340,7 +352,9 @@ inline void update() {
 
     for (int k = 0; k < NUM_RINGS; k++) {
         Ring& R = rings[k];
-        bool fading = R.fadeMs > 0 && (now - R.fadeStart) < R.fadeMs;
+        // SIGNED diffs: set_led runs on the ESP-NOW receive task, so a start time
+        // can land a hair AFTER the `now` cached above.
+        bool fading = R.fadeMs > 0 && (int32_t)(now - R.fadeStart) < (int32_t)R.fadeMs;
         if (!fading && R.fadeWasActive) { R.fadeWasActive = false; R.dirty = true; }
         if (fading) R.fadeWasActive = true;
 
@@ -355,8 +369,8 @@ inline void update() {
 
         // A bounded animation that has run its cycles goes dark and stays there.
         if (R.pattern != STATIC && R.cycles >= 0) {
-            uint32_t elapsed = now - R.start;
-            if (elapsed >= (uint32_t)R.cycles * R.period) {
+            int32_t elapsed = (int32_t)(now - R.start);
+            if (elapsed >= 0 && (uint32_t)elapsed >= (uint32_t)R.cycles * R.period) {
                 bool wasFade = (R.pattern == FADE);
                 R.pattern = STATIC;
                 if (!wasFade) {   // FADE rests on its base colour (c1); others go dark

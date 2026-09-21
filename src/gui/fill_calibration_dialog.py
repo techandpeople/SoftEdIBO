@@ -40,6 +40,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from src.core.skin_config import DEFAULT_MAX_KPA, DEFAULT_MIN_KPA
 from src.gui.base_dialog import BaseDialog
 from src.gui.calibration_indicator import CalibrationLedIndicator
 from src.gui.ui_fill_calibration_dialog import Ui_FillCalibrationDialog
@@ -65,6 +66,7 @@ from src.hardware.fill_calibration import (
     set_type_leak_curve,
     set_type_min_duty,
     set_type_profile,
+    supports_bench_calibration,
     type_slug,
 )
 from src.hardware.fill_profile import FillProfile
@@ -183,10 +185,11 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
         self._refresh_ranks()
         self._prefill_min_power()
 
-        self.all_btn.setEnabled(bool(self._chambers) and gateway is not None)
-        self.duty_btn.setEnabled(bool(self._chambers) and gateway is not None)
-        self.deflate_btn.setEnabled(bool(self._chambers) and gateway is not None)
-        self.hold_btn.setEnabled(bool(self._chambers) and gateway is not None)
+        can_run = bool(self._bench_chambers()) and gateway is not None
+        self.all_btn.setEnabled(can_run)
+        self.duty_btn.setEnabled(can_run)
+        self.deflate_btn.setEnabled(can_run)
+        self.hold_btn.setEnabled(can_run)
         self.all_btn.clicked.connect(self._calibrate_all)
         self.duty_btn.clicked.connect(self._calibrate_duty_all)
         self.deflate_btn.clicked.connect(self._calibrate_deflate_all)
@@ -203,7 +206,8 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
         self._pumps.connect(self._on_pumps)
         if gateway is not None:
             gateway.on_message(self._on_gateway_message)
-        self.finished.connect(lambda _=0: self._stop())
+        # finished covers accept/reject/Esc too (closeEvent does not).
+        self.finished.connect(self._on_finished)
 
     def _rate_ms(self) -> int:
         data = self.detail_combo.currentData()
@@ -240,7 +244,10 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
         result.setFixedWidth(140)
         result.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         btn = QPushButton("Calibrate")
-        btn.setEnabled(self._gateway is not None)
+        btn.setEnabled(self._gateway is not None and supports_bench_calibration(ch))
+        if not supports_bench_calibration(ch):
+            btn.setToolTip("This board's firmware lacks the bench commands the "
+                           "sweeps need (test_run, status_rate, pumps).")
         btn.clicked.connect(lambda _=False, k=key: self._calibrate_one(k))
         h.addWidget(name, stretch=2)
         h.addWidget(bar, stretch=3)
@@ -293,6 +300,11 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
                         prof: FillProfile | None, rank: int | None, total: int) -> None:
         """Render one row's result label from its curve + fill-order rank."""
         label = row["result"]
+        if prof is None and not supports_bench_calibration(row["cfg"]):
+            label.setText("direct board only")
+            label.setToolTip("Calibration sweeps are not supported on this "
+                             "board's firmware yet.")
+            return
         if prof is None:
             duty = self._duty_curve_for(key, row)
             label.setText("duty" if duty else "-")
@@ -330,6 +342,10 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
     # Calibration driving
     # ------------------------------------------------------------------
 
+    def _bench_chambers(self) -> list[dict]:
+        """The chambers whose board firmware can run the calibration sweeps."""
+        return [ch for ch in self._chambers if supports_bench_calibration(ch)]
+
     def _calibrate_one(self, key: tuple[str, int]) -> None:
         """Per-row button: a solo (single-chamber) continuous sweep."""
         if self._job is not None:
@@ -338,22 +354,22 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
 
     def _calibrate_all(self) -> None:
         self._run_specs([{"mac": ch["mac"], "slot": int(ch["slot"]), "kind": "fill"}
-                         for ch in self._chambers])
+                         for ch in self._bench_chambers()])
 
     def _calibrate_duty_all(self) -> None:
         """Sweep every chamber's duty->speed curve (each at several PWM duties)."""
         self._run_specs([{"mac": ch["mac"], "slot": int(ch["slot"]), "kind": "duty"}
-                         for ch in self._chambers])
+                         for ch in self._bench_chambers()])
 
     def _calibrate_deflate_all(self) -> None:
         """Sweep every chamber's deflate curve (fill -> record the fall to the floor)."""
         self._run_specs([{"mac": ch["mac"], "slot": int(ch["slot"]), "kind": "deflate"}
-                         for ch in self._chambers])
+                         for ch in self._bench_chambers()])
 
     def _calibrate_hold_all(self) -> None:
         """Measure every chamber's equilibrium-duty (hold) + leak curves."""
         self._run_specs([{"mac": ch["mac"], "slot": int(ch["slot"]), "kind": "hold"}
-                         for ch in self._chambers])
+                         for ch in self._bench_chambers()])
 
     def _run_specs(self, specs: list[dict]) -> None:
         if self._job is not None or not specs:
@@ -440,14 +456,13 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
         equalises to atmosphere. The vacuum pump (``deflate``) would instead pull
         below ambient - which the gauge can't read - so it never settles at the true
         ambient baseline every sweep must start from. Re-sent as the manual dead-man
-        keepalive; the same open-valves-no-pump the Test Actuators bench uses."""
-        self._gateway.send(mac, "valve_manual", chamber=slot, side=0, open=1)
-        self._gateway.send(mac, "valve_manual", chamber=slot, side=1, open=1)
+        keepalive; the same firmware ``vent`` the Test Actuators bench uses
+        (``valve_manual`` can't do this: it keeps only one side open)."""
+        self._gateway.send(mac, "vent", chamber=slot, open=1)
 
     def _close_valves(self, mac: str, slot: int) -> None:
-        """Close both of a chamber's manual valves (end a vent)."""
-        self._gateway.send(mac, "valve_manual", chamber=slot, side=0, open=0)
-        self._gateway.send(mac, "valve_manual", chamber=slot, side=1, open=0)
+        """Close both of a chamber's valves (end a vent)."""
+        self._gateway.send(mac, "vent", chamber=slot, open=0)
 
     @staticmethod
     def _new_vent_plateau() -> PlateauDetector:
@@ -767,13 +782,14 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
         # Buttons disabled == a sweep (or queued batch) is running: pulse the
         # rings while busy, fade them off when control returns to the operator.
         self._led.off() if on else self._led.on()
-        self.all_btn.setEnabled(on and bool(self._chambers))
-        self.duty_btn.setEnabled(on and bool(self._chambers))
-        self.deflate_btn.setEnabled(on and bool(self._chambers))
-        self.hold_btn.setEnabled(on and bool(self._chambers))
+        can_run = on and bool(self._bench_chambers())
+        self.all_btn.setEnabled(can_run)
+        self.duty_btn.setEnabled(can_run)
+        self.deflate_btn.setEnabled(can_run)
+        self.hold_btn.setEnabled(can_run)
         self.detail_combo.setEnabled(on)
         for r in self._rows.values():
-            r["btn"].setEnabled(on)
+            r["btn"].setEnabled(on and supports_bench_calibration(r["cfg"]))
 
     def _stop(self) -> None:
         """Abort any running calibration and halt everything touched.
@@ -936,8 +952,8 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
                     continue
                 cfg = self._rows.get((mac, i), {}).get("cfg")
                 pct = float(kpa_to_pct(float(k),
-                                       cfg.get("min_pressure", 0.0),
-                                       cfg.get("max_pressure", 8.0))) if cfg else 0.0
+                                       cfg.get("min_pressure", DEFAULT_MIN_KPA),
+                                       cfg.get("max_pressure", DEFAULT_MAX_KPA))) if cfg else 0.0
                 self._pressure.emit(mac, i, pct, float(k))
             return
         chamber = data.get("chamber")
@@ -947,6 +963,14 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
             self._pressure.emit(
                 mac, chamber, float(pressure),
                 float(kpa) if isinstance(kpa, (int, float)) else float("nan"))
+
+    def _on_finished(self, _result: int = 0) -> None:
+        """Stop the sweep and detach from the gateway: an exec()'d dialog stays
+        alive after closing and would otherwise keep handling every frame."""
+        self._active = False
+        self._stop()
+        if self._gateway is not None:
+            self._gateway.remove_message_callback(self._on_gateway_message)
 
     def closeEvent(self, ev) -> None:   # noqa: N802 (Qt override)
         self._active = False

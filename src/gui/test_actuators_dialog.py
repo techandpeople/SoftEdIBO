@@ -14,7 +14,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from src.core.skin_config import FILL_MODE_PRESSURE, normalize_fill_mode
+from src.core.skin_config import (DEFAULT_MAX_KPA, DEFAULT_MIN_KPA,
+                                  FILL_MODE_PRESSURE, normalize_fill_mode)
 from src.core.touch_compensation import compensator_from_config
 from src.gui.led_ring_tester import LedRingTester
 from src.gui.sensor_tester import SensorTester
@@ -263,11 +264,8 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         self._manual_keepalive.setInterval(1500)
         self._manual_keepalive.timeout.connect(self._send_manual_keepalive)
 
-        # Vent alternator: while venting, flip the open valve side every 2 s so an
-        # inflated chamber bleeds out (deflate) AND a vacuumed one draws air in
-        # (inflate) - this board only allows one side open at a time. No pump, so
-        # nothing is pressurised; the 2 s tick also refreshes the manual dead-man.
-        self._vent_side = 1
+        # Whole-skin vent: firmware ``vent`` (both valves open, no pump) on every
+        # chamber, re-sent every 2 s to refresh the manual dead-man.
         self._vent_timer = QTimer(self)
         self._vent_timer.setInterval(2000)
         self._vent_timer.timeout.connect(self._vent_tick)
@@ -627,8 +625,8 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         node's ``set_max_pressure`` takes effect."""
         cfg = self._chamber_cfgs.get(chamber, {})
         return kpa_to_pct(kpa,
-                          float(cfg.get("min_pressure", 0.0)),
-                          float(cfg.get("max_pressure", 8.0)))
+                          float(cfg.get("min_pressure", DEFAULT_MIN_KPA)),
+                          float(cfg.get("max_pressure", DEFAULT_MAX_KPA)))
 
     def _update_valves(self, chamber: int, inflate_open: int, deflate_open: int) -> None:
         """Reflect the node's ACTUAL valve outputs on the per-chamber buttons.
@@ -664,10 +662,11 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
 
     def _on_closed(self) -> None:
         self._active = False
+        self._gateway.remove_message_callback(self._on_gateway_message)
         # Stop re-asserting manual overrides; the firmware dead-man then closes any
         # held valve/pump within ~5 s of the last keepalive.
         self._manual_keepalive.stop()
-        self._vent_timer.stop()   # the dead-man closes the last-opened vent valve
+        self._vent_timer.stop()   # the dead-man closes the vented valves
         # Release any leak-compensating holds (their dead-man would drop them in
         # ~6 s anyway; the explicit off is immediate and quiet).
         self._release_holds()
@@ -912,7 +911,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         kpa = self._levels_kpa.get(slot)
         if kpa is None:
             # No status yet: hold at the configured max as a safe-ish default.
-            kpa = float(cfg.get("max_pressure", 8.0))
+            kpa = float(cfg.get("max_pressure", DEFAULT_MAX_KPA))
         payload = {"chamber": slot,
                    "duty": seed_hold_duty(cfg.get("hold_duty_curve"), kpa),
                    "kpa": round(float(kpa), 2)}
@@ -1064,11 +1063,10 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
     def _toggle_vent(self) -> None:
         """Start/stop venting the whole skin to atmosphere (no pump).
 
-        Alternates each chamber's deflate/inflate valve every 2 s so an inflated
-        chamber bleeds OUT and a vacuumed one draws air IN (each manifold's path
-        to atmosphere through its off pump is one-way, and the board allows only
-        one side open at a time). Runs on its own timer, independent of the manual
-        valve holds; STOP ALL / close / a run all stop it."""
+        Sends the firmware ``vent`` (both valves open, pumps kept off) to every
+        chamber, so an inflated chamber bleeds OUT and a vacuumed one draws air
+        IN at once. Runs on its own timer, independent of the manual valve
+        holds; STOP ALL / close / a run all stop it."""
         if self._vent_timer.isActive():
             self._stop_vent()
             return
@@ -1076,21 +1074,17 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
             return
         self._reset_manual_ui()                 # clear manual holds so they don't fight
         self._arm()
-        self._vent_side = 1                     # start on deflate (bleed inflated)
         self._vent_tick()
         self._vent_timer.start()
         self.vent_btn.setText("Close Vent")
         self.vent_btn.setStyleSheet(self._VALVE_OPEN_STYLE)
 
     def _vent_tick(self) -> None:
-        """One vent cycle: open the current side on every chamber, then flip it."""
-        side = self._vent_side
+        """One vent refresh: (re)open both valves on every chamber."""
         for slot in self._chamber_cfgs:
-            self._gateway.send(self._mac, "valve_manual", chamber=slot,
-                               side=side, open=1)
-            self._set_valve_button((slot, side), True, confirmed=False)
-            self._set_valve_button((slot, 1 - side), False)   # board closes it
-        self._vent_side ^= 1
+            self._gateway.send(self._mac, "vent", chamber=slot, open=1)
+            self._set_valve_button((slot, 0), True, confirmed=False)
+            self._set_valve_button((slot, 1), True, confirmed=False)
 
     def _stop_vent(self) -> None:
         """Stop venting: close both valve sides on every chamber."""
@@ -1098,10 +1092,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         self._vent_timer.stop()
         if was_active:
             for slot in self._chamber_cfgs:
-                self._gateway.send(self._mac, "valve_manual", chamber=slot,
-                                   side=0, open=0)
-                self._gateway.send(self._mac, "valve_manual", chamber=slot,
-                                   side=1, open=0)
+                self._gateway.send(self._mac, "vent", chamber=slot, open=0)
                 self._set_valve_button((slot, 0), False)
                 self._set_valve_button((slot, 1), False)
         self.vent_btn.setText("Vent")

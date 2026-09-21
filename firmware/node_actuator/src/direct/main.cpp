@@ -5,8 +5,8 @@
  * (logic-level), pumps through DRV3297 (PWM). See pins.h for details.
  *
  * Build envs:
- *   pio run             -> release
- *   pio run -e debug    -> debug (Serial logs + "debug" command)
+ *   pio run -e direct          -> release
+ *   pio run -e direct_debug    -> debug (Serial logs + "debug" command)
  *
  * Module breakdown:
  *   pins.h       - GPIO assignments
@@ -20,7 +20,7 @@
  * Protocol: ESP-NOW JSON commands, 500 ms status broadcasts.
  *   {"cmd":"inflate|deflate|set_pressure|set_max_pressure|hold","chamber":N,...}
  *   {"cmd":"ping"} -> {"type":"pong"}
- *   {"type":"status","chamber":N,"pressure":pct}
+ *   {"type":"status","kpa":[...],"st":[...],"vi":[...],"vd":[...]}  (one frame, all chambers)
  */
 
 #include <Arduino.h>
@@ -107,7 +107,7 @@ void setup() {
     // below which pressure a deflate needs a time budget instead of the sensor.
     char ready_msg[160];
     snprintf(ready_msg, sizeof(ready_msg),
-             "{\"status\":\"node_direct_ready\",\"fw\":\"vac-floor-1-sw02\",\"rgbw\":" LED_RGBW_JSON ",\"kpa_min\":%.0f}",
+             "{\"status\":\"node_direct_ready\",\"fw\":\"estop-1-sw02\",\"rgbw\":" LED_RGBW_JSON ",\"kpa_min\":%.0f}",
              (double)pressure::FLOOR_KPA);
     se::broadcast(ready_msg);
 
@@ -201,7 +201,7 @@ void loop() {
     // ---- Organ + cover sensing (broadcasts on change + heartbeat) ----
     organ::tick(now);
 
-    // ---- Magnet/touch sensing (streams ~28 Hz; no-op if no sensors) ----
+    // ---- Magnet/touch sensing (streams ~10 Hz; no-op if no sensors) ----
     magnet::tick(now);
 
     // ---- High-resolution actuation trace -------------------------------------
@@ -245,6 +245,7 @@ void loop() {
         commands::sendStatusAll();
         commands::sendPumps();   // live pump state (debug: stop-latency hunt)
 #ifdef DEBUG_BUILD
+        commands::sendRawAdc();
         commands::checkDryPumps();   // warn if a pump spins with no open valve
 #endif
     }

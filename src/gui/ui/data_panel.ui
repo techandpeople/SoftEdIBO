@@ -13,6 +13,7 @@
      <layout class="QVBoxLayout" name="sessions_layout">
       <item>
        <widget class="QTableWidget" name="sessions_table">
+        <property name="whatsThis"><string>One row per recorded session: ID, activity, start and end. Select one or more rows (Ctrl/Shift-click) to export or delete them; the first selected session's events show below.</string></property>
         <property name="selectionBehavior">
          <enum>QAbstractItemView::SelectRows</enum>
         </property>
@@ -40,6 +41,7 @@
      <layout class="QVBoxLayout" name="events_layout">
       <item>
        <widget class="QTableWidget" name="events_table">
+        <property name="whatsThis"><string>Events of the selected session, in time order: when it happened, which participant and robot, the action, its target and any extra metadata.</string></property>
         <property name="selectionBehavior">
          <enum>QAbstractItemView::SelectRows</enum>
         </property>

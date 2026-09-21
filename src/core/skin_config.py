@@ -21,7 +21,7 @@ DEFAULT_MAX_KPA = 8.0
 # Upper/lower bound for the per-chamber Max/Min the config dialog accepts. These
 # are intentionally generous (effectively uncapped for these low-pressure air
 # chambers) - the pressure gauge is unreliable, so over-pressure is held off by
-# TIME-based backstops (firmware MAX_FILL_MS, the manual dead-man, and the
+# TIME-based backstops (the firmware engine caps, the manual dead-man, and the
 # actuation watchdog), not by an artificial pressure ceiling. Kept in sync with
 # the firmware HARD_*_KPA constants.
 MAX_ALLOWED_KPA = 100.0
@@ -170,6 +170,44 @@ class PressureChange:
     slot: int
     old_kpa: float
     new_kpa: float
+
+
+# Per-chamber keys written by the Calibrate Fill tools (src/hardware/
+# fill_calibration.py), never edited in the skin dialog's rows. A skin save
+# rebuilds each chamber from its row, so these must be carried over or the save
+# silently wipes the calibration.
+CALIBRATION_KEYS = ("fill_profile", "fill_time_ms", "fill_profiles",
+                    "deflate_profile", "hold_duty_curve", "leak_curve",
+                    "duty_curve")
+
+
+def chambers_by_key(chambers: list[dict]) -> dict[tuple[str | None, int], dict]:
+    """Index saved chamber entries by (mac, slot)."""
+    return {(ch.get("mac"), int(ch.get("slot", 0))): ch for ch in chambers}
+
+
+# Skin-level keys the skin dialog rebuilds on every save. Anything else on a
+# saved skin (e.g. ``name``, the Tree's per-branch ``organ`` circuit) is written
+# elsewhere and must survive the save. ``sensor_grid`` is legacy and is dropped.
+DIALOG_SKIN_KEYS = frozenset({
+    "skin_id", "chambers", "skin_type", "skin_variant", "shape", "grid",
+    "chamber_grid", "sensor_grid", "touch", "organs", "led_angles"})
+
+
+def carry_unmanaged_skin_keys(entry: dict, saved: dict) -> None:
+    """Copy the saved skin's keys the dialog does not manage onto ``entry``."""
+    for key, value in saved.items():
+        if key not in DIALOG_SKIN_KEYS:
+            entry.setdefault(key, value)
+
+
+def carry_calibration(chamber: dict, saved: dict | None) -> None:
+    """Copy the saved chamber's calibration (CALIBRATION_KEYS) onto ``chamber``."""
+    if not saved:
+        return
+    for key in CALIBRATION_KEYS:
+        if saved.get(key) is not None:
+            chamber[key] = saved[key]
 
 
 def find_missing_mac(chambers: list[dict]) -> bool:

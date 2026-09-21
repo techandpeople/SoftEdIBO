@@ -18,17 +18,18 @@
 
 namespace {
 
-constexpr uint32_t PRESSURE_CHECK_MS = 200;
+// Idle gauge sweep: every chamber, median of 3 mux reads each (~3 ms for 12).
+// 25 ms = 40 Hz per sensor, so each 500 ms status averages ~20 reads.
+constexpr uint32_t PRESSURE_CHECK_MS = 25;
 constexpr uint32_t STATUS_REPORT_MS  = 500;
 
-// The closed-loop chamber cutoff runs MUCH tighter than tank control / telemetry.
-// A chamber's inflate pump runs at full duty the whole time it is INFLATING, so
-// the achieved pressure overshoots the target by however much is delivered between
-// two checks: at 200 ms a single "+" step (e.g. +10 % of range) blew past to ~30 %
-// before the cutoff looked at the sensor. 20 ms shrinks that window ~10x so the
-// measured level settles on the commanded target (mirrors node_direct). Tank
-// control stays on the slow PRESSURE_CHECK_MS cadence - its pumps must not toggle
-// fast, and the slow mux scan is fine for them.
+// The closed-loop chamber cutoff runs MUCH tighter than the idle gauge refresh /
+// telemetry. A chamber's inflate pump runs at full duty the whole time it is
+// INFLATING, so the achieved pressure overshoots the target by however much is
+// delivered between two checks: at 200 ms a single "+" step (e.g. +10 % of range)
+// blew past to ~30 % before the cutoff looked at the sensor. 20 ms shrinks that
+// window ~10x so the measured level settles on the commanded target (mirrors
+// node_direct). The idle refresh runs on PRESSURE_CHECK_MS.
 constexpr uint32_t CHAMBER_CHECK_MS  = 20;
 
 uint32_t lastPressureMs = 0;
@@ -72,32 +73,13 @@ void sendPong() {
     sendRaw(pong);
 }
 
-void sendStatus(int chamber, float kpa) {
-    if (!gatewayKnown) return;
-    auto& ch = chambers::state[chamber];
-    int pct = units::kpaToPct(kpa, ch.min_kpa, ch.max_kpa);
-    // "st" is the real actuation state (0 idle, 1 inflating, 2 deflating) so the
-    // PC reflects whether a chamber is actually being driven rather than
-    // inferring it from pressure-vs-target (which never settles with pumps off).
-    // "vi"/"vd" are the ACTUAL inflate/deflate valve outputs (pca_valves mirror),
-    // so the PC shows a valve as open whoever opened it - manual toggle, an
-    // inflate/deflate, or the firmware closing it again.
-    char buf[96];
-    int len = snprintf(buf, sizeof(buf),
-                       "{\"type\":\"status\",\"chamber\":%d,\"pressure\":%d,\"kpa\":%.2f,\"st\":%d,\"vi\":%d,\"vd\":%d}",
-                       chamber, pct, kpa, (int)ch.state,
-                       pca_valves::isOpen(chamber, 0) ? 1 : 0,
-                       pca_valves::isOpen(chamber, 1) ? 1 : 0);
-    esp_now_send(gatewayMac, reinterpret_cast<const uint8_t*>(buf), len);
-}
-
 // Batched status: every chamber in ONE frame (parallel arrays) instead of one esp_now_send
 // per chamber. Cuts the status frame count num_chambersx - the biggest win during a
 // status_rate fast window - freeing ESP-NOW airtime the Thymio's co-channel 802.15.4
 // shares. "pressure" is omitted (redundant - the PC recomputes it from "kpa"; kpa is
 // authoritative). Even a full 12-chamber frame is ~200 B, under the 250 B ESP-NOW limit,
-// so it is always a single frame (no splitting). kpa at 0.1 kPa. An old PC ignores it (no
-// "chamber" field); an old node still sends the scalar frame the new PC also parses.
+// so it is always a single frame (no splitting). kpa at 0.1 kPa. The PC still parses the
+// old scalar per-chamber frame for nodes flashed before batching.
 void sendStatusAll() {
     if (!gatewayKnown) return;
     const int n = config::state.num_chambers;
@@ -105,7 +87,7 @@ void sendStatusAll() {
     int len = snprintf(buf, sizeof(buf), "{\"type\":\"status\",\"kpa\":[");
     for (int i = 0; i < n; i++)
         len += snprintf(buf + len, sizeof(buf) - len, "%s%.1f", i ? "," : "",
-                        chambers::cachedKpa[i]);
+                        chambers::takeWindowKpa(i));
     len += snprintf(buf + len, sizeof(buf) - len, "],\"st\":[");
     for (int i = 0; i < n; i++)
         len += snprintf(buf + len, sizeof(buf) - len, "%s%d", i ? "," : "",
@@ -177,15 +159,27 @@ void checkDryPumps() {
 }
 
 void installDebugHook() { chambers::dbgHook = &sendEngEvent; }
+
+// Raw ADC counts of all 16 mux inputs, once per status. Shows which inputs
+// carry a sensor and its ambient offset - the kPa status clamps at the gauge
+// floor, so a sensor whose ambient output sits below the nominal zero reads
+// 0 there, indistinguishable from an empty input.
+void sendRawAdc() {
+    char buf[128];
+    int len = snprintf(buf, sizeof(buf), "{\"type\":\"raw\",\"adc\":[");
+    for (int ch = 0; ch < mux::MUX_CHANNELS; ch++)
+        len += snprintf(buf + len, sizeof(buf) - len, "%s%d", ch ? "," : "", mux::readRaw(ch));
+    len += snprintf(buf + len, sizeof(buf) - len, "]}");
+    sendRaw(buf);
+}
 #endif
 
 bool isDisconnectedRail(int raw) {
     return raw < 40 || raw > 4055;
 }
 
-void detectSensors(int valid_channels[], int& valid_count, int tank_candidates[], int& tank_count) {
+void detectSensors(int valid_channels[], int& valid_count) {
     valid_count = 0;
-    tank_count = 0;
 
     for (int ch = 0; ch < mux::MUX_CHANNELS; ch++) {
         int raw = mux::readRaw(ch);
@@ -205,16 +199,14 @@ void detectSensors(int valid_channels[], int& valid_count, int tank_candidates[]
         valid_channels[valid_count++] = ch;
     }
 
-    config::state.num_chambers = min(valid_count, MAX_CHAMBERS);
-    for (int i = 0; i < config::state.num_chambers; i++) {
-        config::state.chamber_mux_ch[i] = valid_channels[i];
-    }
-    for (int i = config::state.num_chambers; i < MAX_CHAMBERS; i++) {
-        config::state.chamber_mux_ch[i] = -1;
-    }
-
-    for (int i = config::state.num_chambers; i < valid_count; i++) {
-        tank_candidates[tank_count++] = valid_channels[i];
+    // Fixed mapping: chamber i reads mux channel Ii (PSENSOR i+1), the same
+    // index its valves use (UNL 2i+1 / 2i+2). The scan above is diagnostic only:
+    // packing the responders into chambers 0..n-1 put a sensor under the wrong
+    // chamber's valves and left a chamber blind whenever one read out of range
+    // at boot (unsoldered, noisy, or not yet settled).
+    config::state.num_chambers = max(1, min(valid_count, MAX_CHAMBERS));
+    for (int i = 0; i < MAX_CHAMBERS; i++) {
+        config::state.chamber_mux_ch[i] = i;
     }
 
     char channels[96] = {0};
@@ -222,7 +214,7 @@ void detectSensors(int valid_channels[], int& valid_count, int tank_candidates[]
     for (int i = 0; i < valid_count && pos < static_cast<int>(sizeof(channels)) - 8; i++) {
         pos += snprintf(channels + pos, sizeof(channels) - pos, "%s%d", i == 0 ? "" : ",", valid_channels[i]);
     }
-    LOG("TODO: valid sensors detected at mux channels: %s - confirm\n", channels);
+    LOG("Sensors responding at mux channels: %s\n", channels);
 }
 
 // No reservoir tanks: the pumps push directly into the chambers, so their role
@@ -267,31 +259,31 @@ void parseAndQueue(const uint8_t* data, int len) {
         c.chamber = -1;
     } else if (strcmp(cmd, "inflate") == 0) {
         c.type = cmd_queue::CMD_INFLATE;
-        c.chamber = doc["chamber"] | -1;
+        c.chamber = cmd_queue::chamberArg(doc["chamber"] | -1);
         c.param = doc["delta"] | 10;
         c.fill_ms = doc["ms"] | 0;
         c.duty = doc["duty"] | 0;
         c.timed = doc["timed"] | 0;
     } else if (strcmp(cmd, "deflate") == 0) {
         c.type = cmd_queue::CMD_DEFLATE;
-        c.chamber = doc["chamber"] | -1;
+        c.chamber = cmd_queue::chamberArg(doc["chamber"] | -1);
         c.param = doc["delta"] | 10;
         c.fill_ms = doc["ms"] | 0;
         c.duty = doc["duty"] | 0;
         c.timed = doc["timed"] | 0;
     } else if (strcmp(cmd, "set_pressure") == 0) {
         c.type = cmd_queue::CMD_SET_PRESSURE;
-        c.chamber = doc["chamber"] | -1;
+        c.chamber = cmd_queue::chamberArg(doc["chamber"] | -1);
         c.param = doc["value"] | 0;
         c.duty = doc["duty"] | 0;
     } else if (strcmp(cmd, "set_max_pressure") == 0) {
         c.type = cmd_queue::CMD_SET_MAX;
-        c.chamber = doc["chamber"] | -1;
+        c.chamber = cmd_queue::chamberArg(doc["chamber"] | -1);
         c.param_kpa = doc["value"] | config::DEFAULT_CHAMBER_MAX_KPA;
         c.seq = doc["seq"] | cmd_queue::NO_SEQ;
     } else if (strcmp(cmd, "set_min_pressure") == 0) {
         c.type = cmd_queue::CMD_SET_MIN;
-        c.chamber = doc["chamber"] | -1;
+        c.chamber = cmd_queue::chamberArg(doc["chamber"] | -1);
         c.param_kpa = doc["value"] | config::DEFAULT_CHAMBER_MIN_KPA;
         c.seq = doc["seq"] | cmd_queue::NO_SEQ;
     } else if (strcmp(cmd, "hold_duty") == 0) {
@@ -299,14 +291,14 @@ void parseAndQueue(const uint8_t* data, int len) {
         // "kpa":K?,"timed":1?} starts/refreshes (PC re-sends ~2 s as keepalive);
         // "off":1 drops it (chamber -1 = all). No "kpa" / "timed":1 = duty-only.
         c.type = cmd_queue::CMD_HOLD_DUTY;
-        c.chamber = doc["chamber"] | -1;
+        c.chamber = cmd_queue::chamberArg(doc["chamber"] | -1);
         c.duty = doc["duty"] | 0;
         c.param = doc["off"] | 0;
         c.timed = doc["timed"] | 0;
         c.param_kpa = doc["kpa"].is<float>() ? doc["kpa"].as<float>() : NAN;
     } else if (strcmp(cmd, "hold") == 0) {
         c.type = cmd_queue::CMD_HOLD;
-        c.chamber = doc["chamber"] | -1;
+        c.chamber = cmd_queue::chamberArg(doc["chamber"] | -1);
     } else if (strcmp(cmd, "stop") == 0) {
         c.type = cmd_queue::CMD_STOP;
     } else if (strcmp(cmd, "resume") == 0) {
@@ -316,7 +308,7 @@ void parseAndQueue(const uint8_t* data, int len) {
         c.chamber = -1;
     } else if (strcmp(cmd, "valve_manual") == 0) {
         c.type = cmd_queue::CMD_VALVE_MANUAL;
-        c.chamber = doc["chamber"] | -1;
+        c.chamber = cmd_queue::chamberArg(doc["chamber"] | -1);
         c.param = doc["side"] | 0;     // 0=inflate, 1=deflate
         c.cfg_chambers = doc["open"] | 0;
     } else if (strcmp(cmd, "pump_manual") == 0) {
@@ -326,7 +318,7 @@ void parseAndQueue(const uint8_t* data, int len) {
     } else if (strcmp(cmd, "vent") == 0) {
         // Bench vent: both valves of the chamber (-1 = all) open, pumps off it.
         c.type = cmd_queue::CMD_VENT;
-        c.chamber = doc["chamber"] | -1;
+        c.chamber = cmd_queue::chamberArg(doc["chamber"] | -1);
         c.cfg_chambers = doc["open"] | 0;
     } else if (strcmp(cmd, "configure") == 0) {
         c.type = cmd_queue::CMD_CONFIGURE;
@@ -690,6 +682,11 @@ void processCommand(const cmd_queue::Cmd& c) {
         return;
     }
 
+    // While latched stopped, drop every actuation command so nothing is queued
+    // to run on resume. set_max/set_min only store a limit, so they still apply
+    // and ack (the PC's confirmer would otherwise retry into silence).
+    if (emergencyStopped && c.type != CMD_SET_MAX && c.type != CMD_SET_MIN) return;
+
     // Leak-compensating hold: register/refresh/drop; chambers::holdTick()
     // (from loop) actually opens valves and runs the pumps when the manifold
     // is free. param = "off" flag; chamber -1 applies to every chamber.
@@ -759,17 +756,27 @@ void processCommand(const cmd_queue::Cmd& c) {
     ackConfirmable(c, true);   // confirm set_max/set_min AFTER applying it
 }
 
-// Enforce hard limits while in manual override (called at the pressure cadence
-// with freshly-read chamber pressures). Cuts any manual valve that would push a
-// chamber past its hard cap. Dead-man timeout is handled in loop(). (No tank
-// checks: the pumps push straight into chambers, so the per-chamber caps are the
-// limit that matters.)
+// Pressure cutoff while in manual override (called at the pressure cadence with
+// freshly-read chamber pressures). The firmware owns this cut for safety: an
+// inflate valve closes as soon as its chamber reaches the max_kpa the PC last
+// set at runtime (set_max_pressure), not just the hard cap. If that leaves no
+// manual inflate valve open, the manual pressure pump is cut too so it doesn't
+// dead-head. Deflate stays on the hard floor: the 0..100 gauge can't see below
+// ambient, so a runtime min would cut every vacuum deflate at once. Dead-man
+// timeout is handled in loop().
 void manualPressureSafety() {
+    bool cutInflate = false;
+    bool inflateOpen = false;
     for (int i = 0; i < config::state.num_chambers; i++) {
         float k = chambers::cachedKpa[i];
-        if (manualValveOpen[i][0] && k >= config::HARD_CHAMBER_MAX_KPA) applyManualValve(i, 0, false);
+        if (manualValveOpen[i][0] && k >= chambers::state[i].max_kpa) {
+            applyManualValve(i, 0, false);
+            cutInflate = true;
+        }
         if (manualValveOpen[i][1] && k <= config::HARD_CHAMBER_MIN_KPA) applyManualValve(i, 1, false);
+        if (manualValveOpen[i][0]) inflateOpen = true;
     }
+    if (cutInflate && !inflateOpen && manualPumpOn[0]) applyManualPump(0, false);
 }
 
 // Apply a staged organ-channel configuration: hand the channels to the organ
@@ -807,10 +814,8 @@ void onReceived(const uint8_t* mac_addr, const uint8_t* data, int len) {
 void autodetect() {
     int valid_channels[16] = {};
     int valid_count = 0;
-    int tank_candidates[4] = {};
-    int tank_count = 0;
 
-    detectSensors(valid_channels, valid_count, tank_candidates, tank_count);
+    detectSensors(valid_channels, valid_count);
     assignDefaultPumpRoles();
 
     config::state.ready = true;
@@ -857,13 +862,38 @@ void setup() {
     // Broadcast the ready message so the gateway can forward it to the PC
     // even before the node has received its first command (and therefore
     // doesn't yet know the gateway's MAC).
-    char ready_msg[160];
+    // "pca" lists the two PCA9685 addresses in use (#1 drives UNL1-16, #2
+    // UNL17-24) so a bank swap from wrong address jumpers shows in the PC log.
+    char ready_msg[192];
     snprintf(ready_msg, sizeof(ready_msg),
-             "{\"status\":\"node_multiplexed_ready\",\"fw\":\"vac-floor-1\",\"rgbw\":" LED_RGBW_JSON ",\"kpa_min\":%.0f}",
-             (double)pressure::FLOOR_KPA);
+             "{\"status\":\"node_multiplexed_ready\",\"fw\":\"pcaid-1\",\"rgbw\":" LED_RGBW_JSON
+             ",\"kpa_min\":%.0f,\"pca\":[%d,%d]}",
+             (double)pressure::FLOOR_KPA, pca_valves::pca1_addr, pca_valves::pca2_addr);
     se::broadcast(ready_msg);
 
     LOG("%s\n", ready_msg);
+}
+
+// Gauge sweep at PRESSURE_CHECK_MS: every chamber into the live value + the
+// status window. In manual override it also enforces the pressure cutoff.
+void refreshGauges(uint32_t now) {
+    if (!config::state.ready || now - lastPressureMs < PRESSURE_CHECK_MS) return;
+    lastPressureMs = now;
+    for (int i = 0; i < config::state.num_chambers; i++)
+        chambers::recordKpa(i, chambers::readKpaMedian(i));   // ambient-zeroed
+    if (manualActive) manualPressureSafety();
+}
+
+// Status (+ raw ADC in debug builds) at STATUS_REPORT_MS. Runs whether or not
+// the node is configured or halted - telemetry never depends on actuation.
+void broadcastTelemetry(uint32_t now) {
+    if (now - lastStatusMs < STATUS_REPORT_MS) return;
+    lastStatusMs = now;
+    sendStatusAll();
+#ifdef DEBUG_BUILD
+    sendRawAdc();
+    checkDryPumps();
+#endif
 }
 
 void loop() {
@@ -882,14 +912,18 @@ void loop() {
     // Emergency stop or any not-ready state: keep everything off and skip all
     // control. Commands (incl. "resume") were already drained above, so the
     // node can be re-armed.
+    uint32_t now = millis();
+
     if (emergencyStopped || config::state.error || !config::state.ready || !configured) {
         pumps::stopAll();
         pca_valves::closeAllValves();
+        // Telemetry keeps flowing while halted: the PC can only see that the
+        // node is up (and re-send configure / resume) if status keeps coming.
+        refreshGauges(now);
+        broadcastTelemetry(now);
         delay(5);
         return;
     }
-
-    uint32_t now = millis();
 
     // Manual (dev) override: dead-man auto-off every loop (cheap, no I/O). When
     // it fires, autonomous control resumes on the next pressure tick. SIGNED diff:
@@ -905,14 +939,11 @@ void loop() {
     // ---- Child-safety watchdog: stop runaway actuations (sensor failure) ----
     if (!manualActive) chambers::actuationWatchdog(now);
 
-    if (manualActive && now - lastPressureMs >= PRESSURE_CHECK_MS) {
-        lastPressureMs = now;
-        // Autonomous control suspended. Refresh chamber pressures and enforce
-        // hard limits on whatever the operator is driving manually.
-        for (int i = 0; i < config::state.num_chambers; i++)
-            chambers::cachedKpa[i] = chambers::readKpaMedian(i);   // ambient-zeroed
-        manualPressureSafety();
-    }
+    // ---- Refresh gauges for telemetry + command-time guards (mirrors
+    //      node_direct). The engines and holds do their own fresh reads; this keeps
+    //      idle chambers live in status and in the "below/above target?" checks.
+    //      In manual override it also enforces the hard limits. ----
+    refreshGauges(now);
 
     // ---- Coupled-fill engines on their own (tight) cadence: open the group
     //      together -> fill to the lowest open target -> close -> settle -> measure
@@ -929,11 +960,5 @@ void loop() {
     //      the manifold (emergencyStopped never reaches here - loop returned). ----
     chambers::holdTick(now, manualActive || chambers::seqActive());
 
-    if (now - lastStatusMs >= STATUS_REPORT_MS) {
-        lastStatusMs = now;
-        sendStatusAll();
-#ifdef DEBUG_BUILD
-        checkDryPumps();
-#endif
-    }
+    broadcastTelemetry(now);
 }

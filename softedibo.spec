@@ -20,6 +20,7 @@
 #       node_actuator/firmware-multiplexed-rgbw-{release,debug}.bin
 #       node_magnet_sensor/firmware-release.bin      (MLX90393 touch board)
 #       thymio_rcp/firmware.bin                      (XIAO ESP32-C6 RCP, WiFi-OTA app image)
+#       thymio_rcp/firmware-c6.bin                   (XIAO ESP32-C6 RCP, merged image for the wizard's first USB flash)
 
 from pathlib import Path
 
@@ -28,7 +29,7 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 block_cipher = None
 
 # ---------------------------------------------------------------------------
-# Vendored Blockly (Behaviour Editor)
+# Vendored Blockly (Activity Editor)
 # ---------------------------------------------------------------------------
 # The editor page falls back to the unpkg CDN when the library is missing, so a
 # bundle built without it looks fine here and then dies with "Could not load
@@ -74,7 +75,7 @@ main_a = Analysis(
         # / title-bar icon); the .png is what Qt loads at runtime for the
         # window + taskbar icon (see src/gui/app_icon.py).
         ("softedibo.png", "."),
-        # Block editor assets (Tools => Behaviour Editor...). HTML + any vendored
+        # Block editor assets (Tools => Activity Editor...). HTML + any vendored
         # Blockly copy; loaded lazily, only when the editor is opened.
         ("src/gui/blockly/", "src/gui/blockly/"),
         ("firmware/gateway/firmware-s3.bin",                             "firmware/gateway"),
@@ -88,6 +89,7 @@ main_a = Analysis(
         ("firmware/node_actuator/firmware-multiplexed-rgbw-debug.bin",   "firmware/node_actuator"),
         ("firmware/node_magnet_sensor/firmware-release.bin",             "firmware/node_magnet_sensor"),
         ("firmware/thymio_rcp/firmware.bin",                             "firmware/thymio_rcp"),
+        ("firmware/thymio_rcp/firmware-c6.bin",                          "firmware/thymio_rcp"),
     ],
     hiddenimports=[
         *collect_submodules("src"),
@@ -95,7 +97,7 @@ main_a = Analysis(
         "serial.tools.list_ports",
         "PySide6.QtSvg",
         "PySide6.QtXml",
-        # Block editor web view (Tools => Behaviour Editor...). PyInstaller's
+        # Block editor web view (Tools => Activity Editor...). PyInstaller's
         # PySide6 hook bundles the QtWebEngine process when these are imported.
         "PySide6.QtWebEngineWidgets",
         "PySide6.QtWebEngineCore",

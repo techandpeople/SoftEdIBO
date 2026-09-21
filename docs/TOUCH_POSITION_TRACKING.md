@@ -101,8 +101,10 @@ sensor is appended after them.  At boot the board announces
 `magnet_geometry`.  In simulation a `SimulatedMagnetSensor` emits the same
 messages with a `sim:` source, so recordings stay honest about synthetic data.
 
-`Skin._extract_sensor_magnitudes()` tries `mag` -> `act` in order, so it works on
-the raw uT magnitudes and falls back to the binary active set.
+The skin's touch profile (`MagnetSensorProfile.read_magnitudes()`, the
+`TouchSensorProfile` seam in `src/hardware/touch_profiles.py`) tries `mag` ->
+`act` in order, so it works on the raw uT magnitudes and falls back to the
+binary active set.
 
 ---
 
@@ -289,5 +291,5 @@ through the `SimulatedMagnetSensor`.
 |-----------|--------|
 | `QuadrantDetector` / `TouchPositionTracker` | Adapted from the thesis QuadrantPredictor (`tools/quadrant_live_plot.py`) |
 | magnet sensor firmware | In-tree: `firmware/node_magnet_sensor/` on the shared `firmware/common/se_magnet.h` module (also folded into the direct actuator board) |
-| `Skin._extract_sensor_magnitudes` | Handles the `mag`/`act` fallback chain |
+| `TouchSensorProfile.read_magnitudes` (`MagnetSensorProfile`) | Handles the `mag`/`act` fallback chain |
 | `SkinGridView` yellow pulse | Pre-existing, unchanged |

@@ -40,7 +40,6 @@ class SimulatedMagnetSensor:
         self.source_id = f"sim:{mac_address}"
         self._magnet_callbacks:   list[Callable[[dict[str, Any]], None]] = []
         self._organ_callbacks: list[Callable[[float, int], None]] = []
-        self._touch_callbacks: list[Callable[[int, int], None]] = []
 
     @property
     def is_connected(self) -> bool:
@@ -60,6 +59,9 @@ class SimulatedMagnetSensor:
         """Register a callback for magnet sensor messages (``{"act": [...], ...}``)."""
         self._magnet_callbacks.append(callback)
 
+    def remove_magnet_listener(self, callback: Callable[[dict[str, Any]], None]) -> None:
+        self._magnet_callbacks[:] = [cb for cb in self._magnet_callbacks if cb != callback]
+
     def fire_magnet(self, data: dict[str, Any]) -> None:
         """Broadcast a synthetic magnet sensor event to every ``on_magnet`` subscriber.
         Tags the message with this board's ``sim:`` source (unless one is
@@ -67,19 +69,8 @@ class SimulatedMagnetSensor:
         recordings flag the sample as simulated."""
         if "source" not in data:
             data = {**data, "source": self.source_id}
-        for cb in self._magnet_callbacks:
+        for cb in list(self._magnet_callbacks):
             cb(data)
-
-    # ------------------------------------------------------------------
-    # Per-sensor raw touch (capacitive-style); kept for interface parity
-    # ------------------------------------------------------------------
-
-    def on_touch(self, callback: Callable[[int, int], None]) -> None:
-        self._touch_callbacks.append(callback)
-
-    def fire_touch(self, sensor_id: int, raw_value: int) -> None:
-        for cb in self._touch_callbacks:
-            cb(sensor_id, raw_value)
 
     # ------------------------------------------------------------------
     # Organ bio-impedance (cure signal); debug-firable in simulation
@@ -90,6 +81,9 @@ class SimulatedMagnetSensor:
         slot)``; ``float("inf")`` means open circuit (cover off)."""
         self._organ_callbacks.append(callback)
 
+    def remove_organ_listener(self, callback: Callable[[float, int], None]) -> None:
+        self._organ_callbacks[:] = [cb for cb in self._organ_callbacks if cb != callback]
+
     def fire_organ(self, resistance_ohm: float, slot: int = 0) -> None:
-        for cb in self._organ_callbacks:
+        for cb in list(self._organ_callbacks):
             cb(float(resistance_ohm), slot)

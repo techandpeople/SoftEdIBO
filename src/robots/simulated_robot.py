@@ -113,7 +113,7 @@ class SimulatedRobot(BaseRobot):
         skin = self._skins.get(kwargs.get("skin", ""))
         if skin is None:
             return False
-        idx: int = kwargs.get("slot", 0)
+        idx: int | None = kwargs.get("slot")   # None = every chamber, like EspRobot
         if command == "set_pressure":
             return skin.set_pressure(idx, kwargs.get("value", 100))
         if command == "inflate":
@@ -121,6 +121,8 @@ class SimulatedRobot(BaseRobot):
         if command == "deflate":
             return skin.deflate(idx, kwargs.get("delta", 10))
         if command == "hold":
+            if idx is None:
+                return False
             return skin.hold(idx)
         return False
 

@@ -67,7 +67,7 @@ SessionPanel
 
 **Skin geometry by type.** Each skin sets a `skin_type` (e.g. `turtle_square`, `tree_round`, `thymio`) whose **shape and sensor coordinates** are hardcoded in [`src/hardware/skin_geometry.py`](src/hardware/skin_geometry.py). The skin dialog offers only the current robot's types and draws the real outline/aspect (square, rectangle, round, triangle, Thymio "D") - editor and activity view share the masks in [`src/gui/skin_shapes.py`](src/gui/skin_shapes.py). The legacy paint-grid editor still applies to skins without a `skin_type`.
 
-**Sensor stream recording + touch-gesture ML.** A session can record every sensor message to `data/recordings/<id>.jsonl` (toggle in the setup dialog - no video). Those recordings, plus gestures tagged live in the observer panel, feed a **per-`skin_type`, coordinate-free** touch-gesture classifier (tap / press / stroke / squeeze). `scikit-learn` is the optional `ml` extra; the classifier is inert without a trained model. See [docs/TOUCH_ML.md](docs/TOUCH_ML.md).
+**Sensor stream recording + touch-gesture ML.** A session can record every sensor message to `data/recordings/<id>.jsonl` (toggle in the setup dialog - no video). Those recordings, plus gestures tagged live in the observer panel, feed a **per-`skin_type`, coordinate-free** touch-gesture classifier (tap / press / compressions - `src/ml/gesture_taxonomy.py`). `scikit-learn` is the optional `ml` extra; the classifier is inert without a trained model. See [docs/TOUCH_ML.md](docs/TOUCH_ML.md).
 
 **Activities are declarative behaviours.** No activities are hard-coded: every activity is a behaviour spec authored in the block editor (**Tools -> Activity Editor...**), stored in the DB (or imported from JSON examples in `config/examples/behaviours/`) and interpreted at session time by `ScriptedActivity`. See [docs/ACTIVITIES.md](docs/ACTIVITIES.md).
 
@@ -116,7 +116,13 @@ softedibo --uninstall
 
 On first launch, a setup wizard guides you through flashing the firmware to the ESP32 nodes.
 
-### Configuration (`config/settings.yaml`)
+### Configuration (`settings.yaml`)
+
+The app reads and writes the **user copy** of the settings file:
+`~/.local/share/SoftEdIBO/config/settings.yaml` on Linux,
+`%APPDATA%\SoftEdIBO\config\settings.yaml` on Windows. On first run it is copied
+from the bundled default, the repo's [config/settings.yaml](config/settings.yaml);
+later edits to the repo file do not reach an existing user copy.
 
 Robots are configured per type (`turtles:` / `trees:` / `thymios:`), each with its own `nodes:` (ESP32s by MAC) and `skins:` on top. A skin lists its chambers - each a `{mac, slot}` pair on a single node - with optional per-chamber `max_pressure` / `min_pressure` safety limits in kPa. It is all editable from the GUI (Robots panel); the commented examples in [config/settings.yaml](config/settings.yaml) show the full shape (skin types, touch blocks, Thymio entries).
 
@@ -207,9 +213,11 @@ Requires [PlatformIO](https://platformio.org/).
 > ESP-NOW through the connected gateway (no cable, no WiFi). See
 > [firmware/gateway/README.md](firmware/gateway/README.md#ota-firmware-update-over-esp-now).
 
-The CI pipeline automatically selects the firmware environment:
-- **Nightly** (push to `master`) -> node debug build
-- **Stable release** (tag `v*`) -> node release build
+CI builds **every** firmware variant on each run (release + debug, RGB + RGBW)
+and ships them all - bundled in the app and in `firmware.zip` - for both the
+nightly pre-release (push to `master`) and stable releases (tag `v*`). The debug
+build is picked at flash time with the **Debug build** checkbox in the setup
+wizard / **Tools -> Update Nodes (OTA)...**.
 
 ### Debug builds
 
@@ -238,7 +246,7 @@ The CI pipeline automatically selects the firmware environment:
 | `src/gui/monitor/` | Live pressure monitor widgets |
 | `scripts/label_touches.py` / `scripts/train_touch_model.py` | Offline touch-gesture labelling + training (`.[ml]` extra) |
 | `src/log.py` | Centralized logging setup (console + rotating file) |
-| `config/settings.yaml` | Robot and hardware configuration |
+| `config/settings.yaml` | Default robot and hardware configuration (copied to the user data dir on first run) |
 | `firmware/gateway/` | Gateway firmware (ESP-IDF, Seeed XIAO ESP32-S3) |
 | `firmware/thymio_rcp/` | Thymio radio co-processor (XIAO ESP32-C6) - dongle-free 802.15.4 control; see [docs/THYMIO_WIRELESS_CONTROL.md](docs/THYMIO_WIRELESS_CONTROL.md) |
 | `firmware/common/` | Shared firmware headers (`se_espnow.h`, units/pressure/dbg/cmd_queue) |

@@ -49,6 +49,12 @@ class OrganSensor:
             logger.debug("Controller %r has no on_organ - OrganSensor inert",
                          controller)
 
+    def detach(self) -> None:
+        """Stop following the controller's organ readings."""
+        remove = getattr(self._controller, "remove_organ_listener", None)
+        if remove is not None:
+            remove(self._handle_reading)
+
     @property
     def slot(self) -> int:
         """The organ-circuit slot this sensor follows on its controller."""

@@ -43,6 +43,16 @@ def subscribe_skin_magnet(skin: Any,
     return False
 
 
+def unsubscribe_skin_magnet(skin: Any,
+                            callback: Callable[[dict[str, Any]], None]) -> None:
+    """Undo :func:`subscribe_skin_magnet` (a no-op if it was never subscribed)."""
+    for owner in (getattr(skin, "touch_source", None),
+                  getattr(skin, "touch_controller", None)):
+        remove = getattr(owner, "remove_magnet_listener", None)
+        if remove is not None:
+            remove(callback)
+
+
 class CompensatedMagnetSource:
     """Subscribes once to raw magnet data and derives touch state on the PC."""
 
@@ -66,6 +76,10 @@ class CompensatedMagnetSource:
         if not self._attached and hasattr(self._ctrl, "on_magnet"):
             self._attached = True
             self._ctrl.on_magnet(self._handle)
+
+    def remove_magnet_listener(self, callback: Callable[[dict[str, Any]], None]) -> None:
+        """Deregister a callback passed to :meth:`on_magnet` (no-op if absent)."""
+        self._subs[:] = [cb for cb in self._subs if cb != callback]
 
     def set_threshold_ut(self, value: float) -> None:
         """Retune the PC activation threshold (uT) at runtime.
@@ -124,8 +138,8 @@ class CompensatedMagnetSource:
             try:
                 cb(out)
             except RuntimeError:        # Qt signal source deleted - prune it
-                dead.append(i)
+                dead.append(cb)
             except Exception:           # noqa: BLE001 - a bad subscriber must not break others
                 logger.exception("compensated magnet callback failed")
-        for i in reversed(dead):
-            self._subs.pop(i)
+        if dead:
+            self._subs[:] = [cb for cb in self._subs if all(cb is not d for d in dead)]

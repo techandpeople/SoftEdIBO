@@ -25,7 +25,7 @@ from collections import deque
 from typing import Any
 
 from PySide6.QtCore import QRect, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPaintEvent, QPen
+from PySide6.QtGui import QColor, QPainter, QPaintEvent, QPen
 from PySide6.QtWidgets import QPushButton, QSizePolicy, QWidget
 
 from src.gui.skin_grid_editor import CHAMBER_PALETTE
@@ -131,15 +131,6 @@ class SkinGridView(QWidget):
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
-
-    def pulse_sensor(self, sensor_idx: int) -> None:
-        """Flash the yellow sensor highlight (real hardware touch or sim)."""
-        if sensor_idx not in self._sensor_cells:
-            return
-        self._active_sensors[sensor_idx] = 255
-        if not self._tick.isActive():
-            self._tick.start()
-        self.update()
 
     def refresh(self) -> None:
         self.update()

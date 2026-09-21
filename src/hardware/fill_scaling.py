@@ -16,9 +16,10 @@ chamber effectively gets its own pump) must reproduce the measured time and
 never *less* - otherwise a lone chamber would under-inflate. Above the pump
 count the chambers share flow and slow down.
 
-The firmware keeps its own independent backstops - a hard 5 s fill ceiling and
-the per-chamber HARD_MAX pressure cutoff - so this estimate only has to be
-roughly right: it can never drive a chamber past its pressure limit.
+The firmware keeps its own independent backstops - the coupled-fill round and
+sequence time caps, the actuation watchdog and the per-chamber HARD_MAX pressure
+cutoff - so this estimate only has to be roughly right: it can never drive a
+chamber past its pressure limit.
 """
 
 from __future__ import annotations

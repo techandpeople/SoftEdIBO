@@ -42,7 +42,7 @@ done
 want() { [[ " $COMPONENTS " == *" all "* || " $COMPONENTS " == *" $1 "* ]]; }
 
 if ! command -v pio >/dev/null && ! python -m platformio --version >/dev/null 2>&1; then
-    echo "ERROR: PlatformIO not found. Install with: pip install platformio" >&2
+    echo "ERROR: PlatformIO not found. Install with: pip install platformio==6.1.19" >&2
     exit 1
 fi
 
@@ -108,8 +108,10 @@ merge_node() {
         cd "$dir"
         ensure_pioarduino_core "$env"
         "${PIO[@]}" run -e "$env"
+        # --flash-size keep: take each bootloader's own header (the S3 gateway is
+        # built for 8MB, the nodes for 4MB) instead of forcing one size on all.
         python -m esptool --chip "$chip" merge-bin \
-            --flash-mode dio --flash-freq "$freq" --flash-size 4MB \
+            --flash-mode dio --flash-freq "$freq" --flash-size keep \
             -o "$out" \
             "$boot_off" ".pio/build/${env}/bootloader.bin" \
             0x8000      ".pio/build/${env}/partitions.bin" \
