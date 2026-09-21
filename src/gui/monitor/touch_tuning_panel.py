@@ -171,8 +171,8 @@ class LiveSensorWindow(QDialog):
                 "color: #16803c; font-weight: bold;")
             self._cpr_conditions.setText(
                 f"CPR LED: GREEN\n"
-                f"✓ {rounds}/{needed} synchronized rounds\n"
-                "✓ All conditions met")
+                f"OK: {rounds}/{needed} synchronized rounds\n"
+                "OK: All conditions met")
             return
 
         target = float(status.get("target_interval_ms", 0))
@@ -183,10 +183,10 @@ class LiveSensorWindow(QDialog):
         self._cpr_conditions.setStyleSheet("color: #6b4b00;")
         self._cpr_conditions.setText(
             "CPR to green LED:\n"
-            f"• Rounds: {rounds}/{needed}\n"
-            f"• {status.get('reason', 'Keep compressing')}\n"
-            f"• Together: {phase:.0f} ms max ({sensor_text})\n"
-            f"• Rhythm: {target:.0f} ± {cadence:.0f} ms")
+            f"- Rounds: {rounds}/{needed}\n"
+            f"- {status.get('reason', 'Keep compressing')}\n"
+            f"- Together: {phase:.0f} ms max ({sensor_text})\n"
+            f"- Rhythm: {target:.0f} +/- {cadence:.0f} ms")
 
     def update_data(self, data: dict) -> None:
         self._update_cpr_conditions()
