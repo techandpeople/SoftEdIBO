@@ -213,23 +213,33 @@ def _touch_with_saved_threshold(touch_cfg: dict[str, Any] | None,
     if not touch_cfg:
         return touch_cfg
     from src.config.settings import Settings
-    out = dict(touch_cfg)
+    # Do not copy unless there is an overlay to apply.  Apart from avoiding a
+    # needless allocation, callers use object identity to distinguish an
+    # untouched config from one whose saved defaults were merged in.
+    out = touch_cfg
+
+    def apply(key: str, value: Any) -> None:
+        nonlocal out
+        if out is touch_cfg:
+            out = dict(touch_cfg)
+        out[key] = value
+
     settings = Settings()
     key = str(touch_cfg.get("node_mac") or skin_type or "")
     quadrant_thresholds = settings.touch_quadrant_thresholds(key)
     if quadrant_thresholds:
-        out["quadrant_thresholds"] = quadrant_thresholds
+        apply("quadrant_thresholds", quadrant_thresholds)
     spike_threshold = settings.touch_spike_threshold(key)
     if spike_threshold is not None:
-        out["rhythm_spike_ut"] = spike_threshold
+        apply("rhythm_spike_ut", spike_threshold)
     frequency_reset_ms = settings.touch_frequency_reset_ms(key)
     if frequency_reset_ms is not None:
-        out["frequency_reset_ms"] = frequency_reset_ms
+        apply("frequency_reset_ms", frequency_reset_ms)
     sync_tolerance_ms = settings.touch_sync_tolerance_ms(key)
     if sync_tolerance_ms is not None:
-        out["rhythm_sync_tolerance_ms"] = sync_tolerance_ms
-    if not out.get("act_threshold_ut") and skin_type:
+        apply("rhythm_sync_tolerance_ms", sync_tolerance_ms)
+    if not touch_cfg.get("act_threshold_ut") and skin_type:
         saved = settings.touch_threshold_ut(skin_type)
         if saved is not None:
-            out["act_threshold_ut"] = saved
+            apply("act_threshold_ut", saved)
     return out

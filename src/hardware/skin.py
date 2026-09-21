@@ -217,7 +217,15 @@ class Skin:
         magnitudes, optionally after pressure compensation."""
         if touch_controller is None:
             return None
-        threshold = float((touch or {}).get("act_threshold_ut") or 0.0)
+        configured_threshold = (touch or {}).get("act_threshold_ut")
+        threshold = float(configured_threshold or 0.0)
+        if (threshold > 0.0
+                and hasattr(touch_controller, "send_command")):
+            # Keep the node's edge detection aligned with the configured (or
+            # saved per-skin-type) PC threshold.  Do not send the fallback
+            # default: an absent value deliberately leaves the node untouched.
+            touch_controller.send_command(
+                "configure", act_threshold_ut=threshold)
         compensator = self._touch_profile.build_compensator(touch)
         if threshold <= 0.0 and compensator is not None:
             threshold = float(compensator.threshold_ut)
