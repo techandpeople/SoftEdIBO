@@ -86,12 +86,14 @@ also folded into the direct actuator board) streams at ~28 Hz via ESP-NOW:
 | Field | Description |
 |-------|-------------|
 | `mag` | Per-sensor field-change magnitudes in uT, baseline-subtracted by the firmware |
-| `act` | Indices of sensors whose `mag` is at/above the firmware threshold (`act_threshold_ut`, default 300 uT) |
+| `act` | PC-derived indices whose (optionally compensated) `mag` reaches the configured uT threshold; the firmware field is ignored by detection consumers |
 | `vec` | Optional per-sensor 3-axis deltas `[[dx,dy,dz], ...]` (uT) when vector streaming is on (`{"cmd":"configure","stream_vec":true}` or the `MAG_VECTOR` build) - feeds vector compensation and the gesture ML's direction features |
 
 Each sensor auto-zeros over its first 70 reads at boot; `{"cmd":"rebaseline"}`
-re-zeros at runtime and `{"cmd":"configure",...}` tunes `act_threshold_ut`,
-`adaptive_baseline`/`baseline_tau_ms` and `stream_vec`.  Sensor order is wiring
+re-zeros at runtime. The PC derives activity from the baseline-subtracted `mag`
+values using `touch.act_threshold_ut` (default 300 uT); firmware `act` is retained
+only as wire compatibility. `adaptive_baseline`/`baseline_tau_ms` and
+`stream_vec` remain firmware options. Sensor order is wiring
 order: S0-S3 map to quadrants Q1(TL) Q2(TR) Q3(BL) Q4(BR); an optional 5th
 sensor is appended after them.  At boot the board announces
 `{"status":"node_magnet_sensor_ready","sensors":N,"variant":"mlx90393"}`

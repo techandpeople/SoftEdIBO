@@ -177,6 +177,7 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         self._start_recording(record.session_id, True, activity.simulation_mode,
                               session_robots)
         self._start_activity(activity, record.session_id, session_robots)
+        self._monitor.set_activity(activity)
         self._build_skin_participant_map(record.session_id)
         self._session_participants = list(participants)
         self._open_assignment_panel(session_robots)
@@ -298,6 +299,7 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         self._start_recording(session_id, dialog.record_streams,
                               activity.simulation_mode, robots)
         self._start_activity(activity, session_id, robots)
+        self._monitor.set_activity(activity)
         self._build_skin_participant_map(session_id)
         self._open_assignment_panel(robots)
         self._open_observer_panel()
@@ -822,6 +824,7 @@ class SessionPanel(QWidget, Ui_SessionPanel):
 
         self.session_finished.emit()
         self.session_stopped.emit()
+        self._monitor.set_activity(None)
         self._monitor.set_robots([])
         self._skin_participant = {}
         self._skin_robot = {}

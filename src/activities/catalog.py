@@ -352,6 +352,25 @@ CONDITIONS: tuple[Verb, ...] = (
         VerbField("intervals", "int", 5,
                   description="Steady intervals required from each stream."),
     )),
+    Verb("group_touch_sync", "condition",
+         "True after consecutive group compression rounds: every selected child "
+         "must press within one phase window on every beat, and the group beats "
+         "must keep the chosen cadence. `sensors`, when supplied in a hand-authored "
+         "spec, is the exact list of physical sensor IDs; otherwise sensors 0..N-1 "
+         "are used.", (
+        VerbField("participants", "int", 3,
+                  description="Number of independent child/sensor positions."),
+        VerbField("target_interval_ms", "ms", 550,
+                  description="Expected time between completed group beats."),
+        VerbField("cadence_tolerance_ms", "ms", 100,
+                  description="Allowed timing error of one group beat."),
+        VerbField("phase_tolerance_ms", "ms", 150,
+                  description="Maximum spread between children within one beat."),
+        VerbField("min_gap_ms", "ms", 250,
+                  description="Per-sensor debounce; faster onsets are ignored."),
+        VerbField("rounds", "int", 6,
+                  description="Consecutive synchronized group beats required."),
+    )),
     Verb("on_impact", "condition",
          "True once the Thymio was knocked ('impact': a sharp accelerometer "
          "deviation from rest) at least 'min' times in this state, at intensity "

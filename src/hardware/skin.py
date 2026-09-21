@@ -32,7 +32,8 @@ from src.hardware.fill_scaling import (DutyModel, duty_for_period,
 from src.hardware.touch_event_router import TouchEventRouter
 from src.hardware.units import pct_to_kpa
 from src.hardware.touch_profiles import touch_profiles
-from src.hardware.touch_source import CompensatedMagnetSource
+from src.hardware.touch_source import (DEFAULT_THRESHOLD_UT,
+                                       CompensatedMagnetSource)
 
 logger = logging.getLogger(__name__)
 
@@ -211,33 +212,31 @@ class Skin:
                             touch_controller: Any) -> Any:
         """Return the magnet source for detection consumers.
 
-        A :class:`CompensatedMagnetSource` when the skin's ``touch`` config has an
-        enabled coupling matrix; otherwise the raw controller unchanged (so the
-        detection path is byte-for-byte identical when compensation is off)."""
+        A :class:`CompensatedMagnetSource` derives ``act`` from PC-side uT
+        magnitudes, optionally after pressure compensation."""
         if touch_controller is None:
             return None
         threshold = float((touch or {}).get("act_threshold_ut") or 0.0)
-        if threshold > 0 and hasattr(touch_controller, "send_command"):
-            # The skin's saved sensitivity (calibrated in the guided capture /
-            # Test Actuators, resolved per skin type by the robot builder)
-            # becomes the node's live activation threshold at every build -
-            # same re-push semantics as stream_vec below (RAM-only firmware
-            # setting; harmless no-op while the node is offline).
-            touch_controller.send_command("configure",
-                                          act_threshold_ut=threshold)
         compensator = self._touch_profile.build_compensator(touch)
-        if compensator is None:
-            return touch_controller
-        logger.info("Pressure-informed touch compensation enabled for skin %s",
-                    self.skin_id)
-        if compensator.has_vector and hasattr(touch_controller, "send_command"):
+        if threshold <= 0.0 and compensator is not None:
+            threshold = float(compensator.threshold_ut)
+        if threshold <= 0.0:
+            threshold = DEFAULT_THRESHOLD_UT
+        thresholds = (touch or {}).get("quadrant_thresholds")
+        if not isinstance(thresholds, (list, tuple)) or not thresholds:
+            thresholds = threshold
+        if compensator is not None:
+            logger.info("Pressure-informed touch compensation enabled for skin %s",
+                        self.skin_id)
+        if (compensator is not None and compensator.has_vector
+                and hasattr(touch_controller, "send_command")):
             # The calibration carries offset vectors - ask the node to stream
             # its 3-axis deltas so the compensator can subtract vectorially
             # (RAM-only firmware flag, so re-push on every build; harmless
             # no-op on older firmware).
             touch_controller.send_command("configure", stream_vec=True)
         return CompensatedMagnetSource(
-            touch_controller, compensator, self._chamber_levels)
+            touch_controller, compensator, self._chamber_levels, thresholds)
 
     def _chamber_levels(self) -> dict[int, float]:
         """Current inflation level (% of max) per node slot - the live signal the

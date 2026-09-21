@@ -74,12 +74,38 @@ def test_offset_scales_with_chamber_level():
     assert seen[-1]["mag"][0] == 105.0   # 205 - 100
 
 
-def test_disabled_compensation_is_passthrough():
+def test_disabled_compensation_still_derives_activity_on_pc():
     skin, node = _skin(enabled=False)
-    # No CompensatedMagnetSource -> touch_source is the raw controller.
-    assert skin.touch_source is node
     seen: list = []
     skin.on_magnet(seen.append)
     raw = {"type": "magnet", "mag": [205.0, 8.0], "act": [0]}
     node.emit_magnet(raw)
-    assert seen[-1] == raw               # unchanged
+    assert seen[-1]["mag"] == raw["mag"]
+    assert seen[-1]["act"] == []        # PC default threshold is 300 uT
+    assert seen[-1]["pc_detected"] is True
+
+
+def test_pc_activity_uses_configured_ut_threshold_not_firmware_act():
+    node = _FakeNode()
+    touch = {"node_mac": "AA:01", "sensor_count": 2,
+             "act_threshold_ut": 500.0}
+    inp = {"controller": node, "node_slot": 0, "max_pressure": 8.0}
+    skin = Skin("belly", [inp], touch=touch, touch_controller=node)
+    seen: list = []
+    skin.on_magnet(seen.append)
+    node.emit_magnet({"type": "magnet", "mag": [505.0, 8.0], "act": []})
+    assert seen[-1]["act"] == [0]
+
+
+def test_pc_activity_uses_per_sensor_tuning_thresholds():
+    node = _FakeNode()
+    touch = {"node_mac": "AA:01", "sensor_count": 2,
+             "quadrant_thresholds": [500.0, 100.0]}
+    inp = {"controller": node, "node_slot": 0, "max_pressure": 8.0}
+    skin = Skin("belly", [inp], touch=touch, touch_controller=node)
+    seen: list = []
+    skin.on_magnet(seen.append)
+    node.emit_magnet({"type": "magnet", "mag": [400.0, 150.0],
+                      "act": [0]})
+    assert seen[-1]["mag"] == [400.0, 150.0]
+    assert seen[-1]["act"] == [1]

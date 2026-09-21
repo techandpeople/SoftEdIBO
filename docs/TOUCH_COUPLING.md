@@ -107,11 +107,13 @@ Three robustness layers on top of the plain subtraction:
   chamber is at/above a level - the "ignore touch while inflated/vacuum" last
   resort).
 - **Live wiring:** `src/hardware/touch_source.py` `CompensatedMagnetSource` wraps
-  the raw controller; the Skin exposes it as `skin.touch_source` and `skin.on_magnet`.
-  Detection consumers (activities, gesture ML, the skin's QuadrantDetector +
-  TouchEventRouter) read the compensated stream via `subscribe_skin_magnet`; the
-  live monitor and this calibration tool keep using the raw controller (they
-  need uncompensated uT). The stream recorder captures the raw stream *and*,
+  the raw controller, derives `act` from PC-side uT values, and optionally applies
+  pressure compensation; the Skin exposes it as `skin.touch_source` and
+  `skin.on_magnet`. Detection consumers (activities, gesture ML, the skin's
+  QuadrantDetector + TouchEventRouter, and the live sensor window) read this
+  stream via `subscribe_skin_magnet`; the general live monitor and this
+  calibration tool keep using the raw controller (they need uncompensated uT).
+  The stream recorder captures the raw stream *and*,
   when compensation is on, the compensated one (extra lines flagged
   `compensated` - the gesture ML trains on them; see docs/TOUCH_ML.md); the
   coupling analyzer skips flagged lines, so such recordings still calibrate on

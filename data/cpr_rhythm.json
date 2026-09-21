@@ -2,7 +2,7 @@
   "format": "softedibo.activity",
   "version": 1,
   "name": "CPR Rhythm",
-  "description": "Three participants keep a steady compression rhythm until the beat is consistent long enough.",
+    "description": "Three participants make consecutive, synchronized compression rounds at a steady cadence.",
   "spec": {
     "initial": "listening",
     "states": {
@@ -20,12 +20,14 @@
           {
             "to": "complete",
             "when": {
-              "group_touch_rhythm": {
+              "group_touch_sync": {
                 "participants": 3,
-                "tolerance_hz": 0.2,
-                "sync_tolerance_ms": 150,
-                "min_gap_ms": 20,
-                "intervals": 5
+                "sensors": [0, 1, 2],
+                "target_interval_ms": 550,
+                "cadence_tolerance_ms": 100,
+                "phase_tolerance_ms": 150,
+                "min_gap_ms": 250,
+                "rounds": 6
               }
             }
           }

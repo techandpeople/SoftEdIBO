@@ -15,13 +15,96 @@ restored for the same touch node on the next session.
 from __future__ import annotations
 
 import time
+from collections import deque
+from math import ceil
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import Qt, QTimer, QRect, Signal
+from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (QDialog, QDoubleSpinBox, QGridLayout, QGroupBox,
-                               QLabel, QPushButton, QProgressBar, QWidget)
+                               QLabel, QPushButton, QProgressBar, QSizePolicy,
+                               QWidget)
 
 from src.gui.ui_touch_tuning_panel import Ui_TouchTuningPanel
 from src.hardware.skin import Skin
+
+
+class MagnitudePlot(QWidget):
+    """Rolling magnitude plot fed by the live sensor window."""
+
+    _colors = (QColor("#e74c3c"), QColor("#2ecc71"),
+               QColor("#3498db"), QColor("#f1c40f"))
+
+    def __init__(self, sensor_count: int = 4,
+                 parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._history = [deque(maxlen=240) for _ in range(sensor_count)]
+        self._thresholds = [100.0] * sensor_count
+        self.setMinimumHeight(220)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding,
+                           QSizePolicy.Policy.Expanding)
+
+    def add_sample(self, magnitudes: list[float], thresholds: list[float]) -> None:
+        self._thresholds = list(thresholds)
+        for index, history in enumerate(self._history):
+            value = magnitudes[index] if index < len(magnitudes) else 0.0
+            history.append(max(0.0, float(value)))
+        self.update()
+
+    def paintEvent(self, _event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.fillRect(self.rect(), QColor("#202124"))
+        painter.setPen(QColor("#e8eaed"))
+        painter.drawText(12, 16, "Live magnitude (uT)")
+        painter.setPen(QColor("#bdc1c6"))
+        painter.drawText(self.width() - 105, 16, "recent samples")
+
+        gap = 8
+        cell_width = (self.width() - gap * 3) // 2
+        cell_height = (self.height() - 32 - gap * 3) // 2
+        if cell_width <= 0 or cell_height <= 0:
+            return
+
+        for index, history in enumerate(self._history):
+            column = index % 2
+            row = index // 2
+            cell = QRect(column * (cell_width + gap) + gap,
+                         row * (cell_height + gap) + 24,
+                         cell_width, cell_height)
+            plot = cell.adjusted(38, 22, -8, -22)
+            maximum = max(list(history) + [self._thresholds[index], 100.0])
+            y_max = max(100.0, ceil(maximum / 100.0) * 100.0)
+
+            painter.setPen(QPen(QColor("#5f6368"), 1))
+            painter.drawRect(cell)
+            painter.setPen(QColor("#e8eaed"))
+            painter.drawText(cell.left() + 8, cell.top() + 15,
+                             f"Q{index + 1}")
+            painter.setPen(QColor("#bdc1c6"))
+            painter.drawText(5, plot.top() + 5, f"{y_max:.0f}")
+            painter.drawText(18, plot.bottom() + 16, "0")
+
+            painter.setPen(QPen(QColor("#45484d"), 1))
+            painter.drawLine(plot.topLeft(), plot.topRight())
+            painter.drawLine(plot.bottomLeft(), plot.bottomRight())
+            painter.drawLine(plot.topLeft(), plot.bottomLeft())
+            threshold_y = plot.bottom() - (
+                float(self._thresholds[index]) / y_max * plot.height())
+            painter.setPen(QPen(self._colors[index % len(self._colors)], 1,
+                                Qt.PenStyle.DashLine))
+            painter.drawLine(plot.left(), int(threshold_y),
+                             plot.right(), int(threshold_y))
+
+            if len(history) < 2:
+                continue
+            points = []
+            for point, value in enumerate(history):
+                x = plot.left() + point * plot.width() / (len(history) - 1)
+                y = plot.bottom() - (value / y_max) * plot.height()
+                points.append((int(x), int(y)))
+            painter.setPen(QPen(self._colors[index % len(self._colors)], 2))
+            for start, end in zip(points, points[1:]):
+                painter.drawLine(*start, *end)
 
 
 class LiveSensorWindow(QDialog):
@@ -36,8 +119,19 @@ class LiveSensorWindow(QDialog):
         self._state_labels: list[QLabel] = []
         self._bars: list[QProgressBar] = []
         self._frequency_labels: list[QLabel] = []
+        self._synchrony_label = QLabel("Current synchrony: -- ms")
+        self._cpr_conditions = QLabel()
+        self._cpr_conditions.setWordWrap(True)
+        self._cpr_conditions.setMinimumWidth(180)
+        self._cpr_conditions.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self._magnitude_plot = MagnitudePlot(parent=self)
 
         layout = QGridLayout(self)
+        layout.addWidget(self._synchrony_label, 0, 5, 1, 2)
+        # The free area below "Current synchrony" is the live checklist for
+        # the CPR activity. It stays hidden in ordinary touch-monitor use.
+        layout.addWidget(self._cpr_conditions, 1, 5, 4, 2)
         layout.addWidget(QLabel("Sensor"), 0, 0)
         layout.addWidget(QLabel("Magnitude"), 0, 1)
         layout.addWidget(QLabel("Level"), 0, 2)
@@ -59,18 +153,66 @@ class LiveSensorWindow(QDialog):
             self._bars.append(bar)
             self._state_labels.append(state)
             self._frequency_labels.append(frequency)
-        self.resize(560, 190)
+        layout.addWidget(self._magnitude_plot, 5, 0, 1, 7)
+        self.resize(720, 460)
+        self._update_cpr_conditions()
+
+    def _update_cpr_conditions(self) -> None:
+        """Show exactly what is still needed for the CPR LED to go green."""
+        status = getattr(self._skin, "cpr_sync_status", None)
+        if not isinstance(status, dict) or not status.get("active"):
+            self._cpr_conditions.hide()
+            return
+        self._cpr_conditions.show()
+        rounds = int(status.get("rounds", 0))
+        needed = int(status.get("rounds_required", 0))
+        if status.get("complete"):
+            self._cpr_conditions.setStyleSheet(
+                "color: #16803c; font-weight: bold;")
+            self._cpr_conditions.setText(
+                f"CPR LED: GREEN\n"
+                f"✓ {rounds}/{needed} synchronized rounds\n"
+                "✓ All conditions met")
+            return
+
+        target = float(status.get("target_interval_ms", 0))
+        cadence = float(status.get("cadence_tolerance_ms", 0))
+        phase = float(status.get("phase_tolerance_ms", 0))
+        sensors = status.get("sensors", [])
+        sensor_text = ", ".join(f"T{value}" for value in sensors)
+        self._cpr_conditions.setStyleSheet("color: #6b4b00;")
+        self._cpr_conditions.setText(
+            "CPR to green LED:\n"
+            f"• Rounds: {rounds}/{needed}\n"
+            f"• {status.get('reason', 'Keep compressing')}\n"
+            f"• Together: {phase:.0f} ms max ({sensor_text})\n"
+            f"• Rhythm: {target:.0f} ± {cadence:.0f} ms")
 
     def update_data(self, data: dict) -> None:
+        self._update_cpr_conditions()
         magnitudes = data.get("mag")
         active = {int(value) for value in (data.get("act") or [])
                   if str(value).lstrip("-").isdigit()}
         thresholds = self._skin.touch_thresholds or [100.0] * 4
         frequencies = getattr(self.parent(), "_frequency_hz", {})
+        press_times = [getattr(self.parent(), "_last_press_ms", {}).get(index)
+                       for index in active]
+        press_times = [value for value in press_times if value is not None]
+        if len(press_times) >= 2:
+            synchrony_ms = max(press_times) - min(press_times)
+            self._synchrony_label.setText(
+                f"Current synchrony: {synchrony_ms:.0f} ms")
+        else:
+            self._synchrony_label.setText("Current synchrony: -- ms")
         if not isinstance(magnitudes, (list, tuple)):
             return
+        values = [float(value) for value in magnitudes]
+        self._magnitude_plot.add_sample(values, [
+            float(thresholds[index]) if index < len(thresholds) else 100.0
+            for index in range(4)
+        ])
         for index in range(4):
-            magnitude = float(magnitudes[index]) if index < len(magnitudes) else 0.0
+            magnitude = values[index] if index < len(values) else 0.0
             threshold = float(thresholds[index]) if index < len(thresholds) else 100.0
             self._value_labels[index].setText(f"{magnitude:.1f} uT")
             self._bars[index].setRange(0, max(200, int(threshold * 3)))
@@ -134,9 +276,7 @@ class TouchTuningPanel(QGroupBox, Ui_TouchTuningPanel):
         self.live_btn.clicked.connect(self._show_live_window)
         self._live_data.connect(self._update_live_data,
                                 Qt.ConnectionType.QueuedConnection)
-        controller = getattr(skin, "touch_controller", None)
-        if controller is not None and hasattr(controller, "on_magnet"):
-            controller.on_magnet(lambda data: self._live_data.emit(data))
+        skin.on_magnet(lambda data: self._live_data.emit(data))
 
     # ------------------------------------------------------------------
 
@@ -171,6 +311,9 @@ class TouchTuningPanel(QGroupBox, Ui_TouchTuningPanel):
     def _apply_thresholds(self) -> None:
         thresholds = [s.value() for s in self._threshold_spins]
         self._skin.set_touch_thresholds(thresholds)
+        source = getattr(self._skin, "touch_source", None)
+        if source is not None and hasattr(source, "set_thresholds_ut"):
+            source.set_thresholds_ut(thresholds)
         from src.config.settings import Settings
         touch = getattr(self._skin, "touch", None) or {}
         key = str(touch.get("node_mac") or getattr(self._skin, "skin_type", ""))
@@ -238,17 +381,13 @@ class TouchTuningPanel(QGroupBox, Ui_TouchTuningPanel):
         self.rebaseline_btn.setEnabled(True)
 
     def _apply_node_config(self) -> None:
-        """Send configure to the firmware to set the node's activation threshold
-        (the uT at/above which it reports a sensor in ``act``) to this skin
-        type's saved sensitivity (calibrated in the guided gesture capture /
-        Test Actuators), falling back to the firmware default."""
-        ctrl = getattr(self._skin, "touch_controller", None)
-        if ctrl is None or not hasattr(ctrl, "send_command"):
-            return
+        """Apply the saved uT activation threshold to the PC source."""
         from src.config.settings import Settings
         saved = Settings().touch_threshold_ut(
             getattr(self._skin, "skin_type", "") or "")
-        ctrl.send_command("configure", act_threshold_ut=saved or 300.0)
+        source = getattr(self._skin, "touch_source", None)
+        if source is not None and hasattr(source, "set_threshold_ut"):
+            source.set_threshold_ut(saved or 300.0)
 
     def _apply_adaptive_baseline(self) -> None:
         """Toggle the node's adaptive baseline (and its time constant)."""

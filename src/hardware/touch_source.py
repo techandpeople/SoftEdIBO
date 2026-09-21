@@ -1,4 +1,4 @@
-"""CompensatedMagnetSource - a magnet stream with pressure-informed compensation.
+"""PC-side magnet touch detection and pressure-informed compensation.
 
 Wraps a node's raw magnet controller and re-emits each ``type:"magnet"`` message
 with the actuation offset removed (see :class:`src.core.touch_compensation.
@@ -16,9 +16,9 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Sequence
 
-from src.core.touch_compensation import TouchCompensator
+from src.core.touch_compensation import DEFAULT_THRESHOLD_UT, TouchCompensator
 
 logger = logging.getLogger(__name__)
 
@@ -44,14 +44,16 @@ def subscribe_skin_magnet(skin: Any,
 
 
 class CompensatedMagnetSource:
-    """Subscribes once to a raw controller's magnet stream, compensates each
-    message using live chamber levels, and fans it out to its own subscribers."""
+    """Subscribes once to raw magnet data and derives touch state on the PC."""
 
-    def __init__(self, controller: Any, compensator: TouchCompensator,
-                 level_provider: Callable[[], Mapping[int, float]]) -> None:
+    def __init__(self, controller: Any, compensator: TouchCompensator | None,
+                 level_provider: Callable[[], Mapping[int, float]],
+                 threshold_ut: float | Sequence[float] = DEFAULT_THRESHOLD_UT
+                 ) -> None:
         self._ctrl = controller
         self._comp = compensator
         self._levels = level_provider
+        self._thresholds_ut = self._normalise_thresholds(threshold_ut)
         self._subs: list[Callable[[dict[str, Any]], None]] = []
         self._attached = False
 
@@ -66,21 +68,57 @@ class CompensatedMagnetSource:
             self._ctrl.on_magnet(self._handle)
 
     def set_threshold_ut(self, value: float) -> None:
-        """Retune the compensator's activation threshold (uT) at runtime.
+        """Retune the PC activation threshold (uT) at runtime.
 
-        The compensated stream rederives ``act`` from the residual magnitudes at
-        its own threshold, so when a new sensitivity is pushed to the node the
-        compensator must follow - otherwise the node and the compensated stream
-        would disagree about what counts as a touch."""
-        self._comp.threshold_ut = float(value)
+        When compensation is enabled, its residual activity threshold follows
+        the same value.
+        """
+        self._thresholds_ut = [float(value)] * len(self._thresholds_ut)
+        if self._comp is not None:
+            self._comp.threshold_ut = float(value)
+
+    def set_thresholds_ut(self, values: Sequence[float]) -> None:
+        """Set the per-sensor PC activation thresholds (uT)."""
+        self._thresholds_ut = self._normalise_thresholds(values)
+
+    @staticmethod
+    def _normalise_thresholds(
+            values: float | Sequence[float]) -> list[float]:
+        if isinstance(values, (int, float)):
+            return [float(values)]
+        thresholds = [float(value) for value in values]
+        return thresholds or [DEFAULT_THRESHOLD_UT]
+
+    def _derive_active(self, data: dict[str, Any]) -> dict[str, Any]:
+        out = dict(data)
+        magnitudes = data.get("mag")
+        if not isinstance(magnitudes, (list, tuple)):
+            out["act"] = []
+            return out
+        out["act"] = []
+        for index, value in enumerate(magnitudes):
+            try:
+                threshold = (self._thresholds_ut[index]
+                             if index < len(self._thresholds_ut)
+                             else self._thresholds_ut[-1])
+                if float(value) >= threshold:
+                    out["act"].append(index)
+            except (TypeError, ValueError):
+                continue
+        out["pc_detected"] = True
+        return out
 
     def _handle(self, data: dict[str, Any]) -> None:
         try:
-            out = self._comp.apply(data, self._levels(),
-                                   now_ms=time.monotonic() * 1000.0)
+            if self._comp is None:
+                out = self._derive_active(data)
+            else:
+                out = self._comp.apply(data, self._levels(),
+                                       now_ms=time.monotonic() * 1000.0)
+                out = self._derive_active(out)
         except Exception:   # noqa: BLE001 - never let one bad reading kill the stream
-            logger.exception("touch compensation failed; passing raw")
-            out = data
+            logger.exception("touch compensation failed; deriving activity from raw uT")
+            out = self._derive_active(data)
         dead: list[int] = []
         for i, cb in enumerate(self._subs):
             try:

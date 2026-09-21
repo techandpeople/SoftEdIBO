@@ -373,6 +373,86 @@ def test_group_touch_rhythm_rejects_different_sensor_cadence(clock):
     assert activity.unit_state(unit.unit_id) == "s"
 
 
+def _group_sync_spec(**overrides):
+    params = {
+        "participants": 3,
+        "sensors": [0, 1, 2],
+        "target_interval_ms": 100,
+        "cadence_tolerance_ms": 10,
+        "phase_tolerance_ms": 40,
+        "min_gap_ms": 30,
+        "rounds": 4,
+    }
+    params.update(overrides)
+    return {"initial": "s", "states": {
+        "s": {"do": [], "transitions": [{
+            "to": "done", "when": {"group_touch_sync": params},
+        }]},
+        "done": {"do": [], "transitions": []},
+    }}
+
+
+def _emit_group_round(activity, unit, clock, offsets_ms=(0, 10, 20)):
+    """Emit one three-child group beat and leave the clock at its last press."""
+    for sensor, offset in enumerate(offsets_ms):
+        if sensor:
+            clock.advance((offset - offsets_ms[sensor - 1]) / 1000)
+        activity._on_magnet(unit, {"act": [sensor]})
+        activity._on_magnet(unit, {"act": []})
+
+
+def test_group_touch_sync_requires_consecutive_complete_lockstep_rounds(clock):
+    activity = ScriptedActivity("CPR", "", _group_sync_spec())
+    robot = _FakeRobot([_FakeSkin(controller=_FakeCtrl())])
+    _start(activity, robot)
+    unit = _unit(activity)
+
+    # The group medians are exactly 100 ms apart. Each group has a 20 ms
+    # participant spread, well within its 40 ms phase window.
+    for index in range(4):
+        _emit_group_round(activity, unit, clock)
+        if index < 3:
+            clock.advance(0.08)  # 100 ms from one median to the next
+
+    activity._on_tick()
+    assert activity.unit_state(unit.unit_id) == "done"
+
+
+def test_group_touch_sync_rejects_a_late_participant_in_any_round(clock):
+    activity = ScriptedActivity("CPR", "", _group_sync_spec())
+    robot = _FakeRobot([_FakeSkin(controller=_FakeCtrl())])
+    _start(activity, robot)
+    unit = _unit(activity)
+
+    _emit_group_round(activity, unit, clock)
+    clock.advance(0.08)
+    # Sensor 2 arrives 80 ms after the first child, outside the 40 ms window.
+    _emit_group_round(activity, unit, clock, offsets_ms=(0, 10, 80))
+    clock.advance(0.02)
+    _emit_group_round(activity, unit, clock)
+    clock.advance(0.08)
+    _emit_group_round(activity, unit, clock)
+
+    activity._on_tick()
+    assert activity.unit_state(unit.unit_id) == "s"
+
+
+def test_group_touch_sync_uses_the_configured_sensor_positions(clock):
+    activity = ScriptedActivity(
+        "CPR", "", _group_sync_spec(sensors=[1, 2, 3], rounds=2))
+    robot = _FakeRobot([_FakeSkin(controller=_FakeCtrl(), n_chambers=4)])
+    _start(activity, robot)
+    unit = _unit(activity)
+
+    # Pressing 0, 1 and 2 twice must not impersonate children at zones 1, 2, 3.
+    for _ in range(2):
+        _emit_group_round(activity, unit, clock)
+        clock.advance(0.08)
+
+    activity._on_tick()
+    assert activity.unit_state(unit.unit_id) == "s"
+
+
 def test_advance_phase_skips_timer_and_stops_at_terminal(clock):
     activity, ctrl, skin, robot = _condition_a()
     _start(activity, robot)

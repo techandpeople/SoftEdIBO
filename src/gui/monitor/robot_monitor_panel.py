@@ -50,6 +50,7 @@ class RobotMonitorPanel(QWidget):
         self._inner.installEventFilter(_WheelFilter(scroll))
 
         self._robot_widgets: list[RobotMonitorWidget] = []
+        self._activity = None
 
         self._timer = QTimer(self)
         self._timer.setInterval(300)
@@ -65,6 +66,7 @@ class RobotMonitorPanel(QWidget):
 
         for robot in robots:
             rw = RobotMonitorWidget(robot)
+            rw.set_activity(self._activity)
             rw.touch_event.connect(self.touch_event)
             self._robot_widgets.append(rw)
             self._layout.addWidget(rw)
@@ -85,6 +87,13 @@ class RobotMonitorPanel(QWidget):
         for rw in self._robot_widgets:
             rw.set_paused(paused)
 
+    def set_activity(self, activity) -> None:
+        """Attach the active activity so robot cards can mirror CPR state."""
+        self._activity = activity
+        for rw in self._robot_widgets:
+            rw.set_activity(activity)
+
     def _refresh(self) -> None:
         for rw in self._robot_widgets:
             rw.refresh()
+            rw.set_activity(self._activity)

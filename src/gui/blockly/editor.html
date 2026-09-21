@@ -71,6 +71,7 @@
       <block type="se_gesture_count"></block>
       <block type="se_touch_rhythm"></block>
       <block type="se_group_touch_rhythm"></block>
+      <block type="se_group_touch_sync"></block>
       <block type="se_on_impact"></block>
       <block type="se_on_lifted"></block>
       <block type="se_organs"></block>
@@ -396,6 +397,24 @@
                 tooltip: 'True when the requested number of separate sensors have '
                  + 'steady frequencies within the selected Hz tolerance. The '
                  + 'shared frequency itself is learned from the children.' },
+
+              { type: 'se_group_touch_sync',
+                message0: '%1 children synchronize zones %2, %3, %4',
+                args0: [{ type: 'field_number', name: 'PARTICIPANTS', value: 3, min: 1, max: 3 },
+                  { type: 'field_number', name: 'S0', value: 0, min: 0 },
+                  { type: 'field_number', name: 'S1', value: 1, min: 0 },
+                  { type: 'field_number', name: 'S2', value: 2, min: 0 }],
+                message1: 'every %1 ms +/- %2 ms; together within %3 ms; %4 rounds',
+                args1: [{ type: 'field_number', name: 'TARGET', value: 550, min: 1 },
+                  { type: 'field_number', name: 'CADENCE', value: 100, min: 0 },
+                  { type: 'field_number', name: 'PHASE', value: 150, min: 0 },
+                  { type: 'field_number', name: 'ROUNDS', value: 6, min: 1 }],
+                message2: 'ignore repeats faster than %1 ms',
+                args2: [{ type: 'field_number', name: 'MIN_GAP', value: 250, min: 0 }],
+                output: 'Cond', colour: 20,
+                tooltip: 'Counts a round only when every selected child presses once '
+                 + 'within the phase window. Success needs consecutive complete rounds '
+                 + 'at the target tempo; a late child or wrong beat resets the streak.' },
 
         { type: 'se_on_impact',
           message0: 'Thymio hit at least %1 times, at least %2',
@@ -724,6 +743,16 @@
         case 'se_group_touch_rhythm': return { group_touch_rhythm: {
           participants: num(b, 'PARTICIPANTS'), tolerance_hz: num(b, 'TOLERANCE'),
           min_gap_ms: num(b, 'MIN_GAP'), intervals: num(b, 'INTERVALS') } };
+        case 'se_group_touch_sync': {
+          var participants = num(b, 'PARTICIPANTS');
+          return { group_touch_sync: {
+            participants: participants,
+            sensors: [num(b, 'S0'), num(b, 'S1'), num(b, 'S2')].slice(0, participants),
+            target_interval_ms: num(b, 'TARGET'),
+            cadence_tolerance_ms: num(b, 'CADENCE'),
+            phase_tolerance_ms: num(b, 'PHASE'),
+            min_gap_ms: num(b, 'MIN_GAP'), rounds: num(b, 'ROUNDS') } };
+        }
         case 'se_on_impact':   return { on_impact: { min: num(b, 'MIN'),
                                                      level: num(b, 'LEVEL') } };
         case 'se_on_lifted':   return { on_lifted: { min: num(b, 'MIN') } };
@@ -975,6 +1004,18 @@
                                                        : v.tolerance_pct);
           setF(b, 'MIN_GAP', v.min_gap_ms);
           setF(b, 'INTERVALS', v.intervals); break;
+        case 'group_touch_sync':
+          b = newStepBlock('se_group_touch_sync'); v = v || {};
+          setF(b, 'PARTICIPANTS', v.participants);
+          var sensors = Array.isArray(v.sensors) ? v.sensors : [0, 1, 2];
+          setF(b, 'S0', sensors[0] == null ? 0 : sensors[0]);
+          setF(b, 'S1', sensors[1] == null ? 1 : sensors[1]);
+          setF(b, 'S2', sensors[2] == null ? 2 : sensors[2]);
+          setF(b, 'TARGET', v.target_interval_ms);
+          setF(b, 'CADENCE', v.cadence_tolerance_ms);
+          setF(b, 'PHASE', v.phase_tolerance_ms);
+          setF(b, 'MIN_GAP', v.min_gap_ms);
+          setF(b, 'ROUNDS', v.rounds); break;
         case 'on_impact': {
           b = newStepBlock('se_on_impact');
           var im = (v && v.min != null) ? v.min : v;

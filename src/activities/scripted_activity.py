@@ -30,7 +30,8 @@ from PySide6.QtCore import QObject, QTimer
 from src.activities import catalog
 from src.activities.base_activity import BaseActivity
 from src.activities.organ_resolver import OrganResolver
-from src.activities.touch_rhythm import (MagnitudeCompressionTracker,
+from src.activities.touch_rhythm import (GroupTouchSyncTracker,
+                                         MagnitudeCompressionTracker,
                                          TouchRhythmTracker)
 from src.hardware.fill_scaling import (
     MIN_PUMP_DUTY,
@@ -86,6 +87,10 @@ class _Unit:
     rhythm: TouchRhythmTracker = field(default_factory=TouchRhythmTracker)
     rhythm_by_sensor: dict[int, TouchRhythmTracker] = field(default_factory=dict)
     rhythm_last_press_ms: dict[int, float] = field(default_factory=dict)
+    group_sync: GroupTouchSyncTracker = field(default_factory=GroupTouchSyncTracker)
+    # CPR-specific live monitor payload. Present only for behaviours using the
+    # `group_touch_sync` condition; the Skin exposes its current copy to Qt.
+    cpr_sync_params: dict[str, Any] | None = None
     magnitude_by_sensor: dict[int, MagnitudeCompressionTracker] = field(default_factory=dict)
     # Classified gestures (tap/stroke/...) counted in the current state, by label,
     # plus the live classifier feeding them (kept alive here). Empty/None when the
@@ -156,6 +161,7 @@ class ScriptedActivity(BaseActivity):
         # Callbacks fired whenever any unit changes phase (state) - manual,
         # timed or touch-driven - so a GUI can keep phase controls in sync.
         self._phase_listeners: list = []
+        self._cpr_sync_params = self._find_cpr_sync_params()
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -174,6 +180,7 @@ class ScriptedActivity(BaseActivity):
                     robot=robot, skin=skin, ctrl=ctrl,
                     chambers=sorted(skin.chambers.keys()),
                     min_duty=self._resolve_min_duty(settings_data, skin),
+                    cpr_sync_params=self._cpr_sync_params,
                 )
                 self._units[unit.unit_id] = unit
                 self._subscribe_touch(unit)
@@ -181,6 +188,7 @@ class ScriptedActivity(BaseActivity):
                 self._subscribe_impact(unit)
                 self._subscribe_lifted(unit)
                 self._setup_organs(unit, skin)
+                self._publish_cpr_status(unit)
             if not skins:
                 # A robot without skins (e.g. a bare Thymio) still runs the
                 # spec - its unit just has no chambers/LED ring/touch board,
@@ -361,10 +369,12 @@ class ScriptedActivity(BaseActivity):
         unit.lifted_count = 0
         unit.gesture_counts.clear()
         unit.rhythm.reset()
+        unit.group_sync.reset()
         for tracker in unit.rhythm_by_sensor.values():
             tracker.reset()
         for tracker in unit.magnitude_by_sensor.values():
             tracker.reset()
+        self._publish_cpr_status(unit)
         unit.pending_state = None
         unit.aux.clear()
         body = self._states.get(state, {}).get("do", [])
@@ -420,6 +430,8 @@ class ScriptedActivity(BaseActivity):
             return self._eval_touch_rhythm(unit, val)
         if name == "group_touch_rhythm":
             return self._eval_group_touch_rhythm(unit, val)
+        if name == "group_touch_sync":
+            return self._eval_group_touch_sync(unit, val)
         if name == "on_impact":
             if isinstance(val, dict):
                 need = int(val.get("min", 1))
@@ -510,6 +522,72 @@ class ScriptedActivity(BaseActivity):
         sync_tolerance_ms = max(0.0, float(sync_tolerance_ms))
         press_times = [press_ms for _, _, press_ms in selected]
         return max(press_times) - min(press_times) <= sync_tolerance_ms
+
+    @staticmethod
+    def _eval_group_touch_sync(unit: _Unit, val: Any) -> bool:
+        """Require consecutive lockstep multi-child compression rounds.
+
+        Unlike ``group_touch_rhythm``, this pairs presses into individual group
+        beats.  A success therefore proves that every selected child was within
+        the phase window on *each* of the requested rounds, rather than merely
+        having a similar latest frequency.
+        """
+        params = val if isinstance(val, dict) else {}
+        sensor_ids = params.get("sensors")
+        if not isinstance(sensor_ids, (list, tuple)):
+            sensor_ids = None
+        return unit.group_sync.matches(
+            participants=max(1, int(params.get("participants", 3))),
+            sensor_ids=list(sensor_ids) if sensor_ids is not None else None,
+            target_interval_ms=float(params.get("target_interval_ms", 550)),
+            cadence_tolerance_ms=max(
+                0.0, float(params.get("cadence_tolerance_ms", 100))),
+            phase_tolerance_ms=max(
+                0.0, float(params.get("phase_tolerance_ms", 150))),
+            min_gap_ms=max(0.0, float(params.get("min_gap_ms", 250))),
+            required_rounds=max(1, int(params.get("rounds", 6))),
+            now_ms=time.monotonic() * 1000.0,
+        )
+
+    def _find_cpr_sync_params(self) -> dict[str, Any] | None:
+        """Find this behaviour's CPR condition configuration, if it has one."""
+        for state in self._states.values():
+            for transition in state.get("transitions", []) or []:
+                when = transition.get("when", {}) if isinstance(transition, dict) else {}
+                params = when.get("group_touch_sync") if isinstance(when, dict) else None
+                if isinstance(params, dict):
+                    return dict(params)
+        return None
+
+    def _publish_cpr_status(self, unit: _Unit) -> None:
+        """Expose CPR progress on the Skin for the live touch-sensor window."""
+        if unit.skin is None or unit.cpr_sync_params is None:
+            return
+        if unit.state.lower() in {"complete", "success", "done"}:
+            status = {"active": True, "complete": True,
+                      "rounds": unit.cpr_sync_params.get("rounds", 6),
+                      "rounds_required": unit.cpr_sync_params.get("rounds", 6),
+                      "reason": "CPR synchronized - LED is green"}
+        else:
+            params = unit.cpr_sync_params
+            status = unit.group_sync.status(
+                participants=max(1, int(params.get("participants", 3))),
+                sensor_ids=(list(params["sensors"])
+                            if isinstance(params.get("sensors"), (list, tuple))
+                            else None),
+                target_interval_ms=float(params.get("target_interval_ms", 550)),
+                cadence_tolerance_ms=max(
+                    0.0, float(params.get("cadence_tolerance_ms", 100))),
+                phase_tolerance_ms=max(
+                    0.0, float(params.get("phase_tolerance_ms", 150))),
+                min_gap_ms=max(0.0, float(params.get("min_gap_ms", 250))),
+                required_rounds=max(1, int(params.get("rounds", 6))),
+                now_ms=time.monotonic() * 1000.0,
+            )
+            status["active"] = True
+        # The UI only reads this immutable-at-replacement dict on its queued
+        # sensor callback; assignment is atomic under CPython's GIL.
+        unit.skin.cpr_sync_status = status
 
     @staticmethod
     def _unit_kind(unit: _Unit) -> str:
@@ -1131,21 +1209,25 @@ class ScriptedActivity(BaseActivity):
                 tracker.exit = exit
                 tracker.spike_delta = spike_delta
                 if tracker.update(magnitude):
-                    unit.rhythm_by_sensor.setdefault(
-                        sensor_idx, TouchRhythmTracker()).record(now_ms)
-                    unit.rhythm_last_press_ms[sensor_idx] = now_ms
-                    unit.rhythm.record(now_ms)
+                    self._record_compression(unit, sensor_idx, now_ms)
         elif new_set and not unit.active_touch:
             # Backward-compatible fallback for old/binary sensor messages.
             unit.rhythm.record(now_ms)
         for sensor_idx in new_set - unit.active_touch:      # newly pressed
             if not isinstance(magnitudes, (list, tuple)):
-                tracker = unit.rhythm_by_sensor.setdefault(
-                    sensor_idx, TouchRhythmTracker())
-                tracker.record(now_ms)
-                unit.rhythm_last_press_ms[sensor_idx] = now_ms
+                self._record_compression(unit, sensor_idx, now_ms)
             self._on_press(unit, mapping, sensor_idx)
         unit.active_touch = new_set
+        self._publish_cpr_status(unit)
+
+    @staticmethod
+    def _record_compression(unit: _Unit, sensor_idx: int, now_ms: float) -> None:
+        """Fan one accepted physical compression into all rhythm consumers."""
+        unit.rhythm_by_sensor.setdefault(
+            sensor_idx, TouchRhythmTracker()).record(now_ms)
+        unit.rhythm_last_press_ms[sensor_idx] = now_ms
+        unit.rhythm.record(now_ms)
+        unit.group_sync.record(sensor_idx, now_ms)
 
     @staticmethod
     def _magnitude_thresholds(skin: Any) -> tuple[float, float, float]:
