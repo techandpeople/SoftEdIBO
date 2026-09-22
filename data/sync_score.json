@@ -1,0 +1,51 @@
+{
+  "format": "softedibo.activity",
+  "version": 1,
+  "name": "Sync score",
+  "description": "The whole strip starts purple and only moves when the children press together: every synchronized round on the cadence turns a few more pixels yellow, every failed round (someone missing, or a lone random press) turns a few back to purple. Pressing dims the purple pixels of your own quadrant slightly. A full yellow strip completes the activity.",
+  "spec": {
+    "initial": "score",
+    "states": {
+      "score": {
+        "do": [
+          {
+            "score_fill": {
+              "mode": "auto",
+              "participants": 3,
+              "target_interval_ms": 550,
+              "cadence_tolerance_ms": 100,
+              "phase_tolerance_ms": 150,
+              "min_gap_ms": 250,
+              "gain_pct": 15,
+              "penalty_pct": 5,
+              "fill": "random",
+              "on_color": "#f1c40f",
+              "bg_color": "#8e44ad",
+              "hold": "dim",
+              "hold_full_ut": 400,
+              "fade_ms": 250,
+              "ring": "all",
+              "to": "complete"
+            }
+          }
+        ],
+        "transitions": []
+      },
+      "complete": {
+        "do": [
+          {
+            "set_led": {
+              "color": "#f1c40f",
+              "pattern": "pulse",
+              "period_ms": 1200,
+              "fade_ms": 250,
+              "angle": 0,
+              "ring": "all"
+            }
+          }
+        ],
+        "transitions": []
+      }
+    }
+  }
+}

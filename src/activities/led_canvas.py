@@ -17,7 +17,8 @@ from __future__ import annotations
 
 import math
 import random
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Iterable
 
 from src.core.led_geometry import encode_pixel_mask
 from src.core.touch_zones import TouchZoneMap
@@ -31,6 +32,57 @@ FILL_MODES = (FILL_RANDOM, FILL_CONTIGUOUS, FILL_CENTRE)
 # Colour index of an unlit pixel in the rendered mask.
 BG_CODE = 0
 ON_CODE = 1
+# Colour index of a pixel tinted by the live hold feedback (see HoldFeedback).
+HOLD_CODE = 2
+
+# Live feedback while a sensor is being held, scaled by how hard it is pressed:
+# "glow" brightens the held zone's LIT pixels towards white, "dim" fades the
+# held zone's still-UNLIT pixels towards black. "none" shows nothing extra.
+HOLD_NONE = "none"
+HOLD_GLOW = "glow"
+HOLD_DIM = "dim"
+HOLD_MODES = (HOLD_NONE, HOLD_GLOW, HOLD_DIM)
+_HOLD_TARGET = {HOLD_GLOW: "#ffffff", HOLD_DIM: "#000000"}
+
+
+def mix_hex(color_a: str, color_b: str, t: float) -> str:
+    """Linear blend of two ``#RRGGBB`` colours (``t`` 0 = a, 1 = b). A colour
+    that does not parse is treated as black."""
+    def channels(value: str) -> tuple[int, int, int]:
+        text = str(value).strip().lstrip("#")
+        try:
+            if len(text) == 3:
+                text = "".join(ch * 2 for ch in text)
+            return int(text[0:2], 16), int(text[2:4], 16), int(text[4:6], 16)
+        except (TypeError, ValueError, IndexError):
+            return 0, 0, 0
+    t = max(0.0, min(1.0, float(t)))
+    a, b = channels(color_a), channels(color_b)
+    return "#%02x%02x%02x" % tuple(round(x + (y - x) * t) for x, y in zip(a, b))
+
+
+@dataclass(frozen=True)
+class HoldFeedback:
+    """What the strip shows while sensors are held down: which zones, in
+    which mode, and how strongly (``level`` 0..1 from the press strength).
+    A value object the engine rebuilds per sensor frame and the canvas
+    renders as a third mask colour on top of the lit/unlit state."""
+    zones: frozenset[int] = frozenset()
+    mode: str = HOLD_NONE
+    level: float = 0.0
+
+    @property
+    def active(self) -> bool:
+        return bool(self.zones) and self.mode in _HOLD_TARGET and self.level > 0
+
+    def tint(self, on_color: str, bg_color: str) -> str:
+        """The colour of a tinted pixel: the lit colour pushed towards white
+        (glow) or the unlit colour pushed towards black (dim) by ``level``."""
+        base = on_color if self.mode == HOLD_GLOW else bg_color
+        return mix_hex(base, _HOLD_TARGET.get(self.mode, base), self.level)
+
+    def tints_lit(self) -> bool:
+        return self.mode == HOLD_GLOW
 
 
 class LedZoneCanvas:
@@ -145,16 +197,40 @@ class LedZoneCanvas:
 
     # -- rendering ------------------------------------------------------------
 
-    def codes(self) -> list[int]:
-        """Per-pixel colour index: ON where lit by either mode, else BG."""
+    def codes(self, hold: HoldFeedback | None = None) -> list[int]:
+        """Per-pixel colour index: ON where lit by either mode, else BG. With
+        an active ``hold``, the held zones' lit (glow) or unlit (dim) pixels
+        become HOLD instead."""
         on = set(self._total_order[:self._total_lit])
         for lit in self._lit.values():
             on.update(lit)
-        return [ON_CODE if p in on else BG_CODE for p in self._map.all_pixels()]
+        held: set[int] = set()
+        if hold is not None and hold.active:
+            held = set(self._held_pixels(hold.zones))
+        tint_lit = hold.tints_lit() if hold is not None else False
+        out: list[int] = []
+        for p in self._map.all_pixels():
+            is_on = p in on
+            if p in held and is_on == tint_lit:
+                out.append(HOLD_CODE)
+            else:
+                out.append(ON_CODE if is_on else BG_CODE)
+        return out
 
-    def frame(self, on_color: str, bg_color: str) -> tuple[list[str], str]:
-        """The ``set_led_pixels`` payload: ``(colors, mask)``."""
-        return [str(bg_color), str(on_color)], encode_pixel_mask(self.codes())
+    def frame(self, on_color: str, bg_color: str,
+              hold: HoldFeedback | None = None) -> tuple[list[str], str]:
+        """The ``set_led_pixels`` payload: ``(colors, mask)``. The third
+        colour is only present while a hold is active."""
+        colors = [str(bg_color), str(on_color)]
+        if hold is not None and hold.active:
+            colors.append(hold.tint(str(on_color), str(bg_color)))
+        return colors, encode_pixel_mask(self.codes(hold))
+
+    def _held_pixels(self, zones: Iterable[int]) -> list[int]:
+        pixels: list[int] = []
+        for zone in zones:
+            pixels.extend(self._map.zone_pixels(int(zone)))
+        return pixels
 
     def snapshot(self) -> dict[str, Any]:
         """Debug/inspection view of the state."""

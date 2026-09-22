@@ -27,8 +27,8 @@ enum CmdType : uint8_t {
     // Zero the pressure sensors: capture each chamber's current reading as its
     // ambient offset (caller must have vented to atmosphere first). Persisted.
     CMD_TARE,
-    // Leak-compensating continuous hold: valve open + pump at the calibrated
-    // equilibrium duty (see common/hold_duty.h). param = off flag (1 = drop).
+    // Leak-compensating hold (see common/hold_duty.h): pressure or vacuum
+    // side (dir), regulated on the chamber's gauge. param = off flag (1 = drop).
     CMD_HOLD_DUTY,
     // Configuration / status.
     CMD_CONFIGURE, CMD_PING
@@ -55,6 +55,7 @@ struct Cmd {
                             // no pressure sensor populated, run purely on fill_ms and
                             // ignore the (floating, noise) gauge readings entirely
     float    param_kpa;     // chamber min or max in kPa (depends on type)
+    uint8_t  dir;           // hold_duty: 0 = pressure hold, 1 = vacuum hold
     int16_t  cfg_chambers;  // configure: num_chambers, or manual: open/on (bool)
     float    cfg_p_min;     // configure: tank_pressure_min_kpa
     float    cfg_p_max;     // configure: tank_pressure_max_kpa

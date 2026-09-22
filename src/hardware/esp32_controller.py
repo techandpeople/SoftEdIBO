@@ -139,17 +139,18 @@ class ESP32Controller:
     _HOLD_KEEPALIVE_S = 2.0
 
     def start_hold(self, chamber: int, duty: int, kpa: float | None = None,
-                   timed: bool = False) -> bool:
+                   timed: bool = False, vacuum: bool = False) -> bool:
         """Start (or retune) a leak-compensating hold on ``chamber``.
 
-        Given ``kpa`` the node keeps the chamber's inflate valve open while
-        its gauge reads below the target and servos the shared pressure pump
-        in real time, never below :data:`HOLD_DUTY_MIN` while a held valve is
-        open; ``duty`` only seeds that servo (the calibrated equilibrium PWM
-        when known). ``timed=True`` (or no ``kpa``) keeps the valve open at
-        ``duty`` for sensorless boards. A background
-        keepalive re-asserts the hold every ~2 s until :meth:`stop_hold`;
-        without it the firmware dead-man releases the hold in ~6 s.
+        Given ``kpa`` the node regulates the chamber on its gauge with short
+        pulses of the side's pump - the pressure side by default, the vacuum
+        side (deflate valve + vacuum pump) with ``vacuum=True`` for a pose
+        below ambient. The pulse duty never sits below :data:`HOLD_DUTY_MIN`;
+        ``duty`` only seeds that servo (the calibrated equilibrium PWM when
+        known). ``timed=True`` (or no ``kpa``) keeps the valve open at
+        ``duty`` for sensorless boards. A background keepalive re-asserts the
+        hold every ~2 s until :meth:`stop_hold`; without it the firmware
+        dead-man releases the hold in ~6 s.
         """
         payload: dict[str, Any] = {"chamber": int(chamber),
                                    "duty": clamp_hold_duty(duty)}
@@ -157,6 +158,8 @@ class ESP32Controller:
             payload["kpa"] = round(float(kpa), 2)
         if timed:
             payload["timed"] = 1
+        if vacuum:
+            payload["dir"] = 1
         # Sends happen under the lock so a keepalive re-assert can never land
         # after a stop_hold "off" and re-arm a just-released hold.
         with self._holds_lock:

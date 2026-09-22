@@ -81,3 +81,24 @@ def test_handle_message_filters_by_mac():
     # Message from this node should be stored
     controller._handle_message({"source": "AA:BB:CC:DD:EE:01", "pressure": 150})
     assert controller.get_last_status()["pressure"] == 150
+
+
+def test_start_hold_wire_format_pressure_and_vacuum():
+    gateway = MagicMock()
+    gateway.send.return_value = True
+    controller = ESP32Controller("AA:BB:CC:DD:EE:01", gateway)
+
+    assert controller.start_hold(1, 190, kpa=6.0)
+    gateway.send.assert_called_with(
+        "AA:BB:CC:DD:EE:01", "hold_duty", chamber=1, duty=190, kpa=6.0
+    )
+    assert controller.start_hold(2, 100, kpa=-12.345, vacuum=True)
+    gateway.send.assert_called_with(
+        "AA:BB:CC:DD:EE:01", "hold_duty", chamber=2, duty=180, kpa=-12.35, dir=1
+    )
+    assert sorted(controller.active_holds()) == [1, 2]
+    controller.stop_hold()
+    gateway.send.assert_called_with(
+        "AA:BB:CC:DD:EE:01", "hold_duty", chamber=-1, off=1
+    )
+    assert controller.active_holds() == []

@@ -47,6 +47,7 @@
       <block type="se_touch_progress"></block>
       <block type="se_zone_fill"></block>
       <block type="se_sync_fill"></block>
+      <block type="se_score_fill"></block>
     </category>
     <category name="Chambers" colour="30">
       <block type="se_inflate"></block>
@@ -163,6 +164,8 @@
       // rings (0..2; Tree populates all three, Turtle only ring 0); the direct
       // board has one and ignores higher indices.
       // Fill orders of the zone/sync fill blocks (see src/activities/led_canvas.py).
+      var HOLD = [['nothing', 'none'], ['glow the lit pixels', 'glow'],
+                  ['dim the unlit pixels', 'dim']];
       var FILL = [['scattered', 'random'], ['in order', 'contiguous'],
                   ['from the sensor', 'centre']];
       var RING = [['all rings', 'all'], ['ring 0', '0'], ['ring 1', '1'],
@@ -264,8 +267,11 @@
                   { type: 'field_input', name: 'ON', text: '#2ecc71' },
                   { type: 'field_dropdown', name: 'RING', options: RING },
                   { type: 'field_number', name: 'SMOOTH', value: 250, min: 0 }],
-          message3: 'when every zone is full go to phase %1',
-          args3: [{ type: 'field_input', name: 'TO', text: '' }],
+          message3: 'while held: %1 by press strength, full at %2 uT',
+          args3: [{ type: 'field_dropdown', name: 'HOLD', options: HOLD },
+                  { type: 'field_number', name: 'HOLD_FULL', value: 300, min: 1 }],
+          message4: 'when every zone is full go to phase %1',
+          args4: [{ type: 'field_input', name: 'TO', text: '' }],
           previousStatement: 'Step', nextStatement: 'Step', colour: 230,
           tooltip: 'Put it in a phase\'s "on touch". The LED strip is split into '
                  + 'one zone per touch sensor (quadrants on the Thymio skin); each '
@@ -275,8 +281,13 @@
                  + 'cadence (its interval to the previous press in the same zone is '
                  + 'within the tolerance; the first press just starts the clock). '
                  + 'Once every zone is full it jumps to the named phase - leave it '
-                 + 'blank to let a transition move on. Needs the skin\'s LED strip '
-                 + 'and sensor positions configured (Test Actuators / Skin dialog).' },
+                 + 'blank to let a transition move on. "While held" adds live '
+                 + 'feedback scaled by how hard the child presses (the sensor\'s '
+                 + 'uT above the touch threshold, full effect at the given uT): '
+                 + 'glow brightens the held zone\'s lit pixels towards white, dim '
+                 + 'fades its still-unlit pixels towards black; both clear on '
+                 + 'release. Needs the skin\'s LED strip and sensor positions '
+                 + 'configured (Test Actuators / Skin dialog).' },
 
         { type: 'se_sync_fill',
           message0: 'sync fill - light the whole strip as the group\'s rounds complete, %1',
@@ -287,12 +298,52 @@
                   { type: 'field_dropdown', name: 'RING', options: RING },
                   { type: 'field_number', name: 'SMOOTH', value: 250, min: 0 },
                   { type: 'field_number', name: 'DECAY', value: 150, min: 0 }],
+          message2: 'while held: %1 by press strength, full at %2 uT',
+          args2: [{ type: 'field_dropdown', name: 'HOLD', options: HOLD },
+                  { type: 'field_number', name: 'HOLD_FULL', value: 300, min: 1 }],
           previousStatement: 'Step', nextStatement: 'Step', colour: 230,
           tooltip: 'Put it in the phase\'s "do". Lights a share of ALL the strip\'s '
                  + 'pixels equal to completed rounds / rounds required of this '
                  + 'phase\'s "children synchronize" condition, updating every tick. '
                  + 'When the streak breaks the pixels go out one every "decay" ms '
-                 + '(0 = all at once). Needs the skin\'s LED strip configured.' },
+                 + '(0 = all at once). "While held" tints the held zone by press '
+                 + 'strength (glow its lit pixels / dim its unlit ones). Needs the '
+                 + 'skin\'s LED strip configured.' },
+
+        { type: 'se_score_fill',
+          message0: 'score fill - %1 children, %2 mode, %3',
+          args0: [{ type: 'field_number', name: 'PARTICIPANTS', value: 3, min: 1, max: 4 },
+                  { type: 'field_dropdown', name: 'MODE',
+                    options: [['auto (whoever presses)', 'auto'], ['fixed (sensors 0..N-1)', 'fixed']] },
+                  { type: 'field_dropdown', name: 'FILL', options: FILL }],
+          message1: 'round every %1 ms +/- %2 ms; together within %3 ms; ignore repeats under %4 ms',
+          args1: [{ type: 'field_number', name: 'TARGET', value: 550, min: 1 },
+                  { type: 'field_number', name: 'CADENCE', value: 100, min: 0 },
+                  { type: 'field_number', name: 'PHASE', value: 150, min: 0 },
+                  { type: 'field_number', name: 'MIN_GAP', value: 250, min: 0 }],
+          message2: 'each good round lights %1 % of the strip, each miss turns %2 % off',
+          args2: [{ type: 'field_number', name: 'GAIN', value: 15, min: 1, max: 100 },
+                  { type: 'field_number', name: 'PENALTY', value: 5, min: 0, max: 100 }],
+          message3: 'from %1 to %2 on ring %3, smooth %4 ms',
+          args3: [{ type: 'field_input', name: 'BG', text: '#8e44ad' },
+                  { type: 'field_input', name: 'ON', text: '#f1c40f' },
+                  { type: 'field_dropdown', name: 'RING', options: RING },
+                  { type: 'field_number', name: 'SMOOTH', value: 250, min: 0 }],
+          message4: 'while held: %1 by press strength, full at %2 uT',
+          args4: [{ type: 'field_dropdown', name: 'HOLD', options: HOLD },
+                  { type: 'field_number', name: 'HOLD_FULL', value: 300, min: 1 }],
+          message5: 'when the strip is full go to phase %1',
+          args5: [{ type: 'field_input', name: 'TO', text: '' }],
+          previousStatement: 'Step', nextStatement: 'Step', colour: 230,
+          tooltip: 'Put it in the phase\'s "do". A running SCORE shown on the whole '
+                 + 'strip: every round where all the children press together (within '
+                 + 'the phase window) and on the cadence lights the gain share; every '
+                 + 'failed round (a child missing, or one child pressing alone) turns '
+                 + 'the penalty share off again; a round together but off cadence '
+                 + 'changes nothing. A few slips hardly show, lots of random pressing '
+                 + 'drains the strip back to the background colour. Once the strip is '
+                 + 'full it jumps to the named phase. "While held" tints the touched '
+                 + 'zone by press strength. Needs the skin\'s LED strip configured.' },
 
         { type: 'se_touch_progress',
           message0: 'touch fill - %1 arcs, %2 touch(es) each',
@@ -746,6 +797,8 @@
                               target_interval_ms: num(b, 'TARGET'),
                               tolerance_ms: num(b, 'TOLERANCE'),
                               min_gap_ms: num(b, 'MIN_GAP'),
+                              hold: b.getFieldValue('HOLD') || 'none',
+                              hold_full_ut: num(b, 'HOLD_FULL'),
                               fade_ms: num(b, 'SMOOTH') }, b);
           var zfTo = (b.getFieldValue('TO') || '').trim();
           if (zfTo) zf.to = zfTo;
@@ -756,7 +809,27 @@
                                          on_color: b.getFieldValue('ON'),
                                          bg_color: b.getFieldValue('BG'),
                                          fade_ms: num(b, 'SMOOTH'),
-                                         decay_ms: num(b, 'DECAY') }, b) };
+                                         decay_ms: num(b, 'DECAY'),
+                                         hold: b.getFieldValue('HOLD') || 'none',
+                                         hold_full_ut: num(b, 'HOLD_FULL') }, b) };
+        case 'se_score_fill': {
+          var sf = withRing({ mode: b.getFieldValue('MODE') || 'auto',
+                              participants: num(b, 'PARTICIPANTS'),
+                              target_interval_ms: num(b, 'TARGET'),
+                              cadence_tolerance_ms: num(b, 'CADENCE'),
+                              phase_tolerance_ms: num(b, 'PHASE'),
+                              min_gap_ms: num(b, 'MIN_GAP'),
+                              gain_pct: num(b, 'GAIN'), penalty_pct: num(b, 'PENALTY'),
+                              fill: b.getFieldValue('FILL'),
+                              on_color: b.getFieldValue('ON'),
+                              bg_color: b.getFieldValue('BG'),
+                              hold: b.getFieldValue('HOLD') || 'none',
+                              hold_full_ut: num(b, 'HOLD_FULL'),
+                              fade_ms: num(b, 'SMOOTH') }, b);
+          var sfTo = (b.getFieldValue('TO') || '').trim();
+          if (sfTo) sf.to = sfTo;
+          return { score_fill: sf };
+        }
         case 'se_touch_progress': {
           var tp = withRing({ segments: num(b, 'SEGMENTS'), per: num(b, 'PER'),
                               on_color: b.getFieldValue('ON'),
@@ -1010,6 +1083,8 @@
           setF(b, 'TARGET', p.target_interval_ms != null ? p.target_interval_ms : 550);
           setF(b, 'TOLERANCE', p.tolerance_ms != null ? p.tolerance_ms : 150);
           setF(b, 'MIN_GAP', p.min_gap_ms != null ? p.min_gap_ms : 250);
+          setF(b, 'HOLD', p.hold != null ? p.hold : 'none');
+          setF(b, 'HOLD_FULL', p.hold_full_ut != null ? p.hold_full_ut : 300);
           setF(b, 'RING', p.ring); setF(b, 'SMOOTH', p.fade_ms != null ? p.fade_ms : 250);
           setF(b, 'TO', p.to != null ? p.to : ''); break;
         case 'sync_fill':
@@ -1018,7 +1093,26 @@
           setF(b, 'ON', p.on_color != null ? p.on_color : '#2ecc71');
           setF(b, 'BG', p.bg_color != null ? p.bg_color : '#222222');
           setF(b, 'RING', p.ring); setF(b, 'SMOOTH', p.fade_ms != null ? p.fade_ms : 250);
-          setF(b, 'DECAY', p.decay_ms != null ? p.decay_ms : 150); break;
+          setF(b, 'DECAY', p.decay_ms != null ? p.decay_ms : 150);
+          setF(b, 'HOLD', p.hold != null ? p.hold : 'none');
+          setF(b, 'HOLD_FULL', p.hold_full_ut != null ? p.hold_full_ut : 300); break;
+        case 'score_fill':
+          b = newStepBlock('se_score_fill');
+          setF(b, 'MODE', p.mode != null ? p.mode : 'auto');
+          setF(b, 'PARTICIPANTS', p.participants != null ? p.participants : 3);
+          setF(b, 'TARGET', p.target_interval_ms != null ? p.target_interval_ms : 550);
+          setF(b, 'CADENCE', p.cadence_tolerance_ms != null ? p.cadence_tolerance_ms : 100);
+          setF(b, 'PHASE', p.phase_tolerance_ms != null ? p.phase_tolerance_ms : 150);
+          setF(b, 'MIN_GAP', p.min_gap_ms != null ? p.min_gap_ms : 250);
+          setF(b, 'GAIN', p.gain_pct != null ? p.gain_pct : 15);
+          setF(b, 'PENALTY', p.penalty_pct != null ? p.penalty_pct : 5);
+          setF(b, 'FILL', p.fill != null ? p.fill : 'random');
+          setF(b, 'ON', p.on_color != null ? p.on_color : '#f1c40f');
+          setF(b, 'BG', p.bg_color != null ? p.bg_color : '#8e44ad');
+          setF(b, 'HOLD', p.hold != null ? p.hold : 'none');
+          setF(b, 'HOLD_FULL', p.hold_full_ut != null ? p.hold_full_ut : 300);
+          setF(b, 'RING', p.ring); setF(b, 'SMOOTH', p.fade_ms != null ? p.fade_ms : 250);
+          setF(b, 'TO', p.to != null ? p.to : ''); break;
         case 'touch_progress':
           b = newStepBlock('se_touch_progress');
           setF(b, 'SEGMENTS', p.segments != null ? p.segments : 4);

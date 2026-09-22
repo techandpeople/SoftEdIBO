@@ -18,7 +18,13 @@ from src.hardware.fill_calibration import (
     set_type_leak_curve,
 )
 from src.hardware.fill_scaling import FillLoadTracker, interp_curve
-from src.hardware.hold_duty import HOLD_DUTY_MIN, seed_hold_duty
+from src.hardware.hold_duty import (
+    HOLD_DUTY_MIN,
+    HOLD_PRESSURE,
+    HOLD_VACUUM,
+    hold_direction,
+    seed_hold_duty,
+)
 from src.hardware.skin import Skin
 
 
@@ -132,9 +138,10 @@ class _HoldCtrl:
     def on_pressure(self, _cb) -> None:
         pass
 
-    def start_hold(self, chamber, duty, kpa=None, timed=False) -> bool:
+    def start_hold(self, chamber, duty, kpa=None, timed=False,
+                   vacuum=False) -> bool:
         self.hold_calls.append({"chamber": chamber, "duty": duty,
-                                "kpa": kpa, "timed": timed})
+                                "kpa": kpa, "timed": timed, "vacuum": vacuum})
         return True
 
     def stop_hold(self, chamber=None) -> None:
@@ -162,6 +169,17 @@ def test_seed_hold_duty_clamps_to_floor():
     assert seed_hold_duty([[0.0, 300]], 1.0) == 255
 
 
+def test_hold_direction_picks_the_side():
+    assert hold_direction(5.0) == HOLD_PRESSURE
+    assert hold_direction(0.5) == HOLD_PRESSURE
+    assert hold_direction(-10.0) == HOLD_VACUUM
+    assert hold_direction(-0.5) == HOLD_VACUUM
+    assert hold_direction(0.0) is None
+    assert hold_direction(0.3) is None
+    assert hold_direction(-0.3) is None
+    assert hold_direction(float("nan")) is None
+
+
 def test_hold_regulated_seeds_duty_from_curve():
     ctrl = _HoldCtrl()
     skin = Skin("shell", [{
@@ -173,6 +191,19 @@ def test_hold_regulated_seeds_duty_from_curve():
     assert call["kpa"] == 5.0
     assert call["duty"] == 190                 # midpoint of 160..220
     assert call["timed"] is False
+    assert call["vacuum"] is False
+
+
+def test_hold_regulated_vacuum_side_and_nothing_at_ambient():
+    ctrl = _HoldCtrl()
+    skin = Skin("wrinkles", [{"controller": ctrl, "node_slot": 1,
+                              "min_pressure": -20.0, "max_pressure": 0.0}])
+    assert skin.hold_regulated(0, pct=25)      # -15 kPa: vacuum hold
+    call = ctrl.hold_calls[-1]
+    assert call["kpa"] == -15.0
+    assert call["vacuum"] is True
+    assert not skin.hold_regulated(0, pct=100)  # 0 kPa = ambient: nothing
+    assert len(ctrl.hold_calls) == 1
 
 
 def test_hold_regulated_falls_back_without_curve_and_releases():
@@ -226,13 +257,34 @@ def test_auto_hold_immediate_when_already_at_target():
     assert ctrl.hold_calls[0]["kpa"] == 5.0
 
 
-def test_auto_hold_skips_vacuum_and_sensorless():
+def test_auto_hold_engages_vacuum_side_for_a_vacuum_pose():
     ctrl = _HoldCtrl()
     vac = Skin("wrinkles", [{"controller": ctrl, "node_slot": 0,
                              "min_pressure": -20.0, "max_pressure": 0.0}])
-    assert vac.set_pressure(0, 50)              # -10 kPa: inflate-only engine
+    assert vac.set_pressure(0, 50)              # -10 kPa
+    _status(vac, 0, -5.0, 2)                    # deflating
+    _status(vac, 0, -10.0, 0)                   # idle at the pose
+    assert len(ctrl.hold_calls) == 1
+    assert ctrl.hold_calls[0]["kpa"] == -10.0
+    assert ctrl.hold_calls[0]["vacuum"] is True
+
+    # Deepest pose (0 % of a vacuum-fed range) settles to IDLE: still held.
+    assert vac.deflate(0, 100)
+    assert ctrl.stop_calls == [0]
     _status(vac, 0, -15.0, 2)
-    _status(vac, 0, -10.0, 0)
+    _status(vac, 0, -20.0, 0)
+    assert len(ctrl.hold_calls) == 2
+    assert ctrl.hold_calls[1]["kpa"] == -20.0
+    assert ctrl.hold_calls[1]["vacuum"] is True
+
+
+def test_auto_hold_skips_ambient_and_sensorless():
+    ctrl = _HoldCtrl()
+    vac = Skin("wrinkles", [{"controller": ctrl, "node_slot": 0,
+                             "min_pressure": -20.0, "max_pressure": 0.0}])
+    assert vac.set_pressure(0, 100)             # 0 kPa = ambient: nothing to hold
+    _status(vac, 0, -5.0, 1)
+    _status(vac, 0, 0.0, 0)
     assert ctrl.hold_calls == []
 
     blind = Skin("blind", [{"controller": ctrl, "node_slot": 1,

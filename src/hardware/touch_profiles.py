@@ -41,7 +41,7 @@ from typing import Any, Mapping
 from src.core.skin_config import MAGNET_NODE_TYPES
 from src.core.touch_compensation import compensator_from_config
 from src.core.touch_zones import (SensorPlacement, evenly_spaced_placements,
-                                  quadrant_placements)
+                                  quadrant_names, quadrant_placements)
 
 logger = logging.getLogger(__name__)
 
@@ -180,6 +180,9 @@ class MagnetSensorProfile(TouchSensorProfile):
             hysteresis=float(touch.get("hysteresis", 20.0)),
             ema_alpha=float(touch.get("ema_alpha", 0.25)),
             magnet_strength=touch.get("magnet_strength", "strong"),
+            # The same sensor -> corner assignment the LED zones use, so a
+            # touch reports the corner it lights (see sensor_placements).
+            sensor_quadrants=quadrant_names(4, touch.get("sensor_quadrants")),
         )
         tracker = TouchPositionTracker(
             detector=detector,

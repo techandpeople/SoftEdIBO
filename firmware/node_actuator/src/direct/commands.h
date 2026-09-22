@@ -393,11 +393,11 @@ inline void process(const cmd_queue::Cmd& c) {
         if (c.chamber == -1) {
             if (c.param) chambers::holdAbort();
             else for (int i = 0; i < NUM_CHAMBERS; i++)
-                chambers::holdEng.request(i, c.param_kpa, c.duty, c.timed != 0);
+                chambers::holdRequest(i, c.dir, c.param_kpa, c.duty, c.timed != 0);
         } else if (c.chamber >= 0 && c.chamber < NUM_CHAMBERS) {
             if (c.param) chambers::holdDrop(c.chamber);
-            else chambers::holdEng.request(c.chamber, c.param_kpa, c.duty,
-                                           c.timed != 0);
+            else chambers::holdRequest(c.chamber, c.dir, c.param_kpa, c.duty,
+                                       c.timed != 0);
         }
         return;
     }
@@ -467,7 +467,7 @@ inline void parseAndQueue(const uint8_t* data, int len) {
     // Leak-compensating hold: {"cmd":"hold_duty","chamber":n,"duty":D,"kpa":K?,
     // "timed":1?} starts/refreshes (the PC re-sends ~2 s as keepalive); "off":1
     // drops it (chamber -1 = all). No "kpa" (or "timed":1) = duty-only, no trim.
-    else if (strcmp(cmd, "hold_duty") == 0)         { c.type = CMD_HOLD_DUTY;    c.chamber = chamberArg(doc["chamber"] | -1); c.duty = doc["duty"] | 0; c.param = doc["off"] | 0; c.timed = doc["timed"] | 0; c.param_kpa = doc["kpa"].is<float>() ? doc["kpa"].as<float>() : NAN; }
+    else if (strcmp(cmd, "hold_duty") == 0)         { c.type = CMD_HOLD_DUTY;    c.chamber = chamberArg(doc["chamber"] | -1); c.duty = doc["duty"] | 0; c.param = doc["off"] | 0; c.timed = doc["timed"] | 0; c.dir = (doc["dir"] | 0) ? 1 : 0; c.param_kpa = doc["kpa"].is<float>() ? doc["kpa"].as<float>() : NAN; }
     else if (strcmp(cmd, "stop") == 0)              { c.type = CMD_STOP;         c.chamber = -1; }
     else if (strcmp(cmd, "resume") == 0)            { c.type = CMD_RESUME;       c.chamber = -1; }
     else if (strcmp(cmd, "test_run") == 0)          { c.type = CMD_TEST_RUN;     c.chamber = chamberArg(doc["chamber"] | -1); c.param = doc["dir"] | 0; c.duty = doc["duty"] | 0; }  // 0=inflate, 1=deflate; chamber -1 = all; duty 0 = full

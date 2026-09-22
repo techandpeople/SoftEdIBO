@@ -121,13 +121,15 @@ inline void setValve(int ch, int side, bool open) {
     digitalWrite(VALVE_PINS[ch * 2 + side], open ? HIGH : LOW);
 }
 
-// Valves currently opened by the leak-compensating hold engine, and the pump
-// duty it wants for them (0 = none). Updated by holdTick() each loop; consulted
-// by recalcPumps so a hold-only line runs at the calibrated equilibrium duty
-// instead of full speed, while ANY non-hold inflate valve (an engine round, a
-// manual override) immediately wins back full duty.
-inline uint16_t holdValveMask = 0;
-inline uint8_t  holdPumpDuty  = 0;
+// Valves currently opened by the leak-compensating hold engine on each side,
+// and the pump duty it wants for them (0 = none). Updated by holdTick() each
+// loop; consulted by recalcPumps so a hold-only line runs at the servoed hold
+// duty instead of full speed, while ANY non-hold valve of that side (an engine
+// round, a manual override) immediately wins back the normal duty.
+inline uint16_t holdValveMask    = 0;   // inflate valves held open (pressure hold)
+inline uint8_t  holdPumpDuty     = 0;   // pressure pump duty for them
+inline uint16_t holdVacValveMask = 0;   // deflate valves held open (vacuum hold)
+inline uint8_t  holdVacDuty      = 0;   // vacuum pump duty for them
 
 // Chambers under a bench VENT (both valves open, no pump): their open valves
 // do not count as a flow path for recalcPumps, so a vented chamber never has a
@@ -139,8 +141,8 @@ inline uint16_t ventMask = 0;
 // only once they are all closed. So a pump can never dead-head (no open valve of
 // its direction => it is off - that is the "running dry" guard) and across the
 // engine's round hand-offs it never drops out from under an open valve. Direct
-// has one pump per direction. Full duty, except when the ONLY open inflate
-// valves belong to the hold engine - then its equilibrium duty applies - and
+// has one pump per direction. Full duty, except when the ONLY open valves of
+// a side belong to the hold engine - then its servoed hold duty applies - and
 // except when EVERY open deflate valve is past the gauge floor - then the
 // vacuum pump runs at the reduced below-floor duty.
 inline bool deflateLineAtFloor();   // defined after the engines (needs deflateEng)
@@ -149,18 +151,23 @@ inline void recalcPumps() {
     bool anyInflateOpen = false;
     bool anyDeflateOpen = false;
     bool nonHoldInflate = false;
+    bool nonHoldDeflate = false;
     for (int i = 0; i < NUM_CHAMBERS; i++) {
         if (ventMask & (1u << i)) continue;   // vented: open to atmosphere, no pump
         if (valveOpen[i * 2 + 0]) {
             anyInflateOpen = true;
             if (!(holdValveMask & (1u << i))) nonHoldInflate = true;
         }
-        if (valveOpen[i * 2 + 1]) anyDeflateOpen = true;
+        if (valveOpen[i * 2 + 1]) {
+            anyDeflateOpen = true;
+            if (!(holdVacValveMask & (1u << i))) nonHoldDeflate = true;
+        }
     }
     uint8_t inflateDuty = !anyInflateOpen ? 0
                         : nonHoldInflate  ? DEFAULT_INFLATE_DUTY
                                           : holdPumpDuty;
     uint8_t deflateDuty = !anyDeflateOpen      ? 0
+                        : !nonHoldDeflate      ? holdVacDuty
                         : deflateLineAtFloor() ? pump_duty::DEFLATE_BELOW_FLOOR
                                                : DEFAULT_DEFLATE_DUTY;
     static uint8_t lastInflateDuty = 0xFF;
@@ -185,23 +192,33 @@ inline void stop(int n) {
 }
 
 // ---------------------------------------------------------------------------
-// Leak-compensating continuous hold (hold_duty.h). A held chamber keeps its
-// inflate valve open with the pump at the calibrated equilibrium duty; the
-// gauge trims the duty on-node. Driven by holdTick() (end of this header),
-// which suspends it while anything else owns the manifold. Any explicit
-// actuation command on a chamber supersedes (drops) its hold.
+// Leak-compensating hold (hold_duty.h), both sides: a held chamber is topped
+// back up (pressure hold) or pulled back down (vacuum hold) in short, soft
+// pulses on its own gauge whenever it drifts off its target. Driven by
+// holdTick() (end of this header), which suspends it while anything else owns
+// the manifolds. Any explicit actuation command on a chamber supersedes
+// (drops) its hold. Requests go through holdRequest() (also at the end: it
+// needs the chamber's gauge floor).
 // ---------------------------------------------------------------------------
+
+// Direct is the fast board (dedicated ADC pins, direct-GPIO valves): a tight
+// control cadence makes the hold pulses short and the predictive close exact.
+constexpr uint32_t HOLD_CTRL_MS = 20;
 
 inline hold_duty::Engine<NUM_CHAMBERS> holdEng;
 
+inline void holdCloseValve(int i, uint8_t side) { setValve(i, side, false); }
+
 inline void holdDrop(int n) {
-    holdEng.drop(n, [](int i) { setValve(i, 0, false); });
+    holdEng.drop(n, holdCloseValve);
 }
 
 inline void holdAbort() {
     holdEng.abort();
-    holdValveMask = 0;
-    holdPumpDuty  = 0;
+    holdValveMask    = 0;
+    holdPumpDuty     = 0;
+    holdVacValveMask = 0;
+    holdVacDuty      = 0;
 }
 
 // Median-of-three gauge read for the control path: rejects a single-sample sensor
@@ -570,26 +587,41 @@ inline void hardware_init() {
     ledcWrite(PUMP1_LEDC_CH, 0);
     ledcWrite(PUMP2_LEDC_CH, 0);
     enginesInit();
+    holdEng.ctrlPeriodMs = HOLD_CTRL_MS;
+}
+
+// Register / refresh a hold on chamber ``n``: ``side`` 0 = pressure hold
+// (inflate valve + pressure pump), 1 = vacuum hold (deflate valve + vacuum
+// pump). ``kpa`` NAN or ``timed`` = duty-only (sensorless). The chamber's own
+// gauge floor tells the engine whether a vacuum target is visible (servoed)
+// or below the floor (timed re-pulls).
+inline void holdRequest(int n, uint8_t side, float kpa, uint8_t duty, bool timed) {
+    holdEng.request(n, side, kpa, duty, timed, gaugeFloorKpa(n), holdCloseValve);
 }
 
 // Drive the leak-compensating hold engine. Call every loop tick, after
 // controlTick. Defined last: it consults the manual/bench/stop state above.
 // The engine suspends (closes only its own valves) whenever anything else
-// owns the manifold, and its pump duty is applied through recalcPumps - which
-// only honours it while NO non-hold inflate valve is open.
+// owns the manifolds, and its pump duties are applied through recalcPumps -
+// which only honours each one while NO non-hold valve of that side is open.
 inline void holdTick(uint32_t now) {
     bool manual = manualPumpOn[0] || manualPumpOn[1];
     for (int i = 0; i < NUM_CHAMBERS * 2 && !manual; i++)
         if (manualValveOn[i]) manual = true;
     bool busy = stopped || testDir >= 0 || seqActive() || manual;
-    uint8_t d = holdEng.tick(
+    hold_duty::Duties d = holdEng.tick(
         now, busy,
-        [](int i) { setValve(i, 0, true);  },
-        [](int i) { setValve(i, 0, false); },
+        [](int i, uint8_t side) { setValve(i, side, true);  },
+        holdCloseValve,
         [](int i) -> float { float k = readKpaMedian(i); cachedKpa[i] = k; return k; });
-    if (holdEng.openMask != holdValveMask || d != holdPumpDuty) {
-        holdValveMask = holdEng.openMask;
-        holdPumpDuty  = d;
+    uint16_t inflMask = holdEng.openInflateMask();
+    uint16_t deflMask = holdEng.openDeflateMask();
+    if (inflMask != holdValveMask || d.inflate != holdPumpDuty
+        || deflMask != holdVacValveMask || d.deflate != holdVacDuty) {
+        holdValveMask    = inflMask;
+        holdPumpDuty     = d.inflate;
+        holdVacValveMask = deflMask;
+        holdVacDuty      = d.deflate;
         recalcPumps();
     }
 }

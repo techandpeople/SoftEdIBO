@@ -42,7 +42,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from src.activities import activity_kind, skin_condition
-from src.activities.led_canvas import FILL_MODES
+from src.activities.led_canvas import FILL_MODES, HOLD_MODES
 from src.activities.touch_rhythm import MODE_AUTO, SYNC_MODES
 from src.ml.gesture_taxonomy import GESTURE_CLASSES
 
@@ -145,6 +145,19 @@ BEAT_MODES = ("sync", "sequential", "random", "aligned")
 # counts, it only starts the clock).
 ZONE_FILL_KINDS = ("touch", "rhythmic")
 
+# Live feedback while a sensor is held, shared by the fill verbs.
+HOLD_FIELD = VerbField(
+    "hold", "enum", "none", choices=HOLD_MODES,
+    description="Live feedback while a sensor is held, scaled by how hard it "
+                "is pressed: glow = the held zone's lit pixels brighten towards "
+                "white; dim = its still-unlit pixels fade towards black; none "
+                "= nothing extra.")
+HOLD_FULL_FIELD = VerbField(
+    "hold_full_ut", "float", 300,
+    description="Field strength (uT) read as a full-strength press; the touch "
+                "threshold counts as zero. Lower it to make the feedback react "
+                "sooner.")
+
 # Shared by the zone/sync fill verbs: how lit pixels are chosen.
 FILL_FIELD = VerbField(
     "fill", "enum", "random", choices=FILL_MODES,
@@ -239,6 +252,8 @@ ACTIONS: tuple[Verb, ...] = (
                   description="Rhythmic kind: allowed drift around the target."),
         VerbField("min_gap_ms", "ms", 250,
                   description="Rhythmic kind: ignore faster repeats as chatter."),
+        HOLD_FIELD,
+        HOLD_FULL_FIELD,
         FADE_FIELD,
         RING_FIELD,
         VerbField("to", "enum", "",
@@ -259,8 +274,55 @@ ACTIONS: tuple[Verb, ...] = (
         VerbField("decay_ms", "ms", 150,
                   description="After a broken streak, turn one pixel off "
                               "every this many ms (0 = all at once)."),
+        HOLD_FIELD,
+        HOLD_FULL_FIELD,
         FADE_FIELD,
         RING_FIELD,
+    )),
+    Verb("score_fill", "action",
+         "Score the group's synchronized rounds on the WHOLE strip. Put it in "
+         "the phase's 'do'. Every round where all the children press together "
+         "(within the phase window) and on the cadence lights 'gain_pct' more "
+         "of the strip; every failed round (a child missing, or one child "
+         "pressing alone) turns 'penalty_pct' off again. A round together but "
+         "off cadence changes nothing. So a few slips hardly show, while lots "
+         "of random pressing drains the strip back to 'bg_color'. Once the "
+         "strip is full it jumps to phase 'to'. 'mode' auto = whoever presses "
+         "forms the group once 'participants' have joined; fixed = sensors "
+         "0..N-1.", (
+        VerbField("mode", "enum", MODE_AUTO, choices=SYNC_MODES,
+                  description="auto = whoever presses (first N start, others "
+                              "join); fixed = sensors 0..N-1."),
+        VerbField("participants", "int", 3,
+                  description="Number of children (auto: the minimum needed "
+                              "before rounds score)."),
+        VerbField("target_interval_ms", "ms", 550,
+                  description="Expected time between group rounds."),
+        VerbField("cadence_tolerance_ms", "ms", 100,
+                  description="Allowed timing error of one round; a round "
+                              "outside it is neutral, not a miss."),
+        VerbField("phase_tolerance_ms", "ms", 150,
+                  description="Maximum spread between children within one "
+                              "round; a press later than this starts a new "
+                              "round."),
+        VerbField("min_gap_ms", "ms", 250,
+                  description="Per-sensor debounce; faster onsets are ignored."),
+        VerbField("gain_pct", "pct", 15,
+                  description="Share of the strip lit per good round."),
+        VerbField("penalty_pct", "pct", 5,
+                  description="Share of the strip turned off per failed round."),
+        FILL_FIELD,
+        VerbField("on_color", "color", "#f1c40f",
+                  description="Colour of a lit pixel."),
+        VerbField("bg_color", "color", "#8e44ad",
+                  description="Colour of an unlit pixel."),
+        HOLD_FIELD,
+        HOLD_FULL_FIELD,
+        FADE_FIELD,
+        RING_FIELD,
+        VerbField("to", "enum", "",
+                  description="Phase to jump to once the strip is full "
+                              "(empty = don't advance)."),
     )),
     Verb("inflate", "action", "Drive a chamber up to a pressure %.", (
         CHAMBER_FIELD,

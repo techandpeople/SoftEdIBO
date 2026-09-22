@@ -1,0 +1,45 @@
+{
+  "format": "softedibo.activity",
+  "version": 1,
+  "name": "MVP - quadrant touch lights",
+  "description": "Whole strip starts purple. Every press lights a few random pixels of the LED quadrant above the touched sensor in yellow; pressing another part of the skin starts lighting that quadrant too. Nothing else happens - a pure visual demo.",
+  "spec": {
+    "initial": "touch",
+    "states": {
+      "touch": {
+        "do": [
+          {
+            "set_led": {
+              "color": "#8e44ad",
+              "pattern": "solid",
+              "period_ms": 0,
+              "fade_ms": 250,
+              "angle": 0,
+              "ring": "all"
+            }
+          }
+        ],
+        "on_touch": [
+          {
+            "zone_fill": {
+              "kind": "touch",
+              "step_pct": 20,
+              "fill": "random",
+              "on_color": "#f1c40f",
+              "bg_color": "#8e44ad",
+              "target_interval_ms": 550,
+              "tolerance_ms": 150,
+              "min_gap_ms": 250,
+              "fade_ms": 250,
+              "ring": "all",
+              "to": "",
+              "hold": "glow",
+              "hold_full_ut": 300
+            }
+          }
+        ],
+        "transitions": []
+      }
+    }
+  }
+}

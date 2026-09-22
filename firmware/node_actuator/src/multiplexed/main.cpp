@@ -295,6 +295,7 @@ void parseAndQueue(const uint8_t* data, int len) {
         c.duty = doc["duty"] | 0;
         c.param = doc["off"] | 0;
         c.timed = doc["timed"] | 0;
+        c.dir = (doc["dir"] | 0) ? 1 : 0;    // 0 = pressure hold, 1 = vacuum hold
         c.param_kpa = doc["kpa"].is<float>() ? doc["kpa"].as<float>() : NAN;
     } else if (strcmp(cmd, "hold") == 0) {
         c.type = cmd_queue::CMD_HOLD;
@@ -722,11 +723,11 @@ void processCommand(const cmd_queue::Cmd& c) {
         if (c.chamber == -1) {
             if (c.param) chambers::holdAbort();
             else for (int i = 0; i < n_ch; i++)
-                chambers::holdEng.request(i, c.param_kpa, c.duty, c.timed != 0);
+                chambers::holdRequest(i, c.dir, c.param_kpa, c.duty, c.timed != 0);
         } else if (c.chamber >= 0 && c.chamber < n_ch) {
             if (c.param) chambers::holdDrop(c.chamber);
-            else chambers::holdEng.request(c.chamber, c.param_kpa, c.duty,
-                                           c.timed != 0);
+            else chambers::holdRequest(c.chamber, c.dir, c.param_kpa, c.duty,
+                                       c.timed != 0);
         }
         return;
     }
@@ -893,7 +894,7 @@ void setup() {
     // UNL17-24) so a bank swap from wrong address jumpers shows in the PC log.
     char ready_msg[192];
     snprintf(ready_msg, sizeof(ready_msg),
-             "{\"status\":\"node_multiplexed_ready\",\"fw\":\"pixels-1\",\"rgbw\":" LED_RGBW_JSON
+             "{\"status\":\"node_multiplexed_ready\",\"fw\":\"hold-3\",\"rgbw\":" LED_RGBW_JSON
              ",\"kpa_min\":%.0f,\"pca\":[%d,%d]}",
              (double)pressure::FLOOR_KPA, pca_valves::pca1_addr, pca_valves::pca2_addr);
     se::broadcast(ready_msg);

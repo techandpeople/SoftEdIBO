@@ -301,3 +301,134 @@ class GroupTouchSyncTracker:
             # Repeated IDs cannot represent independent participants.
             return selected if len(set(selected)) == len(selected) else []
         return list(range(max(1, int(participants))))
+
+
+@dataclass
+class SyncScoreTracker:
+    """Score the group's synchronized rounds as they happen.
+
+    Unlike :class:`GroupTouchSyncTracker` (a *streak*: one miss restarts the
+    count), this keeps a running score in 0..1: every complete round in
+    cadence adds ``gain``, every failed round (a child missing from the phase
+    window, or a stray press by one child alone) subtracts ``penalty``. A
+    complete round that is off cadence is neutral. So a few slips barely
+    show while a lot of random pressing drains the score back to zero.
+
+    Rounds are segmented incrementally: the first accepted press opens a
+    round, presses within ``phase_tolerance_ms`` join it, the next press
+    beyond the window (or :meth:`tick` once the window has expired) closes
+    it. ``mode`` works as for the streak tracker: *fixed* uses
+    ``sensor_ids`` (or sensors 0..N-1), *auto* lets whoever presses form the
+    group, scoring only once ``participants`` sensors have joined.
+    """
+
+    score: float = 0.0
+    good_rounds: int = 0
+    bad_rounds: int = 0
+    _params: dict | None = None
+    _joined: list[int] = field(default_factory=list)
+    _last_onset: dict[int, float] = field(default_factory=dict)
+    _open_start: float | None = None
+    _open_presses: dict[int, float] = field(default_factory=dict)
+    _last_round_ms: float | None = None
+
+    def configure(self, *, participants: int, sensor_ids: list[int] | None,
+                  target_interval_ms: float, cadence_tolerance_ms: float,
+                  phase_tolerance_ms: float, min_gap_ms: float,
+                  gain: float, penalty: float,
+                  mode: str = MODE_FIXED) -> None:
+        """Set the round rules. Until configured, presses are ignored."""
+        selected: list[int] | None = None
+        if mode != MODE_AUTO:
+            selected = GroupTouchSyncTracker._selected_sensors(
+                participants, sensor_ids)
+        self._params = {
+            "auto": mode == MODE_AUTO,
+            "participants": max(1, int(participants)),
+            "selected": selected,
+            "target": max(1.0, float(target_interval_ms)),
+            "cadence_tol": max(0.0, float(cadence_tolerance_ms)),
+            "phase_tol": max(0.0, float(phase_tolerance_ms)),
+            "debounce": max(0.0, float(min_gap_ms)),
+            "gain": max(0.0, float(gain)),
+            "penalty": max(0.0, float(penalty)),
+        }
+
+    def reset(self) -> None:
+        self.score = 0.0
+        self.good_rounds = 0
+        self.bad_rounds = 0
+        self._joined.clear()
+        self._last_onset.clear()
+        self._open_start = None
+        self._open_presses = {}
+        self._last_round_ms = None
+
+    @property
+    def complete(self) -> bool:
+        return self.score >= 1.0 - 1e-9
+
+    @property
+    def sensors(self) -> list[int]:
+        """The sensors currently required in every round."""
+        if self._params is None:
+            return []
+        selected = self._params["selected"]
+        return list(selected) if selected is not None else sorted(self._joined)
+
+    def record(self, sensor_idx: int, timestamp_ms: float) -> None:
+        p = self._params
+        if p is None:
+            return
+        sensor_idx = int(sensor_idx)
+        timestamp_ms = float(timestamp_ms)
+        if p["selected"] is not None and sensor_idx not in p["selected"]:
+            return
+        previous = self._last_onset.get(sensor_idx)
+        if previous is not None and timestamp_ms - previous < p["debounce"]:
+            return
+        self._last_onset[sensor_idx] = timestamp_ms
+        if sensor_idx not in self._joined:
+            self._joined.append(sensor_idx)
+        if self._open_start is None:
+            self._open_start, self._open_presses = timestamp_ms, {sensor_idx: timestamp_ms}
+            return
+        if timestamp_ms - self._open_start <= p["phase_tol"]:
+            self._open_presses.setdefault(sensor_idx, timestamp_ms)
+            return
+        self._close_round()
+        self._open_start, self._open_presses = timestamp_ms, {sensor_idx: timestamp_ms}
+
+    def tick(self, now_ms: float) -> None:
+        """Close the open round once its phase window has expired, so a
+        lone stray press is judged without waiting for the next one."""
+        p = self._params
+        if p is None or self._open_start is None:
+            return
+        if float(now_ms) - self._open_start > p["phase_tol"]:
+            self._close_round()
+            self._open_start, self._open_presses = None, {}
+
+    def status(self) -> dict:
+        return {"score": self.score, "complete": self.complete,
+                "good_rounds": self.good_rounds, "bad_rounds": self.bad_rounds,
+                "sensors": self.sensors}
+
+    def _close_round(self) -> None:
+        p = self._params
+        if p is None or not self._open_presses:
+            return
+        wanted = set(self.sensors)
+        if p["auto"] and len(wanted) < p["participants"]:
+            return                           # not enough children yet: no score
+        pressed = set(self._open_presses)
+        if not wanted <= pressed:
+            self.bad_rounds += 1
+            self.score = max(0.0, self.score - p["penalty"])
+            return
+        round_ms = float(median(self._open_presses.values()))
+        last = self._last_round_ms
+        self._last_round_ms = round_ms
+        if last is None or abs((round_ms - last) - p["target"]) <= p["cadence_tol"]:
+            self.good_rounds += 1
+            self.score = min(1.0, self.score + p["gain"])

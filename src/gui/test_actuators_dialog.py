@@ -23,7 +23,7 @@ from src.gui.base_dialog import BaseDialog
 from src.gui.ui_test_actuators_dialog import Ui_TestActuatorsDialog
 from src.hardware.gateway import Gateway
 from src.hardware.fill_profile import FillProfile
-from src.hardware.hold_duty import seed_hold_duty
+from src.hardware.hold_duty import HOLD_VACUUM, hold_direction, seed_hold_duty
 from src.hardware.units import kpa_to_pct
 
 
@@ -361,21 +361,24 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
             slot_row.addWidget(inf_btn)
             slot_row.addWidget(def_btn)
 
-            # Leak-compensating hold toggle: valve open + pump at the calibrated
-            # equilibrium duty, trimmed by the node's gauge. Needs a working
-            # pressure sensor, so it is hidden on sensorless boards.
+            # Leak-compensating hold toggle: the node regulates the chamber on
+            # its gauge with short pump pulses (pressure side above ambient,
+            # vacuum side below). Needs a working pressure sensor, so it is
+            # hidden on sensorless boards.
             if not self._sensorless:
                 hold_btn = QPushButton("Hold")
                 hold_btn.setCheckable(True)
                 hold_btn.setWhatsThis(
                     "Leak-compensating hold: keep this chamber AT its current "
-                    "pressure despite leaks. The node opens the inflate valve "
-                    "whenever the sensor reads below the level and adjusts "
-                    "the shared pump PWM in real time (never below 180 while "
-                    "holding). Toggles on by itself once an Inflate or "
-                    "Deflate finishes at a nonzero level, so the chamber stays "
-                    "inflated until you deflate it. The dialog re-asserts the "
-                    "hold every ~2 s; toggling off, actuating the chamber, "
+                    "pressure despite leaks. Above ambient the node re-opens "
+                    "the inflate valve in short, soft pump pulses whenever the "
+                    "sensor drifts below the level; below ambient it does the "
+                    "same with the deflate valve and the vacuum pump (a vacuum "
+                    "deeper than the sensor can see is kept by brief timed "
+                    "re-pulls). Toggles on by itself once an Inflate or "
+                    "Deflate finishes away from ambient, so the chamber keeps "
+                    "its pose until the next actuation. The dialog re-asserts "
+                    "the hold every ~2 s; toggling off, actuating the chamber, "
                     "STOP ALL or closing the dialog releases it.")
                 hold_btn.toggled.connect(
                     lambda on, s=slot: self._toggle_hold(s, on))
@@ -933,10 +936,12 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
     def _toggle_hold(self, slot: int, on: bool) -> None:
         """Start/stop a leak-compensating hold on one chamber (Hold toggle).
 
+        Holds the pressure the chamber is at right now - on the pressure
+        side above ambient, on the vacuum side below it (a reading sitting at
+        the blind gauge's floor becomes a timed re-pull hold on the node).
         Seeds the node's hold servo with the calibrated equilibrium duty
-        (``hold_duty_curve`` at the chamber's current kPa) or a conservative
-        default, targeting the pressure the chamber is at right now; the node
-        then trims the duty on its gauge. The dialog keepalive re-asserts it.
+        (``hold_duty_curve`` at that kPa) or the floor; the node then trims
+        the duty on its gauge. The dialog keepalive re-asserts it.
         """
         if not on:
             if self._held.pop(slot, None) is not None:
@@ -955,6 +960,8 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         payload = {"chamber": slot,
                    "duty": seed_hold_duty(cfg.get("hold_duty_curve"), kpa),
                    "kpa": round(float(kpa), 2)}
+        if hold_direction(kpa) == HOLD_VACUUM:
+            payload["dir"] = 1
         self._held[slot] = payload
         self._gateway.send(self._mac, "hold_duty", **payload)
         self._hold_timer.start()
@@ -1018,8 +1025,8 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
     # too short for a status frame to catch it moving - idle this long after
     # the command went out.
     _AUTO_HOLD_SETTLE_S = 1.5
-    # Levels at or under this (% of the chamber's range) are "empty": nothing
-    # to hold. Also requires a positive gauge (the hold is inflate-only).
+    # A pressure pose at or under this (% of the chamber's range) is "empty":
+    # nothing to hold. A vacuum pose (reading below ambient) is always held.
     _AUTO_HOLD_MIN_PCT = 5
 
     def _arm_auto_hold(self, slots: list[int]) -> None:
@@ -1050,9 +1057,13 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         if self._stopped or self._run is not None:
             return
         kpa = self._levels_kpa.get(chamber)
-        if kpa is None or kpa <= 0:
+        if kpa is None:
             return
-        if self._pct_for_kpa(chamber, kpa) <= self._AUTO_HOLD_MIN_PCT:
+        side = hold_direction(kpa)
+        if side is None:
+            return          # at ambient: nothing to hold
+        if side != HOLD_VACUUM and (
+                self._pct_for_kpa(chamber, kpa) <= self._AUTO_HOLD_MIN_PCT):
             return          # deflated: nothing to hold
         btn = self._hold_btns.get(chamber)
         if btn is not None and not btn.isChecked():

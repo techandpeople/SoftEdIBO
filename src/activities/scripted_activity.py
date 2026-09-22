@@ -29,12 +29,13 @@ from PySide6.QtCore import QObject, QTimer
 
 from src.activities import catalog
 from src.activities.base_activity import BaseActivity
-from src.activities.led_canvas import LedZoneCanvas
+from src.activities.led_canvas import LedZoneCanvas, HOLD_MODES, HoldFeedback
 from src.activities.organ_resolver import OrganResolver
 from src.core.touch_zones import TouchZoneMap
 from src.activities.touch_rhythm import (MODE_AUTO, MODE_FIXED,
                                          GroupTouchSyncTracker,
                                          MagnitudeCompressionTracker,
+                                         SyncScoreTracker,
                                          TouchRhythmTracker)
 from src.hardware.fill_scaling import (
     MIN_PUMP_DUTY,
@@ -114,6 +115,14 @@ class _Unit:
     sync_fill: dict[str, Any] | None = None
     sync_lit: int = 0
     sync_decay_at: float = 0.0
+    # Live hold feedback of the current state's `zone_fill` (held zones tinted
+    # by press strength); rebuilt on every sensor frame, cleared on phase entry.
+    hold: HoldFeedback = field(default_factory=HoldFeedback)
+    # Running-score whole-strip display (`score_fill`): its tracker, the
+    # block params of the current state (None = off) and the pixels last lit.
+    score: SyncScoreTracker = field(default_factory=SyncScoreTracker)
+    score_fill: dict[str, Any] | None = None
+    score_lit: int = 0
     # This skin type's power-level-1 PWM floor (see fill_scaling.duty_for_power);
     # resolved from settings at setup, defaults to the global stall floor.
     min_duty: int = MIN_PUMP_DUTY
@@ -395,6 +404,10 @@ class ScriptedActivity(BaseActivity):
         unit.aux.clear()
         unit.sync_fill = None
         unit.sync_lit = 0
+        unit.hold = HoldFeedback()
+        unit.score.reset()
+        unit.score_fill = None
+        unit.score_lit = 0
         if unit.canvas is not None:
             unit.canvas.reset()
         body = self._states.get(state, {}).get("do", [])
@@ -423,6 +436,7 @@ class ScriptedActivity(BaseActivity):
             self._advance(unit)
             self._advance_aux(unit)
             self._refresh_sync_fill(unit)
+            self._refresh_score_fill(unit)
 
     def _check_transitions(self, unit: _Unit) -> bool:
         for tr in self._states.get(unit.state, {}).get("transitions", []) or []:
@@ -967,6 +981,8 @@ class ScriptedActivity(BaseActivity):
             self._zone_fill(unit, params, ctx)
         elif verb == "sync_fill":
             self._sync_fill(unit, params)
+        elif verb == "score_fill":
+            self._score_fill(unit, params)
         elif verb in ("inflate", "set_pressure"):
             self._set_pressure(unit, self._resolve_chamber(unit, params, ctx),
                                int(params.get("pct", 60 if verb == "inflate" else 0)),
@@ -1161,6 +1177,56 @@ class ScriptedActivity(BaseActivity):
         canvas.set_total_lit(new)
         self._send_canvas(unit, params)
 
+    def _score_fill(self, unit: _Unit, params: dict) -> None:
+        """Arm the running-score whole-strip display for this state: the
+        tracker starts from zero with the block's round rules and the strip
+        is painted dark; `_refresh_score_fill` keeps it live."""
+        if unit.canvas is None:
+            logger.debug("score_fill ignored on %s (no canvas)", unit.unit_id)
+            return
+        unit.score_fill = dict(params)
+        unit.score.configure(**self._score_kwargs(params))
+        unit.score.reset()
+        unit.canvas.set_fill(str(params.get("fill", "") or ""))
+        unit.score_lit = -1                    # force the first paint
+        self._refresh_score_fill(unit)
+
+    def _refresh_score_fill(self, unit: _Unit) -> None:
+        """Per tick: close an expired round, then light the strip share equal
+        to the score. Growth and shrink both show at once (a miss costs a
+        visible step). A full score jumps to ``to`` like the other fills."""
+        params = unit.score_fill
+        canvas = unit.canvas
+        if params is None or canvas is None:
+            return
+        unit.score.tick(time.monotonic() * 1000.0)
+        target = round(canvas.total_size * unit.score.score)
+        if target != unit.score_lit:
+            unit.score_lit = target
+            canvas.set_total_lit(target)
+            self._send_canvas(unit, params)
+        to = str(params.get("to", "") or "")
+        if to and unit.score.complete and to in self._states \
+                and unit.pending_state is None:
+            unit.pending_state = to
+
+    @staticmethod
+    def _score_kwargs(params: dict) -> dict[str, Any]:
+        """The ``SyncScoreTracker`` rules a `score_fill` block encodes: the
+        group-sync round rules plus the gain / penalty per round (block
+        percentages of the strip -> fractions)."""
+        sync = ScriptedActivity._sync_kwargs(params)
+        sync.pop("required_rounds", None)
+        try:
+            gain = float(params.get("gain_pct", 15)) / 100.0
+        except (TypeError, ValueError):
+            gain = 0.15
+        try:
+            penalty = float(params.get("penalty_pct", 5)) / 100.0
+        except (TypeError, ValueError):
+            penalty = 0.05
+        return {**sync, "gain": gain, "penalty": penalty}
+
     def _send_canvas(self, unit: _Unit, params: dict) -> None:
         """Render the unit's canvas as ONE `set_led_pixels` frame."""
         canvas = unit.canvas
@@ -1168,7 +1234,8 @@ class ScriptedActivity(BaseActivity):
         if canvas is None or send is None:
             return
         colors, mask = canvas.frame(str(params.get("on_color", "#2ecc71")),
-                                    str(params.get("bg_color", "#222222")))
+                                    str(params.get("bg_color", "#222222")),
+                                    unit.hold)
         try:
             send(colors, mask, pattern="solid", ring=self._parse_ring(params),
                  fade_ms=self._fade_ms(params))
@@ -1404,7 +1471,70 @@ class ScriptedActivity(BaseActivity):
                 self._record_compression(unit, sensor_idx, now_ms)
             self._on_press(unit, mapping, sensor_idx)
         unit.active_touch = new_set
+        self._refresh_hold(unit, magnitudes, new_set)
         self._publish_cpr_status(unit)
+
+    # Press-strength levels are quantised to this many steps so a steady hold
+    # does not re-send a frame on every 10 Hz sensor message.
+    HOLD_LEVELS = 10
+
+    def _state_zone_fill_params(self, unit: _Unit) -> dict[str, Any] | None:
+        """The first `zone_fill` step of the current state's ``on_touch``
+        handler (top level), else None."""
+        for step in self._states.get(unit.state, {}).get("on_touch", []) or []:
+            params = step.get("zone_fill") if isinstance(step, dict) else None
+            if isinstance(params, dict):
+                return params
+        return None
+
+    def _state_hold_params(self, unit: _Unit) -> dict[str, Any] | None:
+        """The fill block whose ``hold`` setting (and colours) drive the live
+        hold feedback: the state's `zone_fill`, else its armed `score_fill`,
+        else its armed `sync_fill`."""
+        return (self._state_zone_fill_params(unit)
+                or unit.score_fill or unit.sync_fill)
+
+    def _refresh_hold(self, unit: _Unit, magnitudes: Any,
+                      active: set[int]) -> None:
+        """Repaint the strip's live hold feedback from this sensor frame.
+
+        The current state's `zone_fill` chooses the mode (``hold``: glow the
+        held zone's lit pixels / dim its unlit ones / none) and the field
+        strength read as full effect (``hold_full_ut``; the touch threshold
+        is zero effect). Held zones = the active sensors; level = the
+        strongest of them. Only a change of zones or (quantised) level sends
+        a frame, and a frame is sent on release so the tint clears."""
+        params = self._state_hold_params(unit)
+        mode = str((params or {}).get("hold", "none") or "none")
+        if params is None or unit.canvas is None or mode not in HOLD_MODES \
+                or mode == "none":
+            unit.hold = HoldFeedback()
+            return
+        enter, _exit, _spike = self._magnitude_thresholds(unit.skin)
+        try:
+            full = float(params.get("hold_full_ut", 300) or 0)
+        except (TypeError, ValueError):
+            full = 300.0
+        if full <= enter:
+            full = enter * 3 if enter > 0 else 300.0
+        level = 0.0
+        for sensor in active:
+            if isinstance(magnitudes, (list, tuple)) and sensor < len(magnitudes):
+                try:
+                    strength = (float(magnitudes[sensor]) - enter) / (full - enter)
+                except (TypeError, ValueError):
+                    strength = 0.0
+            else:
+                strength = 1.0             # binary sensor: full effect while held
+            level = max(level, max(0.0, min(1.0, strength)))
+        level = round(level * self.HOLD_LEVELS) / self.HOLD_LEVELS
+        new = HoldFeedback(frozenset(int(s) for s in active), mode, level)
+        if new == unit.hold:
+            return
+        was_active = unit.hold.active
+        unit.hold = new
+        if new.active or was_active:
+            self._send_canvas(unit, params)
 
     @staticmethod
     def _record_compression(unit: _Unit, sensor_idx: int, now_ms: float) -> None:
@@ -1413,6 +1543,7 @@ class ScriptedActivity(BaseActivity):
             sensor_idx, TouchRhythmTracker()).record(now_ms)
         unit.rhythm_last_press_ms[sensor_idx] = now_ms
         unit.rhythm.record(now_ms)
+        unit.score.record(sensor_idx, now_ms)
         unit.group_sync.record(sensor_idx, now_ms)
 
     @staticmethod

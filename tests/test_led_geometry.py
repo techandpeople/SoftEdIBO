@@ -9,6 +9,7 @@ from src.core.led_geometry import (DEFAULT_LED_LAYOUTS, LedStripGeometry,
 from src.core.touch_zones import (QUADRANT_POSITIONS, SensorPlacement,
                                   TouchZoneMap, evenly_spaced_placements,
                                   normalise_sensor_quadrants,
+                                  quadrant_names,
                                   quadrant_placements)
 
 
@@ -152,6 +153,12 @@ class TestPlacements:
     def test_non_four_boards_fall_back_to_even_spacing(self):
         assert [p.position for p in quadrant_placements(2, {"0": "Q3"})] == \
             pytest.approx([0.25, 0.75])
+
+    def test_quadrant_names_follow_the_assignment(self):
+        assert quadrant_names(4) == ["Q1", "Q2", "Q3", "Q4"]
+        assert quadrant_names(4, {"0": "Q4", 3: "q1", "9": "Q2", "1": "zz"}) \
+            == ["Q4", "Q2", "Q3", "Q1"]
+        assert quadrant_names(2, {"0": "Q3"}) == ["Q1", "Q2"]
 
     def test_normalise_sensor_quadrants_keeps_only_real_changes(self):
         assert normalise_sensor_quadrants({"0": "Q1", "1": "Q3", "x": "Q2",

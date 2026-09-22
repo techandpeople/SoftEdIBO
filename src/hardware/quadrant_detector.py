@@ -6,16 +6,20 @@ with the SoftEdIBO ESP-NOW pipeline.  Uses raw magnitude values (uT) directly -
 no normalisation against a fullscale constant - so the detector is independent of
 firmware configuration and behaves like the proven thesis implementation.
 
-Quadrant layout:
+Quadrant layout (looking down, front at the top):
     Q1(+)  Q2(-)
     Q3(-)  Q4(+)
+
+Which *sensor index* sits in which quadrant is the skin's ``sensor_quadrants``
+assignment (default sensor ``i`` = ``Q{i+1}``); the detector takes it as
+``sensor_quadrants`` so its reported quadrants follow the configured wiring.
 """
 
 from __future__ import annotations
 
 import math
 import logging
-from typing import List, Tuple, Dict, Any
+from typing import List, Tuple, Dict, Any, Sequence
 from enum import Enum
 
 logger = logging.getLogger(__name__)
@@ -60,11 +64,12 @@ _POSITION_TO_ZONE: dict[QuadrantPosition, TouchZone] = {
     QuadrantPosition.NONE:   TouchZone.NONE,
 }
 
+# Adjacent quadrant pairs (by NAME, so a remapped wiring still resolves edges).
 _BETWEEN_PAIRS: dict[frozenset, QuadrantPosition] = {
-    frozenset((0, 1)): QuadrantPosition.Q1_Q2,
-    frozenset((0, 2)): QuadrantPosition.Q1_Q3,
-    frozenset((1, 3)): QuadrantPosition.Q2_Q4,
-    frozenset((2, 3)): QuadrantPosition.Q3_Q4,
+    frozenset(("Q1", "Q2")): QuadrantPosition.Q1_Q2,
+    frozenset(("Q1", "Q3")): QuadrantPosition.Q1_Q3,
+    frozenset(("Q2", "Q4")): QuadrantPosition.Q2_Q4,
+    frozenset(("Q3", "Q4")): QuadrantPosition.Q3_Q4,
 }
 
 _QUADRANT_NAMES = ["Q1", "Q2", "Q3", "Q4"]
@@ -91,9 +96,14 @@ class QuadrantDetector:
         between_min: float = 50.0,
         between_max: float = 120.0,
         magnet_strength: str = "strong",
+        sensor_quadrants: Sequence[str] | None = None,
     ) -> None:
         default = 100.0
         self.thresholds     = list(thresholds) if thresholds else [default] * 4
+        # Quadrant name of each sensor index (the skin's ``sensor_quadrants``).
+        self.quadrant_names = list(_QUADRANT_NAMES)
+        if sensor_quadrants:
+            self.set_sensor_quadrants(sensor_quadrants)
         self.hysteresis     = max(0.0, hysteresis)
         self.ema_alpha      = max(0.0, min(1.0, ema_alpha))
         self.between_min    = between_min
@@ -152,12 +162,19 @@ class QuadrantDetector:
     def set_hysteresis(self, h: float) -> None:
         self.hysteresis = max(0.0, float(h))
 
+    def set_sensor_quadrants(self, names: Sequence[str]) -> None:
+        """Assign a quadrant name (``Q1``..``Q4``) to each of the 4 sensors."""
+        names = [str(n).strip().upper() for n in names]
+        if len(names) != 4 or set(names) != set(_QUADRANT_NAMES):
+            raise ValueError(f"Expected a permutation of Q1..Q4, got {names}")
+        self.quadrant_names = names
+
     # ------------------------------------------------------------------
     # Quadrant / zone helpers
     # ------------------------------------------------------------------
 
     def get_active_quadrants(self) -> List[str]:
-        return [_QUADRANT_NAMES[i] for i, a in enumerate(self.active_state) if a]
+        return [self.quadrant_names[i] for i, a in enumerate(self.active_state) if a]
 
     def get_dominant_quadrant(self) -> Tuple[str, float]:
         """Return (quadrant_name, signal_strength_uT) for the strongest active sensor."""
@@ -165,7 +182,7 @@ class QuadrantDetector:
         if not active_idx:
             return ("NONE", 0.0)
         best = max(active_idx, key=lambda i: self.sensor_values[i])
-        return (_QUADRANT_NAMES[best], self.sensor_values[best])
+        return (self.quadrant_names[best], self.sensor_values[best])
 
     def get_confidence(self) -> float:
         """Confidence = (primary - second) / primary (thesis formula)."""
@@ -184,14 +201,13 @@ class QuadrantDetector:
 
         count = sum(active)
         if count == 1:
-            return [QuadrantPosition.Q1, QuadrantPosition.Q2,
-                    QuadrantPosition.Q3, QuadrantPosition.Q4][active.index(True)]
+            return QuadrantPosition[self.quadrant_names[active.index(True)]]
         if count == 4:
             return QuadrantPosition.CENTER
 
-        for pair, pos in _BETWEEN_PAIRS.items():
-            i, j = tuple(pair)
-            if active[i] and active[j] and count == 2:
+        if count == 2:
+            pos = _BETWEEN_PAIRS.get(frozenset(self.get_active_quadrants()))
+            if pos is not None:
                 return pos
 
         dominant, _ = self.get_dominant_quadrant()
@@ -211,6 +227,7 @@ class QuadrantDetector:
             "thresholds":      self.thresholds,
             "hysteresis":      self.hysteresis,
             "magnet_strength": self.magnet_strength,
+            "sensor_quadrants": list(self.quadrant_names),
             "active_quadrants": self.get_active_quadrants(),
             "sensor_values":   self.sensor_values,
             "position":        self.estimate_position().value,

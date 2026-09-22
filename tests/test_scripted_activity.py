@@ -1486,3 +1486,192 @@ def test_sync_kwargs_mode_defaults():
     assert kw["mode"] == "fixed"               # a sensor list is always fixed
     assert ScriptedActivity._sync_kwargs({})["mode"] == "fixed"
     assert ScriptedActivity._sync_kwargs({"mode": "auto"})["mode"] == "auto"
+
+
+# ---------------------------------------------------------------------------
+# zone_fill live hold feedback (glow / dim by press strength)
+# ---------------------------------------------------------------------------
+
+def _hold_skin(ctrl, enter_ut=100.0):
+    skin = _ZoneSkin(ctrl)
+    skin.touch["act_threshold_ut"] = enter_ut
+    return skin
+
+
+def _frame(activity, unit, act, mag):
+    activity._on_magnet(unit, {"act": act, "mag": mag})
+
+
+def test_zone_fill_hold_glow_tints_the_held_zone_by_press_strength(clock):
+    ctrl = _FakePixelCtrl()
+    skin = _hold_skin(ctrl)
+    activity = ScriptedActivity("Hold", "", _zone_fill_spec(
+        kind="touch", step_pct=50, to="", hold="glow", hold_full_ut=300,
+        on_color="#000000", bg_color="#8e44ad"))
+    _start(activity, _FakeRobot([skin]))
+    unit = _unit(activity)
+    zone_map = skin.touch_zone_map()
+
+    # Press zone 2 at threshold strength: lights half the zone, no tint yet.
+    _frame(activity, unit, [2], [0, 0, 100, 0])
+    activity._on_tick()
+    assert ctrl.pixels[-1][0] == ["#8e44ad", "#000000"]
+    lit = _lit_pixels(ctrl)
+    assert lit <= set(zone_map.zone_pixels(2))
+
+    # Still held, harder: half way between threshold and full -> grey tint on
+    # exactly the lit pixels of zone 2, nothing else changes.
+    n = len(ctrl.pixels)
+    _frame(activity, unit, [2], [0, 0, 200, 0])
+    assert len(ctrl.pixels) == n + 1
+    colors, mask = ctrl.pixels[-1]
+    assert colors == ["#8e44ad", "#000000", "#808080"]
+    from src.core.led_geometry import decode_pixel_mask
+    codes = decode_pixel_mask(mask, 68)
+    assert {i for i, c in enumerate(codes) if c == 2} == lit
+
+    # Same strength again: no new frame (quantised level unchanged).
+    _frame(activity, unit, [2], [0, 0, 205, 0])
+    assert len(ctrl.pixels) == n + 1
+
+    # Release: one plain frame clears the tint; further idle frames send nothing.
+    _frame(activity, unit, [], [0, 0, 0, 0])
+    assert len(ctrl.pixels) == n + 2
+    assert ctrl.pixels[-1][0] == ["#8e44ad", "#000000"]
+    _frame(activity, unit, [], [0, 0, 0, 0])
+    assert len(ctrl.pixels) == n + 2
+
+
+def test_zone_fill_hold_dim_fades_the_held_zones_unlit_pixels(clock):
+    ctrl = _FakePixelCtrl()
+    skin = _hold_skin(ctrl)
+    activity = ScriptedActivity("Hold", "", _zone_fill_spec(
+        kind="touch", step_pct=50, to="", hold="dim", hold_full_ut=300,
+        on_color="#f1c40f", bg_color="#8e44ad"))
+    _start(activity, _FakeRobot([skin]))
+    unit = _unit(activity)
+    zone_map = skin.touch_zone_map()
+
+    _frame(activity, unit, [1], [0, 300, 0, 0])      # full strength at once
+    activity._on_tick()                              # lights half of zone 1
+    # The on_touch repaint keeps the live tint (unit.hold) in the frame.
+    colors, mask = ctrl.pixels[-1]
+    assert colors == ["#8e44ad", "#f1c40f", "#000000"]
+    from src.core.led_geometry import decode_pixel_mask
+    codes = decode_pixel_mask(mask, 68)
+    dimmed = {i for i, c in enumerate(codes) if c == 2}
+    lit = {i for i, c in enumerate(codes) if c == 1}
+    assert dimmed | lit == set(zone_map.zone_pixels(1)) and not dimmed & lit
+
+
+def test_zone_fill_hold_none_sends_nothing_extra(clock):
+    ctrl = _FakePixelCtrl()
+    skin = _hold_skin(ctrl)
+    activity = ScriptedActivity("Hold", "", _zone_fill_spec(kind="touch", to=""))
+    _start(activity, _FakeRobot([skin]))
+    unit = _unit(activity)
+    _frame(activity, unit, [0], [300, 0, 0, 0])
+    activity._on_tick()
+    n = len(ctrl.pixels)
+    _frame(activity, unit, [0], [300, 0, 0, 0])
+    _frame(activity, unit, [], [0, 0, 0, 0])
+    assert len(ctrl.pixels) == n
+    assert all(len(colors) == 2 for colors, _m in ctrl.pixels)
+
+
+# ---------------------------------------------------------------------------
+# score_fill (running score of synchronized rounds on the whole strip)
+# ---------------------------------------------------------------------------
+
+def _score_fill_spec(**overrides):
+    params = {"mode": "auto", "participants": 3, "target_interval_ms": 100,
+              "cadence_tolerance_ms": 10, "phase_tolerance_ms": 40,
+              "min_gap_ms": 30, "gain_pct": 25, "penalty_pct": 25,
+              "fill": "contiguous", "on_color": "#f1c40f",
+              "bg_color": "#8e44ad", "to": "done"}
+    params.update(overrides)
+    return {"initial": "s", "states": {
+        "s": {"do": [{"score_fill": params}], "transitions": []},
+        "done": {"do": [], "transitions": []},
+    }}
+
+
+def _beat(activity, unit, clock, t0, at_ms, sensors=(0, 1, 2)):
+    """Group beat at absolute ``t0 + at_ms``: sensors press 10 ms apart."""
+    for i, sensor in enumerate(sensors):
+        clock.t = t0 + (at_ms + 10 * i) / 1000.0
+        _press(activity, unit, sensor)
+
+
+def _settle(activity, unit, clock, t0, at_ms):
+    """Move past the phase window and tick so the open round is judged."""
+    clock.t = t0 + at_ms / 1000.0
+    activity._on_tick()
+
+
+def test_score_fill_grows_on_synced_rounds_shrinks_on_misses_and_completes(clock):
+    ctrl = _FakePixelCtrl()
+    skin = _ZoneSkin(ctrl)
+    activity = ScriptedActivity("Score", "", _score_fill_spec())
+    _start(activity, _FakeRobot([skin]))
+    unit = _unit(activity)
+    t0 = clock.t
+    assert ctrl.pixels and not _lit_pixels(ctrl)          # painted dark on enter
+    assert ctrl.pixels[-1][0] == ["#8e44ad", "#f1c40f"]
+
+    _beat(activity, unit, clock, t0, 0); _settle(activity, unit, clock, t0, 70)
+    assert len(_lit_pixels(ctrl)) == 17                    # 25 % of 68
+    _beat(activity, unit, clock, t0, 100); _settle(activity, unit, clock, t0, 170)
+    assert _lit_pixels(ctrl) == set(range(34))             # whole strip, in order
+
+    _beat(activity, unit, clock, t0, 200, sensors=(0,))    # one child alone: miss
+    _settle(activity, unit, clock, t0, 270)
+    assert len(_lit_pixels(ctrl)) == 17                    # a step back to purple
+
+    _beat(activity, unit, clock, t0, 300); _settle(activity, unit, clock, t0, 370)
+    assert len(_lit_pixels(ctrl)) == 17                    # off cadence: neutral
+    for at in (400, 500, 600):
+        _beat(activity, unit, clock, t0, at); _settle(activity, unit, clock, t0, at + 70)
+    assert len(_lit_pixels(ctrl)) == 68
+    activity._on_tick()                                    # pending jump applied
+    assert activity.unit_state(unit.unit_id) == "done"
+
+
+def test_score_fill_hold_dims_the_touched_zones_unlit_pixels(clock):
+    ctrl = _FakePixelCtrl()
+    skin = _hold_skin(ctrl)
+    activity = ScriptedActivity("Score", "", _score_fill_spec(
+        hold="dim", hold_full_ut=300, to=""))
+    _start(activity, _FakeRobot([skin]))
+    unit = _unit(activity)
+    zone_map = skin.touch_zone_map()
+    _frame(activity, unit, [1], [0, 300, 0, 0])
+    colors, mask = ctrl.pixels[-1]
+    assert colors == ["#8e44ad", "#f1c40f", "#000000"]
+    from src.core.led_geometry import decode_pixel_mask
+    codes = decode_pixel_mask(mask, 68)
+    assert {i for i, c in enumerate(codes) if c == 2} == set(zone_map.zone_pixels(1))
+    _frame(activity, unit, [], [0, 0, 0, 0])
+    assert ctrl.pixels[-1][0] == ["#8e44ad", "#f1c40f"]
+
+
+def test_sync_fill_hold_uses_the_armed_blocks_colours(clock):
+    ctrl = _FakePixelCtrl()
+    skin = _hold_skin(ctrl)
+    spec = _sync_fill_spec(rounds=4)
+    spec["states"]["s"]["do"][0]["sync_fill"].update(
+        {"hold": "glow", "hold_full_ut": 300})
+    activity = ScriptedActivity("CPR", "", spec)
+    _start(activity, _FakeRobot([skin]))
+    unit = _unit(activity)
+    _emit_group_round(activity, unit, clock)                # streak 1 -> 17 px lit
+    activity._on_tick()
+    lit = _lit_pixels(ctrl)
+    assert lit
+    _frame(activity, unit, [0], [200, 0, 0, 0])             # held at half strength
+    colors, mask = ctrl.pixels[-1]
+    assert colors == ["#000000", "#ffffff", "#ffffff"]      # glow of white = white
+    from src.core.led_geometry import decode_pixel_mask
+    codes = decode_pixel_mask(mask, 68)
+    zone0 = set(skin.touch_zone_map().zone_pixels(0))
+    assert {i for i, c in enumerate(codes) if c == 2} == lit & zone0

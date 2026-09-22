@@ -145,7 +145,7 @@ class SimulatedController(QObject):
         return True
 
     def start_hold(self, chamber: int, duty: int, kpa: float | None = None,
-                   timed: bool = False) -> bool:
+                   timed: bool = False, vacuum: bool = False) -> bool:
         """Leak-compensating hold - a no-op in simulation (nothing leaks): the
         chamber simply keeps its current target. Interface parity with
         :meth:`ESP32Controller.start_hold`."""

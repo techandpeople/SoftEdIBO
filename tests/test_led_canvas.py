@@ -120,3 +120,48 @@ class TestFrame:
         codes = decode_pixel_mask(mask, 68)
         assert sum(codes) == 3
         assert [i for i, c in enumerate(codes) if c] == canvas.zone_map.zone_pixels(0)[:3]
+
+
+class TestHoldFeedback:
+    def test_inactive_hold_renders_two_colours(self):
+        from src.activities.led_canvas import HoldFeedback
+        canvas = _canvas(fill=FILL_CONTIGUOUS)
+        canvas.fill_zone(1, 3)
+        plain = canvas.frame("#f1c40f", "#8e44ad")
+        assert canvas.frame("#f1c40f", "#8e44ad", HoldFeedback()) == plain
+        assert canvas.frame("#f1c40f", "#8e44ad",
+                            HoldFeedback(frozenset({1}), "glow", 0.0)) == plain
+        assert len(plain[0]) == 2
+
+    def test_glow_tints_only_the_held_zones_lit_pixels(self):
+        from src.activities.led_canvas import HOLD_CODE, HoldFeedback, ON_CODE
+        canvas = _canvas(fill=FILL_CONTIGUOUS)
+        canvas.fill_zone(1, 3)
+        canvas.fill_zone(2, 3)
+        hold = HoldFeedback(frozenset({1}), "glow", 0.5)
+        codes = canvas.codes(hold)
+        zone1 = canvas.zone_map.zone_pixels(1)
+        assert [p for p, c in enumerate(codes) if c == HOLD_CODE] == zone1[:3]
+        assert all(codes[p] == ON_CODE for p in canvas.zone_map.zone_pixels(2)[:3])
+        colors, _mask = canvas.frame("#000000", "#8e44ad", hold)
+        assert colors == ["#8e44ad", "#000000", "#808080"]     # half way to white
+
+    def test_dim_tints_only_the_held_zones_unlit_pixels(self):
+        from src.activities.led_canvas import BG_CODE, HOLD_CODE, HoldFeedback
+        canvas = _canvas(fill=FILL_CONTIGUOUS)
+        canvas.fill_zone(1, 3)
+        hold = HoldFeedback(frozenset({1}), "dim", 1.0)
+        codes = canvas.codes(hold)
+        zone1 = canvas.zone_map.zone_pixels(1)
+        assert [p for p, c in enumerate(codes) if c == HOLD_CODE] == zone1[3:]
+        assert all(codes[p] == BG_CODE for p in canvas.zone_map.zone_pixels(0))
+        colors, _mask = canvas.frame("#f1c40f", "#8e44ad", hold)
+        assert colors[2] == "#000000"
+
+    def test_mix_hex_blends_and_clamps(self):
+        from src.activities.led_canvas import mix_hex
+        assert mix_hex("#000000", "#ffffff", 0.0) == "#000000"
+        assert mix_hex("#000000", "#ffffff", 1.0) == "#ffffff"
+        assert mix_hex("#000000", "#ffffff", 2.0) == "#ffffff"
+        assert mix_hex("#fff", "#000", 0.5) == "#808080"
+        assert mix_hex("junk", "#ffffff", 0.5) == "#808080"

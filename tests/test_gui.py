@@ -4,6 +4,7 @@ from datetime import datetime
 from unittest.mock import MagicMock
 
 import pytest
+from PySide6.QtCore import Qt
 
 from src.activities.scripted_activity import ScriptedActivity
 from src.activities.seed_behaviors import SEED_CONDITIONS
@@ -188,6 +189,42 @@ class TestRobotPanel:
         assert panel.turtles_tree.topLevelItemCount() == 2
         assert panel.trees_tree.topLevelItemCount() == 0
         assert panel.thymio_tree.topLevelItemCount() == 0
+
+    def test_skins_nest_under_their_node(self, qtbot):
+        # A skin whose chambers all live on one configured node is shown under
+        # that node; one spanning two boards stays directly under the robot.
+        mac_a, mac_b = "F4:65:0B:B5:78:04", "F4:65:0B:B5:71:C4"
+        settings = _mock_settings()
+        settings.data["robots"]["thymios"] = [{
+            "thymio_id": "thymio-1",
+            "nodes": [{"mac": mac_a, "node_type": "node_direct"},
+                      {"mac": mac_b, "node_type": "node_direct"}],
+            "skins": [
+                {"name": "on A", "chambers": [{"mac": mac_a, "slot": 0},
+                                              {"mac": mac_a, "slot": 1}]},
+                {"name": "on B", "chambers": [{"mac": mac_b, "slot": 0}]},
+                {"name": "spans", "chambers": [{"mac": mac_a, "slot": 2},
+                                               {"mac": mac_b, "slot": 1}]},
+            ],
+        }]
+        panel = RobotPanel(Gateway("/dev/null"), settings)
+        qtbot.addWidget(panel)
+        panel.refresh([])
+        robot = panel.thymio_tree.topLevelItem(0)
+        assert robot is not None
+
+        def children(item):
+            return [item.child(i) for i in range(item.childCount())]
+
+        kinds = [c.data(0, Qt.ItemDataRole.UserRole)["item_type"]
+                 for c in children(robot)]
+        assert kinds == ["node", "node", "skin"]
+        node_a, node_b, spanning = children(robot)
+        assert [c.text(0) for c in children(node_a)] \
+            == ["[S]  on A  (78:04#0, 78:04#1)"]
+        assert [c.text(0) for c in children(node_b)] \
+            == ["[S]  on B  (71:C4#0)"]
+        assert "spans" in spanning.text(0)
 
     def test_gateway_connect_btn_present(self, qtbot):
         panel = RobotPanel(Gateway("/dev/null"), _mock_settings())

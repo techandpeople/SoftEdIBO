@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (QDialog, QDoubleSpinBox, QGridLayout, QGroupBox,
                                QLabel, QPushButton, QProgressBar, QSizePolicy,
                                QWidget)
 
+from src.core.touch_zones import QUADRANT_LABELS, quadrant_names
 from src.gui.ui_touch_tuning_panel import Ui_TouchTuningPanel
 from src.hardware.skin import Skin
 
@@ -247,8 +248,17 @@ class TouchTuningPanel(QGroupBox, Ui_TouchTuningPanel):
         for child in self.findChildren(QWidget):
             child.setFont(compact)
 
-        # Quadrant thresholds (index 0..3 = Q1..Q4), seeded from the skin.
+        # Per-sensor thresholds (index 0..3), seeded from the skin. Each
+        # column is titled with the corner that sensor is configured to sit
+        # in (the skin's ``sensor_quadrants``), so the labels match what the
+        # detector reports.
         self._threshold_spins = [self.thr0, self.thr1, self.thr2, self.thr3]
+        touch_cfg = getattr(skin, "touch", None) or {}
+        names = quadrant_names(4, touch_cfg.get("sensor_quadrants"))
+        for i, label in enumerate([self.q0_label, self.q1_label,
+                                   self.q2_label, self.q3_label]):
+            short = "".join(w[0] for w in QUADRANT_LABELS[names[i]].split("-"))
+            label.setText(f"{names[i]} ({short.upper()})")
         thresholds = skin.touch_thresholds or [100.0, 100.0, 100.0, 100.0]
         for i, spin in enumerate(self._threshold_spins):
             spin.setValue(float(thresholds[i]) if i < len(thresholds) else 100.0)

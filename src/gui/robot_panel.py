@@ -51,7 +51,9 @@ class RobotPanel(QWidget, Ui_RobotPanel):
     Tree structure per robot:
       - top-level item   = robot
         +-- [N] * MAC  (node_type, used/max slots)   - double-click to edit node
-        +-- [S] Skin name  (chamber summary)          - double-click to edit skin
+            +-- [S] Skin name  (chamber summary)      - double-click to edit skin
+        +-- [S] Skin name  (chamber summary)          - skin spanning several nodes
+                                                        (or none) stays under the robot
 
     Signals:
         robot_configured: Emitted after any config change.
@@ -465,6 +467,9 @@ class RobotPanel(QWidget, Ui_RobotPanel):
 
             # --- Node children ---
             skins_for_robot = robot_cfg.get("skins", [])
+            # mac -> node item, so each skin can be parented under the board
+            # that carries its chambers.
+            node_items_by_mac: dict[str, QTreeWidgetItem] = {}
             for node_index, node_cfg in enumerate(robot_cfg.get("nodes", [])):
                 mac        = node_cfg.get("mac", "")
                 node_type  = node_cfg.get("node_type", "standard")
@@ -498,8 +503,13 @@ class RobotPanel(QWidget, Ui_RobotPanel):
                 # to date by _on_latency_update via the _node_items map.
                 self._init_latency_cell(node_item, mac, online)
                 robot_item.addChild(node_item)
+                if mac and mac not in node_items_by_mac:
+                    node_items_by_mac[mac] = node_item
 
             # --- Skin children ---
+            # A skin whose chambers all sit on one configured node is nested
+            # under that node; one spanning several boards (or with no chambers
+            # yet) is listed directly under the robot.
             for skin_index, skin_cfg in enumerate(skins_for_robot):
                 skin_name = skin_cfg.get("name") or skin_cfg.get("skin_id", "")
                 chambers  = skin_cfg.get("chambers", [])
@@ -512,9 +522,22 @@ class RobotPanel(QWidget, Ui_RobotPanel):
                     "item_type":   "skin",
                     "skin_index":  skin_index,
                 })
-                robot_item.addChild(skin_item)
+                parent = self._skin_parent(chambers, node_items_by_mac) or robot_item
+                parent.addChild(skin_item)
+                parent.setExpanded(True)
 
             robot_item.setExpanded(True)
+
+    @staticmethod
+    def _skin_parent(
+        chambers: list[dict],
+        node_items_by_mac: dict[str, QTreeWidgetItem],
+    ) -> QTreeWidgetItem | None:
+        """Return the node item owning ALL of ``chambers``, or None."""
+        macs = {c.get("mac", "") for c in chambers}
+        if len(macs) != 1:
+            return None
+        return node_items_by_mac.get(macs.pop())
 
     # ------------------------------------------------------------------
     # Context menu

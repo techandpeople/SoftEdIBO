@@ -74,7 +74,24 @@ def quadrant_placements(count: int,
     n = max(1, int(count))
     if n != len(QUADRANT_NAMES):
         return evenly_spaced_placements(n)
-    assigned: dict[int, str] = {}
+    return [SensorPlacement(i, QUADRANT_POSITIONS[name])
+            for i, name in enumerate(quadrant_names(n, sensor_quadrants))]
+
+
+def quadrant_names(count: int,
+                   sensor_quadrants: Mapping[Any, Any] | None = None
+                   ) -> list[str]:
+    """The quadrant name of each sensor index on a four-sensor board, from
+    its ``sensor_quadrants`` assignment (sensor ``i`` defaults to ``Q{i+1}``;
+    bad keys/names are ignored). The single source both the LED zones and the
+    quadrant detector read, so a touch on a moved sensor lights and reports
+    the same corner. Other sensor counts get the identity names, truncated
+    or padded with empty strings."""
+    n = max(1, int(count))
+    names = [QUADRANT_NAMES[i] if i < len(QUADRANT_NAMES) else ""
+             for i in range(n)]
+    if n != len(QUADRANT_NAMES):
+        return names
     for key, value in (sensor_quadrants or {}).items():
         try:
             idx = int(key)
@@ -82,12 +99,8 @@ def quadrant_placements(count: int,
             continue
         name = str(value).strip().upper()
         if 0 <= idx < n and name in QUADRANT_POSITIONS:
-            assigned[idx] = name
-    out: list[SensorPlacement] = []
-    for i in range(n):
-        name = assigned.get(i, QUADRANT_NAMES[i])
-        out.append(SensorPlacement(i, QUADRANT_POSITIONS[name]))
-    return out
+            names[idx] = name
+    return names
 
 
 def normalise_sensor_quadrants(value: Any, count: int) -> dict[str, str]:

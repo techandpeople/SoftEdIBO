@@ -166,3 +166,24 @@ def test_profiles_without_a_layout_space_sensors_evenly():
     assert capacitive[0].position == 1 / 16
     # No config at all: the four-sensor default.
     assert len(touch_profiles.default.sensor_placements(None)) == 4
+
+
+def test_position_tracker_reports_the_configured_quadrants():
+    """The detector must name corners the way the skin's ``sensor_quadrants``
+    says, so a touch reports the same corner the LED zones light."""
+    p = MagnetSensorProfile()
+    built = p.build_position_tracker(
+        {"sensor_count": 4, "sensor_quadrants": {"0": "Q4", "3": "Q1"}})
+    assert built is not None
+    detector, _tracker = built
+    assert detector.quadrant_names == ["Q4", "Q2", "Q3", "Q1"]
+    detector.update([500.0, 0.0, 0.0, 0.0])
+    assert detector.get_active_quadrants() == ["Q4"]
+    assert detector.estimate_position().value == "Q4"
+    assert detector.get_touch_zone().value == "bottom_right"
+    # Sensors 0 and 2 are now Q4 and Q3: the bottom edge, not Q1-Q3.
+    detector.update([500.0, 0.0, 500.0, 0.0])
+    assert detector.estimate_position().value == "Q3-Q4"
+    # Default wiring is untouched.
+    default_detector, _ = p.build_position_tracker({"sensor_count": 4})
+    assert default_detector.quadrant_names == ["Q1", "Q2", "Q3", "Q4"]
