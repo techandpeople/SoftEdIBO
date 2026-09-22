@@ -42,6 +42,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from src.activities import activity_kind, skin_condition
+from src.activities.led_canvas import FILL_MODES
+from src.activities.touch_rhythm import MODE_AUTO, SYNC_MODES
 from src.ml.gesture_taxonomy import GESTURE_CLASSES
 
 
@@ -137,6 +139,18 @@ ANGLE_FIELD = VerbField(
 
 BEAT_MODES = ("sync", "sequential", "random", "aligned")
 
+# What counts as one step of a `zone_fill`: any press, or only a press that
+# keeps the zone's cadence (its interval to the previous press in the SAME
+# zone is within tolerance of the target - the first press of a run never
+# counts, it only starts the clock).
+ZONE_FILL_KINDS = ("touch", "rhythmic")
+
+# Shared by the zone/sync fill verbs: how lit pixels are chosen.
+FILL_FIELD = VerbField(
+    "fill", "enum", "random", choices=FILL_MODES,
+    description="random = scattered pixels; contiguous = in strip order; "
+                "centre = outward from the touched sensor.")
+
 
 # ---------------------------------------------------------------------------
 # Catalogue
@@ -198,6 +212,55 @@ ACTIONS: tuple[Verb, ...] = (
         VerbField("to", "enum", "",
                   description="Phase to jump to once the ring is full "
                               "(empty = don't advance)."),
+    )),
+    Verb("zone_fill", "action",
+         "Light part of the LED zone above the sensor that was just touched. "
+         "Put it in a phase's 'on touch': each qualifying press lights "
+         "'step_pct' more of THAT zone (the strip is split into one zone per "
+         "touch sensor - quadrants on the Thymio skin). 'kind' = any touch, or "
+         "only a rhythmic one (a press that keeps the zone's cadence). Once "
+         "every zone is full it jumps to phase 'to' (empty = don't advance). "
+         "Needs a skin whose LED strip and sensor positions are configured.", (
+        VerbField("kind", "enum", "touch", choices=ZONE_FILL_KINDS,
+                  description="touch = every press counts; rhythmic = only a "
+                              "press within tolerance of the target interval "
+                              "since the previous press in the same zone."),
+        VerbField("step_pct", "pct", 25,
+                  description="Share of the zone lit per qualifying press "
+                              "(25 = a quarter of the zone each time)."),
+        FILL_FIELD,
+        VerbField("on_color", "color", "#2ecc71",
+                  description="Colour of a lit pixel."),
+        VerbField("bg_color", "color", "#222222",
+                  description="Colour of an unlit pixel."),
+        VerbField("target_interval_ms", "ms", 550,
+                  description="Rhythmic kind: expected time between presses."),
+        VerbField("tolerance_ms", "ms", 150,
+                  description="Rhythmic kind: allowed drift around the target."),
+        VerbField("min_gap_ms", "ms", 250,
+                  description="Rhythmic kind: ignore faster repeats as chatter."),
+        FADE_FIELD,
+        RING_FIELD,
+        VerbField("to", "enum", "",
+                  description="Phase to jump to once every zone is full "
+                              "(empty = don't advance)."),
+    )),
+    Verb("sync_fill", "action",
+         "Show the group's synchronized-round progress on the WHOLE strip: "
+         "the lit share of all pixels equals completed rounds / rounds "
+         "required of this phase's 'group sync' condition. Put it in the "
+         "phase's 'do' (it keeps updating every tick). When the streak breaks "
+         "the pixels go out one every 'decay_ms' instead of all at once.", (
+        FILL_FIELD,
+        VerbField("on_color", "color", "#2ecc71",
+                  description="Colour of a lit pixel."),
+        VerbField("bg_color", "color", "#222222",
+                  description="Colour of an unlit pixel."),
+        VerbField("decay_ms", "ms", 150,
+                  description="After a broken streak, turn one pixel off "
+                              "every this many ms (0 = all at once)."),
+        FADE_FIELD,
+        RING_FIELD,
     )),
     Verb("inflate", "action", "Drive a chamber up to a pressure %.", (
         CHAMBER_FIELD,
@@ -355,11 +418,18 @@ CONDITIONS: tuple[Verb, ...] = (
     Verb("group_touch_sync", "condition",
          "True after consecutive group compression rounds: every selected child "
          "must press within one phase window on every beat, and the group beats "
-         "must keep the chosen cadence. `sensors`, when supplied in a hand-authored "
-         "spec, is the exact list of physical sensor IDs; otherwise sensors 0..N-1 "
-         "are used.", (
+         "must keep the chosen cadence. 'mode' auto lets the children pick "
+         "themselves: the first 'participants' sensors to press form the group "
+         "and any further sensor that presses joins for good (so a fourth child "
+         "may come in, and from then on all four must keep every round). 'mode' "
+         "fixed uses `sensors` (the exact physical sensor IDs) or, without it, "
+         "sensors 0..N-1.", (
+        VerbField("mode", "enum", MODE_AUTO, choices=SYNC_MODES,
+                  description="auto = whoever presses (first N start, others "
+                              "join); fixed = the listed sensors only."),
         VerbField("participants", "int", 3,
-                  description="Number of independent child/sensor positions."),
+                  description="Number of independent child/sensor positions "
+                              "(auto: the minimum needed to start counting)."),
         VerbField("target_interval_ms", "ms", 550,
                   description="Expected time between completed group beats."),
         VerbField("cadence_tolerance_ms", "ms", 100,

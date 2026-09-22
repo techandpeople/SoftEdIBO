@@ -138,3 +138,31 @@ def test_capacitive_placeholder_is_well_formed():
     # Inherited no-ops: no coupling, no spatial detector.
     assert p.build_compensator({}) is None
     assert p.build_position_tracker({"sensor_count": 4}) is None
+
+
+# ---------------------------------------------------------------------------
+# Sensor placements (where each sensor sits along the skin perimeter)
+# ---------------------------------------------------------------------------
+
+def test_magnet_profile_places_four_sensors_on_the_quadrants():
+    from src.core.touch_zones import QUADRANT_POSITIONS
+    profile = MagnetSensorProfile()
+    placements = profile.sensor_placements({"sensor_count": 4})
+    assert [p.index for p in placements] == [0, 1, 2, 3]
+    assert [p.position for p in placements] == [
+        QUADRANT_POSITIONS["Q1"], QUADRANT_POSITIONS["Q2"],
+        QUADRANT_POSITIONS["Q3"], QUADRANT_POSITIONS["Q4"]]
+    moved = profile.sensor_placements(
+        {"sensor_count": 4, "sensor_quadrants": {"0": "Q2", "1": "Q1"}})
+    assert moved[0].position == QUADRANT_POSITIONS["Q2"]
+    assert moved[1].position == QUADRANT_POSITIONS["Q1"]
+
+
+def test_profiles_without_a_layout_space_sensors_evenly():
+    magnet = MagnetSensorProfile().sensor_placements({"sensor_count": 2})
+    assert [p.position for p in magnet] == [0.25, 0.75]
+    capacitive = CapacitiveSensorProfile().sensor_placements({"sensor_count": 8})
+    assert len(capacitive) == 8
+    assert capacitive[0].position == 1 / 16
+    # No config at all: the four-sensor default.
+    assert len(touch_profiles.default.sensor_placements(None)) == 4

@@ -29,8 +29,11 @@ from PySide6.QtCore import QObject, QTimer
 
 from src.activities import catalog
 from src.activities.base_activity import BaseActivity
+from src.activities.led_canvas import LedZoneCanvas
 from src.activities.organ_resolver import OrganResolver
-from src.activities.touch_rhythm import (GroupTouchSyncTracker,
+from src.core.touch_zones import TouchZoneMap
+from src.activities.touch_rhythm import (MODE_AUTO, MODE_FIXED,
+                                         GroupTouchSyncTracker,
                                          MagnitudeCompressionTracker,
                                          TouchRhythmTracker)
 from src.hardware.fill_scaling import (
@@ -102,6 +105,15 @@ class _Unit:
     # A phase jump requested from inside a per-press handler (touch_progress),
     # applied at the next tick so it never mutates the running aux list mid-run.
     pending_state: str | None = None
+    # Lit-pixel model of this skin's LED strip, painted by the `zone_fill` /
+    # `sync_fill` blocks and sent as one `set_led_pixels` frame per change.
+    # None when the skin has no strip geometry / sensor placements to join.
+    canvas: LedZoneCanvas | None = None
+    # Active `sync_fill` block params in the current state (None = off), the
+    # pixel count it last lit and when the last decay step happened.
+    sync_fill: dict[str, Any] | None = None
+    sync_lit: int = 0
+    sync_decay_at: float = 0.0
     # This skin type's power-level-1 PWM floor (see fill_scaling.duty_for_power);
     # resolved from settings at setup, defaults to the global stall floor.
     min_duty: int = MIN_PUMP_DUTY
@@ -183,6 +195,7 @@ class ScriptedActivity(BaseActivity):
                     chambers=sorted(skin.chambers.keys()),
                     min_duty=self._resolve_min_duty(settings_data, skin),
                     cpr_sync_params=self._cpr_sync_params,
+                    canvas=self._build_canvas(skin),
                 )
                 self._units[unit.unit_id] = unit
                 self._subscribe_touch(unit)
@@ -380,6 +393,10 @@ class ScriptedActivity(BaseActivity):
         self._publish_cpr_status(unit)
         unit.pending_state = None
         unit.aux.clear()
+        unit.sync_fill = None
+        unit.sync_lit = 0
+        if unit.canvas is not None:
+            unit.canvas.reset()
         body = self._states.get(state, {}).get("do", [])
         unit.runner = self._run_steps(unit, body, {})
         unit.wait = None
@@ -405,6 +422,7 @@ class ScriptedActivity(BaseActivity):
                 continue                       # state changed; body restarted
             self._advance(unit)
             self._advance_aux(unit)
+            self._refresh_sync_fill(unit)
 
     def _check_transitions(self, unit: _Unit) -> bool:
         for tr in self._states.get(unit.state, {}).get("transitions", []) or []:
@@ -536,21 +554,47 @@ class ScriptedActivity(BaseActivity):
         having a similar latest frequency.
         """
         params = val if isinstance(val, dict) else {}
+        return unit.group_sync.matches(
+            **ScriptedActivity._sync_kwargs(params),
+            now_ms=time.monotonic() * 1000.0,
+        )
+
+    @staticmethod
+    def _sync_kwargs(params: dict) -> dict[str, Any]:
+        """The ``GroupTouchSyncTracker`` arguments a `group_touch_sync` block's
+        params encode - shared by the condition, the live CPR status and the
+        `sync_fill` display so the three can never disagree.
+
+        ``mode`` defaults to *fixed* when the spec lists ``sensors`` or says
+        nothing (older hand-authored specs), *auto* only when it asks for it."""
         sensor_ids = params.get("sensors")
         if not isinstance(sensor_ids, (list, tuple)):
             sensor_ids = None
-        return unit.group_sync.matches(
-            participants=max(1, int(params.get("participants", 3))),
-            sensor_ids=list(sensor_ids) if sensor_ids is not None else None,
-            target_interval_ms=float(params.get("target_interval_ms", 550)),
-            cadence_tolerance_ms=max(
+        mode = str(params.get("mode") or "")
+        if mode != MODE_AUTO or sensor_ids is not None:
+            mode = MODE_FIXED
+        return {
+            "participants": max(1, int(params.get("participants", 3))),
+            "sensor_ids": list(sensor_ids) if sensor_ids is not None else None,
+            "target_interval_ms": float(params.get("target_interval_ms", 550)),
+            "cadence_tolerance_ms": max(
                 0.0, float(params.get("cadence_tolerance_ms", 100))),
-            phase_tolerance_ms=max(
+            "phase_tolerance_ms": max(
                 0.0, float(params.get("phase_tolerance_ms", 150))),
-            min_gap_ms=max(0.0, float(params.get("min_gap_ms", 250))),
-            required_rounds=max(1, int(params.get("rounds", 6))),
-            now_ms=time.monotonic() * 1000.0,
-        )
+            "min_gap_ms": max(0.0, float(params.get("min_gap_ms", 250))),
+            "required_rounds": max(1, int(params.get("rounds", 6))),
+            "mode": mode,
+        }
+
+    def _state_sync_params(self, unit: _Unit) -> dict[str, Any] | None:
+        """The `group_touch_sync` params of the unit's CURRENT state (its
+        first such transition), else the behaviour-wide one, else None."""
+        for tr in self._states.get(unit.state, {}).get("transitions", []) or []:
+            when = tr.get("when") if isinstance(tr, dict) else None
+            params = when.get("group_touch_sync") if isinstance(when, dict) else None
+            if isinstance(params, dict):
+                return params
+        return unit.cpr_sync_params
 
     def _find_cpr_sync_params(self) -> dict[str, Any] | None:
         """Find this behaviour's CPR condition configuration, if it has one."""
@@ -572,19 +616,8 @@ class ScriptedActivity(BaseActivity):
                       "rounds_required": unit.cpr_sync_params.get("rounds", 6),
                       "reason": "CPR synchronized - LED is green"}
         else:
-            params = unit.cpr_sync_params
             status = unit.group_sync.status(
-                participants=max(1, int(params.get("participants", 3))),
-                sensor_ids=(list(params["sensors"])
-                            if isinstance(params.get("sensors"), (list, tuple))
-                            else None),
-                target_interval_ms=float(params.get("target_interval_ms", 550)),
-                cadence_tolerance_ms=max(
-                    0.0, float(params.get("cadence_tolerance_ms", 100))),
-                phase_tolerance_ms=max(
-                    0.0, float(params.get("phase_tolerance_ms", 150))),
-                min_gap_ms=max(0.0, float(params.get("min_gap_ms", 250))),
-                required_rounds=max(1, int(params.get("rounds", 6))),
+                **self._sync_kwargs(unit.cpr_sync_params),
                 now_ms=time.monotonic() * 1000.0,
             )
             status["active"] = True
@@ -930,6 +963,10 @@ class ScriptedActivity(BaseActivity):
                                  angle=self._angle(params))
         elif verb == "touch_progress":
             self._touch_progress(unit, params)
+        elif verb == "zone_fill":
+            self._zone_fill(unit, params, ctx)
+        elif verb == "sync_fill":
+            self._sync_fill(unit, params)
         elif verb in ("inflate", "set_pressure"):
             self._set_pressure(unit, self._resolve_chamber(unit, params, ctx),
                                int(params.get("pct", 60 if verb == "inflate" else 0)),
@@ -1009,6 +1046,134 @@ class ScriptedActivity(BaseActivity):
         to = str(params.get("to", "") or "")
         if to and filled >= segments and to in self._states:
             unit.pending_state = to
+
+    # ------------------------------------------------------------------
+    # Zone-aware LED fills (strip pixels grouped by touch sensor)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_canvas(skin: Any) -> LedZoneCanvas | None:
+        """A lit-pixel canvas for skins that can join their LED strip to
+        their sensor placements (``Skin.touch_zone_map``); None otherwise, and
+        then the zone/sync fill verbs are logged no-ops on that unit."""
+        get_map = getattr(skin, "touch_zone_map", None)
+        if not callable(get_map):
+            return None
+        try:
+            zone_map = get_map()
+        except Exception:   # noqa: BLE001 - a bad layout must not block a session
+            logger.exception("touch zone map failed on %s",
+                             getattr(skin, "skin_id", "?"))
+            return None
+        if not isinstance(zone_map, TouchZoneMap):
+            return None
+        return LedZoneCanvas(zone_map)
+
+    def _zone_fill(self, unit: _Unit, params: dict, ctx: dict) -> None:
+        """Light more of the zone the current press landed in.
+
+        Runs from a phase's ``on_touch`` handler: ``ctx["sensor"]`` is the
+        sensor that fired. ``kind`` 'touch' counts every press; 'rhythmic'
+        only a press whose interval to the previous press in the same zone is
+        within tolerance of the target (the zone's own ``TouchRhythmTracker``,
+        one interval). Once every zone is full, ``to`` schedules the phase
+        jump exactly as `touch_progress` does."""
+        canvas = unit.canvas
+        sensor = ctx.get("sensor")
+        if canvas is None or sensor is None:
+            logger.debug("zone_fill ignored on %s (no canvas / sensor)",
+                         unit.unit_id)
+            return
+        kind = str(params.get("kind", "touch") or "touch")
+        if kind == "rhythmic":
+            tracker = unit.rhythm_by_sensor.get(int(sensor))
+            if tracker is None or not tracker.matches(
+                    target_interval_ms=float(params.get("target_interval_ms", 550)),
+                    tolerance_ms=float(params.get("tolerance_ms", 150)),
+                    min_gap_ms=float(params.get("min_gap_ms", 250)),
+                    required_intervals=1):
+                return
+        elif kind != "touch":
+            logger.debug("zone_fill kind %r unsupported on %s", kind, unit.unit_id)
+            return
+        canvas.set_fill(str(params.get("fill", "") or ""))
+        try:
+            step = float(params.get("step_pct", 25) or 0) / 100.0
+        except (TypeError, ValueError):
+            step = 0.25
+        canvas.fill_zone_fraction(int(sensor), step)
+        self._send_canvas(unit, params)
+        to = str(params.get("to", "") or "")
+        if to and canvas.all_full() and to in self._states:
+            unit.pending_state = to
+
+    def _sync_fill(self, unit: _Unit, params: dict) -> None:
+        """Arm the whole-strip group-progress display for this state and
+        paint its current value; `_refresh_sync_fill` keeps it live."""
+        if unit.canvas is None:
+            logger.debug("sync_fill ignored on %s (no canvas)", unit.unit_id)
+            return
+        unit.sync_fill = dict(params)
+        unit.canvas.set_fill(str(params.get("fill", "") or ""))
+        unit.sync_lit = -1                     # force the first paint
+        unit.sync_decay_at = time.monotonic()
+        self._refresh_sync_fill(unit)
+
+    def _refresh_sync_fill(self, unit: _Unit) -> None:
+        """Per tick: lit share of the strip = rounds / rounds required of the
+        state's `group_touch_sync`. Growth shows at once; a broken streak
+        (rounds back to 0) decays one pixel per ``decay_ms`` so the drop reads
+        as a fade rather than a snap (0 = drop immediately)."""
+        params = unit.sync_fill
+        canvas = unit.canvas
+        if params is None or canvas is None:
+            return
+        cond = self._state_sync_params(unit)
+        if cond is None:
+            return
+        status = unit.group_sync.status(**self._sync_kwargs(cond),
+                                        now_ms=time.monotonic() * 1000.0)
+        required = max(1, int(status.get("rounds_required", 1) or 1))
+        rounds = max(0, int(status.get("rounds", 0) or 0))
+        total = canvas.total_size
+        target = total if status.get("complete") else \
+            min(total, round(total * rounds / required))
+        current = max(0, unit.sync_lit)
+        now = time.monotonic()
+        if target >= current:
+            new = target
+            unit.sync_decay_at = now
+        else:
+            try:
+                decay_ms = max(0, int(params.get("decay_ms", 150) or 0))
+            except (TypeError, ValueError):
+                decay_ms = 150
+            if decay_ms == 0:
+                new = target
+            elif (now - unit.sync_decay_at) * 1000.0 >= decay_ms:
+                new = current - 1
+                unit.sync_decay_at = now
+            else:
+                new = current
+        if new == unit.sync_lit:
+            return
+        unit.sync_lit = new
+        canvas.set_total_lit(new)
+        self._send_canvas(unit, params)
+
+    def _send_canvas(self, unit: _Unit, params: dict) -> None:
+        """Render the unit's canvas as ONE `set_led_pixels` frame."""
+        canvas = unit.canvas
+        send = getattr(unit.ctrl, "set_led_pixels", None)
+        if canvas is None or send is None:
+            return
+        colors, mask = canvas.frame(str(params.get("on_color", "#2ecc71")),
+                                    str(params.get("bg_color", "#222222")))
+        try:
+            send(colors, mask, pattern="solid", ring=self._parse_ring(params),
+                 fade_ms=self._fade_ms(params))
+        except Exception:   # noqa: BLE001
+            logger.exception("set_led_pixels failed on %s", unit.unit_id)
 
     def _set_pressure(self, unit: _Unit, chamber, pct: int,
                       period_ms: int = 0, duty: int | None = None) -> None:
@@ -1280,11 +1445,14 @@ class ScriptedActivity(BaseActivity):
                     unit.touch_seq_by_chamber.get(ch, 0) + 1
             except (TypeError, ValueError):
                 pass
-        # Spawn the state's on_touch handler, if any, to run concurrently.
+        # Spawn the state's on_touch handler, if any, to run concurrently. The
+        # context names the chamber the sensor routes to AND the sensor itself,
+        # so zone-aware verbs (zone_fill) know which strip zone to paint.
         handler = self._states.get(unit.state, {}).get("on_touch")
         if handler:
             gen = self._run_steps(unit, handler,
-                                  {"chamber": ch if ch is not None else None})
+                                  {"chamber": ch if ch is not None else None,
+                                   "sensor": int(sensor_idx)})
             unit.aux.append((gen, None))
 
     @staticmethod

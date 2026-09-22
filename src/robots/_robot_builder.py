@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from src.core.led_geometry import MAX_BRIGHTNESS, led_geometry_for
 from src.core.skin_config import DEFAULT_MAX_KPA, DEFAULT_MIN_KPA
 from src.hardware.skin import Skin
 
@@ -90,6 +91,28 @@ def push_led_angles(
         ctrl = controllers.get(mac or "")
         if ctrl is not None and hasattr(ctrl, "set_led_angles"):
             ctrl.set_led_angles(led_angles)
+
+
+def push_led_layouts(
+    skin_configs: list[dict[str, Any]],
+    controllers: dict[str, Any],
+) -> None:
+    """Push each skin's LED strip brightness cap to its node.
+
+    Board state like the mounting angles (see :func:`push_led_angles`): the
+    cut strip on the Thymio skin can draw several times what the old ring did,
+    so a skin's ``led_layout.brightness`` caps the node. Only skins with a
+    resolvable strip geometry and a non-default cap send anything.
+    """
+    for skin_cfg in skin_configs:
+        geometry = led_geometry_for(skin_cfg)
+        if geometry is None or geometry.brightness >= MAX_BRIGHTNESS:
+            continue
+        mac = next((ch.get("mac") for ch in skin_cfg.get("chambers", [])
+                    if ch.get("mac")), None)
+        ctrl = controllers.get(mac or "")
+        if ctrl is not None and hasattr(ctrl, "set_led_config"):
+            ctrl.set_led_config(geometry.brightness, ring=geometry.ring)
 
 
 def build_skins(
@@ -189,6 +212,7 @@ def _build_one_skin(skin_cfg: dict[str, Any],
         skin_type=skin_cfg.get("skin_type", ""),
         skin_variant=skin_cfg.get("skin_variant", ""),
         pressure_sensors=mac not in sensorless_macs,
+        led_geometry=led_geometry_for(skin_cfg),
     )
 
 

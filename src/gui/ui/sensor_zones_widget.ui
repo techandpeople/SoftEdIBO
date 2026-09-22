@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>SensorZonesWidget</class>
+ <widget class="QGroupBox" name="SensorZonesWidget">
+  <property name="geometry">
+   <rect><x>0</x><y>0</y><width>360</width><height>160</height></rect>
+  </property>
+  <property name="title"><string>Sensor positions</string></property>
+  <property name="whatsThis"><string>Which corner of the skin each touch sensor sits in. Activities light the LED-strip pixels above the sensor that was touched, so this is what makes a touch on the top-left corner light the top-left arc. Only a four-sensor magnet board has corner quadrants; other layouts space the sensors evenly.</string></property>
+  <layout class="QVBoxLayout" name="outer_layout">
+   <item>
+    <widget class="QLabel" name="hint_label">
+     <property name="text"><string>Seen from above with the robot's front at the top. Default: sensor 0 = Q1, 1 = Q2, 2 = Q3, 3 = Q4.</string></property>
+     <property name="wordWrap"><bool>true</bool></property>
+    </widget>
+   </item>
+   <item>
+    <layout class="QFormLayout" name="rows_form"/>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
 from src.config.settings import Settings
 from src.core import skin_config as skincfg
 from src.data.models import SkinTemplate
+from src.gui.sensor_zones_widget import SensorZonesWidget
 from src.gui.skin_grid_editor import SkinGridEditor
 from src.gui.base_dialog import BaseDialog
 from src.gui.ui_skin_config_dialog import Ui_SkinConfigDialog
@@ -308,6 +309,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         self._skin_index  = skin_index
         self._settings    = settings
         self._led_angles: dict[int, float] = {}   # ring -> mounting angle (deg)
+        self._led_layout: dict = {}                # strip count/gap/brightness/..
         self._gateway     = gateway
         self._db          = db
         self._rows: list[_ChamberRow] = []
@@ -416,6 +418,9 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         # Actuators dialog's ring handle; persisted with the skin entry.
         self._led_angles = {int(k): float(v)
                             for k, v in (skin_cfg.get("led_angles") or {}).items()}
+        # The LED strip's physical layout (edited from the Test Actuators strip
+        # row; persisted with the skin entry, absent = skin-type default).
+        self._led_layout = skincfg.normalise_led_layout(skin_cfg.get("led_layout"))
         self._rebuild_palette()
 
     def _populate_chambers(self, skin_cfg: dict) -> None:
@@ -438,6 +443,8 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         if idx >= 0:
             self._touch_mac_combo.setCurrentIndex(idx)
         self._sensor_count_spin.setValue(int(touch_cfg.get("sensor_count", 4)))
+        self._sensor_zones.set_sensor_count(int(self._sensor_count_spin.value()))
+        self._sensor_zones.set_assignments(touch_cfg.get("sensor_quadrants"))
 
     def _populate_shape(self, shape: str) -> None:
         if shape == "round":
@@ -696,6 +703,11 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         self._sensor_count_spin.valueChanged.connect(self._on_sensor_count_changed)
         form.addRow("Sensors:", self._sensor_count_spin)
 
+        # Which corner each sensor sits in (four-sensor boards only): what
+        # joins a touch to the LED-strip arc above it in zone-fill activities.
+        self._sensor_zones = SensorZonesWidget()
+        outer.addWidget(self._sensor_zones)
+
         # Note: Sensor -> Chamber routing follows the skin's order by default;
         # behaviours that need a different mapping address chambers explicitly.
         outer.addWidget(QLabel(
@@ -703,7 +715,8 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
 
         return group
 
-    def _on_sensor_count_changed(self, _value: int) -> None:
+    def _on_sensor_count_changed(self, value: int) -> None:
+        self._sensor_zones.set_sensor_count(int(value))
         self._rebuild_palette()
 
     def _build_layout_group(self) -> QGroupBox:
@@ -1006,6 +1019,13 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         prev_touch = self._load_skin_cfg().get("touch") or {}
         for key, value in prev_touch.items():
             touch_entry.setdefault(key, value)
+        # Sensor quadrants ARE edited here: write the current assignment (only
+        # sensors moved off their default), dropping a stale saved one.
+        quadrants = self._sensor_zones.assignments()
+        if quadrants:
+            touch_entry["sensor_quadrants"] = quadrants
+        else:
+            touch_entry.pop("sensor_quadrants", None)
         skin_entry["touch"] = touch_entry
 
     def _rebuild_palette(self) -> None:
@@ -1121,6 +1141,8 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
             led_rings=led_rings,
             led_angles=dict(self._led_angles),
             on_save_angle=self._save_led_angle,
+            led_layout=dict(self._led_layout),
+            on_save_layout=self._save_led_layout,
             pressure_sensors=mac not in self._sensorless_macs(),
             parent=self,
         )
@@ -1136,6 +1158,18 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
             if skincfg.set_skin_led_angles(
                     self._settings.data, self._robot_type, self._robot_index,
                     self._skin_index, self._led_angles):
+                self._settings.save()
+
+    def _save_led_layout(self, ring: int, layout: dict) -> None:
+        """Persist the LED strip layout (from the Test Actuators strip row).
+
+        Patches the saved skin entry in place when the skin already exists;
+        otherwise keeps it in memory to be written on the next full Save."""
+        self._led_layout = skincfg.normalise_led_layout({**layout, "ring": int(ring)})
+        if self._skin_index is not None and self._skin_index >= 0:
+            if skincfg.set_skin_led_layout(
+                    self._settings.data, self._robot_type, self._robot_index,
+                    self._skin_index, self._led_layout):
                 self._settings.save()
 
     def _on_calibrate(self) -> None:
@@ -1358,10 +1392,12 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         # Organs are only meaningful on organ-bearing variants; drop otherwise.
         organs = self._organs_from_rows() if variant_has_organs(skin_variant) else []
         skincfg.apply_organs(skin_entry, organs)
-        # Carry the per-ring LED mounting angles through a full save.
+        # Carry the per-ring LED mounting angles + strip layout through a full save.
         if self._led_angles:
             skin_entry["led_angles"] = {
                 str(k): float(v) for k, v in self._led_angles.items()}
+        if self._led_layout:
+            skin_entry["led_layout"] = dict(self._led_layout)
 
         # save_skin_entry returns the written index - for a brand-new skin this
         # is the appended slot. Adopt it so a second Apply replaces the entry

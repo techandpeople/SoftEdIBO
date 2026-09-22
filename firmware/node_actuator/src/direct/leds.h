@@ -5,14 +5,20 @@
 
 #include "pins.h"
 
-// WS2812 ring control for node_direct. Driven by the "set_led" / "set_led_halves"
-// ESP-NOW commands (see commands.h). Rendering is non-blocking AND fully deferred:
-// the recv callback only updates the per-pixel target buffer plus the animation
-// state, and loop()'s update() is the ONLY place strip.show() runs. That matters
-// because show() bit-bangs the strip with interrupts disabled (~0.5 ms for a
-// 16-LED RGBW ring); driving it from the ESP-NOW receive task - once per pixel for
-// a split-ring repaint - starved the radio and reset the node. One show() per loop,
-// off the receive task, keeps the link up.
+// WS2812 strip control for node_direct. Driven by the "set_led" / "set_led_halves"
+// / "set_led_pixels" / "led_config" ESP-NOW commands (see commands.h). Rendering is
+// non-blocking AND fully deferred: the recv callback only updates the per-pixel
+// target buffer plus the animation state, and loop()'s update() is the ONLY place
+// strip.show() runs. That matters because show() bit-bangs the strip with
+// interrupts disabled (~2 ms for 68 pixels); driving it from the ESP-NOW receive
+// task - once per pixel for a split repaint - starved the radio and reset the
+// node. One show() per loop, off the receive task, keeps the link up.
+//
+// Geometry: the strip is a loop of STRIP_SLOTS equal positions; pixel i sits at
+// slot i and the LED_GAP_SLOTS after the last pixel are the empty seam (see
+// pins.h). Everything angular (arc boundaries, comet heads, the "angle" offset)
+// is computed over slots so it stays continuous across the seam; only real
+// pixels are painted.
 //
 // Render is a 3-stage pipeline evaluated every frame (render_()):
 //   1. target + pattern -> animatedTo[i]   (STATIC/BLINK/PULSE scale `base`; COMET
@@ -29,6 +35,9 @@ enum Pattern : uint8_t { STATIC, BLINK, PULSE, COMET, FADE };
 // Max arcs/colours a "set_led_halves" command may carry (also the max comet count).
 constexpr int MAX_SEGMENTS = 8;
 
+// Colours a "set_led_pixels" frame may carry: its mask holds 2 bits per pixel.
+constexpr int MAX_MASK_COLORS = 4;
+
 // Default cross-fade time (ms) when a command omits "fade_ms". Matches the PC.
 constexpr uint32_t DEFAULT_FADE_MS = 250;
 
@@ -38,10 +47,10 @@ constexpr uint32_t DEFAULT_FADE_MS = 250;
 // an RGB build drives an RGBW ring with shifted colours and vice versa. The colour
 // code below is unchanged: Color()/setPixelColor leave W at 0.
 #ifdef LED_RGBW
-inline Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_GRBW + NEO_KHZ800);
+inline Adafruit_NeoPixel strip(NUM_PIXELS, LED_PIN, NEO_GRBW + NEO_KHZ800);
 #define LED_RGBW_JSON "true"    // reported in ready/pong so the OTA picker auto-selects the RGBW bin
 #else
-inline Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
+inline Adafruit_NeoPixel strip(NUM_PIXELS, LED_PIN, NEO_GRB + NEO_KHZ800);
 #define LED_RGBW_JSON "false"
 #endif
 
@@ -49,9 +58,9 @@ inline Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
 // render this buffer (a whole-ring colour fills every entry; a split ring fills
 // contiguous arcs; the test panel sets a single entry). COMET ignores `base` and
 // paints from seg[]/segCount_ instead.
-inline uint8_t  baseR_[NUM_LEDS] = {0};
-inline uint8_t  baseG_[NUM_LEDS] = {0};
-inline uint8_t  baseB_[NUM_LEDS] = {0};
+inline uint8_t  baseR_[NUM_PIXELS] = {0};
+inline uint8_t  baseG_[NUM_PIXELS] = {0};
+inline uint8_t  baseB_[NUM_PIXELS] = {0};
 
 // Segment colours (one whole-ring colour, or the k arc colours of a split ring).
 // COMET paints one comet per segment colour, equally spaced around the ring.
@@ -71,12 +80,12 @@ inline uint8_t  fadeToR_ = 0, fadeToG_ = 0, fadeToB_ = 0;
 
 // Cross-fade source: a snapshot of the displayed output the instant a new command
 // landed, and the rolling displayed buffer that feeds the next snapshot.
-inline uint8_t  fromR_[NUM_LEDS] = {0};
-inline uint8_t  fromG_[NUM_LEDS] = {0};
-inline uint8_t  fromB_[NUM_LEDS] = {0};
-inline uint8_t  dispR_[NUM_LEDS] = {0};
-inline uint8_t  dispG_[NUM_LEDS] = {0};
-inline uint8_t  dispB_[NUM_LEDS] = {0};
+inline uint8_t  fromR_[NUM_PIXELS] = {0};
+inline uint8_t  fromG_[NUM_PIXELS] = {0};
+inline uint8_t  fromB_[NUM_PIXELS] = {0};
+inline uint8_t  dispR_[NUM_PIXELS] = {0};
+inline uint8_t  dispG_[NUM_PIXELS] = {0};
+inline uint8_t  dispB_[NUM_PIXELS] = {0};
 
 inline Pattern  pattern_  = STATIC;
 inline uint32_t period_   = 1000;   // ms per blink/pulse cycle or comet revolution
@@ -128,18 +137,20 @@ inline Pattern patternFromStr(const char* s) {
 // by seg[j]. A fractional head keeps the motion smooth between pixels.
 inline void renderComet_(uint8_t* oR, uint8_t* oG, uint8_t* oB, uint32_t now) {
     int k = segCount_ < 1 ? 1 : (segCount_ > MAX_SEGMENTS ? MAX_SEGMENTS : segCount_);
-    float head    = (float)((now - start_) % period_) / (float)period_ * NUM_LEDS
-                    + segOffset_ * NUM_LEDS;   // angular offset rotates the comet start
-    float spacing = (float)NUM_LEDS / k;
+    // Heads travel over the STRIP_SLOTS loop (so they cross the seam smoothly);
+    // pixel i sits at slot i.
+    float head    = (float)((now - start_) % period_) / (float)period_ * STRIP_SLOTS
+                    + segOffset_ * STRIP_SLOTS;   // angular offset rotates the comet start
+    float spacing = (float)STRIP_SLOTS / k;
     float tail    = spacing * 0.7f;
-    if (tail > NUM_LEDS / 3.0f) tail = NUM_LEDS / 3.0f;
+    if (tail > STRIP_SLOTS / 3.0f) tail = STRIP_SLOTS / 3.0f;
     if (tail < 1.0f) tail = 1.0f;
-    for (int i = 0; i < NUM_LEDS; i++) {
+    for (int i = 0; i < NUM_PIXELS; i++) {
         float best = 0.0f; int bestj = 0;
         for (int j = 0; j < k; j++) {
             float h = head + j * spacing;
-            // distance pixel i sits *behind* comet head h (wrapped to [0,N))
-            float d = fmodf(h - i + 2.0f * NUM_LEDS, (float)NUM_LEDS);
+            // distance slot i sits *behind* comet head h (wrapped to [0,SLOTS))
+            float d = fmodf(h - i + 2.0f * STRIP_SLOTS, (float)STRIP_SLOTS);
             float b = 1.0f - d / tail;
             if (b > best) { best = b; bestj = j; }
         }
@@ -156,7 +167,7 @@ inline void computeAnimated_(uint8_t* oR, uint8_t* oG, uint8_t* oB, uint32_t now
         uint32_t t = (now - start_) % period_;
         float frac = (float)t / period_;
         float tri  = frac < 0.5f ? frac * 2.0f : (1.0f - frac) * 2.0f;   // 0 -> 1 -> 0
-        for (int i = 0; i < NUM_LEDS; i++) {
+        for (int i = 0; i < NUM_PIXELS; i++) {
             oR[i] = lerp8_(baseR_[i], fadeToR_, tri);
             oG[i] = lerp8_(baseG_[i], fadeToG_, tri);
             oB[i] = lerp8_(baseB_[i], fadeToB_, tri);
@@ -173,7 +184,7 @@ inline void computeAnimated_(uint8_t* oR, uint8_t* oG, uint8_t* oB, uint32_t now
             scale = frac < 0.5f ? frac * 2.0f : (1.0f - frac) * 2.0f;
         }
     }
-    for (int i = 0; i < NUM_LEDS; i++) {
+    for (int i = 0; i < NUM_PIXELS; i++) {
         oR[i] = (uint8_t)(baseR_[i] * scale);
         oG[i] = (uint8_t)(baseG_[i] * scale);
         oB[i] = (uint8_t)(baseB_[i] * scale);
@@ -190,10 +201,10 @@ inline float fadeProgress_(uint32_t now) {
 // Stages 1-3: animate, cross-fade from the snapshot, remember the output, gamma+show.
 // The only caller of strip.show() outside hardware_init - always reached from loop().
 inline void render_(uint32_t now) {
-    uint8_t aR[NUM_LEDS], aG[NUM_LEDS], aB[NUM_LEDS];
+    uint8_t aR[NUM_PIXELS], aG[NUM_PIXELS], aB[NUM_PIXELS];
     computeAnimated_(aR, aG, aB, now);
     float ft = fadeProgress_(now);
-    for (int i = 0; i < NUM_LEDS; i++) {
+    for (int i = 0; i < NUM_PIXELS; i++) {
         uint8_t r = lerp8_(fromR_[i], aR[i], ft);
         uint8_t g = lerp8_(fromG_[i], aG[i], ft);
         uint8_t b = lerp8_(fromB_[i], aB[i], ft);
@@ -213,7 +224,7 @@ inline void hardware_init() {
 // Snapshot what is on screen and start a cross-fade towards whatever the caller is
 // about to write. Latch the animation mode + timing. count<=0 = run forever.
 inline void apply_(Pattern p, uint32_t period, int32_t count, uint32_t fadeMs) {
-    for (int i = 0; i < NUM_LEDS; i++) {
+    for (int i = 0; i < NUM_PIXELS; i++) {
         fromR_[i] = dispR_[i]; fromG_[i] = dispG_[i]; fromB_[i] = dispB_[i];
     }
     pattern_   = p;
@@ -229,7 +240,7 @@ inline void apply_(Pattern p, uint32_t period, int32_t count, uint32_t fadeMs) {
 inline void setAll(uint8_t r, uint8_t g, uint8_t b,
                    Pattern p, uint32_t period, int32_t count,
                    uint32_t fadeMs = DEFAULT_FADE_MS, float offset = 0.0f) {
-    for (int i = 0; i < NUM_LEDS; i++) { baseR_[i] = r; baseG_[i] = g; baseB_[i] = b; }
+    for (int i = 0; i < NUM_PIXELS; i++) { baseR_[i] = r; baseG_[i] = g; baseB_[i] = b; }
     segR_[0] = r; segG_[0] = g; segB_[0] = b; segCount_ = 1;
     segOffset_ = offset;
     apply_(p, period, count, fadeMs);
@@ -243,33 +254,80 @@ inline void setFade(uint8_t r, uint8_t g, uint8_t b,
                     uint8_t r2, uint8_t g2, uint8_t b2,
                     uint32_t period, int32_t count,
                     uint32_t fadeMs = DEFAULT_FADE_MS, float offset = 0.0f) {
-    for (int i = 0; i < NUM_LEDS; i++) { baseR_[i] = r; baseG_[i] = g; baseB_[i] = b; }
+    for (int i = 0; i < NUM_PIXELS; i++) { baseR_[i] = r; baseG_[i] = g; baseB_[i] = b; }
     segR_[0] = r; segG_[0] = g; segB_[0] = b; segCount_ = 1;
     fadeToR_ = r2; fadeToG_ = g2; fadeToB_ = b2;
     segOffset_ = offset;
     apply_(FADE, period, count, fadeMs);
 }
 
-// Split the ring into `k` equal contiguous arcs (k clamped to 1..NUM_LEDS), rotated
-// by `offset` (fraction of the ring) so the split can sit at any angle. Keeps the k
-// colours for COMET (one comet per arc colour).
+// Split the loop into `k` equal contiguous arcs (k clamped to 1..MAX_SEGMENTS),
+// rotated by `offset` (fraction of the loop) so the split can sit at any angle.
+// Arcs are measured in slots (the seam gap belongs to the last arc's tail), so
+// e.g. quarters of a 69-slot strip are 17/17/17/17 pixels plus the dark seam.
+// Keeps the k colours for COMET (one comet per arc colour).
 inline void setSegments(const uint8_t* r, const uint8_t* g, const uint8_t* b, int k,
                         Pattern p, uint32_t period, int32_t count,
                         uint32_t fadeMs = DEFAULT_FADE_MS, float offset = 0.0f) {
     if (k < 1) k = 1;
-    if (k > NUM_LEDS) k = NUM_LEDS;
+    if (k > NUM_PIXELS) k = NUM_PIXELS;
     if (k > MAX_SEGMENTS) k = MAX_SEGMENTS;
     for (int j = 0; j < k; j++) { segR_[j] = r[j]; segG_[j] = g[j]; segB_[j] = b[j]; }
     segCount_ = k;
     segOffset_ = offset;
-    int off = ((int)lroundf(offset * NUM_LEDS)) % NUM_LEDS;
-    for (int i = 0; i < NUM_LEDS; i++) {
-        int idx = ((i - off) % NUM_LEDS + NUM_LEDS) % NUM_LEDS;
-        int seg = idx * k / NUM_LEDS;
+    int off = ((int)lroundf(offset * STRIP_SLOTS)) % STRIP_SLOTS;
+    for (int i = 0; i < NUM_PIXELS; i++) {
+        int idx = ((i - off) % STRIP_SLOTS + STRIP_SLOTS) % STRIP_SLOTS;
+        int seg = idx * k / STRIP_SLOTS;
         if (seg > k - 1) seg = k - 1;
         baseR_[i] = r[seg]; baseG_[i] = g[seg]; baseB_[i] = b[seg];
     }
     apply_(p, period, count, fadeMs);
+}
+
+// Decode pixel i's colour index from a "set_led_pixels" mask: hex text, two
+// pixels per character, pixel i in bits (i % 2) * 2 of character i / 2. A short
+// or malformed mask reads as index 0 (the first colour, the background). Mirrors
+// src/core/led_geometry.py encode_pixel_mask().
+inline int maskCode_(const char* mask, int i) {
+    if (!mask) return 0;
+    int ci = i / 2;
+    for (int j = 0; j <= ci; j++) if (mask[j] == '\0') return 0;
+    char c = mask[ci];
+    int v = (c >= '0' && c <= '9') ? c - '0'
+          : (c >= 'a' && c <= 'f') ? c - 'a' + 10
+          : (c >= 'A' && c <= 'F') ? c - 'A' + 10 : 0;
+    return (v >> ((i % 2) * 2)) & 3;
+}
+
+// Paint an arbitrary per-pixel selection in ONE frame: pixel i takes colour
+// mask-index(i) of the k colours (an index past k goes dark). This is how the
+// PC lights scattered pixels of a zone (the zone/sync fill blocks) without a
+// per-pixel burst. No angle offset: the PC already resolved pixel indices from
+// the skin's geometry. STATIC/BLINK/PULSE animate the whole selection.
+inline void setPixels(const uint8_t* r, const uint8_t* g, const uint8_t* b, int k,
+                      const char* mask, Pattern p, uint32_t period, int32_t count,
+                      uint32_t fadeMs = DEFAULT_FADE_MS) {
+    if (k < 1) k = 1;
+    if (k > MAX_MASK_COLORS) k = MAX_MASK_COLORS;
+    segR_[0] = r[0]; segG_[0] = g[0]; segB_[0] = b[0]; segCount_ = 1;
+    for (int i = 0; i < NUM_PIXELS; i++) {
+        int c = maskCode_(mask, i);
+        if (c < k) { baseR_[i] = r[c]; baseG_[i] = g[c]; baseB_[i] = b[c]; }
+        else       { baseR_[i] = 0;    baseG_[i] = 0;    baseB_[i] = 0;    }
+    }
+    if (p == COMET || p == FADE) p = STATIC;   // meaningless on a pixel mask
+    apply_(p, period, count, fadeMs);
+}
+
+// Brightness cap (1..255) for everything rendered from now on. Board state the PC
+// pushes from the skin's led_layout ("led_config"): the cut strip can draw several
+// times what the old ring did, so a skin may cap it. Adafruit scales at
+// setPixelColor time and render_() rewrites every pixel each frame, so the cap
+// applies cleanly to the current look too.
+inline void setBrightness(uint8_t b) {
+    strip.setBrightness(b ? b : 1);
+    dirty_ = true;
 }
 
 // Set a single pixel (used by the LED test panel). Static; leaves the other
@@ -277,8 +335,8 @@ inline void setSegments(const uint8_t* r, const uint8_t* g, const uint8_t* b, in
 // Cross-fades the changed pixel in.
 inline void setPixel(int i, uint8_t r, uint8_t g, uint8_t b,
                      uint32_t fadeMs = DEFAULT_FADE_MS) {
-    if (i < 0 || i >= NUM_LEDS) return;
-    for (int j = 0; j < NUM_LEDS; j++) {
+    if (i < 0 || i >= NUM_PIXELS) return;
+    for (int j = 0; j < NUM_PIXELS; j++) {
         fromR_[j] = dispR_[j]; fromG_[j] = dispG_[j]; fromB_[j] = dispB_[j];
     }
     baseR_[i] = r; baseG_[i] = g; baseB_[i] = b;
@@ -314,7 +372,7 @@ inline void update() {
             bool wasFade = (pattern_ == FADE);
             pattern_ = STATIC;
             if (!wasFade) {   // FADE rests on its base colour (c1); others go dark
-                for (int i = 0; i < NUM_LEDS; i++) { baseR_[i] = baseG_[i] = baseB_[i] = 0; }
+                for (int i = 0; i < NUM_PIXELS; i++) { baseR_[i] = baseG_[i] = baseB_[i] = 0; }
                 segCount_ = 1; segR_[0] = segG_[0] = segB_[0] = 0;
             }
             fadeMs_ = 0;   // snap to the resting colour

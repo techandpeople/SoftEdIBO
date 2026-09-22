@@ -46,6 +46,8 @@ _SEGMENTS = {"Whole": 1, "Halves": 2, "Quarters": 4}
 # slow to read the motion while verifying wiring.
 _PULSE_PERIOD_MS = 1000
 _COMET_PERIOD_MS = 2000
+# Wait this long after the last brightness spin change before sending it.
+_BRIGHTNESS_DEBOUNCE_MS = 200
 
 # Repaint cadence for the on-screen preview (~30 fps) while animating/fading.
 _PREVIEW_MS = 33
@@ -275,11 +277,16 @@ class LedRingTester(QGroupBox, Ui_LedRingTester):
                  send_cb: Callable[[int | None, list[str] | None, str, int, float], None],
                  initial_angle: float = 0.0,
                  on_save_angle: Callable[[float], None] | None = None,
+                 initial_layout: dict | None = None,
+                 on_save_layout: Callable[[dict], None] | None = None,
+                 on_brightness: Callable[[int], None] | None = None,
                  parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setupUi(self)
         self._send = send_cb
         self._on_save_angle = on_save_angle
+        self._on_save_layout = on_save_layout
+        self._on_brightness = on_brightness
         # Clicked-colour queue: the last N clicks (N = segment count) are the arc
         # colours, oldest -> newest. One colour for the whole ring, two for halves,
         # four for quarters - the user builds the split by clicking colours in a row.
@@ -318,6 +325,30 @@ class LedRingTester(QGroupBox, Ui_LedRingTester):
             self.segment_row.addWidget(btn)
         self._segment_buttons["Whole"].setChecked(True)
         self.segment_row.addStretch()
+
+        # Strip layout row (pixel count / seam gap / brightness cap / direction):
+        # the physical description activities need to place pixels round the
+        # skin. Hidden when the host cannot persist it (no skin context).
+        layout = dict(initial_layout or {})
+        self.count_spin.setValue(int(layout.get("count", count) or count))
+        self.gap_spin.setValue(int(layout.get("gap", 0) or 0))
+        self.brightness_spin.setValue(int(layout.get("brightness", 255) or 255))
+        self.ccw_check.setChecked(not bool(layout.get("clockwise", True)))
+        if self._on_save_layout is not None:
+            self.save_layout_btn.clicked.connect(self._on_save_layout_clicked)
+        else:
+            for w in (self.layout_label, self.count_spin, self.gap_label,
+                      self.gap_spin, self.brightness_label, self.brightness_spin,
+                      self.ccw_check, self.save_layout_btn):
+                w.setVisible(False)
+        # Brightness previews live, debounced so spinning the box doesn't
+        # flood the radio with one frame per step.
+        self._brightness_timer = QTimer(self)
+        self._brightness_timer.setSingleShot(True)
+        self._brightness_timer.setInterval(_BRIGHTNESS_DEBOUNCE_MS)
+        self._brightness_timer.timeout.connect(self._push_brightness)
+        self.brightness_spin.valueChanged.connect(
+            lambda _v: self._brightness_timer.start())
 
         # Static control buttons live in the .ui.
         self.off_btn.clicked.connect(self._on_off)
@@ -432,3 +463,19 @@ class LedRingTester(QGroupBox, Ui_LedRingTester):
         """Persist the current angle as this ring's mounting orientation."""
         if self._on_save_angle is not None:
             self._on_save_angle(self._angle)
+
+    def strip_layout(self) -> dict:
+        """The strip row as a ``led_layout`` dict (see src/core/led_geometry.py)."""
+        return {"count": int(self.count_spin.value()),
+                "gap": int(self.gap_spin.value()),
+                "brightness": int(self.brightness_spin.value()),
+                "clockwise": not self.ccw_check.isChecked()}
+
+    def _on_save_layout_clicked(self) -> None:
+        """Persist the strip row with the skin via the host callback."""
+        if self._on_save_layout is not None:
+            self._on_save_layout(self.strip_layout())
+
+    def _push_brightness(self) -> None:
+        if self._on_brightness is not None:
+            self._on_brightness(int(self.brightness_spin.value()))

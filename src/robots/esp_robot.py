@@ -34,6 +34,7 @@ from src.robots._robot_builder import (
     build_skins,
     configure_multiplexed_nodes,
     push_led_angles,
+    push_led_layouts,
     set_pump_counts,
 )
 from src.robots.base_robot import BaseRobot, RobotStatus
@@ -104,6 +105,7 @@ class EspRobot(BaseRobot):
         set_pump_counts(self._node_configs, self._controllers)
         configure_multiplexed_nodes(self._node_configs, self._controllers)
         push_led_angles(self._skin_configs, self._controllers)
+        push_led_layouts(self._skin_configs, self._controllers)
 
     # ------------------------------------------------------------------
     # Public model accessors

@@ -45,6 +45,8 @@
       <block type="se_set_led_quarters"></block>
       <block type="se_fade"></block>
       <block type="se_touch_progress"></block>
+      <block type="se_zone_fill"></block>
+      <block type="se_sync_fill"></block>
     </category>
     <category name="Chambers" colour="30">
       <block type="se_inflate"></block>
@@ -160,6 +162,9 @@
       // LED ring selector. The multiplexed board defines three independent
       // rings (0..2; Tree populates all three, Turtle only ring 0); the direct
       // board has one and ignores higher indices.
+      // Fill orders of the zone/sync fill blocks (see src/activities/led_canvas.py).
+      var FILL = [['scattered', 'random'], ['in order', 'contiguous'],
+                  ['from the sensor', 'centre']];
       var RING = [['all rings', 'all'], ['ring 0', '0'], ['ring 1', '1'],
                   ['ring 2', '2']];
       // Robot kinds for the `if robot is` / `robot is` blocks (activity_kind.KINDS).
@@ -243,6 +248,51 @@
                  + 'colours. Wrap in "repeat forever" for a continuous fade. '
                  + '"ring" picks one of the multiplexed board\'s three rings '
                  + '(0..2) or "all rings".' },
+
+        { type: 'se_zone_fill',
+          message0: 'zone fill - each %1 lights %2 % of the touched zone, %3',
+          args0: [{ type: 'field_dropdown', name: 'KIND',
+                    options: [['touch', 'touch'], ['rhythmic touch', 'rhythmic']] },
+                  { type: 'field_number', name: 'STEP', value: 25, min: 1, max: 100 },
+                  { type: 'field_dropdown', name: 'FILL', options: FILL }],
+          message1: 'rhythm: every %1 ms +/- %2 ms, ignore repeats under %3 ms',
+          args1: [{ type: 'field_number', name: 'TARGET', value: 550, min: 1 },
+                  { type: 'field_number', name: 'TOLERANCE', value: 150, min: 0 },
+                  { type: 'field_number', name: 'MIN_GAP', value: 250, min: 0 }],
+          message2: 'from %1 to %2 on ring %3, smooth %4 ms',
+          args2: [{ type: 'field_input', name: 'BG', text: '#222222' },
+                  { type: 'field_input', name: 'ON', text: '#2ecc71' },
+                  { type: 'field_dropdown', name: 'RING', options: RING },
+                  { type: 'field_number', name: 'SMOOTH', value: 250, min: 0 }],
+          message3: 'when every zone is full go to phase %1',
+          args3: [{ type: 'field_input', name: 'TO', text: '' }],
+          previousStatement: 'Step', nextStatement: 'Step', colour: 230,
+          tooltip: 'Put it in a phase\'s "on touch". The LED strip is split into '
+                 + 'one zone per touch sensor (quadrants on the Thymio skin); each '
+                 + 'qualifying press lights the given share of the zone that was '
+                 + 'touched - scattered, in order, or growing out from the sensor. '
+                 + '"rhythmic touch" only counts a press that keeps the zone\'s '
+                 + 'cadence (its interval to the previous press in the same zone is '
+                 + 'within the tolerance; the first press just starts the clock). '
+                 + 'Once every zone is full it jumps to the named phase - leave it '
+                 + 'blank to let a transition move on. Needs the skin\'s LED strip '
+                 + 'and sensor positions configured (Test Actuators / Skin dialog).' },
+
+        { type: 'se_sync_fill',
+          message0: 'sync fill - light the whole strip as the group\'s rounds complete, %1',
+          args0: [{ type: 'field_dropdown', name: 'FILL', options: FILL }],
+          message1: 'from %1 to %2 on ring %3, smooth %4 ms, decay %5 ms',
+          args1: [{ type: 'field_input', name: 'BG', text: '#222222' },
+                  { type: 'field_input', name: 'ON', text: '#2ecc71' },
+                  { type: 'field_dropdown', name: 'RING', options: RING },
+                  { type: 'field_number', name: 'SMOOTH', value: 250, min: 0 },
+                  { type: 'field_number', name: 'DECAY', value: 150, min: 0 }],
+          previousStatement: 'Step', nextStatement: 'Step', colour: 230,
+          tooltip: 'Put it in the phase\'s "do". Lights a share of ALL the strip\'s '
+                 + 'pixels equal to completed rounds / rounds required of this '
+                 + 'phase\'s "children synchronize" condition, updating every tick. '
+                 + 'When the streak breaks the pixels go out one every "decay" ms '
+                 + '(0 = all at once). Needs the skin\'s LED strip configured.' },
 
         { type: 'se_touch_progress',
           message0: 'touch fill - %1 arcs, %2 touch(es) each',
@@ -399,22 +449,30 @@
                  + 'shared frequency itself is learned from the children.' },
 
               { type: 'se_group_touch_sync',
-                message0: '%1 children synchronize zones %2, %3, %4',
-                args0: [{ type: 'field_number', name: 'PARTICIPANTS', value: 3, min: 1, max: 3 },
-                  { type: 'field_number', name: 'S0', value: 0, min: 0 },
+                message0: '%1 children synchronize, %2',
+                args0: [{ type: 'field_number', name: 'PARTICIPANTS', value: 3, min: 1, max: 4 },
+                  { type: 'field_dropdown', name: 'MODE',
+                    options: [['whoever touches first (others may join)', 'auto'],
+                              ['exactly the zones below', 'fixed']] }],
+                message1: 'fixed zones %1, %2, %3',
+                args1: [{ type: 'field_number', name: 'S0', value: 0, min: 0 },
                   { type: 'field_number', name: 'S1', value: 1, min: 0 },
                   { type: 'field_number', name: 'S2', value: 2, min: 0 }],
-                message1: 'every %1 ms +/- %2 ms; together within %3 ms; %4 rounds',
-                args1: [{ type: 'field_number', name: 'TARGET', value: 550, min: 1 },
+                message2: 'every %1 ms +/- %2 ms; together within %3 ms; %4 rounds',
+                args2: [{ type: 'field_number', name: 'TARGET', value: 550, min: 1 },
                   { type: 'field_number', name: 'CADENCE', value: 100, min: 0 },
                   { type: 'field_number', name: 'PHASE', value: 150, min: 0 },
                   { type: 'field_number', name: 'ROUNDS', value: 6, min: 1 }],
-                message2: 'ignore repeats faster than %1 ms',
-                args2: [{ type: 'field_number', name: 'MIN_GAP', value: 250, min: 0 }],
+                message3: 'ignore repeats faster than %1 ms',
+                args3: [{ type: 'field_number', name: 'MIN_GAP', value: 250, min: 0 }],
                 output: 'Cond', colour: 20,
-                tooltip: 'Counts a round only when every selected child presses once '
+                tooltip: 'Counts a round only when every child in the group presses once '
                  + 'within the phase window. Success needs consecutive complete rounds '
-                 + 'at the target tempo; a late child or wrong beat resets the streak.' },
+                 + 'at the target tempo; a late child or wrong beat resets the streak. '
+                 + '"whoever touches first": the first N zones pressed form the group '
+                 + 'and any further zone that presses joins for good (a fourth child '
+                 + 'may come in, and from then on all four must keep every round). '
+                 + '"exactly the zones below": only the listed sensor zones count.' },
 
         { type: 'se_on_impact',
           message0: 'Thymio hit at least %1 times, at least %2',
@@ -680,6 +738,25 @@
         case 'se_fade':
           return { fade: withRing({ color1: b.getFieldValue('C1'), color2: b.getFieldValue('C2'),
                            period_ms: num(b, 'PERIOD') }, b) };
+        case 'se_zone_fill': {
+          var zf = withRing({ kind: b.getFieldValue('KIND'), step_pct: num(b, 'STEP'),
+                              fill: b.getFieldValue('FILL'),
+                              on_color: b.getFieldValue('ON'),
+                              bg_color: b.getFieldValue('BG'),
+                              target_interval_ms: num(b, 'TARGET'),
+                              tolerance_ms: num(b, 'TOLERANCE'),
+                              min_gap_ms: num(b, 'MIN_GAP'),
+                              fade_ms: num(b, 'SMOOTH') }, b);
+          var zfTo = (b.getFieldValue('TO') || '').trim();
+          if (zfTo) zf.to = zfTo;
+          return { zone_fill: zf };
+        }
+        case 'se_sync_fill':
+          return { sync_fill: withRing({ fill: b.getFieldValue('FILL'),
+                                         on_color: b.getFieldValue('ON'),
+                                         bg_color: b.getFieldValue('BG'),
+                                         fade_ms: num(b, 'SMOOTH'),
+                                         decay_ms: num(b, 'DECAY') }, b) };
         case 'se_touch_progress': {
           var tp = withRing({ segments: num(b, 'SEGMENTS'), per: num(b, 'PER'),
                               on_color: b.getFieldValue('ON'),
@@ -745,13 +822,19 @@
           min_gap_ms: num(b, 'MIN_GAP'), intervals: num(b, 'INTERVALS') } };
         case 'se_group_touch_sync': {
           var participants = num(b, 'PARTICIPANTS');
-          return { group_touch_sync: {
+          var syncMode = b.getFieldValue('MODE') || 'auto';
+          var gts = {
+            mode: syncMode,
             participants: participants,
-            sensors: [num(b, 'S0'), num(b, 'S1'), num(b, 'S2')].slice(0, participants),
             target_interval_ms: num(b, 'TARGET'),
             cadence_tolerance_ms: num(b, 'CADENCE'),
             phase_tolerance_ms: num(b, 'PHASE'),
-            min_gap_ms: num(b, 'MIN_GAP'), rounds: num(b, 'ROUNDS') } };
+            min_gap_ms: num(b, 'MIN_GAP'), rounds: num(b, 'ROUNDS') };
+          // Only a fixed group carries a sensor list: the runtime treats a
+          // spec WITH "sensors" as fixed regardless of mode.
+          if (syncMode === 'fixed')
+            gts.sensors = [num(b, 'S0'), num(b, 'S1'), num(b, 'S2')].slice(0, Math.min(participants, 3));
+          return { group_touch_sync: gts };
         }
         case 'se_on_impact':   return { on_impact: { min: num(b, 'MIN'),
                                                      level: num(b, 'LEVEL') } };
@@ -917,6 +1000,25 @@
           setF(b, 'PCT', p.pct); setF(b, 'PCT2', p.pct2);
           setF(b, 'ALIGNED', p.aligned); setF(b, 'PERIOD', p.period_ms);
           setPower(b, p); break;
+        case 'zone_fill':
+          b = newStepBlock('se_zone_fill');
+          setF(b, 'KIND', p.kind != null ? p.kind : 'touch');
+          setF(b, 'STEP', p.step_pct != null ? p.step_pct : 25);
+          setF(b, 'FILL', p.fill != null ? p.fill : 'random');
+          setF(b, 'ON', p.on_color != null ? p.on_color : '#2ecc71');
+          setF(b, 'BG', p.bg_color != null ? p.bg_color : '#222222');
+          setF(b, 'TARGET', p.target_interval_ms != null ? p.target_interval_ms : 550);
+          setF(b, 'TOLERANCE', p.tolerance_ms != null ? p.tolerance_ms : 150);
+          setF(b, 'MIN_GAP', p.min_gap_ms != null ? p.min_gap_ms : 250);
+          setF(b, 'RING', p.ring); setF(b, 'SMOOTH', p.fade_ms != null ? p.fade_ms : 250);
+          setF(b, 'TO', p.to != null ? p.to : ''); break;
+        case 'sync_fill':
+          b = newStepBlock('se_sync_fill');
+          setF(b, 'FILL', p.fill != null ? p.fill : 'random');
+          setF(b, 'ON', p.on_color != null ? p.on_color : '#2ecc71');
+          setF(b, 'BG', p.bg_color != null ? p.bg_color : '#222222');
+          setF(b, 'RING', p.ring); setF(b, 'SMOOTH', p.fade_ms != null ? p.fade_ms : 250);
+          setF(b, 'DECAY', p.decay_ms != null ? p.decay_ms : 150); break;
         case 'touch_progress':
           b = newStepBlock('se_touch_progress');
           setF(b, 'SEGMENTS', p.segments != null ? p.segments : 4);
@@ -1007,6 +1109,10 @@
         case 'group_touch_sync':
           b = newStepBlock('se_group_touch_sync'); v = v || {};
           setF(b, 'PARTICIPANTS', v.participants);
+          // A saved spec listing sensors is a fixed group (that is how the
+          // runtime reads it); otherwise honour its mode, default auto.
+          setF(b, 'MODE', Array.isArray(v.sensors) ? 'fixed'
+                                                   : (v.mode === 'fixed' ? 'fixed' : 'auto'));
           var sensors = Array.isArray(v.sensors) ? v.sensors : [0, 1, 2];
           setF(b, 'S0', sensors[0] == null ? 0 : sensors[0]);
           setF(b, 'S1', sensors[1] == null ? 1 : sensors[1]);

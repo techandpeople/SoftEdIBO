@@ -84,10 +84,12 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         mac: str,
         skin_cfgs: list[dict],
         gateway: Gateway,
-        led_count: int = 16,
+        led_count: int = 68,
         led_rings: list[int] | None = None,
         led_angles: dict[int, float] | None = None,
         on_save_angle=None,
+        led_layout: dict | None = None,
+        on_save_layout=None,
         pressure_sensors: bool = True,
         parent: QWidget | None = None,
     ):
@@ -104,6 +106,11 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         # one to the skin config (None = saving unavailable, hides the Save button).
         self._led_angles = {int(k): float(v) for k, v in (led_angles or {}).items()}
         self._on_save_angle = on_save_angle
+        # The skin's saved LED strip layout (count / gap / brightness /
+        # direction, plus the ``ring`` it describes) shown in that ring's
+        # tester; ``on_save_layout(ring, layout)`` persists an edited one.
+        self._led_layout = dict(led_layout or {})
+        self._on_save_layout = on_save_layout
         self._active = True
         # True while STOP ALL has the node latched off. We do NOT auto-resume
         # (that would throw away the firmware's continuous "stay-off" enforcement
@@ -207,7 +214,10 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
                 lambda idx, cols, pat, fade, angle:
                     self._send_led(None, idx, cols, pat, fade, angle),
                 initial_angle=self._led_angles.get(0, 0.0),
-                on_save_angle=self._angle_saver(0))
+                on_save_angle=self._angle_saver(0),
+                initial_layout=self._layout_for(0),
+                on_save_layout=self._layout_saver(0),
+                on_brightness=lambda b: self._send_led_config(None, b))
             self.left_col.insertWidget(
                 self.left_col.indexOf(self.pump_group), self._led_tester)
         elif len(rings) > 1:
@@ -218,7 +228,10 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
                     lambda idx, cols, pat, fade, angle, r=k:
                         self._send_led(r, idx, cols, pat, fade, angle),
                     initial_angle=self._led_angles.get(k, 0.0),
-                    on_save_angle=self._angle_saver(k))
+                    on_save_angle=self._angle_saver(k),
+                    initial_layout=self._layout_for(k),
+                    on_save_layout=self._layout_saver(k),
+                    on_brightness=lambda b, r=k: self._send_led_config(r, b))
                 self._led_tabs.addTab(tester, f"Ring {k} | {size} LEDs")
             self.left_col.insertWidget(
                 self.left_col.indexOf(self.pump_group), self._led_tabs)
@@ -693,6 +706,33 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
             save_hook(r, float(angle))
 
         return _save
+
+    def _layout_for(self, ring: int) -> dict | None:
+        """The saved strip layout when it describes ``ring`` (a skin stores
+        one layout, tagged with its ring), else None (tester defaults)."""
+        if self._led_layout and int(self._led_layout.get("ring", 0) or 0) == ring:
+            return dict(self._led_layout)
+        return None
+
+    def _layout_saver(self, ring: int):
+        """A ``(layout) -> None`` callback that persists ``ring``'s strip
+        layout, or None when the host provided no save hook (hides the row)."""
+        save_hook = self._on_save_layout
+        if save_hook is None:
+            return None
+
+        def _save(layout: dict, r: int = ring) -> None:
+            self._led_layout = {**layout, "ring": r}
+            save_hook(r, dict(layout))
+
+        return _save
+
+    def _send_led_config(self, ring: int | None, brightness: int) -> None:
+        """Push a brightness cap to the node (``led_config``) - the live
+        preview of the strip row's brightness box."""
+        payload: dict = {} if ring is None else {"ring": ring}
+        self._gateway.send(self._mac, "led_config",
+                           brightness=max(1, min(255, int(brightness))), **payload)
 
     def _send_led(self, ring: int | None, index: int | None,
                   colors: list[str] | None, pattern: str = "solid",

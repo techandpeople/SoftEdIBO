@@ -59,7 +59,7 @@ class _FakeSkin:
         self.chambers = {i: object() for i in range(n_chambers)}
         self.pressures: list[tuple] = []
         self.duties: list[tuple] = []
-        self.touch = None
+        self.touch: dict | None = None
         self.touch_controller: Any = None
         self._ctrl = controller
 
@@ -1183,3 +1183,306 @@ def test_stop_detaches_magnet_listener(clock):
     activity.stop()
 
     assert board._magnet_callbacks == []
+
+
+# ---------------------------------------------------------------------------
+# Zone-aware LED fills (zone_fill / sync_fill) + auto group mode
+# ---------------------------------------------------------------------------
+
+class _FakePixelCtrl(_FakeCtrl):
+    """A controller that also takes the one-frame pixel mask."""
+    def __init__(self):
+        super().__init__()
+        self.pixels: list[tuple[list[str], str]] = []
+
+    def set_led_pixels(self, colors, mask, pattern="solid", ring=None, **kw):
+        self.pixels.append((list(colors), str(mask)))
+        return True
+
+
+class _ZoneSkin(_FakeSkin):
+    """A skin whose LED strip and sensor placements can be joined."""
+    def __init__(self, controller, sensor_quadrants=None):
+        super().__init__(controller=controller, n_chambers=3)
+        from src.core.led_geometry import LedStripGeometry
+        from src.core.touch_zones import TouchZoneMap, quadrant_placements
+        self.touch = {"sensor_count": 4}
+        if sensor_quadrants:
+            self.touch["sensor_quadrants"] = sensor_quadrants
+        self._zone_map = TouchZoneMap(
+            LedStripGeometry(count=68, gap=1),
+            quadrant_placements(4, sensor_quadrants))
+
+    def touch_zone_map(self):
+        return self._zone_map
+
+
+def _lit_pixels(ctrl: _FakePixelCtrl) -> set[int]:
+    from src.core.led_geometry import decode_pixel_mask
+    _colors, mask = ctrl.pixels[-1]
+    return {i for i, c in enumerate(decode_pixel_mask(mask, 68)) if c}
+
+
+def _press(activity, unit, sensor):
+    activity._on_magnet(unit, {"act": [sensor]})
+    activity._on_magnet(unit, {"act": []})
+
+
+def _zone_fill_spec(**overrides):
+    params = {"kind": "touch", "step_pct": 50, "fill": "contiguous",
+              "on_color": "#00ff00", "bg_color": "#000000", "to": "done"}
+    params.update(overrides)
+    return {"initial": "s", "states": {
+        "s": {"do": [], "on_touch": [{"zone_fill": params}], "transitions": []},
+        "done": {"do": [], "transitions": []},
+    }}
+
+
+def test_zone_fill_lights_only_the_touched_zone_and_advances_when_full(clock):
+    ctrl = _FakePixelCtrl()
+    skin = _ZoneSkin(ctrl)
+    activity = ScriptedActivity("Zones", "", _zone_fill_spec())
+    _start(activity, _FakeRobot([skin]))
+    unit = _unit(activity)
+    assert unit.canvas is not None
+    zone_map = skin.touch_zone_map()
+
+    _press(activity, unit, 2)
+    activity._on_tick()                       # runs the on_touch handler
+    lit = _lit_pixels(ctrl)
+    assert lit and lit <= set(zone_map.zone_pixels(2))
+    assert len(lit) == -(-len(zone_map.zone_pixels(2)) // 2)   # half, rounded up
+    assert ctrl.pixels[-1][0] == ["#000000", "#00ff00"]
+
+    # Filling every zone (two half-steps each) schedules the jump.
+    for sensor in (0, 1, 2, 3):
+        for _ in range(2):
+            _press(activity, unit, sensor)
+            activity._on_tick()
+    assert unit.canvas.all_full()
+    activity._on_tick()                       # pending_state applied at a tick
+    assert activity.unit_state(unit.unit_id) == "done"
+    assert not unit.canvas.all_full()         # reset on phase entry
+
+
+def test_zone_fill_rhythmic_ignores_the_first_press_and_off_beat_presses(clock):
+    ctrl = _FakePixelCtrl()
+    skin = _ZoneSkin(ctrl)
+    activity = ScriptedActivity("Zones", "", _zone_fill_spec(
+        kind="rhythmic", step_pct=10, target_interval_ms=500,
+        tolerance_ms=100, min_gap_ms=50, to=""))
+    _start(activity, _FakeRobot([skin]))
+    unit = _unit(activity)
+
+    _press(activity, unit, 1)                 # first press: starts the clock
+    activity._on_tick()
+    assert not ctrl.pixels
+    clock.advance(0.5)
+    _press(activity, unit, 1)                 # on the beat
+    activity._on_tick()
+    assert len(_lit_pixels(ctrl)) > 0
+    lit_before = len(_lit_pixels(ctrl))
+    clock.advance(1.5)
+    _press(activity, unit, 1)                 # far too late: no growth
+    activity._on_tick()
+    assert len(_lit_pixels(ctrl)) == lit_before
+    # Another zone keeps its own cadence.
+    _press(activity, unit, 3)
+    clock.advance(0.45)
+    _press(activity, unit, 3)
+    activity._on_tick()
+    lit = _lit_pixels(ctrl)
+    assert lit & set(skin.touch_zone_map().zone_pixels(3))
+
+
+def test_zone_fill_follows_the_configured_sensor_quadrants(clock):
+    ctrl = _FakePixelCtrl()
+    swapped = _ZoneSkin(ctrl, sensor_quadrants={"0": "Q4", "3": "Q1"})
+    activity = ScriptedActivity("Zones", "", _zone_fill_spec(to=""))
+    _start(activity, _FakeRobot([swapped]))
+    unit = _unit(activity)
+    _press(activity, unit, 0)
+    activity._on_tick()
+    default_map = _ZoneSkin(_FakePixelCtrl()).touch_zone_map()
+    # Sensor 0 now lives in Q4, so its pixels are the default layout's zone 3.
+    assert _lit_pixels(ctrl) <= set(default_map.zone_pixels(3))
+
+
+def test_zone_fill_is_a_no_op_without_a_zone_map(clock):
+    ctrl = _FakePixelCtrl()
+    activity = ScriptedActivity("Zones", "", _zone_fill_spec())
+    _start(activity, _FakeRobot([_FakeSkin(controller=ctrl)]))
+    unit = _unit(activity)
+    assert unit.canvas is None
+    _press(activity, unit, 0)
+    activity._on_tick()
+    assert not ctrl.pixels
+    assert activity.unit_state(unit.unit_id) == "s"
+
+
+def test_on_touch_context_names_the_sensor(clock):
+    seen = []
+    activity = ScriptedActivity("Ctx", "", {"initial": "s", "states": {
+        "s": {"do": [], "on_touch": [{"log": "x"}], "transitions": []}}})
+    _start(activity, _FakeRobot([_FakeSkin(controller=_FakeCtrl())]))
+    unit = _unit(activity)
+    original = activity._run_steps
+
+    def spy(u, steps, ctx):
+        seen.append(dict(ctx))
+        return original(u, steps, ctx)
+    activity._run_steps = spy   # type: ignore[method-assign]
+    _press(activity, unit, 2)
+    assert seen and seen[-1]["sensor"] == 2 and seen[-1]["chamber"] == 2
+
+
+def _sync_fill_spec(rounds=4, decay_ms=0, **cond):
+    params = {"participants": 3, "sensors": [0, 1, 2],
+              "target_interval_ms": 100, "cadence_tolerance_ms": 10,
+              "phase_tolerance_ms": 40, "min_gap_ms": 30, "rounds": rounds}
+    params.update(cond)
+    return {"initial": "s", "states": {
+        "s": {"do": [{"sync_fill": {"fill": "contiguous", "decay_ms": decay_ms,
+                                    "on_color": "#ffffff", "bg_color": "#000000"}}],
+              "transitions": [{"to": "done", "when": {"group_touch_sync": params}}]},
+        "done": {"do": [], "transitions": []},
+    }}
+
+
+def test_sync_fill_lights_the_whole_strip_share_of_completed_rounds(clock):
+    ctrl = _FakePixelCtrl()
+    skin = _ZoneSkin(ctrl)
+    activity = ScriptedActivity("CPR", "", _sync_fill_spec(rounds=4))
+    _start(activity, _FakeRobot([skin]))
+    unit = _unit(activity)
+    assert ctrl.pixels and not _lit_pixels(ctrl)      # painted dark on enter
+
+    _emit_group_round(activity, unit, clock)          # round 1 -> streak 1
+    activity._on_tick()
+    assert len(_lit_pixels(ctrl)) == round(68 * 1 / 4)
+    clock.advance(0.08)
+    _emit_group_round(activity, unit, clock)          # streak 2
+    activity._on_tick()
+    assert len(_lit_pixels(ctrl)) == round(68 * 2 / 4)
+    # Pixels are spread over the WHOLE strip (contiguous here: 0..33), not one zone.
+    assert _lit_pixels(ctrl) == set(range(34))
+
+
+def test_sync_fill_drops_when_the_streak_goes_stale_with_optional_decay(clock):
+    ctrl = _FakePixelCtrl()
+    activity = ScriptedActivity("CPR", "", _sync_fill_spec(rounds=4, decay_ms=100))
+    _start(activity, _FakeRobot([_ZoneSkin(ctrl)]))
+    unit = _unit(activity)
+    _emit_group_round(activity, unit, clock)
+    clock.advance(0.08)
+    _emit_group_round(activity, unit, clock)
+    activity._on_tick()
+    assert len(_lit_pixels(ctrl)) == 34
+    clock.advance(1.0)                                 # stale: rounds -> 0
+    activity._on_tick()
+    assert len(_lit_pixels(ctrl)) == 33                # one pixel per decay step
+    clock.advance(0.05)
+    activity._on_tick()
+    assert len(_lit_pixels(ctrl)) == 33                # not yet
+    clock.advance(0.06)
+    activity._on_tick()
+    assert len(_lit_pixels(ctrl)) == 32
+
+
+def test_sync_fill_without_decay_drops_at_once(clock):
+    ctrl = _FakePixelCtrl()
+    activity = ScriptedActivity("CPR", "", _sync_fill_spec(rounds=4, decay_ms=0))
+    _start(activity, _FakeRobot([_ZoneSkin(ctrl)]))
+    unit = _unit(activity)
+    _emit_group_round(activity, unit, clock)
+    activity._on_tick()
+    assert len(_lit_pixels(ctrl)) == 17
+    clock.advance(1.0)
+    activity._on_tick()
+    assert not _lit_pixels(ctrl)
+
+
+def test_group_sync_auto_mode_takes_whoever_presses_and_a_joiner_restarts(clock):
+    activity = ScriptedActivity("CPR", "", _group_sync_spec(
+        mode="auto", sensors=None, participants=3, rounds=2))
+    activity._states["s"]["transitions"][0]["when"]["group_touch_sync"].pop("sensors")
+    robot = _FakeRobot([_FakeSkin(controller=_FakeCtrl(), n_chambers=4)])
+    _start(activity, robot)
+    unit = _unit(activity)
+
+    # Children at zones 1, 2, 3 (not 0..2) synchronize: auto mode accepts them.
+    def round_at(sensors):
+        for i, sensor in enumerate(sensors):
+            if i:
+                clock.advance(0.01)
+            activity._on_magnet(unit, {"act": [sensor]})
+            activity._on_magnet(unit, {"act": []})
+
+    round_at((1, 2, 3))
+    clock.advance(0.08)
+    round_at((1, 2, 3))
+    status = unit.group_sync.status(**activity._sync_kwargs(
+        activity._states["s"]["transitions"][0]["when"]["group_touch_sync"]),
+        now_ms=sa.time.monotonic() * 1000.0)
+    assert status["sensors"] == [1, 2, 3] and status["rounds"] == 2
+    activity._on_tick()
+    assert activity.unit_state(unit.unit_id) == "done"
+
+
+def test_group_sync_auto_mode_fourth_child_joins_for_good(clock):
+    activity = ScriptedActivity("CPR", "", _group_sync_spec(
+        mode="auto", participants=3, rounds=2))
+    activity._states["s"]["transitions"][0]["when"]["group_touch_sync"].pop("sensors")
+    robot = _FakeRobot([_FakeSkin(controller=_FakeCtrl(), n_chambers=4)])
+    _start(activity, robot)
+    unit = _unit(activity)
+    cond = activity._states["s"]["transitions"][0]["when"]["group_touch_sync"]
+
+    def round_at(sensors):
+        for i, sensor in enumerate(sensors):
+            if i:
+                clock.advance(0.01)
+            activity._on_magnet(unit, {"act": [sensor]})
+            activity._on_magnet(unit, {"act": []})
+
+    round_at((0, 1, 2))
+    clock.advance(0.08)
+    round_at((0, 1, 2, 3))                     # a fourth child joins
+    status = unit.group_sync.status(**activity._sync_kwargs(cond),
+                                    now_ms=sa.time.monotonic() * 1000.0)
+    assert status["sensors"] == [0, 1, 2, 3]
+    assert status["rounds"] == 1               # the 3-child round no longer counts
+    activity._on_tick()
+    assert activity.unit_state(unit.unit_id) == "s"
+    clock.advance(0.07)
+    round_at((0, 1, 2))                        # back to three: incomplete
+    activity._on_tick()
+    assert activity.unit_state(unit.unit_id) == "s"
+    clock.advance(0.07)
+    round_at((0, 1, 2, 3))
+    clock.advance(0.07)
+    round_at((0, 1, 2, 3))
+    activity._on_tick()
+    assert activity.unit_state(unit.unit_id) == "done"
+
+
+def test_group_sync_auto_mode_waits_for_enough_children(clock):
+    activity = ScriptedActivity("CPR", "", _group_sync_spec(mode="auto", rounds=1))
+    cond = activity._states["s"]["transitions"][0]["when"]["group_touch_sync"]
+    cond.pop("sensors")
+    _start(activity, _FakeRobot([_FakeSkin(controller=_FakeCtrl())]))
+    unit = _unit(activity)
+    activity._on_magnet(unit, {"act": [0]}); activity._on_magnet(unit, {"act": []})
+    clock.advance(0.01)
+    activity._on_magnet(unit, {"act": [1]}); activity._on_magnet(unit, {"act": []})
+    status = unit.group_sync.status(**activity._sync_kwargs(cond),
+                                    now_ms=sa.time.monotonic() * 1000.0)
+    assert status["rounds"] == 0 and status["mode"] == "auto"
+    assert "Waiting for 1 more child" in status["reason"]
+
+
+def test_sync_kwargs_mode_defaults():
+    kw = ScriptedActivity._sync_kwargs({"sensors": [0, 1, 2], "mode": "auto"})
+    assert kw["mode"] == "fixed"               # a sensor list is always fixed
+    assert ScriptedActivity._sync_kwargs({})["mode"] == "fixed"
+    assert ScriptedActivity._sync_kwargs({"mode": "auto"})["mode"] == "auto"

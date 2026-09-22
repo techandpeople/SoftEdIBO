@@ -416,6 +416,43 @@ class ESP32Controller:
             kwargs["angle"] = eff_angle
         return self.send_command("set_led_halves", **kwargs)
 
+    def set_led_pixels(self, colors: list[str], mask: str,
+                       pattern: str = "solid", period_ms: int = 0,
+                       ring: int | None = None,
+                       fade_ms: int | None = None) -> bool:
+        """Paint an arbitrary per-pixel colour selection in ONE frame.
+
+        ``colors`` is up to four ``"#RRGGBB"`` entries and ``mask`` the packed
+        2-bit-per-pixel colour index (see
+        :func:`src.core.led_geometry.encode_pixel_mask`; index 0 = ``colors[0]``,
+        the background). Pixels past the mask, or whose index has no colour,
+        go dark. This is how the zone/sync fill blocks light scattered pixels
+        of a 68-LED strip without a per-pixel burst. No mounting ``angle`` is
+        applied: the PC already resolved pixel indices from the skin's
+        geometry. ``pattern`` (solid/blink/pulse) and ``period_ms`` animate the
+        whole selection; ``ring`` / ``fade_ms`` as for :meth:`set_led`."""
+        cols = [str(c) for c in colors][:4]
+        if not cols or not mask:
+            return False
+        kwargs: dict[str, Any] = {"colors": cols, "mask": str(mask),
+                                  "pattern": pattern, "period_ms": int(period_ms)}
+        if ring is not None:
+            kwargs["ring"] = int(ring)
+        if fade_ms is not None:
+            kwargs["fade_ms"] = int(fade_ms)
+        return self.send_command("set_led_pixels", **kwargs)
+
+    def set_led_config(self, brightness: int, ring: int | None = None) -> bool:
+        """Set the node's LED brightness cap (1..255) - board state pushed from
+        the skin's ``led_layout`` at build/claim, like the mounting angles. A
+        cut strip can draw far more than the old 16-LED ring, so a skin may
+        cap it below full. ``ring`` selects one of the multiplexed board's
+        rings; omitted applies to all."""
+        kwargs: dict[str, Any] = {"brightness": max(1, min(255, int(brightness)))}
+        if ring is not None:
+            kwargs["ring"] = int(ring)
+        return self.send_command("led_config", **kwargs)
+
     def on_pressure(self, callback: Callable[..., None]) -> None:
         """Register a callback for pressure status messages.
 

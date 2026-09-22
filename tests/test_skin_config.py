@@ -216,3 +216,33 @@ def test_carry_unmanaged_skin_keys_keeps_foreign_keys_only():
     skincfg.carry_unmanaged_skin_keys(entry, saved)
     assert entry == {"skin_id": "new", "chambers": [],
                      "name": "Belly", "organ": {"mux_ch": 3}}
+
+
+# ---------------------------------------------------------------------------
+# led_layout persistence
+# ---------------------------------------------------------------------------
+
+def test_set_skin_led_layout_patches_in_place_and_cleans_values():
+    data = _data()
+    assert skincfg.set_skin_led_layout(
+        data, "turtle", 0, 0,
+        {"count": "68", "gap": 1, "brightness": 180, "clockwise": 0,
+         "ring": 0, "bogus": 1, "start": 0.3})
+    saved = data["robots"]["turtles"][0]["skins"][0]["led_layout"]
+    assert saved == {"count": 68, "gap": 1, "brightness": 180,
+                     "clockwise": False, "ring": 0}
+    # An empty layout removes the key (back to the type default).
+    assert skincfg.set_skin_led_layout(data, "turtle", 0, 0, {})
+    assert "led_layout" not in data["robots"]["turtles"][0]["skins"][0]
+    assert not skincfg.set_skin_led_layout(data, "turtle", 0, 9, {"count": 1})
+
+
+def test_normalise_led_layout_ignores_bad_values():
+    assert skincfg.normalise_led_layout({"count": "x", "gap": None,
+                                          "brightness": 12}) == {"brightness": 12}
+    assert skincfg.normalise_led_layout(None) == {}
+
+
+def test_led_layout_is_a_dialog_managed_key():
+    assert "led_layout" in skincfg.DIALOG_SKIN_KEYS
+    assert skincfg.NODE_LED_RINGS["node_direct"] == (68,)

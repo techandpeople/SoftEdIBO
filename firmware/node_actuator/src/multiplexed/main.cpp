@@ -424,6 +424,33 @@ void parseAndQueue(const uint8_t* data, int len) {
         }
         if (k > 0) leds::setSegments(ring, r, g, b, k, leds::patternFromStr(pat), period, count, fade, offset);
         return;
+    } else if (strcmp(cmd, "set_led_pixels") == 0) {
+        // Arbitrary per-pixel selection on ring(s) in ONE frame: up to 4 colours
+        // plus a hex "mask" holding a 2-bit colour index per pixel (24 pixels =
+        // 12 chars). {"cmd":"set_led_pixels","ring":N,"colors":[...],"mask":"...",
+        //  "pattern":"solid|blink|pulse","period_ms":N,"fade_ms":N}
+        const char* pat  = doc["pattern"]   | "solid";
+        const char* mask = doc["mask"]      | "";
+        uint32_t period  = doc["period_ms"] | 0;
+        int32_t  count   = doc["count"]     | 0;
+        uint32_t fade    = doc["fade_ms"]   | leds::DEFAULT_FADE_MS;
+        int      ring    = doc["ring"]      | -1;
+        uint8_t r[leds::MAX_MASK_COLORS], g[leds::MAX_MASK_COLORS], b[leds::MAX_MASK_COLORS];
+        int k = 0;
+        for (JsonVariant v : doc["colors"].as<JsonArray>()) {
+            if (k >= leds::MAX_MASK_COLORS) break;
+            leds::parseHexColor(v.as<const char*>(), r[k], g[k], b[k]);
+            k++;
+        }
+        if (k > 0) leds::setPixels(ring, r, g, b, k, mask, leds::patternFromStr(pat), period, count, fade);
+        return;
+    } else if (strcmp(cmd, "led_config") == 0) {
+        // Board-level LED settings pushed at build/claim: {"cmd":"led_config",
+        // "brightness":1..255,"ring":N}. Not persisted - re-pushed on every claim.
+        int brightness = doc["brightness"] | 255;
+        int ring       = doc["ring"]       | -1;
+        leds::setBrightness(ring, (uint8_t)constrain(brightness, 1, 255));
+        return;
     } else {
         return;
     }
@@ -866,7 +893,7 @@ void setup() {
     // UNL17-24) so a bank swap from wrong address jumpers shows in the PC log.
     char ready_msg[192];
     snprintf(ready_msg, sizeof(ready_msg),
-             "{\"status\":\"node_multiplexed_ready\",\"fw\":\"pcaid-1\",\"rgbw\":" LED_RGBW_JSON
+             "{\"status\":\"node_multiplexed_ready\",\"fw\":\"pixels-1\",\"rgbw\":" LED_RGBW_JSON
              ",\"kpa_min\":%.0f,\"pca\":[%d,%d]}",
              (double)pressure::FLOOR_KPA, pca_valves::pca1_addr, pca_valves::pca2_addr);
     se::broadcast(ready_msg);

@@ -236,6 +236,30 @@ class SimulatedController(QObject):
                      colors, pattern, period_ms, ring, fade_ms, angle)
         return True
 
+    def set_led_pixels(self, colors: list[str], mask: str,
+                       pattern: str = "solid", period_ms: int = 0,
+                       ring: int | None = None,
+                       fade_ms: int | None = None) -> bool:
+        """No-op shim mirroring :meth:`ESP32Controller.set_led_pixels`. Keeps
+        the last frame (``led_pixels``) so a monitor view can mirror the
+        zone/sync fill blocks in simulation."""
+        self._led_pixels = (list(colors), str(mask))
+        logger.debug("SIM set_led_pixels(%s, mask=%s, pattern=%s, period=%dms, "
+                     "ring=%s, fade=%s)",
+                     colors, mask, pattern, period_ms, ring, fade_ms)
+        return True
+
+    @property
+    def led_pixels(self) -> tuple[list[str], str] | None:
+        """The last ``(colors, mask)`` frame from :meth:`set_led_pixels`."""
+        return getattr(self, "_led_pixels", None)
+
+    def set_led_config(self, brightness: int, ring: int | None = None) -> bool:
+        """No-op shim mirroring :meth:`ESP32Controller.set_led_config`."""
+        self._led_brightness = int(brightness)
+        logger.debug("SIM set_led_config(brightness=%s, ring=%s)", brightness, ring)
+        return True
+
     def stop_all(self) -> None:
         """Stop the animation timer. Call on cleanup or pause."""
         self._timer.stop()

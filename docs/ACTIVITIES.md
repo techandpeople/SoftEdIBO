@@ -73,12 +73,13 @@ hospital study's behaviours. Two layers:
   with a cooperative sequence scheduler (`wait` / `wait_for_touch` suspend a
   running sequence). The verb set lives in
   [`catalog.py`](../src/activities/catalog.py) - actions (`set_led`,
-  `set_led_halves`, `fade`, `touch_progress`, `beat`,
+  `set_led_halves`, `fade`, `touch_progress`, `zone_fill`, `sync_fill`, `beat`,
   `inflate`/`deflate`/`set_pressure`, `stop`, `log`, and the Thymio
   wheel/LED/sound verbs `thymio_drive` / `thymio_leds` / `thymio_sound`),
   control flow (`sequence`, `repeat`, `for_each_chamber`, `if_robot`, `wait`,
   `wait_for_touch`) and conditions (`elapsed_ms`, `touch_count`,
-  `gesture_count`, `on_impact`, `on_lifted`, `organs`, `robot_is`,
+  `gesture_count`, `touch_rhythm`, `group_touch_rhythm`, `group_touch_sync`,
+  `on_impact`, `on_lifted`, `organs`, `robot_is`,
   `any`/`all`/`not`, `always`). The catalogue is the single source
   of truth and also drives the editor blocks. Specs are validated by
   `validate_spec` (`wrinkle` is deprecated - accepted in saved specs as an
@@ -102,10 +103,46 @@ hospital study's behaviours. Two layers:
   (`"all"` default, or `0..2`): the multiplexed board defines **three independent
   24-LED rings** that can animate separately (Tree populates all three, one per
   branch skin; Turtle only ring 0), so a Tree activity can drive each ring on
-  its own, while the direct board has a single 16-LED ring and ignores higher
-  indices. `ring` omitted / `"all"` keeps the prior whole-ring behaviour; the
-  firmware sizes the selected ring itself. A multiplexed-authored behaviour run
-  on a direct board degrades gracefully (only ring 0 shows).
+  its own, while the direct board drives a single **68-pixel cut COB strip**
+  wrapped round the Thymio skin (plus one empty seam slot, so arcs and comets
+  are computed over 69 slots and stay continuous across the seam) and ignores
+  higher indices. `ring` omitted / `"all"` keeps the prior whole-ring behaviour;
+  the firmware sizes the selected ring itself. A multiplexed-authored behaviour
+  run on a direct board degrades gracefully (only ring 0 shows).
+
+  **Zone fills** light the pixels *above a touch sensor*. The strip's geometry
+  ([`led_geometry.py`](../src/core/led_geometry.py): pixel count, seam gap,
+  direction, brightness cap, and the mounting angle saved from the Test
+  Actuators handle) and the touch profile's **sensor placements**
+  ([`touch_profiles.py`](../src/hardware/touch_profiles.py): the magnet
+  board's four corner quadrants, configurable per sensor in the Skin dialog's
+  "Sensor positions" box; a future capacitive board reports its own) are both
+  expressed as a *perimeter fraction* (0 = front centre, clockwise from above)
+  and joined once per skin by
+  [`TouchZoneMap`](../src/core/touch_zones.py): every pixel belongs to the
+  nearest sensor, so a symmetric skin with corner sensors gets four equal
+  quarters with no hand-kept table. The runtime keeps a per-skin
+  [`LedZoneCanvas`](../src/activities/led_canvas.py) and renders every change
+  as ONE `set_led_pixels` frame (up to 4 colours + a 2-bit-per-pixel hex
+  mask, 34 chars for 68 pixels).
+  - `zone_fill` (in a phase's `on_touch`): each qualifying press lights
+    `step_pct` more of the touched zone - `fill` random / contiguous / centre
+    (outward from the sensor); `kind` `touch` (every press) or `rhythmic`
+    (only a press within `tolerance_ms` of `target_interval_ms` since the
+    previous press in the *same* zone - the first press just starts the
+    clock). `to` jumps once every zone is full. Steps round up, so N steps of
+    1/N fill a zone.
+  - `sync_fill` (in a phase's `do`): the lit share of the **whole** strip
+    equals completed rounds / rounds required of the phase's
+    `group_touch_sync` condition, refreshed every tick; when the streak
+    breaks the pixels go out one per `decay_ms` (0 = at once).
+  - `group_touch_sync` gained `mode`: `auto` (editor default) takes whoever
+    presses - the first `participants` distinct sensors form the group and any
+    further sensor that presses joins for good, so a fourth child may come in
+    and from then on all four must keep every round (the streak restarts when
+    the group grows); `fixed` (or any spec listing `sensors`) keeps the exact
+    sensor list. Skins without a strip geometry or touch board make both fill
+    verbs logged no-ops.
   The `organs` condition compares how many of the skin's plugged organs resolve
   to good/bad (decomposed from the organ circuit by `OrganResolver`): `scope`
   `all_good`/`all_bad` mean "every organ matches", `count` compares the good and

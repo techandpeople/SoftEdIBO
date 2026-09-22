@@ -5,8 +5,8 @@
   <property name="geometry">
    <rect><x>0</x><y>0</y><width>620</width><height>270</height></rect>
   </property>
-  <property name="title"><string>LED ring test</string></property>
-  <property name="whatsThis"><string>Drives the WS2812 LED ring on a node_direct board. Pick a colour, a pattern (solid/blink/pulse, or comet for a rotating light) and how many segments (whole / halves / quarters); the ring updates live as you choose. Every change cross-fades smoothly; the &quot;Smooth transition&quot; box sets how long the fade takes. Use it to verify the ring wiring, brightness and animations.</string></property>
+  <property name="title"><string>LED strip test</string></property>
+  <property name="whatsThis"><string>Drives the WS2812 LED strip (or ring) on this node. Pick a colour, a pattern (solid/blink/pulse, or comet for a rotating light) and how many segments (whole / halves / quarters); the strip updates live as you choose. Every change cross-fades smoothly; the &quot;Smooth transition&quot; box sets how long the fade takes. Drag the handle on the preview to set where the split starts and &quot;Save angle&quot; to store it as the strip's mounting. The &quot;Strip&quot; row describes the physical strip (pixel count, empty seam slots, brightness cap, direction); &quot;Save layout&quot; stores it with the skin so activities can light the pixels above each touch sensor.</string></property>
   <layout class="QHBoxLayout" name="main_layout">
    <item>
     <widget class="QWidget" name="left_panel" native="true">
@@ -65,16 +65,80 @@
        </layout>
       </item>
       <item>
+       <layout class="QHBoxLayout" name="layout_row">
+        <item>
+         <widget class="QLabel" name="layout_label">
+          <property name="text"><string>Strip:</string></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QSpinBox" name="count_spin">
+          <property name="whatsThis"><string>Physical pixels on the wire - what the firmware drives (68 for the cut COB strip on the Thymio skin, 24 for a multiplexed-board ring). Must match the firmware build; a change here only takes effect in the preview after reopening the dialog.</string></property>
+          <property name="suffix"><string> px</string></property>
+          <property name="minimum"><number>1</number></property>
+          <property name="maximum"><number>300</number></property>
+          <property name="value"><number>68</number></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLabel" name="gap_label">
+          <property name="text"><string>gap</string></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QSpinBox" name="gap_spin">
+          <property name="whatsThis">
+           <string>Empty pixel slots at the seam where the two ends of a cut strip meet (1 on the Thymio skin: the strip is one pixel pitch shorter than the perimeter). 0 for a closed ring. Arcs and comets are computed over pixels + gap so the light stays continuous across the seam.</string>
+          </property>
+          <property name="minimum"><number>0</number></property>
+          <property name="maximum"><number>20</number></property>
+          <property name="value"><number>0</number></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLabel" name="brightness_label">
+          <property name="text"><string>brightness</string></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QSpinBox" name="brightness_spin">
+          <property name="whatsThis"><string>Brightness cap the node applies to every LED command (1-255). Applied live while you change it. A long strip at full white draws far more than the old ring, so a lower cap keeps the board's 5 V rail happy; 255 = no cap.</string></property>
+          <property name="minimum"><number>1</number></property>
+          <property name="maximum"><number>255</number></property>
+          <property name="value"><number>255</number></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QCheckBox" name="ccw_check">
+          <property name="whatsThis"><string>Tick when pixel indices grow counter-clockwise seen from above (the data-in end of the strip runs the other way round the skin). Changes which corner each touch sensor's arc lands on.</string></property>
+          <property name="text"><string>counter-clockwise</string></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="save_layout_btn">
+          <property name="whatsThis"><string>Store this strip row (pixel count, seam gap, brightness cap, direction) with the skin. Together with the saved angle it tells activities where every pixel sits round the skin, so a touch can light the pixels above its sensor.</string></property>
+          <property name="text"><string>Save layout</string></property>
+         </widget>
+        </item>
+        <item>
+         <spacer name="layout_spacer">
+          <property name="orientation"><enum>Qt::Horizontal</enum></property>
+          <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+         </spacer>
+        </item>
+       </layout>
+      </item>
+      <item>
        <layout class="QHBoxLayout" name="control_row">
         <item>
          <widget class="QPushButton" name="off_btn">
-          <property name="whatsThis"><string>Turn the whole ring off.</string></property>
+          <property name="whatsThis"><string>Turn the whole strip off.</string></property>
           <property name="text"><string>Off</string></property>
          </widget>
         </item>
         <item>
          <widget class="QPushButton" name="save_angle_btn">
-          <property name="whatsThis"><string>Save the current handle angle as this ring's mounting orientation. It is stored with the skin and applied to every animation (test panel and activities) so a physically-rotated ring always shows the right orientation.</string></property>
+          <property name="whatsThis"><string>Save the current handle angle as this strip's mounting orientation. It is stored with the skin and applied to every animation (test panel and activities) so a physically-rotated strip always shows the right orientation, and it tells the zone logic where pixel 0 sits round the skin.</string></property>
           <property name="text"><string>Save angle</string></property>
          </widget>
         </item>

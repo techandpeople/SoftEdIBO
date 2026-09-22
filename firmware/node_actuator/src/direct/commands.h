@@ -543,6 +543,33 @@ inline void parseAndQueue(const uint8_t* data, int len) {
         if (k > 0) leds::setSegments(r, g, b, k, leds::patternFromStr(pat), period, count, fade, offset);
         return;
     }
+    else if (strcmp(cmd, "set_led_pixels") == 0) {
+        // Arbitrary per-pixel selection in ONE frame: up to 4 colours plus a hex
+        // "mask" holding a 2-bit colour index per pixel (68 pixels = 34 chars).
+        // {"cmd":"set_led_pixels","colors":["#RRGGBB",...],"mask":"...",
+        //  "pattern":"solid|blink|pulse","period_ms":N,"fade_ms":N}
+        const char* pat  = doc["pattern"]   | "solid";
+        const char* mask = doc["mask"]      | "";
+        uint32_t period  = doc["period_ms"] | 0;
+        int32_t  count   = doc["count"]     | 0;
+        uint32_t fade    = doc["fade_ms"]   | leds::DEFAULT_FADE_MS;
+        uint8_t r[leds::MAX_MASK_COLORS], g[leds::MAX_MASK_COLORS], b[leds::MAX_MASK_COLORS];
+        int k = 0;
+        for (JsonVariant v : doc["colors"].as<JsonArray>()) {
+            if (k >= leds::MAX_MASK_COLORS) break;
+            leds::parseHexColor(v.as<const char*>(), r[k], g[k], b[k]);
+            k++;
+        }
+        if (k > 0) leds::setPixels(r, g, b, k, mask, leds::patternFromStr(pat), period, count, fade);
+        return;
+    }
+    else if (strcmp(cmd, "led_config") == 0) {
+        // Board-level LED settings pushed at build/claim: {"cmd":"led_config",
+        // "brightness":1..255}. Not persisted - the PC re-pushes on every claim.
+        int brightness = doc["brightness"] | 255;
+        leds::setBrightness((uint8_t)constrain(brightness, 1, 255));
+        return;
+    }
     // ---- Magnet/touch board commands (handled inline, not queued) ----
     // Match what the PC's touch tuning panel sends; no-ops if no sensors wired.
     else if (strcmp(cmd, "rebaseline") == 0) { magnet::resetBaseline();   return; }

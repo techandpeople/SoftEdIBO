@@ -38,10 +38,19 @@ constexpr int VALVE_PINS[6] = {25, 4, 16, 17, 18, 19};
 
 constexpr int NUM_CHAMBERS = 3;
 
-// WS2812 / NeoPixel ring on a single data line (IO23 is otherwise unused).
-// 16-LED ring (the boards on the Thymios were 24-LED until 2026-08-18).
-constexpr int LED_PIN  = 23;
-constexpr int NUM_LEDS = 16;
+// WS2812B COB LED strip on a single data line (IO23 is otherwise unused).
+// Since 2026-09-21 a cut length of 160/m strip wrapped once round the Thymio
+// skin: 68 pixels on the wire, plus ONE empty slot at the seam where the two
+// ends meet (the strip is cut to the perimeter minus one pixel pitch). The
+// arc/comet geometry therefore runs over STRIP_SLOTS equal positions of which
+// the last is dark, so a split or a comet stays continuous across the seam.
+// (A NeoPixel ring is the LED_GAP_SLOTS = 0 special case: 16-LED ring until
+// 2026-09-21, 24-LED before 2026-08-18.) Mirrored on the PC by
+// src/core/led_geometry.py (DEFAULT_LED_LAYOUTS["thymio"]).
+constexpr int LED_PIN       = 23;
+constexpr int NUM_PIXELS    = 68;
+constexpr int LED_GAP_SLOTS = 1;
+constexpr int STRIP_SLOTS   = NUM_PIXELS + LED_GAP_SLOTS;
 
 // Organ + cover sensing ADC input (see organ.h). IO36 (SENSOR_VP) is the
 // only free ADC1 input - IO34/35/39 are the pressure sensors, IO32/33 the

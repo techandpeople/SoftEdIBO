@@ -5,6 +5,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from statistics import median
 
+# How a group sync condition picks its participants:
+#   fixed - the configured sensor list (or sensors 0..N-1);
+#   auto  - whoever presses: the first N distinct sensors form the group and any
+#           further sensor that presses joins for good, so a fourth child can
+#           come in but from then on all four must keep every round.
+MODE_FIXED = "fixed"
+MODE_AUTO = "auto"
+SYNC_MODES = (MODE_FIXED, MODE_AUTO)
+
 
 @dataclass
 class TouchRhythmTracker:
@@ -129,7 +138,8 @@ class GroupTouchSyncTracker:
     def matches(self, *, participants: int, sensor_ids: list[int] | None,
                 target_interval_ms: float, cadence_tolerance_ms: float,
                 phase_tolerance_ms: float, min_gap_ms: float,
-                required_rounds: int, now_ms: float) -> bool:
+                required_rounds: int, now_ms: float,
+                mode: str = MODE_FIXED) -> bool:
         """Whether the latest rounds form a fresh synchronized streak.
 
         A round begins with the first accepted press and has a fixed phase
@@ -142,21 +152,34 @@ class GroupTouchSyncTracker:
             target_interval_ms=target_interval_ms,
             cadence_tolerance_ms=cadence_tolerance_ms,
             phase_tolerance_ms=phase_tolerance_ms, min_gap_ms=min_gap_ms,
-            required_rounds=required_rounds, now_ms=now_ms,
+            required_rounds=required_rounds, now_ms=now_ms, mode=mode,
         )["complete"])
 
     def status(self, *, participants: int, sensor_ids: list[int] | None,
                target_interval_ms: float, cadence_tolerance_ms: float,
                phase_tolerance_ms: float, min_gap_ms: float,
-               required_rounds: int, now_ms: float) -> dict:
-        """Return the current CPR-round progress for a live UI checklist."""
-        selected = self._selected_sensors(participants, sensor_ids)
+               required_rounds: int, now_ms: float,
+               mode: str = MODE_FIXED) -> dict:
+        """Return the current CPR-round progress for a live UI checklist.
+
+        ``mode`` :data:`MODE_FIXED` uses ``sensor_ids`` (or sensors 0..N-1);
+        :data:`MODE_AUTO` lets the children pick themselves: every sensor
+        that has pressed since the last reset is in the group, and at least
+        ``participants`` of them are needed before rounds count.  A sensor
+        that joins late makes the earlier rounds incomplete, so the streak
+        restarts with the larger group - by design, once four are in, all
+        four must keep every round.
+        """
+        auto = mode == MODE_AUTO
+        min_participants = max(1, int(participants))
+        selected: list[int] | None = (
+            None if auto else self._selected_sensors(participants, sensor_ids))
         rounds_needed = max(1, int(required_rounds))
-        if not selected:
+        if selected is not None and not selected:
             return {"complete": False, "rounds": 0,
                     "rounds_required": rounds_needed, "sensors": [],
-                    "missing_sensors": [], "reason": "Invalid sensor zones"}
-        wanted = set(selected)
+                    "missing_sensors": [], "mode": mode,
+                    "reason": "Invalid sensor zones"}
         target = max(1.0, float(target_interval_ms))
         cadence_tol = max(0.0, float(cadence_tolerance_ms))
         phase_tol = max(0.0, float(phase_tolerance_ms))
@@ -172,14 +195,33 @@ class GroupTouchSyncTracker:
         cutoff = float(now_ms) - 120_000.0
         last_by_sensor: dict[int, float] = {}
         accepted: list[tuple[float, int]] = []
+        joined: list[int] = []            # auto mode: sensors in first-press order
         for timestamp, sensor_idx in sorted(self.events):
-            if timestamp < cutoff or sensor_idx not in wanted:
+            if timestamp < cutoff:
+                continue
+            if selected is not None and sensor_idx not in selected:
                 continue
             previous = last_by_sensor.get(sensor_idx)
             if previous is not None and timestamp - previous < debounce:
                 continue
             last_by_sensor[sensor_idx] = timestamp
             accepted.append((timestamp, sensor_idx))
+            if sensor_idx not in joined:
+                joined.append(sensor_idx)
+        if selected is None:
+            selected = sorted(joined)
+            if len(selected) < min_participants:
+                short = min_participants - len(selected)
+                return {"complete": False, "rounds": 0,
+                        "rounds_required": rounds_needed, "sensors": selected,
+                        "missing_sensors": [], "mode": mode,
+                        "target_interval_ms": target,
+                        "cadence_tolerance_ms": cadence_tol,
+                        "phase_tolerance_ms": phase_tol,
+                        "last_interval_ms": None, "last_interval_ok": None,
+                        "reason": (f"Waiting for {short} more "
+                                   f"{'child' if short == 1 else 'children'}")}
+        wanted = set(selected)
 
         completed: list[float] = []
         start: float | None = None
@@ -243,6 +285,7 @@ class GroupTouchSyncTracker:
             "phase_tolerance_ms": phase_tol,
             "last_interval_ms": last_interval_ms,
             "last_interval_ok": last_interval_ok,
+            "mode": mode,
             "reason": reason,
         }
 

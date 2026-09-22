@@ -16,7 +16,10 @@ A profile owns, in one place:
 * how a raw message becomes per-sensor magnitudes (:meth:`read_magnitudes`);
 * which detection strategy applies - a spatial position tracker
   (:meth:`build_position_tracker`) and whether chamber inflation can masquerade
-  as a touch, hence a pressure compensator (:meth:`build_compensator`).
+  as a touch, hence a pressure compensator (:meth:`build_compensator`);
+* where its sensors physically sit along the skin perimeter
+  (:meth:`sensor_placements`), which the LED strip geometry is joined to so a
+  touch lights the pixels above the sensor (see :mod:`src.core.touch_zones`).
 
 Adding a new touch technology is therefore a new :class:`TouchSensorProfile`
 subclass registered here (plus its firmware, and its ``node_type`` added to the
@@ -37,6 +40,8 @@ from typing import Any, Mapping
 
 from src.core.skin_config import MAGNET_NODE_TYPES
 from src.core.touch_compensation import compensator_from_config
+from src.core.touch_zones import (SensorPlacement, evenly_spaced_placements,
+                                  quadrant_placements)
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +94,17 @@ class TouchSensorProfile(ABC):
         Default: none. Technologies with a spatial detector override this.
         """
         return None
+
+    def sensor_placements(self, touch: Mapping[str, Any] | None
+                          ) -> list[SensorPlacement]:
+        """Where each sensor sits along the skin perimeter (fraction 0..1,
+        front centre = 0, clockwise from above), one entry per sensor index.
+
+        Default: ``sensor_count`` sensors equally spaced (four = the corners).
+        Technologies whose boards know their layout override this.
+        """
+        count = int((touch or {}).get("sensor_count", 4) or 4)
+        return evenly_spaced_placements(count)
 
 
 class MagnetSensorProfile(TouchSensorProfile):
@@ -171,6 +187,16 @@ class MagnetSensorProfile(TouchSensorProfile):
             min_touch_duration_ms=touch.get("min_touch_duration_ms", 100),
         )
         return detector, tracker
+
+    def sensor_placements(self, touch: Mapping[str, Any] | None
+                          ) -> list[SensorPlacement]:
+        """The four-sensor board's corner quadrants, from the skin's
+        ``touch.sensor_quadrants`` (sensor index -> ``Q1``..``Q4``, default
+        sensor ``i`` = ``Q{i+1}``). Other sensor counts fall back to equal
+        spacing - the quadrant detector does not engage for them either."""
+        touch = touch or {}
+        count = int(touch.get("sensor_count", 4) or 4)
+        return quadrant_placements(count, touch.get("sensor_quadrants"))
 
 
 class CapacitiveSensorProfile(TouchSensorProfile):

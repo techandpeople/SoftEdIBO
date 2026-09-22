@@ -66,6 +66,7 @@ class Skin:
         skin_type: str = "",
         skin_variant: str = "",
         pressure_sensors: bool = True,
+        led_geometry: Any = None,
     ):
         if not chamber_inputs:
             raise ValueError(f"Skin {skin_id!r} has no chambers")
@@ -93,6 +94,13 @@ class Skin:
         # decision - signal extraction, compensation, spatial detection - is
         # delegated to this profile instead of assuming "magnet".
         self._touch_profile = touch_profiles.for_config(touch)
+        # ``led_geometry``: the LED strip wrapped round this skin
+        # (:class:`~src.core.led_geometry.LedStripGeometry`) or None when the
+        # skin has no addressable strip. Joined with the touch profile's sensor
+        # placements in :meth:`touch_zone_map` so activities can light the
+        # pixels above a touched sensor.
+        self._led_geometry = led_geometry
+        self._touch_zone_map: Any = None
         # ``organ``: {"slot": int, "node_mac": str?} - this skin has its OWN
         # organ+cover circuit (e.g. a Tree branch). ``slot`` indexes the
         # node's organ circuits (``configure`` ``organ_channels``); ``node_mac``
@@ -891,6 +899,28 @@ class Skin:
     def has_touch_tracking(self) -> bool:
         """Check if this skin has touch position tracking enabled."""
         return self._touch_position_tracker is not None
+
+    @property
+    def led_geometry(self) -> Any:
+        """This skin's LED strip geometry, or None."""
+        return self._led_geometry
+
+    def touch_zone_map(self) -> Any:
+        """Pixels of the LED strip grouped by the nearest touch sensor
+        (:class:`~src.core.touch_zones.TouchZoneMap`), or None when the skin
+        has no strip or no touch board. Built lazily, once: the strip knows
+        its pixel positions, the touch profile its sensor positions, and
+        neither knows the other."""
+        if self._touch_zone_map is not None:
+            return self._touch_zone_map
+        if self._led_geometry is None or not self.touch:
+            return None
+        from src.core.touch_zones import TouchZoneMap
+        placements = self._touch_profile.sensor_placements(self.touch)
+        if not placements:
+            return None
+        self._touch_zone_map = TouchZoneMap(self._led_geometry, placements)
+        return self._touch_zone_map
 
     def get_touch_position(self) -> dict[str, Any]:
         """Get current touch position tracking state."""

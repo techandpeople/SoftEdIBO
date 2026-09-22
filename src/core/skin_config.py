@@ -55,13 +55,15 @@ ACTUATOR_NODE_TYPES = ("node_direct", "node_multiplexed")
 # touch node is the actuator's own MAC). ``node_multiplexed`` has no magnet bus.
 MAGNET_NODE_TYPES = ("node_magnet_sensor", "node_direct")
 
-# LED ring layout per node type - the LED count of each independently
-# addressable ring, mirroring the firmware's RING_LEDS. node_direct (the Thymio
-# board) drives a single 16-LED ring; node_multiplexed defines three 24-LED
-# rings, each selected via set_led's "ring" field. The Test Actuators dialog
-# builds one ring tester per entry. Node types absent here have no LED rings.
+# LED layout per node type - the pixel count of each independently
+# addressable strip/ring, mirroring the firmware's NUM_PIXELS / RING_LEDS.
+# node_direct (the Thymio board) drives a single 68-pixel cut strip wrapped
+# round the skin (plus one empty seam slot - see src/core/led_geometry.py);
+# node_multiplexed defines three 24-LED rings, each selected via set_led's
+# "ring" field. The Test Actuators dialog builds one tester per entry. Node
+# types absent here have no LEDs.
 NODE_LED_RINGS: dict[str, tuple[int, ...]] = {
-    "node_direct": (16,),
+    "node_direct": (68,),
     "node_multiplexed": (24, 24, 24),
 }
 
@@ -191,7 +193,8 @@ def chambers_by_key(chambers: list[dict]) -> dict[tuple[str | None, int], dict]:
 # elsewhere and must survive the save. ``sensor_grid`` is legacy and is dropped.
 DIALOG_SKIN_KEYS = frozenset({
     "skin_id", "chambers", "skin_type", "skin_variant", "shape", "grid",
-    "chamber_grid", "sensor_grid", "touch", "organs", "led_angles"})
+    "chamber_grid", "sensor_grid", "touch", "organs", "led_angles",
+    "led_layout"})
 
 
 def carry_unmanaged_skin_keys(entry: dict, saved: dict) -> None:
@@ -323,6 +326,48 @@ def set_skin_led_angles(data: dict, robot_type: str, robot_index: int,
         if 0 <= skin_index < len(skins):
             skins[skin_index]["led_angles"] = {
                 str(int(k)): float(v) for k, v in led_angles.items()}
+            return True
+    return False
+
+
+# ``led_layout`` keys the Test Actuators strip row edits (see
+# src/core/led_geometry.py for their meaning). ``start`` is NOT here: the
+# mounting angle stays in ``led_angles``.
+LED_LAYOUT_KEYS = ("count", "gap", "clockwise", "brightness", "ring")
+
+
+def normalise_led_layout(layout: dict | None) -> dict:
+    """A saved ``led_layout`` cleaned to its known keys and types
+    (unknown keys dropped, bad values ignored). Empty dict = type default."""
+    out: dict = {}
+    if not isinstance(layout, dict):
+        return out
+    for key in LED_LAYOUT_KEYS:
+        if key not in layout or layout[key] is None:
+            continue
+        try:
+            out[key] = bool(layout[key]) if key == "clockwise" else int(layout[key])
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def set_skin_led_layout(data: dict, robot_type: str, robot_index: int,
+                        skin_index: int, led_layout: dict) -> bool:
+    """Patch just the ``led_layout`` of an already-saved skin entry in place
+    (the Test Actuators dialog persists the strip's count / gap / brightness
+    without re-committing the whole skin). An empty layout removes the key so
+    the skin falls back to its type default. Returns True if the entry
+    existed and was updated."""
+    robots_list = data.get("robots", {}).get(YAML_KEY[robot_type], [])
+    if 0 <= robot_index < len(robots_list):
+        skins = robots_list[robot_index].get("skins", [])
+        if 0 <= skin_index < len(skins):
+            layout = normalise_led_layout(led_layout)
+            if layout:
+                skins[skin_index]["led_layout"] = layout
+            else:
+                skins[skin_index].pop("led_layout", None)
             return True
     return False
 

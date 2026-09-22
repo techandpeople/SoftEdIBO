@@ -171,6 +171,10 @@ pip install -r requirements.txt
 python scripts/run.py
 ```
 
+Or with the Makefile: `make install && make run` (`make` alone lists every
+target - tests, type check, firmware build/flash/monitor, PyInstaller bundle).
+`make run` recompiles only the changed `.ui` files on its own.
+
 Requires Python 3.12+. Re-run `./scripts/compile_ui.sh` after editing any
 `src/gui/ui/*.ui` file, or the app fails with
 `ModuleNotFoundError: No module named 'src.gui.ui_...'`.

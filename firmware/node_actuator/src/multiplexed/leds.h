@@ -35,6 +35,9 @@ enum Pattern : uint8_t { STATIC, BLINK, PULSE, COMET, FADE };
 constexpr int MAX_SEGMENTS  = 8;
 constexpr int MAX_RING_LEDS = 24;
 
+// Colours a "set_led_pixels" frame may carry: its mask holds 2 bits per pixel.
+constexpr int MAX_MASK_COLORS = 4;
+
 // Default cross-fade time (ms) when a command omits "fade_ms". Matches the PC.
 constexpr uint32_t DEFAULT_FADE_MS = 250;
 
@@ -324,6 +327,61 @@ inline void setSegments(int ring, const uint8_t* r, const uint8_t* g,
             R.baseR[i] = r[seg]; R.baseG[i] = g[seg]; R.baseB[i] = b[seg];
         }
         apply_(R, p, period, count, fadeMs, now);
+    }
+}
+
+// Decode pixel i's colour index from a "set_led_pixels" mask: hex text, two
+// pixels per character, pixel i in bits (i % 2) * 2 of character i / 2. A short
+// or malformed mask reads as index 0 (the first colour, the background). Mirrors
+// src/core/led_geometry.py encode_pixel_mask() and node_direct.
+inline int maskCode_(const char* mask, int i) {
+    if (!mask) return 0;
+    int ci = i / 2;
+    for (int j = 0; j <= ci; j++) if (mask[j] == '\0') return 0;
+    char c = mask[ci];
+    int v = (c >= '0' && c <= '9') ? c - '0'
+          : (c >= 'a' && c <= 'f') ? c - 'a' + 10
+          : (c >= 'A' && c <= 'F') ? c - 'A' + 10 : 0;
+    return (v >> ((i % 2) * 2)) & 3;
+}
+
+// Paint an arbitrary per-pixel selection on ring(s) in ONE frame: pixel i takes
+// colour mask-index(i) of the k colours (an index past k goes dark). Used by the
+// PC's zone/sync fill blocks. No angle offset: the PC resolved pixel indices from
+// the skin's geometry. ring < 0 = all rings (same mask on each).
+inline void setPixels(int ring, const uint8_t* r, const uint8_t* g,
+                      const uint8_t* b, int k, const char* mask, Pattern p,
+                      uint32_t period, int32_t count,
+                      uint32_t fadeMs = DEFAULT_FADE_MS) {
+    if (ring >= NUM_RINGS) return;
+    if (k < 1) k = 1;
+    if (k > MAX_MASK_COLORS) k = MAX_MASK_COLORS;
+    if (p == COMET || p == FADE) p = STATIC;   // meaningless on a pixel mask
+    int lo, hi; ringRange_(ring, lo, hi);
+    uint32_t now = millis();
+    for (int j = lo; j < hi; j++) {
+        Ring& R = rings[j];
+        R.segR[0] = r[0]; R.segG[0] = g[0]; R.segB[0] = b[0]; R.segCount = 1;
+        uint16_t n = strips[j].numPixels();
+        for (uint16_t i = 0; i < n && i < MAX_RING_LEDS; i++) {
+            int c = maskCode_(mask, i);
+            if (c < k) { R.baseR[i] = r[c]; R.baseG[i] = g[c]; R.baseB[i] = b[c]; }
+            else       { R.baseR[i] = 0;    R.baseG[i] = 0;    R.baseB[i] = 0;    }
+        }
+        apply_(R, p, period, count, fadeMs, now);
+    }
+}
+
+// Brightness cap (1..255) for ring(s) from now on - board state the PC pushes
+// from the skin's led_layout ("led_config"). Adafruit scales at setPixelColor
+// time and the renderer rewrites every pixel each frame, so it applies cleanly
+// to the current look. ring < 0 = all rings.
+inline void setBrightness(int ring, uint8_t b) {
+    if (ring >= NUM_RINGS) return;
+    int lo, hi; ringRange_(ring, lo, hi);
+    for (int j = lo; j < hi; j++) {
+        strips[j].setBrightness(b ? b : 1);
+        rings[j].dirty = true;
     }
 }
 
