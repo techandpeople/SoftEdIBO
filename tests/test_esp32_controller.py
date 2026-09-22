@@ -94,7 +94,7 @@ def test_start_hold_wire_format_pressure_and_vacuum():
     )
     assert controller.start_hold(2, 100, kpa=-12.345, vacuum=True)
     gateway.send.assert_called_with(
-        "AA:BB:CC:DD:EE:01", "hold_duty", chamber=2, duty=180, kpa=-12.35, dir=1
+        "AA:BB:CC:DD:EE:01", "hold_duty", chamber=2, duty=100, kpa=-12.35, dir=1
     )
     assert sorted(controller.active_holds()) == [1, 2]
     controller.stop_hold()

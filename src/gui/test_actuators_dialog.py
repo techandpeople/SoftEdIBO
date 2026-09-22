@@ -362,20 +362,22 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
             slot_row.addWidget(def_btn)
 
             # Leak-compensating hold toggle: the node regulates the chamber on
-            # its gauge with short pump pulses (pressure side above ambient,
-            # vacuum side below). Needs a working pressure sensor, so it is
-            # hidden on sensorless boards.
+            # its gauge with a continuous, loss-matched pump duty (pressure
+            # side above ambient, vacuum side below). Needs a working pressure
+            # sensor, so it is hidden on sensorless boards.
             if not self._sensorless:
                 hold_btn = QPushButton("Hold")
                 hold_btn.setCheckable(True)
                 hold_btn.setWhatsThis(
                     "Leak-compensating hold: keep this chamber AT its current "
-                    "pressure despite leaks. Above ambient the node re-opens "
-                    "the inflate valve in short, soft pump pulses whenever the "
-                    "sensor drifts below the level; below ambient it does the "
-                    "same with the deflate valve and the vacuum pump (a vacuum "
-                    "deeper than the sensor can see is kept by brief timed "
-                    "re-pulls). Toggles on by itself once an Inflate or "
+                    "pressure despite leaks. The node measures how fast the "
+                    "chamber loses air: a tight chamber simply stays closed; a "
+                    "leaky one keeps its valve open and runs the pump at a "
+                    "continuous low PWM that just balances the loss (no on/off "
+                    "pulsing). Above ambient that is the inflate valve and the "
+                    "pressure pump; below ambient the deflate valve and the "
+                    "vacuum pump (a vacuum deeper than the sensor can see is "
+                    "kept by brief timed re-pulls). Toggles on by itself once an Inflate or "
                     "Deflate finishes away from ambient, so the chamber keeps "
                     "its pose until the next actuation. The dialog re-asserts "
                     "the hold every ~2 s; toggling off, actuating the chamber, "
@@ -940,8 +942,9 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         side above ambient, on the vacuum side below it (a reading sitting at
         the blind gauge's floor becomes a timed re-pull hold on the node).
         Seeds the node's hold servo with the calibrated equilibrium duty
-        (``hold_duty_curve`` at that kPa) or the floor; the node then trims
-        the duty on its gauge. The dialog keepalive re-asserts it.
+        (``hold_duty_curve`` at that kPa) when one exists, else lets the node
+        predict its own from the loss it measures; the node then servos the
+        duty on its gauge. The dialog keepalive re-asserts it.
         """
         if not on:
             if self._held.pop(slot, None) is not None:

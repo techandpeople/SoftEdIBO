@@ -894,7 +894,7 @@ void setup() {
     // UNL17-24) so a bank swap from wrong address jumpers shows in the PC log.
     char ready_msg[192];
     snprintf(ready_msg, sizeof(ready_msg),
-             "{\"status\":\"node_multiplexed_ready\",\"fw\":\"hold-3\",\"rgbw\":" LED_RGBW_JSON
+             "{\"status\":\"node_multiplexed_ready\",\"fw\":\"hold-4\",\"rgbw\":" LED_RGBW_JSON
              ",\"kpa_min\":%.0f,\"pca\":[%d,%d]}",
              (double)pressure::FLOOR_KPA, pca_valves::pca1_addr, pca_valves::pca2_addr);
     se::broadcast(ready_msg);

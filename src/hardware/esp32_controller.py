@@ -142,15 +142,18 @@ class ESP32Controller:
                    timed: bool = False, vacuum: bool = False) -> bool:
         """Start (or retune) a leak-compensating hold on ``chamber``.
 
-        Given ``kpa`` the node regulates the chamber on its gauge with short
-        pulses of the side's pump - the pressure side by default, the vacuum
-        side (deflate valve + vacuum pump) with ``vacuum=True`` for a pose
-        below ambient. The pulse duty never sits below :data:`HOLD_DUTY_MIN`;
-        ``duty`` only seeds that servo (the calibrated equilibrium PWM when
-        known). ``timed=True`` (or no ``kpa``) keeps the valve open at
-        ``duty`` for sensorless boards. A background keepalive re-asserts the
-        hold every ~2 s until :meth:`stop_hold`; without it the firmware
-        dead-man releases the hold in ~6 s.
+        Given ``kpa`` the node regulates the chamber on its gauge from the
+        losses it measures: a tight chamber stays closed and unpumped, a
+        leaky one keeps its valve open with the side's pump PWM servoed
+        continuously (never under :data:`HOLD_DUTY_MIN`, the run floor) to
+        balance the loss - the pressure side by default, the vacuum side
+        (deflate valve + vacuum pump) with ``vacuum=True`` for a pose below
+        ambient. ``duty`` only seeds that servo: the calibrated equilibrium
+        PWM when known, else 0 and the node predicts its own from the loss it
+        measures before opening. ``timed=True`` (or no ``kpa``) keeps the
+        valve open at ``duty`` for sensorless boards. A background keepalive
+        re-asserts the hold every ~2 s until :meth:`stop_hold`; without it
+        the firmware dead-man releases the hold in ~6 s.
         """
         payload: dict[str, Any] = {"chamber": int(chamber),
                                    "duty": clamp_hold_duty(duty)}

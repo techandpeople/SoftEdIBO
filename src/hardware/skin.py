@@ -477,11 +477,14 @@ class Skin:
     def hold_regulated(self, local_idx: int, pct: int | None = None) -> bool:
         """Leak-compensating hold: keep the chamber AT a level despite leaks.
 
-        The node regulates the chamber on its gauge with short pulses of the
-        matching pump - the pressure side for a level above ambient, the
-        vacuum side (deflate valve + vacuum pump) for one below - never under
-        :data:`~src.hardware.hold_duty.HOLD_DUTY_MIN`, seeded from the
-        calibrated ``hold_duty_curve`` at the hold pressure when present.
+        The node regulates the chamber on its gauge from the losses it
+        measures: closed and unpumped while it is tight, valve open with the
+        matching pump's PWM servoed continuously (never under
+        :data:`~src.hardware.hold_duty.HOLD_DUTY_MIN`) once it leaks - the
+        pressure side for a level above ambient, the vacuum side (deflate
+        valve + vacuum pump) for one below. The servo is seeded from the
+        calibrated ``hold_duty_curve`` at the hold pressure when present,
+        else it predicts its own first duty from the measured loss.
         ``pct`` picks the level to hold (default: the chamber's current
         target); a level at ambient has nothing to hold and returns False.
         On a sensorless node the hold is duty-only (valve open at the seed),

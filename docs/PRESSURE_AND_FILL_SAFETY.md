@@ -74,13 +74,15 @@ venting, so an unbounded deflate can pull a sealed chamber into vacuum.
   (`P_MIN - zero`, within `FLOOR_BAND_KPA` = 0.5 kPa) **and** its target lies
   below that. The valve stays open - the pull goes on until `capMs` - but
   `recalcPumps` drops the vacuum pump from full duty to
-  `pump_duty::DEFLATE_BELOW_FLOOR` (= the shared **180** PWM floor,
+  `pump_duty::DEFLATE_BELOW_FLOOR` (= the shared **180** PWM START floor,
   `firmware/common/pump_duty.h`) as soon as **every** open deflate valve is
   at-floor. Any open deflate valve that is still visibly falling, or was opened
   by hand (manual / bench), keeps full duty on the shared line. Blind chambers
   (`timed:1`, no sensor) never reduce - their manual empty time was measured at
-  full duty. The floor is the same one the hold servo never goes below (the
-  diaphragm pumps stall under ~180).
+  full duty. 180 is the pump's START floor (from rest the motor needs it to
+  break away); the `hold_duty` regulator, once its pump is spinning, servos
+  down to the separate RUN floor `pump_duty::RUN_MIN` (70) and learns upward
+  from there if the pump stops delivering.
 
 ## Safety nets
 

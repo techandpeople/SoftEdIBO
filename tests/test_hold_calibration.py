@@ -20,6 +20,7 @@ from src.hardware.fill_calibration import (
 from src.hardware.fill_scaling import FillLoadTracker, interp_curve
 from src.hardware.hold_duty import (
     HOLD_DUTY_MIN,
+    HOLD_DUTY_UNSEEDED,
     HOLD_PRESSURE,
     HOLD_VACUUM,
     hold_direction,
@@ -162,9 +163,10 @@ class _HoldCtrl:
 
 
 def test_seed_hold_duty_clamps_to_floor():
-    assert seed_hold_duty(None, 5.0) == HOLD_DUTY_MIN
-    assert seed_hold_duty([[0.0, 40], [10.0, 140]], 5.0) == HOLD_DUTY_MIN
-    assert seed_hold_duty([[0.0, 140], [10.0, 200]], 5.0) == HOLD_DUTY_MIN   # 170 < floor
+    assert seed_hold_duty(None, 5.0) == HOLD_DUTY_UNSEEDED    # no curve: node predicts
+    assert seed_hold_duty([[0.0, 40], [10.0, 60]], 5.0) == HOLD_DUTY_MIN   # 50 < run floor
+    assert seed_hold_duty([[0.0, 40], [10.0, 140]], 5.0) == 90
+    assert seed_hold_duty([[0.0, 140], [10.0, 200]], 5.0) == 170
     assert seed_hold_duty([[0.0, 160], [10.0, 220]], 5.0) == 190
     assert seed_hold_duty([[0.0, 300]], 1.0) == 255
 
@@ -211,7 +213,7 @@ def test_hold_regulated_falls_back_without_curve_and_releases():
     skin = Skin("shell", [{"controller": ctrl, "node_slot": 3,
                            "max_pressure": 10.0}])
     assert skin.hold_regulated(0, pct=80)
-    assert ctrl.hold_calls[-1]["duty"] == HOLD_DUTY_MIN
+    assert ctrl.hold_calls[-1]["duty"] == HOLD_DUTY_UNSEEDED
     skin.release_hold(0)
     assert ctrl.stop_calls == [3]              # node slot, not local index
 
