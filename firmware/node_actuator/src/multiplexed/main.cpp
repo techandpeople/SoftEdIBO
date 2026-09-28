@@ -293,7 +293,7 @@ void parseAndQueue(const uint8_t* data, int len) {
         c.type = cmd_queue::CMD_HOLD_DUTY;
         c.chamber = cmd_queue::chamberArg(doc["chamber"] | -1);
         c.duty = doc["duty"] | 0;
-        c.param = doc["off"] | 0;
+        c.param = cmd_queue::holdDutyMode(doc["off"] | 0, doc["ka"] | 0);   // start / off / keepalive refresh
         c.timed = doc["timed"] | 0;
         c.dir = (doc["dir"] | 0) ? 1 : 0;    // 0 = pressure hold, 1 = vacuum hold
         c.param_kpa = doc["kpa"].is<float>() ? doc["kpa"].as<float>() : NAN;
@@ -720,14 +720,16 @@ void processCommand(const cmd_queue::Cmd& c) {
     // is free. param = "off" flag; chamber -1 applies to every chamber.
     if (c.type == cmd_queue::CMD_HOLD_DUTY) {
         const int n_ch = config::state.num_chambers;
+        bool off = c.param == cmd_queue::HOLD_MODE_OFF;
+        bool ka  = c.param == cmd_queue::HOLD_MODE_REFRESH;
         if (c.chamber == -1) {
-            if (c.param) chambers::holdAbort();
+            if (off) chambers::holdAbort();
             else for (int i = 0; i < n_ch; i++)
-                chambers::holdRequest(i, c.dir, c.param_kpa, c.duty, c.timed != 0);
+                chambers::holdRequest(i, c.dir, c.param_kpa, c.duty, c.timed != 0, ka);
         } else if (c.chamber >= 0 && c.chamber < n_ch) {
-            if (c.param) chambers::holdDrop(c.chamber);
+            if (off) chambers::holdDrop(c.chamber);
             else chambers::holdRequest(c.chamber, c.dir, c.param_kpa, c.duty,
-                                       c.timed != 0);
+                                       c.timed != 0, ka);
         }
         return;
     }
@@ -894,7 +896,7 @@ void setup() {
     // UNL17-24) so a bank swap from wrong address jumpers shows in the PC log.
     char ready_msg[192];
     snprintf(ready_msg, sizeof(ready_msg),
-             "{\"status\":\"node_multiplexed_ready\",\"fw\":\"hold-4\",\"rgbw\":" LED_RGBW_JSON
+             "{\"status\":\"node_multiplexed_ready\",\"fw\":\"hold-5\",\"rgbw\":" LED_RGBW_JSON
              ",\"kpa_min\":%.0f,\"pca\":[%d,%d]}",
              (double)pressure::FLOOR_KPA, pca_valves::pca1_addr, pca_valves::pca2_addr);
     se::broadcast(ready_msg);

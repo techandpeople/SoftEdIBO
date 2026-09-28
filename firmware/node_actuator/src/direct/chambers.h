@@ -595,7 +595,14 @@ inline void hardware_init() {
 // pump). ``kpa`` NAN or ``timed`` = duty-only (sensorless). The chamber's own
 // gauge floor tells the engine whether a vacuum target is visible (servoed)
 // or below the floor (timed re-pulls).
-inline void holdRequest(int n, uint8_t side, float kpa, uint8_t duty, bool timed) {
+// ``refreshOnly`` = a PC keepalive: only re-asserts a hold already running
+// (see hold_duty::Engine::refresh), never starts one.
+inline void holdRequest(int n, uint8_t side, float kpa, uint8_t duty, bool timed,
+                        bool refreshOnly = false) {
+    if (refreshOnly) {
+        holdEng.refresh(n, side, kpa, duty, timed, gaugeFloorKpa(n), holdCloseValve);
+        return;
+    }
     holdEng.request(n, side, kpa, duty, timed, gaugeFloorKpa(n), holdCloseValve);
 }
 

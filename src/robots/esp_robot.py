@@ -185,6 +185,18 @@ class EspRobot(BaseRobot):
         for ctrl in self._controllers.values():
             ctrl.resume()
 
+    def dispose(self) -> None:
+        """End this robot's holds and detach its controllers from the gateway.
+
+        Called when the robots are rebuilt from a new config: without it the
+        old controllers stay subscribed to the gateway and their hold
+        keepalives keep re-asserting holds nobody owns any more.
+        """
+        for skin in self._skins.values():
+            skin.release_hold()
+        for ctrl in self._controllers.values():
+            ctrl.detach()
+
     def shutdown_node(self, mac: str) -> bool:
         """Pumps off and valves closed on node ``mac``, left re-armed.
 

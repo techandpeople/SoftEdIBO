@@ -408,6 +408,10 @@ class MainWindow(QMainWindow, Ui_MainWindow):
     def _on_robot_configured(self) -> None:
         """Reload settings and recreate robots after a config dialog saves."""
         self._settings.load()
+        # The old robots' controllers must let go of the gateway (and their
+        # hold keepalives) before the new ones take the same nodes.
+        for robot in self._robots:
+            robot.dispose()
         self._robots = self._load_robots_safe()
         self._session_panel.set_available_robots(self._robots)
         self._robot_panel.refresh(self._robots)

@@ -69,6 +69,10 @@ class BaseRobot(ABC):
     def rearm(self) -> None:
         """Re-enable actuation after an :meth:`emergency_stop`. Override if needed."""
 
+    def dispose(self) -> None:
+        """Release everything this robot holds on the hardware side before it
+        is replaced (config reload). Override for hardware robots."""
+
     def shutdown_node(self, mac: str) -> bool:
         """Turn every actuator on node ``mac`` off and leave it re-armed.
 

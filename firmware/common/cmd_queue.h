@@ -45,6 +45,17 @@ inline int8_t chamberArg(long v) {
     return (v < -1 || v > 127) ? (int8_t)127 : (int8_t)v;
 }
 
+// hold_duty's Cmd::param: what the frame asks for. A PC keepalive carries
+// "ka":1 and may only refresh a hold the node already runs (never start one:
+// the node may have rebooted since), "off":1 drops it.
+constexpr int16_t HOLD_MODE_START   = 0;
+constexpr int16_t HOLD_MODE_OFF     = 1;
+constexpr int16_t HOLD_MODE_REFRESH = 2;
+
+inline int16_t holdDutyMode(long off, long ka) {
+    return off ? HOLD_MODE_OFF : (ka ? HOLD_MODE_REFRESH : HOLD_MODE_START);
+}
+
 struct Cmd {
     CmdType  type;
     int8_t   chamber;       // chamber index

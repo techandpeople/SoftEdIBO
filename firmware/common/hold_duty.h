@@ -365,6 +365,20 @@ struct Engine {
         activeMask |= bit;
     }
 
+    // Keepalive refresh ("ka":1 on the wire): re-assert a hold this engine
+    // ALREADY runs, in the same direction. A refresh for a hold the node does
+    // not know - it rebooted, or the hold was dropped by stop / an actuation /
+    // its dead-man - is ignored, so a PC keepalive can never start a hold on
+    // an idle node by itself. Returns true when it refreshed.
+    template <class CloseFn>
+    bool refresh(int i, uint8_t d, float target_kpa, uint8_t seed, bool blind,
+                 float floor_kpa, CloseFn closeFn) {
+        if (i < 0 || i >= count || !isHolding(i) || dirOf(i) != (d ? 1 : 0))
+            return false;
+        request(i, d, target_kpa, seed, blind, floor_kpa, closeFn);
+        return true;
+    }
+
     // Drop one hold. Closes the valve via ``closeFn(i, side)`` if we hold it
     // open right now (pump recalc is the caller's tick's job).
     template <class CloseFn>

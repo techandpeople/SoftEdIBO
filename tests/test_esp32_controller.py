@@ -116,3 +116,28 @@ def test_shutdown_drops_holds_then_stops_and_rearms():
     assert controller.active_holds() == []      # keepalive cannot re-open
     cmds = [c.args[1] for c in gateway.send.call_args_list]
     assert cmds == ["stop", "stop", "stop", "resume"]
+
+
+def test_boot_announce_drops_holds():
+    gateway = MagicMock()
+    gateway.send.return_value = True
+    controller = ESP32Controller("AA:BB:CC:DD:EE:01", gateway)
+    controller.start_hold(1, 0, kpa=-2.3, vacuum=True)
+    dropped: list[list[int]] = []
+    controller.on_holds_dropped(dropped.append)
+
+    controller._handle_message({"source": "AA:BB:CC:DD:EE:01",
+                                "status": "node_direct_ready", "fw": "hold-4"})
+
+    assert controller.active_holds() == []
+    assert dropped == [[1]]
+
+
+def test_detach_stops_listening_and_holding():
+    gateway = MagicMock()
+    gateway.send.return_value = True
+    controller = ESP32Controller("AA:BB:CC:DD:EE:01", gateway)
+    controller.start_hold(0, 0, kpa=5.0)
+    controller.detach()
+    assert controller.active_holds() == []
+    gateway.remove_message_callback.assert_called_once_with(controller._handle_message)

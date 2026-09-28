@@ -89,7 +89,7 @@ static bool run(const Scenario& sc) {
         sim_now_ms = 1000 + t;
         if (t % 2000 == 0)
             for (int i = 0; i < pl.n; i++)
-                eng.request(i, (uint8_t)side, sc.target, 0, false, gaugeFloor, [](int, uint8_t) {});   // keepalive
+                eng.refresh(i, (uint8_t)side, sc.target, 0, false, gaugeFloor, [](int, uint8_t) {});   // keepalive
         hold_duty::Duties d = eng.tick(
             sim_now_ms, false,
             [&](int i, uint8_t) { pl.setValve(i, true); },
@@ -119,6 +119,25 @@ static bool run(const Scenario& sc) {
            sc.name, toggles, togglesLate, rms, maxOver,
            dutyN ? minDuty : 0, maxDutyLate, dutyN ? (double)dutySum / dutyN : 0.0,
            eng.side[side].runFloor, ok ? "ok" : "FAIL");
+    return ok;
+}
+
+// A PC keepalive ("ka":1 -> Engine::refresh) must never START a hold: after a
+// node reboot, or once stop / an actuation dropped the hold, the engine is idle
+// and the keepalive is ignored. Only a real request starts one, and a refresh
+// with the other direction does not flip a live hold.
+static bool keepaliveNeverStarts() {
+    hold_duty::Engine<4> eng;
+    auto noop = [](int, uint8_t) {};
+    bool idleIgnored  = !eng.refresh(1, 1, -2.3f, 0, false, 0.0f, noop) && !eng.active();
+    eng.request(1, 0, 11.0f, 0, false, 0.0f, noop);
+    bool liveRefreshed = eng.refresh(1, 0, 11.0f, 0, false, 0.0f, noop);
+    bool noFlip = !eng.refresh(1, 1, -2.3f, 0, false, 0.0f, noop) && eng.dirOf(1) == 0;
+    eng.drop(1, noop);
+    bool droppedIgnored = !eng.refresh(1, 0, 11.0f, 0, false, 0.0f, noop) && !eng.active();
+    bool ok = idleIgnored && liveRefreshed && noFlip && droppedIgnored;
+    printf("%-34s idle=%d live=%d noflip=%d dropped=%d  %s\n", "M keepalive never starts",
+           idleIgnored, liveRefreshed, noFlip, droppedIgnored, ok ? "ok" : "FAIL");
     return ok;
 }
 
@@ -167,6 +186,7 @@ int main() {
       S.push_back({"L tight vacuum", p, -8.0f, 0, 20, 0, 0.5f}); }
     bool all = true;
     for (auto& sc : S) all = run(sc) && all;
+    all = keepaliveNeverStarts() && all;
     printf("%s\n", all ? "ALL OK" : "SOME FAILED");
     return all ? 0 : 1;
 }
