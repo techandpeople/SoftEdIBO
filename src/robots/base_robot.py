@@ -73,13 +73,10 @@ class BaseRobot(ABC):
         """Release everything this robot holds on the hardware side before it
         is replaced (config reload). Override for hardware robots."""
 
-    def shutdown_node(self, mac: str) -> bool:
-        """Turn every actuator on node ``mac`` off and leave it re-armed.
-
-        Returns True when this robot drives that node (and shut it down),
-        False otherwise. Override for hardware robots.
-        """
-        return False
+    def controller_for(self, mac: str) -> Any:
+        """The live controller this robot drives node ``mac`` with, or None
+        when it does not drive that node. Override for hardware robots."""
+        return None
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(id={self.robot_id!r}, status={self._status.value})"

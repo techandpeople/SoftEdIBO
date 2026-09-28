@@ -43,6 +43,7 @@ from src.gui.sensor_zones_widget import SensorZonesWidget
 from src.gui.skin_grid_editor import SkinGridEditor
 from src.gui.base_dialog import BaseDialog
 from src.gui.ui_skin_config_dialog import Ui_SkinConfigDialog
+from src.hardware.esp32_controller import ESP32Controller
 from src.hardware.gateway import Gateway
 from src.hardware.skin_geometry import max_organs_for, variant_has_organs
 from src.robots._robot_builder import multiplexed_configure
@@ -291,8 +292,8 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
                      or ``-1`` to add a new skin.
         settings:    Application settings instance.
         gateway:     Shared SoftEdIBO gateway (used by the test dialog).
-        shutdown_node: Turns every actuator on a node off (by MAC) when the
-                     test dialog closes; see ``RobotPanel.shutdown_node``.
+        controller_for: The live controller of a node (by MAC), handed to
+                     the test dialog; see ``RobotPanel.controller_for``.
         parent:      Optional parent widget.
     """
 
@@ -304,12 +305,12 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         settings: Settings,
         gateway: Gateway,
         db=None,
-        shutdown_node: Callable[[str], None] | None = None,
+        controller_for: Callable[[str], ESP32Controller | None] | None = None,
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
         self.setupUi(self)
-        self._shutdown_node = shutdown_node
+        self._controller_for = controller_for
         self._robot_type  = robot_type
         self._robot_index = robot_index
         self._skin_index  = skin_index
@@ -1150,7 +1151,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
             led_layout=dict(self._led_layout),
             on_save_layout=self._save_led_layout,
             pressure_sensors=mac not in self._sensorless_macs(),
-            shutdown_node=self._shutdown_node,
+            controller=self._controller_for(mac) if self._controller_for else None,
             keep_running_on_close=self._settings.override_mode,
             parent=self,
         )

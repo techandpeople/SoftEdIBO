@@ -197,21 +197,6 @@ class EspRobot(BaseRobot):
         for ctrl in self._controllers.values():
             ctrl.detach()
 
-    def shutdown_node(self, mac: str) -> bool:
-        """Pumps off and valves closed on node ``mac``, left re-armed.
-
-        Drops this robot's automatic holds on that node first, so its skins
-        do not re-establish them, then shuts the controller down.
-        """
-        ctrl = self._controllers.get(mac)
-        if ctrl is None:
-            return False
-        for skin in self._skins.values():
-            if skin.mac == mac:
-                skin.release_hold()
-        ctrl.shutdown()
-        return True
-
     # ------------------------------------------------------------------
     # Commanding
     # ------------------------------------------------------------------

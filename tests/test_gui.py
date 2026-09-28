@@ -421,22 +421,68 @@ class TestActuatorsDialogClose:
         cmds = [c for c, _ in gw.sent]
         assert cmds[-4:] == ["stop", "stop", "stop", "resume"]
 
-    def test_close_uses_the_injected_node_shutdown(self, qtbot):
+    def test_injected_controller_is_claimed_and_shut_down_on_close(self, qtbot):
+        from unittest.mock import MagicMock
         gw = _RecordingGateway()
-        calls: list[str] = []
-        dlg = self._dialog(qtbot, gw, shutdown_node=calls.append)
+        ctrl = MagicMock()
+        dlg = self._dialog(qtbot, gw, controller=ctrl)
+        ctrl.claim_bench.assert_called_once()
         dlg._on_closed()
-        assert calls == [self.MAC]
+        ctrl.release_bench.assert_called_once()
+        ctrl.shutdown.assert_called_once()
+        ctrl.detach.assert_not_called()           # the robot still owns it
         assert "stop" not in [c for c, _ in gw.sent]
 
     def test_override_mode_leaves_actuators_running(self, qtbot):
+        from unittest.mock import MagicMock
         gw = _RecordingGateway()
-        calls: list[str] = []
-        dlg = self._dialog(qtbot, gw, shutdown_node=calls.append,
-                           keep_running_on_close=True)
+        ctrl = MagicMock()
+        dlg = self._dialog(qtbot, gw, controller=ctrl, keep_running_on_close=True)
         dlg._on_closed()
-        assert calls == []
-        assert "stop" not in [c for c, _ in gw.sent]
+        ctrl.release_bench.assert_called_once()
+        ctrl.shutdown.assert_not_called()
+
+
+class TestActuatorsDialogHoldMode:
+    """Hold is a per-chamber mode only the user switches."""
+
+    MAC = "AA:BB:CC:DD:EE:FF"
+
+    def _dialog(self, qtbot, ctrl):
+        from src.gui.test_actuators_dialog import TestActuatorsDialog
+
+        skin_cfgs = [{"skin_id": "s", "chambers": [
+            {"slot": 0, "max_pressure": 30.0, "min_pressure": -2.0}]}]
+        dlg = TestActuatorsDialog(self.MAC, skin_cfgs, _RecordingGateway(),
+                                  led_count=0, controller=ctrl)
+        qtbot.addWidget(dlg)
+        return dlg
+
+    def test_mode_on_holds_at_current_level_and_survives_actuation(self, qtbot):
+        from unittest.mock import MagicMock
+        ctrl = MagicMock()
+        dlg = self._dialog(qtbot, ctrl)
+        dlg._update_pressure(0, 100, 30.0)
+        dlg._hold_btns[0].setChecked(True)
+        assert dlg._hold_btns[0].text() == "Hold: ON"
+        ctrl.start_hold.assert_called_once()
+        assert ctrl.start_hold.call_args.kwargs["bench"] is True
+        dlg._inflate_slot(0)
+        assert dlg._hold_btns[0].isChecked()      # an actuation keeps the mode
+        dlg._update_actuation(0, 1)
+        dlg._update_actuation(0, 0)               # settled: held again
+        assert ctrl.start_hold.call_count == 2
+
+    def test_mode_off_never_holds_after_actuation(self, qtbot):
+        from unittest.mock import MagicMock
+        ctrl = MagicMock()
+        dlg = self._dialog(qtbot, ctrl)
+        dlg._update_pressure(0, 100, 30.0)
+        dlg._inflate_slot(0)
+        dlg._update_actuation(0, 1)
+        dlg._update_actuation(0, 0)
+        ctrl.start_hold.assert_not_called()
+        assert dlg._hold_btns[0].text() == "Hold: OFF"
 
 
 class TestActuatorsDialogActuation:
