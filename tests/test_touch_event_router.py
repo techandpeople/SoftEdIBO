@@ -48,6 +48,19 @@ def test_no_event_when_set_unchanged():
     assert events == [(1, "press")]
 
 
+def test_detailed_events_include_sensor_and_edge_magnitude():
+    router = TouchEventRouter.from_touch_config({"sensor_count": 2}, chamber_count=2)
+    events = []
+    router.subscribe_detail(
+        lambda chamber, action, sensor, intensity: events.append(
+            (chamber, action, sensor, intensity)))
+
+    router.handle_magnet({"act": [1], "mag": [12.0, 345.6]})
+    router.handle_magnet({"act": [], "mag": [10.0, 78.9]})
+
+    assert events == [(1, "press", 1, 345.6), (1, "release", 1, 78.9)]
+
+
 def test_explicit_sensor_to_chamber_mapping():
     router = TouchEventRouter.from_touch_config(
         {"sensor_to_chamber": {"0": 5, "1": 6}}, chamber_count=8)

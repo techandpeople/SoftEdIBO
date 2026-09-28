@@ -28,6 +28,7 @@ class TouchEventRouter:
         self._sensor_to_chamber = dict(sensor_to_chamber)
         self._name = name
         self._cbs: list[Callable[[int, str], None]] = []
+        self._detail_cbs: list[Callable[[int, str, int, float | None], None]] = []
         self._active: set[int] = set()
 
     @classmethod
@@ -62,6 +63,17 @@ class TouchEventRouter:
         """Deregister a callback passed to :meth:`subscribe` (no-op if absent)."""
         self._cbs[:] = [cb for cb in self._cbs if cb != callback]
 
+    def subscribe_detail(self, callback: Callable[[int, str, int, float | None], None]) -> None:
+        """Register ``callback(chamber, action, sensor, intensity_ut)``.
+
+        This supplements, rather than changes, the original two-argument API
+        so existing displays and simulations remain compatible.
+        """
+        self._detail_cbs.append(callback)
+
+    def unsubscribe_detail(self, callback: Callable[[int, str, int, float | None], None]) -> None:
+        self._detail_cbs[:] = [cb for cb in self._detail_cbs if cb != callback]
+
     def attach(self, touch_controller: Any) -> None:
         """Start consuming ``on_magnet`` events from ``touch_controller`` (a no-op
         when it is missing or exposes no ``on_magnet``)."""
@@ -80,13 +92,21 @@ class TouchEventRouter:
                 new_set.add(int(raw))
             except (TypeError, ValueError):
                 continue
+        magnitudes = data.get("mag")
+        def intensity(sensor_idx: int) -> float | None:
+            if not isinstance(magnitudes, (list, tuple)) or sensor_idx >= len(magnitudes):
+                return None
+            try:
+                return float(magnitudes[sensor_idx])
+            except (TypeError, ValueError):
+                return None
         for sensor_idx in new_set - self._active:
-            self._dispatch(sensor_idx, "press")
+            self._dispatch(sensor_idx, "press", intensity(sensor_idx))
         for sensor_idx in self._active - new_set:
-            self._dispatch(sensor_idx, "release")
+            self._dispatch(sensor_idx, "release", intensity(sensor_idx))
         self._active = new_set
 
-    def _dispatch(self, sensor_idx: int, action: str) -> None:
+    def _dispatch(self, sensor_idx: int, action: str, intensity_ut: float | None) -> None:
         chamber_id = self._sensor_to_chamber.get(sensor_idx, sensor_idx)
         dead: list = []
         for cb in list(self._cbs):      # snapshot: listeners change on the GUI thread
@@ -98,3 +118,14 @@ class TouchEventRouter:
                 logger.exception("touch_event callback failed (%s)", self._name)
         if dead:
             self._cbs[:] = [cb for cb in self._cbs if all(cb is not d for d in dead)]
+        dead = []
+        for cb in list(self._detail_cbs):
+            try:
+                cb(chamber_id, action, sensor_idx, intensity_ut)
+            except RuntimeError:
+                dead.append(cb)
+            except Exception:  # noqa: BLE001
+                logger.exception("detailed touch_event callback failed (%s)", self._name)
+        if dead:
+            self._detail_cbs[:] = [cb for cb in self._detail_cbs
+                                  if all(cb is not d for d in dead)]

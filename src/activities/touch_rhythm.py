@@ -222,14 +222,62 @@ class GroupTouchSyncTracker:
                         "reason": (f"Waiting for {short} more "
                                    f"{'child' if short == 1 else 'children'}")}
         wanted = set(selected)
+        # Latest individual cadence for each child/zone.  It is deliberately
+        # based on debounced onsets, so one long press or sensor chatter is not
+        # presented as an unrealistically high CPR frequency.
+        frequency_hz_by_sensor: dict[int, float] = {}
+        previous_by_sensor: dict[int, float] = {}
+        for timestamp, sensor_idx in accepted:
+            if sensor_idx not in wanted:
+                continue
+            previous = previous_by_sensor.get(sensor_idx)
+            if previous is not None and timestamp > previous:
+                frequency_hz_by_sensor[sensor_idx] = round(
+                    1000.0 / (timestamp - previous), 3)
+            previous_by_sensor[sensor_idx] = timestamp
 
-        completed: list[float] = []
+        # Keep failures as first-class outcomes as well as successful beats.
+        # Besides making a miss reset the streak, this gives the session log a
+        # useful explanation instead of merely making the green LED not appear.
+        completed: list[tuple[float, float]] = []
+        outcomes: list[tuple[str, float | None, float | None, dict | None]] = []
+        rejections: list[dict] = []
         start: float | None = None
         presses: dict[int, float] = {}
 
-        def finish_round() -> None:
+        def finish_round(*, late_sensor: int | None = None,
+                         late_time: float | None = None) -> None:
             if len(presses) == len(wanted):
-                completed.append(float(median(presses.values())))
+                times = list(presses.values())
+                beat = float(median(times))
+                spread = max(times) - min(times)
+                completed.append((beat, spread))
+                outcomes.append(("accepted", beat, spread, None))
+                return
+
+            # If a new onset arrives after the phase window, it belongs to the
+            # next attempted round.  It can nevertheless identify the child
+            # who was late for the round we are closing.
+            missing = sorted(wanted - set(presses))
+            other_times = list(presses.values())
+            other_spread = (max(other_times) - min(other_times)
+                            if len(other_times) >= 2 else None)
+            is_late = late_sensor in missing and late_time is not None
+            rejection = {
+                "id": (f"{start:.3f}:late:{late_sensor}" if is_late
+                       else f"{start:.3f}:timeout"),
+                "round_attempt": len(outcomes) + 1,
+                "reason": "missing_or_late_touch",
+                "missing_sensors": missing,
+                "late_sensor": late_sensor if is_late else None,
+                "lateness_ms": (max(0.0, late_time - (start + phase_tol))
+                                if is_late else None),
+                "other_sensors": sorted(presses),
+                "other_sync_spread_ms": other_spread,
+                "phase_tolerance_ms": phase_tol,
+            }
+            rejections.append(rejection)
+            outcomes.append(("rejected", None, None, rejection))
 
         for timestamp, sensor_idx in accepted:
             if start is None:
@@ -241,26 +289,46 @@ class GroupTouchSyncTracker:
                 # is the child's contribution to this round.
                 presses.setdefault(sensor_idx, timestamp)
                 continue
-            finish_round()
+            finish_round(late_sensor=sensor_idx, late_time=timestamp)
             start, presses = timestamp, {sensor_idx: timestamp}
         if start is not None:
-            finish_round()
+            if len(presses) == len(wanted):
+                finish_round()
+            elif float(now_ms) - start > phase_tol:
+                # This is called from the activity tick too, so a child who
+                # never presses is reported promptly rather than only after a
+                # later child happens to touch the robot.
+                finish_round()
 
         streak = 0
         last_interval_ms: float | None = None
         last_interval_ok: bool | None = None
-        for index, current in enumerate(completed):
-            if index == 0:
-                streak = 1
+        previous: float | None = None
+        for kind, current, _spread, rejection in outcomes:
+            if kind == "rejected":
+                # The failed round is the next round in the current streak.
+                # After it, the following valid group beat must be round 1.
+                if rejection is not None:
+                    rejection["round"] = streak + 1
+                streak = 0
+                previous = None
+                last_interval_ms = None
+                last_interval_ok = None
                 continue
-            previous = completed[index - 1]
+            if previous is None:
+                streak = 1
+                previous = current
+                continue
             last_interval_ms = current - previous
             last_interval_ok = abs(last_interval_ms - target) <= cadence_tol
             if last_interval_ok:
                 streak += 1
             else:
                 streak = 1
-        fresh = bool(completed) and float(now_ms) - completed[-1] <= stale_after
+            previous = current
+        last_round_ms = completed[-1][0] if completed else None
+        last_phase_spread_ms = completed[-1][1] if completed else None
+        fresh = bool(completed) and float(now_ms) - last_round_ms <= stale_after
         missing = (sorted(wanted - set(presses))
                    if start is not None and float(now_ms) - start <= phase_tol
                    else [])
@@ -285,6 +353,10 @@ class GroupTouchSyncTracker:
             "phase_tolerance_ms": phase_tol,
             "last_interval_ms": last_interval_ms,
             "last_interval_ok": last_interval_ok,
+            "last_round_ms": last_round_ms,
+            "last_phase_spread_ms": last_phase_spread_ms,
+            "last_rejection": rejections[-1] if rejections else None,
+            "frequency_hz_by_sensor": frequency_hz_by_sensor,
             "mode": mode,
             "reason": reason,
         }

@@ -859,6 +859,15 @@ class Skin:
         """Deregister a callback passed to :meth:`on_touch_event`."""
         self._touch_router.unsubscribe(callback)
 
+    def on_touch_event_detail(
+            self, callback: Callable[[int, str, int, float | None], None]) -> None:
+        """Register a press/release callback including sensor and magnitude.
+
+        ``intensity_ut`` is the compensated magnet magnitude in microtesla at
+        the edge where the touch was detected (or ``None`` if unavailable).
+        """
+        self._touch_router.subscribe_detail(callback)
+
     def on_magnet(self, callback: Callable[[dict[str, Any]], None]) -> bool:
         """Register ``callback(data)`` for this skin's compensated magnet stream.
 

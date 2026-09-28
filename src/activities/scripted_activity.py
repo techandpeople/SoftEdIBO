@@ -19,6 +19,7 @@ controllers both expose, so a whole session can be rehearsed in simulation.
 
 from __future__ import annotations
 
+import json
 import logging
 import random
 import time
@@ -95,6 +96,9 @@ class _Unit:
     # CPR-specific live monitor payload. Present only for behaviours using the
     # `group_touch_sync` condition; the Skin exposes its current copy to Qt.
     cpr_sync_params: dict[str, Any] | None = None
+    cpr_logged_round_ms: float | None = None
+    cpr_logged_rejection_ids: set[str] = field(default_factory=set)
+    cpr_completion_logged: bool = False
     magnitude_by_sensor: dict[int, MagnitudeCompressionTracker] = field(default_factory=dict)
     # Classified gestures (tap/stroke/...) counted in the current state, by label,
     # plus the live classifier feeding them (kept alive here). Empty/None when the
@@ -399,6 +403,9 @@ class ScriptedActivity(BaseActivity):
             tracker.reset()
         for tracker in unit.magnitude_by_sensor.values():
             tracker.reset()
+        unit.cpr_logged_round_ms = None
+        unit.cpr_logged_rejection_ids.clear()
+        unit.cpr_completion_logged = False
         self._publish_cpr_status(unit)
         unit.pending_state = None
         unit.aux.clear()
@@ -424,6 +431,8 @@ class ScriptedActivity(BaseActivity):
 
     def _on_tick(self) -> None:
         for unit in self._units.values():
+            # Also close/report a CPR phase window when a child never touches.
+            self._publish_cpr_status(unit)
             # A per-press handler (touch_progress) may have requested a jump last
             # tick; apply it here, at a clean tick boundary, before anything else.
             if unit.pending_state is not None:
@@ -629,15 +638,68 @@ class ScriptedActivity(BaseActivity):
                       "rounds": unit.cpr_sync_params.get("rounds", 6),
                       "rounds_required": unit.cpr_sync_params.get("rounds", 6),
                       "reason": "CPR synchronized - LED is green"}
+            if not unit.cpr_completion_logged:
+                unit.cpr_completion_logged = True
+                self.log_event(
+                    "cpr", "complete", target=unit.unit_id,
+                    metadata=json.dumps({
+                        "rounds": status["rounds"],
+                        "rounds_required": status["rounds_required"],
+                    }),
+                )
         else:
             status = unit.group_sync.status(
                 **self._sync_kwargs(unit.cpr_sync_params),
                 now_ms=time.monotonic() * 1000.0,
             )
             status["active"] = True
+            self._log_cpr_round(unit, status)
         # The UI only reads this immutable-at-replacement dict on its queued
         # sensor callback; assignment is atomic under CPython's GIL.
         unit.skin.cpr_sync_status = status
+
+    def _log_cpr_round(self, unit: _Unit, status: dict) -> None:
+        """Write durable CPR beat and rejection diagnostics for the timeline."""
+        rejection = status.get("last_rejection")
+        if isinstance(rejection, dict):
+            rejection_id = str(rejection.get("id", ""))
+            if rejection_id and rejection_id not in unit.cpr_logged_rejection_ids:
+                unit.cpr_logged_rejection_ids.add(rejection_id)
+                self.log_event(
+                    "cpr", "round_rejected", target=unit.unit_id,
+                    metadata=json.dumps({
+                        "round": rejection.get("round"),
+                        "reason": rejection.get("reason"),
+                        "missing_sensors": rejection.get("missing_sensors", []),
+                        "late_sensor": rejection.get("late_sensor"),
+                        "lateness_ms": rejection.get("lateness_ms"),
+                        "other_sensors": rejection.get("other_sensors", []),
+                        "other_sync_spread_ms": rejection.get("other_sync_spread_ms"),
+                        "phase_tolerance_ms": rejection.get("phase_tolerance_ms"),
+                        "frequency_hz_by_sensor": status.get("frequency_hz_by_sensor", {}),
+                    }),
+                )
+        round_ms = status.get("last_round_ms")
+        if not isinstance(round_ms, (int, float)):
+            return
+        if unit.cpr_logged_round_ms == float(round_ms):
+            return
+        unit.cpr_logged_round_ms = float(round_ms)
+        off_cadence = status.get("last_interval_ok") is False
+        self.log_event(
+            "cpr", "round_off_cadence" if off_cadence else "round_accepted",
+            target=unit.unit_id,
+            metadata=json.dumps({
+                "round": status.get("rounds", 0),
+                "rounds_required": status.get("rounds_required", 0),
+                "sensors": status.get("sensors", []),
+                "phase_spread_ms": status.get("last_phase_spread_ms"),
+                "interval_ms": status.get("last_interval_ms"),
+                "target_interval_ms": status.get("target_interval_ms"),
+                "cadence_tolerance_ms": status.get("cadence_tolerance_ms"),
+                "frequency_hz_by_sensor": status.get("frequency_hz_by_sensor", {}),
+            }),
+        )
 
     @staticmethod
     def _unit_kind(unit: _Unit) -> str:

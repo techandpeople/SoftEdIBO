@@ -27,6 +27,8 @@ class SkinWidget(QGroupBox):
 
     touch_event   = Signal(str, int, str)  # (skin_id, chamber_id, action)
     _touch_log    = Signal(int, str)       # thread-safe bridge -> touch_event log
+    touch_detail_event = Signal(str, int, str, int, object)
+    _touch_detail_log = Signal(int, str, int, object)
 
     def __init__(self, skin: Skin) -> None:
         super().__init__(skin.skin_id)
@@ -41,7 +43,14 @@ class SkinWidget(QGroupBox):
         # them. The Skin's TouchEventRouter fires on the gateway thread, so hop
         # through a QueuedConnection bridge before re-emitting on the GUI thread.
         self._touch_log.connect(self._emit_touch_log, Qt.ConnectionType.QueuedConnection)
-        skin.on_touch_event(lambda chamber_id, action: self._touch_log.emit(chamber_id, action))
+        self._touch_detail_log.connect(
+            self._emit_touch_detail_log, Qt.ConnectionType.QueuedConnection)
+        # Hardware events use the detailed stream so session records include
+        # the compensated magnitude that triggered the touch.  The ordinary
+        # touch_event remains for simulated chamber-button presses.
+        skin.on_touch_event_detail(
+            lambda chamber_id, action, sensor_idx, intensity_ut:
+            self._touch_detail_log.emit(chamber_id, action, sensor_idx, intensity_ut))
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(2, 2, 2, 2)
@@ -108,6 +117,12 @@ class SkinWidget(QGroupBox):
         """Re-emit a router touch event as the widget's ``touch_event`` (on the
         GUI thread) so it bubbles up to the session panel for DB logging."""
         self.touch_event.emit(self._skin_id, chamber_id, action)
+
+    def _emit_touch_detail_log(self, chamber_id: int, action: str,
+                               sensor_idx: int, intensity_ut: object) -> None:
+        """Bubble a physical touch, with its edge magnitude, to the session."""
+        self.touch_detail_event.emit(self._skin_id, chamber_id, action,
+                                     sensor_idx, intensity_ut)
 
     def _relay_to_grid(self, _skin_id: str, chamber_id: int, action: str) -> None:
         """Mirror chamber touches onto the SkinGridView as a blue pulse on
