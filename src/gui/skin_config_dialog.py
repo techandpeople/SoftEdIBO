@@ -16,6 +16,8 @@ Layout:
 
 from __future__ import annotations
 
+from typing import Callable
+
 from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import (
     QAbstractButton,
@@ -289,6 +291,8 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
                      or ``-1`` to add a new skin.
         settings:    Application settings instance.
         gateway:     Shared SoftEdIBO gateway (used by the test dialog).
+        shutdown_node: Turns every actuator on a node off (by MAC) when the
+                     test dialog closes; see ``RobotPanel.shutdown_node``.
         parent:      Optional parent widget.
     """
 
@@ -300,10 +304,12 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         settings: Settings,
         gateway: Gateway,
         db=None,
+        shutdown_node: Callable[[str], None] | None = None,
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
         self.setupUi(self)
+        self._shutdown_node = shutdown_node
         self._robot_type  = robot_type
         self._robot_index = robot_index
         self._skin_index  = skin_index
@@ -1144,6 +1150,8 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
             led_layout=dict(self._led_layout),
             on_save_layout=self._save_led_layout,
             pressure_sensors=mac not in self._sensorless_macs(),
+            shutdown_node=self._shutdown_node,
+            keep_running_on_close=self._settings.override_mode,
             parent=self,
         )
         dlg.exec()

@@ -1,6 +1,7 @@
 """Test actuators dialog - inflate/deflate individual chambers via the gateway."""
 
 import time
+from typing import Callable
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
@@ -25,6 +26,7 @@ from src.gui.ui_test_actuators_dialog import Ui_TestActuatorsDialog
 from src.hardware.gateway import Gateway
 from src.hardware.fill_profile import FillProfile
 from src.hardware.hold_duty import HOLD_VACUUM, hold_direction, seed_hold_duty
+from src.hardware.node_halt import halt_and_rearm
 from src.hardware.units import kpa_to_pct
 
 
@@ -51,6 +53,12 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
             only ring 0). Each ring gets its own tester tab and is
             addressed via the ``set_led`` ``ring`` field. None falls back to a
             single ring of ``led_count``.
+        shutdown_node: Turns every actuator on a node off (by MAC) and leaves
+            it re-armed; called on close. Injected by the robot panel so the
+            live controller's hold keepalive stops too. None falls back to a
+            plain stop/resume through the gateway.
+        keep_running_on_close: Settings "override mode": closing the dialog
+            leaves the actuators as they are instead of shutting them down.
         parent: Optional parent widget.
     """
 
@@ -92,11 +100,15 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         led_layout: dict | None = None,
         on_save_layout=None,
         pressure_sensors: bool = True,
+        shutdown_node: Callable[[str], None] | None = None,
+        keep_running_on_close: bool = False,
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
         self._mac = mac
         self._gateway = gateway
+        self._shutdown_node = shutdown_node or self._halt_via_gateway
+        self._keep_running_on_close = keep_running_on_close
         # ``pressure_sensors=False``: this node's PCB has no pressure sensors
         # populated, so every inflate/deflate is sent open-loop ("timed":1)
         # with the manual per-chamber fill/empty window - the firmware ignores
@@ -701,9 +713,19 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         # A continuous run ignores the firmware dead-man, so it would keep going
         # after the dialog closes - always stop it on the way out.
         self._stop_run()
-        # If we left the node latched off via STOP ALL, re-arm it so the rest of
-        # the app can drive it again (everything is already off, so this is safe).
-        self._arm()
+        if self._keep_running_on_close:
+            # Override mode: leave the actuators alone; only undo a STOP ALL
+            # latch so the rest of the app can drive the node again.
+            self._arm()
+            return
+        # Hand the node back idle: pumps off, every valve closed, holds and
+        # overrides dropped, and re-armed so the rest of the app can drive it.
+        self._shutdown_node(self._mac)
+        self._stopped = False
+
+    def _halt_via_gateway(self, mac: str) -> None:
+        """Fallback shutdown when no robot-level one was injected."""
+        halt_and_rearm(lambda command: self._gateway.send(mac, command))
 
     # ------------------------------------------------------------------
     # Commands

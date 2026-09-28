@@ -26,6 +26,7 @@ from src.gui.thymio_config_form import ThymioConfigForm
 from src.gui.ui_robot_panel import Ui_RobotPanel
 from src.hardware.gateway import Gateway
 from src.hardware.latency_monitor import LatencyMonitor
+from src.hardware.node_halt import halt_and_rearm
 from src.hardware.serial_ports import list_esp32_ports
 from src.robots.base_robot import BaseRobot
 
@@ -149,6 +150,19 @@ class RobotPanel(QWidget, Ui_RobotPanel):
     def refresh(self, robots: list[BaseRobot]) -> None:
         self._robots = robots
         self._refresh_all_trees()
+
+    def shutdown_node(self, mac: str) -> None:
+        """Turn every actuator on node ``mac`` off and leave it re-armed.
+
+        Goes through the robot that drives the node, so its controller's hold
+        keepalive and its skins' automatic holds are dropped too; a node no
+        loaded robot drives gets the same stop/resume straight through the
+        gateway.
+        """
+        for robot in self._robots:
+            if robot.shutdown_node(mac):
+                return
+        halt_and_rearm(lambda command: self._gateway.send(mac, command))
 
     def sync_gateway_ui(self) -> None:
         """Reflect the gateway's current connection state in this panel.
@@ -685,6 +699,7 @@ class RobotPanel(QWidget, Ui_RobotPanel):
             settings=self._settings,
             gateway=self._gateway,
             db=self._db,
+            shutdown_node=self.shutdown_node,
             parent=self,
         )
         if dlg.exec() == QDialog.DialogCode.Accepted:

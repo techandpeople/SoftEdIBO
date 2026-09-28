@@ -61,6 +61,19 @@
     </widget>
    </item>
    <item>
+    <widget class="QGroupBox" name="debug_group">
+     <property name="title"><string>Debug</string></property>
+     <layout class="QVBoxLayout" name="debug_layout">
+      <item>
+       <widget class="QCheckBox" name="override_mode_check">
+        <property name="text"><string>Override mode (keep actuators running when Test Actuators closes)</string></property>
+        <property name="whatsThis"><string>Off (default): closing the Test Actuators window turns every pump on that node off and closes every valve, drops any hold, and leaves the node ready for the rest of the app. On: closing the window leaves the actuators as they are (a fill already under way finishes; manual valves, pumps and holds still time out on the node's own dead-man after a few seconds). Only for bench debugging.</string></property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
     <widget class="QDialogButtonBox" name="button_box">
      <property name="whatsThis"><string>Save writes these settings to settings.yaml and closes the window; Apply writes them but keeps the window open; Cancel closes without saving. Database changes take effect on next launch.</string></property>
      <property name="standardButtons"><set>QDialogButtonBox::Apply|QDialogButtonBox::Cancel|QDialogButtonBox::Save</set></property>

@@ -102,3 +102,17 @@ def test_start_hold_wire_format_pressure_and_vacuum():
         "AA:BB:CC:DD:EE:01", "hold_duty", chamber=-1, off=1
     )
     assert controller.active_holds() == []
+
+
+def test_shutdown_drops_holds_then_stops_and_rearms():
+    gateway = MagicMock()
+    gateway.send.return_value = True
+    controller = ESP32Controller("AA:BB:CC:DD:EE:01", gateway)
+    controller.start_hold(0, 190, kpa=6.0)
+    gateway.send.reset_mock()
+
+    controller.shutdown()
+
+    assert controller.active_holds() == []      # keepalive cannot re-open
+    cmds = [c.args[1] for c in gateway.send.call_args_list]
+    assert cmds == ["stop", "stop", "stop", "resume"]

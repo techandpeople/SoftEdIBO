@@ -206,6 +206,12 @@ class Settings:
         return self._data.get("gateway", {}).get("auto_connect", True)
 
     @property
+    def override_mode(self) -> bool:
+        """Bench override: closing Test Actuators leaves the actuators as they
+        are instead of turning every pump off and closing every valve."""
+        return bool(self._data.get("debug", {}).get("override_mode", False))
+
+    @property
     def auto_scan_on_connect(self) -> bool:
         """Whether to scan for nodes automatically right after the gateway connects."""
         return self._data.get("gateway", {}).get("auto_scan_on_connect", True)

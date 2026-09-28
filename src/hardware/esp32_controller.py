@@ -2,16 +2,21 @@
 
 import logging
 import threading
-import time
 from typing import Any, Callable
 
 from src.hardware.command_confirmer import CommandConfirmer
 from src.hardware.hold_duty import clamp_hold_duty
+from src.hardware.hold_keeper import HoldKeeper
+from src.hardware.node_halt import halt_and_rearm
 from src.hardware.gateway import Gateway
 from src.hardware.fill_scaling import FillLoadTracker
 from src.hardware.touch_profiles import touch_profiles
 
 logger = logging.getLogger(__name__)
+
+
+# Boot announces of the actuator boards (their holds are gone after one).
+ACTUATOR_READY_STATUSES = frozenset({"node_direct_ready", "node_multiplexed_ready"})
 
 
 class ESP32Controller:
@@ -44,12 +49,10 @@ class ESP32Controller:
         # safety limits, so a dropped set_max/set_min can't leave the node on a
         # stale ceiling (the 20->50 kPa over-inflation). See confirm_limits().
         self._confirmer = CommandConfirmer(gateway, mac_address)
-        # Active leak-compensating holds ({chamber: hold_duty payload}), kept
-        # alive by a background thread (see start_hold): the firmware drops a
-        # hold not refreshed for ~6 s, so the pose can't outlive the app.
-        self._holds: dict[int, dict[str, Any]] = {}
-        self._holds_lock = threading.Lock()
-        self._hold_thread: threading.Thread | None = None
+        # The single owner of this node's leak-compensating holds: keeps them
+        # alive, drops them when the node reboots or goes silent, and gives a
+        # bench tool exclusive ownership (see HoldKeeper).
+        self._holds = HoldKeeper(self.send_command, name=mac_address)
 
         self._gateway.on_message(self._handle_message)
 
@@ -133,13 +136,9 @@ class ESP32Controller:
     # Leak-compensating regulated hold (firmware ``hold_duty``)
     # ------------------------------------------------------------------
 
-    # PC keepalive cadence for active holds. The firmware drops a hold not
-    # refreshed for ~6 s (its dead-man), so ~2 s survives a couple of dropped
-    # ESP-NOW frames while still dying quickly if the app goes away.
-    _HOLD_KEEPALIVE_S = 2.0
-
     def start_hold(self, chamber: int, duty: int, kpa: float | None = None,
-                   timed: bool = False, vacuum: bool = False) -> bool:
+                   timed: bool = False, vacuum: bool = False,
+                   bench: bool = False) -> bool:
         """Start (or retune) a leak-compensating hold on ``chamber``.
 
         Given ``kpa`` the node regulates the chamber on its gauge from the
@@ -154,6 +153,9 @@ class ESP32Controller:
         valve open at ``duty`` for sensorless boards. A background keepalive
         re-asserts the hold every ~2 s until :meth:`stop_hold`; without it
         the firmware dead-man releases the hold in ~6 s.
+
+        ``bench`` marks a hold started by the bench tool that has claimed
+        the node (:meth:`claim_bench`); while claimed, other holds are refused.
         """
         payload: dict[str, Any] = {"chamber": int(chamber),
                                    "duty": clamp_hold_duty(duty)}
@@ -163,52 +165,41 @@ class ESP32Controller:
             payload["timed"] = 1
         if vacuum:
             payload["dir"] = 1
-        # Sends happen under the lock so a keepalive re-assert can never land
-        # after a stop_hold "off" and re-arm a just-released hold.
-        with self._holds_lock:
-            self._holds[int(chamber)] = payload
-            self._ensure_hold_keepalive()
-            return self.send_command("hold_duty", **payload)
+        return self._holds.start(payload, bench=bench)
 
     def stop_hold(self, chamber: int | None = None) -> None:
         """End a regulated hold (all of this node's holds when ``chamber`` is
         None): stop the keepalive and tell the node to drop it."""
-        with self._holds_lock:
-            if chamber is None:
-                had = bool(self._holds)
-                self._holds.clear()
-            else:
-                had = self._holds.pop(int(chamber), None) is not None
-            if had:
-                self.send_command("hold_duty",
-                                  chamber=-1 if chamber is None else int(chamber),
-                                  off=1)
+        self._holds.stop(chamber)
 
     def active_holds(self) -> list[int]:
         """Chambers currently under a PC-kept regulated hold."""
-        with self._holds_lock:
-            return sorted(self._holds)
+        return self._holds.active()
 
-    def _ensure_hold_keepalive(self) -> None:
-        """Start the keepalive thread if not running (holds_lock held)."""
-        t = self._hold_thread
-        if t is not None and t.is_alive():
-            return
-        self._hold_thread = threading.Thread(
-            target=self._hold_keepalive_loop,
-            name=f"hold-keepalive-{self.mac_address}", daemon=True)
-        self._hold_thread.start()
+    def on_holds_dropped(self, callback: Callable[[list[int]], None]) -> None:
+        """Hear about holds dropped without being asked (node reboot, node
+        silent, bench claim, stop): ``callback(chambers)``."""
+        self._holds.on_dropped(callback)
 
-    def _hold_keepalive_loop(self) -> None:
-        """Re-assert every active hold until none remain, then exit."""
-        while True:
-            time.sleep(self._HOLD_KEEPALIVE_S)
-            with self._holds_lock:
-                if not self._holds:
-                    self._hold_thread = None
-                    return
-                for p in self._holds.values():
-                    self.send_command("hold_duty", **p)
+    @property
+    def bench_active(self) -> bool:
+        """True while a bench tool (Test Actuators) owns this node."""
+        return self._holds.bench_active
+
+    def claim_bench(self) -> None:
+        """A bench tool takes this node: the app's holds are dropped and new
+        ones refused until :meth:`release_bench`."""
+        self._holds.claim_bench()
+
+    def release_bench(self) -> None:
+        """The bench tool is done with this node (its holds end)."""
+        self._holds.release_bench()
+
+    def detach(self) -> None:
+        """Stop listening to the gateway and keeping holds alive (the robot
+        owning this controller is being replaced)."""
+        self._holds.close()
+        self._gateway.remove_message_callback(self._handle_message)
 
     def emergency_stop(self) -> bool:
         """Latch every actuator on this node OFF - all pumps off, all valves closed.
@@ -219,13 +210,23 @@ class ESP32Controller:
         """
         # Kill the PC keepalive too (the firmware aborts its holds on stop; the
         # keepalive must not re-establish them the moment the node is resumed).
-        with self._holds_lock:
-            self._holds.clear()
+        self._holds.drop_all()
         return self.send_command("stop")
 
     def resume(self) -> bool:
         """Re-arm the node after an :meth:`emergency_stop` so it accepts commands again."""
         return self.send_command("resume")
+
+    def shutdown(self) -> None:
+        """Turn every actuator on this node off and leave it re-armed.
+
+        Pumps off, all valves closed, holds and manual overrides dropped (see
+        :func:`~src.hardware.node_halt.halt_and_rearm`), and the PC hold
+        keepalive stopped first so it cannot re-open a valve afterwards.
+        Unlike :meth:`emergency_stop` the node is NOT left latched.
+        """
+        self._holds.drop_all()
+        halt_and_rearm(self.send_command)
 
     def set_pressure(self, chamber: int, value: int,
                      duty: int | None = None) -> bool:
@@ -590,6 +591,11 @@ class ESP32Controller:
         if data.get("source") == self.mac_address:
             self._last_status.update(data)
             logger.debug("Status from %s: %s", self.mac_address, data)
+            self._holds.node_heard()
+            if data.get("status") in ACTUATOR_READY_STATUSES:
+                # A fresh boot holds nothing: forget ours instead of letting
+                # the next keepalive re-create them on an idle node.
+                self._holds.node_rebooted()
 
             # Gauge floor self-report, carried by ready and pong messages.
             kpa_min = data.get("kpa_min")

@@ -391,6 +391,53 @@ class _RecordingGateway:
     def on_message(self, _cb):
         pass
 
+    def remove_message_callback(self, _cb):
+        pass
+
+
+class TestActuatorsDialogClose:
+    """Closing the dialog hands the node back with everything off, unless
+    the settings override mode keeps the actuators running."""
+
+    MAC = "AA:BB:CC:DD:EE:FF"
+
+    def _dialog(self, qtbot, gateway, **kwargs):
+        from src.gui.test_actuators_dialog import TestActuatorsDialog
+
+        skin_cfgs = [{"skin_id": "s", "chambers": [
+            {"slot": 0, "max_pressure": 6.0, "min_pressure": -2.0}]}]
+        dlg = TestActuatorsDialog(self.MAC, skin_cfgs, gateway, led_count=0,
+                                  **kwargs)
+        qtbot.addWidget(dlg)
+        gateway.sent.clear()
+        return dlg
+
+    def test_close_stops_then_rearms_the_node(self, qtbot):
+        gw = _RecordingGateway()
+        dlg = self._dialog(qtbot, gw)
+        dlg._inflate_slot(0)
+        gw.sent.clear()
+        dlg._on_closed()
+        cmds = [c for c, _ in gw.sent]
+        assert cmds[-4:] == ["stop", "stop", "stop", "resume"]
+
+    def test_close_uses_the_injected_node_shutdown(self, qtbot):
+        gw = _RecordingGateway()
+        calls: list[str] = []
+        dlg = self._dialog(qtbot, gw, shutdown_node=calls.append)
+        dlg._on_closed()
+        assert calls == [self.MAC]
+        assert "stop" not in [c for c, _ in gw.sent]
+
+    def test_override_mode_leaves_actuators_running(self, qtbot):
+        gw = _RecordingGateway()
+        calls: list[str] = []
+        dlg = self._dialog(qtbot, gw, shutdown_node=calls.append,
+                           keep_running_on_close=True)
+        dlg._on_closed()
+        assert calls == []
+        assert "stop" not in [c for c, _ in gw.sent]
+
 
 class TestActuatorsDialogActuation:
     MAC = "AA:BB:CC:DD:EE:FF"

@@ -189,6 +189,11 @@ class Skin:
         on_target = getattr(self._ctrl, "on_target", None)
         if on_target is not None:
             on_target(self._on_target)
+        # Holds the controller drops on its own (node rebooted or silent, a
+        # bench tool claimed the node, stop) are no longer ours either.
+        on_holds_dropped = getattr(self._ctrl, "on_holds_dropped", None)
+        if on_holds_dropped is not None:
+            on_holds_dropped(self._on_holds_dropped)
 
         self._push_pressure_limits()
 
@@ -522,6 +527,14 @@ class Skin:
         elif local_idx in self._chambers:
             self._auto_held.discard(local_idx)
             stop_hold(self._slots[local_idx])
+
+    def _on_holds_dropped(self, slots: list[int]) -> None:
+        """The controller dropped these node slots' holds: forget them as
+        automatic holds, so the next settle may hold again."""
+        for slot in slots:
+            local_idx = self._reverse.get(slot)
+            if local_idx is not None:
+                self._auto_held.discard(local_idx)
 
     def _release_auto_hold(self, local_idx: int) -> None:
         """Drop the automatic hold on a chamber about to be actuated (the

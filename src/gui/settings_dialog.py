@@ -126,6 +126,7 @@ class SettingsDialog(BaseDialog, Ui_SettingsDialog):
             self.gw_baud_combo.setCurrentIndex(baud_idx)
         self.gw_auto_check.setChecked(self._settings.gateway_auto_connect)
         self.gw_scan_check.setChecked(self._settings.auto_scan_on_connect)
+        self.override_mode_check.setChecked(self._settings.override_mode)
 
         db = self._settings.db_cfg
         backend = db.get("backend", "sqlite").lower()
@@ -167,6 +168,7 @@ class SettingsDialog(BaseDialog, Ui_SettingsDialog):
         d["gateway"]["baud_rate"] = int(self.gw_baud_combo.currentText())
         d["gateway"]["auto_connect"] = self.gw_auto_check.isChecked()
         d["gateway"]["auto_scan_on_connect"] = self.gw_scan_check.isChecked()
+        d.setdefault("debug", {})["override_mode"] = self.override_mode_check.isChecked()
 
         d.setdefault("database", {})
         backend = "sqlite" if self.backend_combo.currentIndex() == 0 else "postgresql"
