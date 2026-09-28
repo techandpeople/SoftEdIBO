@@ -128,64 +128,38 @@ class Settings:
         by_type[skin_type] = float(value)
         self.save()
 
-    def touch_quadrant_thresholds(self, key: str) -> list[float] | None:
-        """Saved per-quadrant touch thresholds for a node or skin key."""
-        values = self._data.get("touch", {}).get("quadrant_thresholds", {})
-        values = values.get(key) if isinstance(values, dict) else None
-        if not isinstance(values, list) or not values:
-            return None
-        try:
-            return [float(value) for value in values]
-        except (TypeError, ValueError):
-            return None
+    # Per-touch-node tuning saved by the touch tuning panel, stored under
+    # ``touch.<field>.<key>`` (key: node MAC, else skin type - see
+    # :meth:`touch_tuning_key`). A value is a float or a list of floats.
+    TOUCH_TUNING_FIELDS = ("quadrant_thresholds", "spike_threshold_ut",
+                           "frequency_reset_ms")
 
-    def set_touch_quadrant_thresholds(self, key: str,
-                                      values: list[float]) -> None:
-        """Persist per-quadrant touch thresholds and save immediately."""
-        if not key:
+    @staticmethod
+    def touch_tuning_key(touch_cfg: dict | None, skin_type: str) -> str:
+        """The settings key a skin's touch tuning is saved under."""
+        return str((touch_cfg or {}).get("node_mac") or skin_type or "")
+
+    def touch_tuning(self, key: str, field: str) -> float | list[float] | None:
+        """A saved touch tuning value, or None when absent / malformed."""
+        by_key = self._data.get("touch", {}).get(field, {})
+        value = by_key.get(key) if isinstance(by_key, dict) and key else None
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, list) and value:
+            try:
+                return [float(v) for v in value]
+            except (TypeError, ValueError):
+                return None
+        return None
+
+    def set_touch_tuning(self, key: str, field: str,
+                         value: float | list[float]) -> None:
+        """Persist one touch tuning value and save immediately."""
+        if not key or field not in self.TOUCH_TUNING_FIELDS:
             return
-        touch = self._data.setdefault("touch", {})
-        by_key = touch.setdefault("quadrant_thresholds", {})
-        by_key[key] = [float(value) for value in values]
-        self.save()
-
-    def touch_spike_threshold(self, key: str) -> float | None:
-        values = self._data.get("touch", {}).get("spike_threshold_ut", {})
-        value = values.get(key) if isinstance(values, dict) else None
-        return float(value) if isinstance(value, (int, float)) else None
-
-    def set_touch_spike_threshold(self, key: str, value: float) -> None:
-        if not key:
-            return
-        touch = self._data.setdefault("touch", {})
-        by_key = touch.setdefault("spike_threshold_ut", {})
-        by_key[key] = float(value)
-        self.save()
-
-    def touch_frequency_reset_ms(self, key: str) -> float | None:
-        values = self._data.get("touch", {}).get("frequency_reset_ms", {})
-        value = values.get(key) if isinstance(values, dict) else None
-        return float(value) if isinstance(value, (int, float)) else None
-
-    def set_touch_frequency_reset_ms(self, key: str, value: float) -> None:
-        if not key:
-            return
-        touch = self._data.setdefault("touch", {})
-        by_key = touch.setdefault("frequency_reset_ms", {})
-        by_key[key] = float(value)
-        self.save()
-
-    def touch_sync_tolerance_ms(self, key: str) -> float | None:
-        values = self._data.get("touch", {}).get("sync_tolerance_ms", {})
-        value = values.get(key) if isinstance(values, dict) else None
-        return float(value) if isinstance(value, (int, float)) else None
-
-    def set_touch_sync_tolerance_ms(self, key: str, value: float) -> None:
-        if not key:
-            return
-        touch = self._data.setdefault("touch", {})
-        by_key = touch.setdefault("sync_tolerance_ms", {})
-        by_key[key] = float(value)
+        by_key = self._data.setdefault("touch", {}).setdefault(field, {})
+        by_key[key] = ([float(v) for v in value] if isinstance(value, list)
+                       else float(value))
         self.save()
 
     @property

@@ -59,6 +59,19 @@ class Param:
         return self.label or self.name.replace("_", " ").capitalize()
 
 
+@dataclass(frozen=True)
+class ActivityProgress:
+    """Live progress of one activity unit (a skin, or a bare robot) toward
+    leaving its current state - shown in the robot monitor.
+
+    ``lines`` are human-readable, one per pending condition item; empty when
+    the state has nothing countable to show or ``finished`` is set."""
+    unit: str
+    state: str
+    finished: bool
+    lines: tuple[str, ...] = ()
+
+
 # ---------------------------------------------------------------------------
 # BaseActivity
 # ---------------------------------------------------------------------------
@@ -227,3 +240,7 @@ class BaseActivity(ABC):
     def get_state(self) -> dict[str, Any]:
         """Return the current activity state as a dictionary."""
         ...
+
+    def progress(self, robot_id: str) -> list[ActivityProgress]:
+        """Live progress of ``robot_id``'s units. Default: nothing to show."""
+        return []

@@ -48,24 +48,6 @@ class TouchRhythmTracker:
             matching += 1
         return matching >= max(1, int(required_intervals))
 
-    def latest_interval_ms(self, min_gap_ms: float = 0.0) -> float | None:
-        """Return the latest non-duplicate interval, if one is available."""
-        for interval_ms in reversed(self.intervals_ms):
-            if interval_ms >= min_gap_ms:
-                return interval_ms
-        return None
-
-    def latest_frequency_hz(self, min_gap_ms: float = 0.0) -> float | None:
-        """Return the latest usable cadence as presses per second."""
-        interval_ms = self.latest_interval_ms(min_gap_ms)
-        return None if interval_ms is None or interval_ms <= 0 else 1000.0 / interval_ms
-
-    def has_matching_intervals(self, min_gap_ms: float,
-                               required_intervals: int) -> bool:
-        """Return whether this stream has enough usable intervals."""
-        usable = sum(interval >= min_gap_ms for interval in self.intervals_ms)
-        return usable >= max(1, int(required_intervals))
-
 
 @dataclass
 class MagnitudeCompressionTracker:
@@ -107,19 +89,89 @@ class MagnitudeCompressionTracker:
         return False
 
 
+# Onsets older than this are dropped: far longer than any plausible streak,
+# while an unattended activity cannot accumulate data forever.
+_ONSET_WINDOW_MS = 120_000.0
+
+
+@dataclass(frozen=True)
+class _SyncRules:
+    """Normalised round rules for one :meth:`GroupTouchSyncTracker.status`."""
+
+    target: float
+    cadence_tol: float
+    phase_tol: float
+    debounce: float
+    rounds_needed: int
+
+    @property
+    def stale_after(self) -> float:
+        """A streak must be earned by current movement, not a good sequence
+        that happened long before the next tick / phase."""
+        return max(self.target * 1.5, self.phase_tol * 2.0, 250.0)
+
+
+@dataclass
+class _RoundLog:
+    """Rounds segmented from the accepted onsets, oldest first.
+
+    ``outcomes`` holds ``(beat_ms, None)`` for a complete round and
+    ``(None, rejection)`` for a failed one. ``open_start``/``open_presses``
+    describe the latest round (still open, or the one just closed)."""
+
+    wanted: set[int]
+    phase_tol: float
+    completed: list[tuple[float, float]] = field(default_factory=list)
+    outcomes: list[tuple[float | None, dict | None]] = field(default_factory=list)
+    open_start: float | None = None
+    open_presses: dict[int, float] = field(default_factory=dict)
+
+    def open(self, timestamp: float, sensor_idx: int) -> None:
+        self.open_start, self.open_presses = timestamp, {sensor_idx: timestamp}
+
+    def close(self, *, late_sensor: int | None = None,
+              late_time: float | None = None) -> None:
+        """Judge the latest round: complete, or a rejection naming who was
+        missing (and, when a later onset reveals it, who was late)."""
+        assert self.open_start is not None
+        start = self.open_start
+        if len(self.open_presses) == len(self.wanted):
+            times = list(self.open_presses.values())
+            beat = float(median(times))
+            self.completed.append((beat, max(times) - min(times)))
+            self.outcomes.append((beat, None))
+            return
+        missing = sorted(self.wanted - set(self.open_presses))
+        other_times = list(self.open_presses.values())
+        is_late = late_sensor in missing and late_time is not None
+        rejection = {
+            "id": (f"{start:.3f}:late:{late_sensor}" if is_late
+                   else f"{start:.3f}:timeout"),
+            "round_attempt": len(self.outcomes) + 1,
+            "reason": "missing_or_late_touch",
+            "missing_sensors": missing,
+            "late_sensor": late_sensor if is_late else None,
+            "lateness_ms": (max(0.0, late_time - (start + self.phase_tol))
+                            if is_late and late_time is not None else None),
+            "other_sensors": sorted(self.open_presses),
+            "other_sync_spread_ms": (max(other_times) - min(other_times)
+                                     if len(other_times) >= 2 else None),
+            "phase_tolerance_ms": self.phase_tol,
+        }
+        self.outcomes.append((None, rejection))
+
+
 @dataclass
 class GroupTouchSyncTracker:
-    """Recognise consecutive, lockstep multi-person compression rounds.
+    """Recognise consecutive, lockstep multi-participant rounds.
 
-    The older :class:`TouchRhythmTracker` is deliberately per sensor: it is a
-    useful way to ask whether several people happen to have similar *latest*
-    rates.  CPR-style play needs a stronger guarantee: every accepted round
-    must contain one onset from every selected child, close together in time,
-    and the resulting group beats must keep the requested cadence.
+    Every accepted round must contain one onset from every selected sensor,
+    close together in time (the phase window), and the resulting group beats
+    must keep the requested cadence.
 
-    This class keeps the raw onsets and rebuilds rounds when queried.  That
-    makes it safe for more than one declarative condition to inspect the same
-    skin and avoids consuming a press before the activity tick sees it.
+    This class keeps the raw onsets and rebuilds rounds when queried, so more
+    than one condition can inspect the same skin and no press is consumed
+    before the activity tick sees it.
     """
 
     events: list[tuple[float, int]] = field(default_factory=list)
@@ -130,7 +182,7 @@ class GroupTouchSyncTracker:
     def record(self, sensor_idx: int, timestamp_ms: float) -> None:
         timestamp_ms = float(timestamp_ms)
         self.events.append((timestamp_ms, int(sensor_idx)))
-        cutoff = timestamp_ms - 120_000.0
+        cutoff = timestamp_ms - _ONSET_WINDOW_MS
         if self.events and self.events[0][0] < cutoff:
             self.events = [(time_ms, idx) for time_ms, idx in self.events
                            if time_ms >= cutoff]
@@ -140,13 +192,7 @@ class GroupTouchSyncTracker:
                 phase_tolerance_ms: float, min_gap_ms: float,
                 required_rounds: int, now_ms: float,
                 mode: str = MODE_FIXED) -> bool:
-        """Whether the latest rounds form a fresh synchronized streak.
-
-        A round begins with the first accepted press and has a fixed phase
-        window.  It is valid only when every selected sensor appears exactly
-        once in that window.  The round time is the median press time, which
-        avoids one slightly early/late child moving the shared cadence.
-        """
+        """Whether the latest rounds form a fresh synchronized streak."""
         return bool(self.status(
             participants=participants, sensor_ids=sensor_ids,
             target_interval_ms=target_interval_ms,
@@ -160,42 +206,85 @@ class GroupTouchSyncTracker:
                phase_tolerance_ms: float, min_gap_ms: float,
                required_rounds: int, now_ms: float,
                mode: str = MODE_FIXED) -> dict:
-        """Return the current CPR-round progress for a live UI checklist.
+        """Current round progress (streak, last beat, last rejection, reason).
+
+        A round begins with the first accepted press and lasts one phase
+        window; it is complete only when every selected sensor appears in it.
+        Its beat time is the median press time, so one slightly early/late
+        participant does not move the shared cadence.
 
         ``mode`` :data:`MODE_FIXED` uses ``sensor_ids`` (or sensors 0..N-1);
-        :data:`MODE_AUTO` lets the children pick themselves: every sensor
-        that has pressed since the last reset is in the group, and at least
-        ``participants`` of them are needed before rounds count.  A sensor
-        that joins late makes the earlier rounds incomplete, so the streak
-        restarts with the larger group - by design, once four are in, all
-        four must keep every round.
+        :data:`MODE_AUTO` makes every sensor that has pressed since the last
+        reset part of the group, with at least ``participants`` needed before
+        rounds count. A late joiner makes earlier rounds incomplete, so the
+        streak restarts with the larger group.
         """
-        auto = mode == MODE_AUTO
-        min_participants = max(1, int(participants))
-        selected: list[int] | None = (
-            None if auto else self._selected_sensors(participants, sensor_ids))
-        rounds_needed = max(1, int(required_rounds))
+        rules = _SyncRules(
+            target=max(1.0, float(target_interval_ms)),
+            cadence_tol=max(0.0, float(cadence_tolerance_ms)),
+            phase_tol=max(0.0, float(phase_tolerance_ms)),
+            debounce=max(0.0, float(min_gap_ms)),
+            rounds_needed=max(1, int(required_rounds)),
+        )
+        now_ms = float(now_ms)
+        result: dict = {
+            "complete": False, "rounds": 0,
+            "rounds_required": rules.rounds_needed, "sensors": [],
+            "missing_sensors": [], "mode": mode,
+            "target_interval_ms": rules.target,
+            "cadence_tolerance_ms": rules.cadence_tol,
+            "phase_tolerance_ms": rules.phase_tol,
+            "last_interval_ms": None, "last_interval_ok": None,
+            "last_round_ms": None, "last_phase_spread_ms": None,
+            "last_rejection": None, "frequency_hz_by_sensor": {},
+        }
+        selected = (None if mode == MODE_AUTO
+                    else self._selected_sensors(participants, sensor_ids))
         if selected is not None and not selected:
-            return {"complete": False, "rounds": 0,
-                    "rounds_required": rounds_needed, "sensors": [],
-                    "missing_sensors": [], "mode": mode,
-                    "reason": "Invalid sensor zones"}
-        target = max(1.0, float(target_interval_ms))
-        cadence_tol = max(0.0, float(cadence_tolerance_ms))
-        phase_tol = max(0.0, float(phase_tolerance_ms))
-        debounce = max(0.0, float(min_gap_ms))
+            return {**result, "reason": "Invalid sensor zones"}
+        accepted = self._accepted_onsets(selected, rules.debounce, now_ms)
+        if selected is None:
+            selected = sorted({idx for _, idx in accepted})
+            short = max(1, int(participants)) - len(selected)
+            if short > 0:
+                return {**result, "sensors": selected,
+                        "reason": (f"Waiting for {short} more participant"
+                                   f"{'' if short == 1 else 's'}")}
 
-        # A condition must be earned by current movement, not a good sequence
-        # that happened long before the next activity tick/session phase.
-        stale_after = max(target * 1.5, phase_tol * 2.0, 250.0)
+        rounds = self._segment_rounds(accepted, set(selected),
+                                      rules.phase_tol, now_ms)
+        streak, last_interval_ms, last_interval_ok = self._streak(
+            rounds.outcomes, rules)
+        last_round_ms, last_spread = (rounds.completed[-1] if rounds.completed
+                                      else (None, None))
+        fresh = (last_round_ms is not None
+                 and now_ms - last_round_ms <= rules.stale_after)
+        missing = (sorted(set(selected) - set(rounds.open_presses))
+                   if rounds.open_start is not None
+                   and now_ms - rounds.open_start <= rules.phase_tol else [])
+        rejections = [rej for _, rej in rounds.outcomes if rej is not None]
+        result.update({
+            "complete": fresh and streak >= rules.rounds_needed,
+            "rounds": streak if fresh else 0,
+            "sensors": selected,
+            "missing_sensors": missing,
+            "last_interval_ms": last_interval_ms,
+            "last_interval_ok": last_interval_ok,
+            "last_round_ms": last_round_ms,
+            "last_phase_spread_ms": last_spread,
+            "last_rejection": rejections[-1] if rejections else None,
+            "frequency_hz_by_sensor": self._frequencies(accepted),
+            "reason": self._reason(missing, bool(rounds.completed), fresh,
+                                   last_interval_ok),
+        })
+        return result
 
-        # Reject duplicate/chattering onsets before creating groups.  Keep the
-        # latest 120 s of input: considerably more than any plausible streak,
-        # while preventing an unattended activity from accumulating data.
-        cutoff = float(now_ms) - 120_000.0
+    def _accepted_onsets(self, selected: list[int] | None, debounce: float,
+                         now_ms: float) -> list[tuple[float, int]]:
+        """Recent onsets of the selected sensors, minus per-sensor chatter."""
+        cutoff = now_ms - _ONSET_WINDOW_MS
         last_by_sensor: dict[int, float] = {}
         accepted: list[tuple[float, int]] = []
-        joined: list[int] = []            # auto mode: sensors in first-press order
         for timestamp, sensor_idx in sorted(self.events):
             if timestamp < cutoff:
                 continue
@@ -206,160 +295,81 @@ class GroupTouchSyncTracker:
                 continue
             last_by_sensor[sensor_idx] = timestamp
             accepted.append((timestamp, sensor_idx))
-            if sensor_idx not in joined:
-                joined.append(sensor_idx)
-        if selected is None:
-            selected = sorted(joined)
-            if len(selected) < min_participants:
-                short = min_participants - len(selected)
-                return {"complete": False, "rounds": 0,
-                        "rounds_required": rounds_needed, "sensors": selected,
-                        "missing_sensors": [], "mode": mode,
-                        "target_interval_ms": target,
-                        "cadence_tolerance_ms": cadence_tol,
-                        "phase_tolerance_ms": phase_tol,
-                        "last_interval_ms": None, "last_interval_ok": None,
-                        "reason": (f"Waiting for {short} more "
-                                   f"{'child' if short == 1 else 'children'}")}
-        wanted = set(selected)
-        # Latest individual cadence for each child/zone.  It is deliberately
-        # based on debounced onsets, so one long press or sensor chatter is not
-        # presented as an unrealistically high CPR frequency.
-        frequency_hz_by_sensor: dict[int, float] = {}
+        return accepted
+
+    @staticmethod
+    def _frequencies(accepted: list[tuple[float, int]]) -> dict[int, float]:
+        """Latest per-sensor cadence (Hz) from the debounced onsets."""
+        frequency_hz: dict[int, float] = {}
         previous_by_sensor: dict[int, float] = {}
         for timestamp, sensor_idx in accepted:
-            if sensor_idx not in wanted:
-                continue
             previous = previous_by_sensor.get(sensor_idx)
             if previous is not None and timestamp > previous:
-                frequency_hz_by_sensor[sensor_idx] = round(
-                    1000.0 / (timestamp - previous), 3)
+                frequency_hz[sensor_idx] = round(1000.0 / (timestamp - previous), 3)
             previous_by_sensor[sensor_idx] = timestamp
+        return frequency_hz
 
-        # Keep failures as first-class outcomes as well as successful beats.
-        # Besides making a miss reset the streak, this gives the session log a
-        # useful explanation instead of merely making the green LED not appear.
-        completed: list[tuple[float, float]] = []
-        outcomes: list[tuple[str, float | None, float | None, dict | None]] = []
-        rejections: list[dict] = []
-        start: float | None = None
-        presses: dict[int, float] = {}
-
-        def finish_round(*, late_sensor: int | None = None,
-                         late_time: float | None = None) -> None:
-            if len(presses) == len(wanted):
-                times = list(presses.values())
-                beat = float(median(times))
-                spread = max(times) - min(times)
-                completed.append((beat, spread))
-                outcomes.append(("accepted", beat, spread, None))
-                return
-
-            # If a new onset arrives after the phase window, it belongs to the
-            # next attempted round.  It can nevertheless identify the child
-            # who was late for the round we are closing.
-            missing = sorted(wanted - set(presses))
-            other_times = list(presses.values())
-            other_spread = (max(other_times) - min(other_times)
-                            if len(other_times) >= 2 else None)
-            is_late = late_sensor in missing and late_time is not None
-            rejection = {
-                "id": (f"{start:.3f}:late:{late_sensor}" if is_late
-                       else f"{start:.3f}:timeout"),
-                "round_attempt": len(outcomes) + 1,
-                "reason": "missing_or_late_touch",
-                "missing_sensors": missing,
-                "late_sensor": late_sensor if is_late else None,
-                "lateness_ms": (max(0.0, late_time - (start + phase_tol))
-                                if is_late else None),
-                "other_sensors": sorted(presses),
-                "other_sync_spread_ms": other_spread,
-                "phase_tolerance_ms": phase_tol,
-            }
-            rejections.append(rejection)
-            outcomes.append(("rejected", None, None, rejection))
-
+    @staticmethod
+    def _segment_rounds(accepted: list[tuple[float, int]], wanted: set[int],
+                        phase_tol: float, now_ms: float) -> _RoundLog:
+        """Group onsets into phase-window rounds and judge each one."""
+        log = _RoundLog(wanted=wanted, phase_tol=phase_tol)
         for timestamp, sensor_idx in accepted:
-            if start is None:
-                start, presses = timestamp, {sensor_idx: timestamp}
-                continue
-            if timestamp - start <= phase_tol:
-                # Debouncing above means a second entry here is either a
-                # deliberately very fast press or an overlap; the first onset
-                # is the child's contribution to this round.
-                presses.setdefault(sensor_idx, timestamp)
-                continue
-            finish_round(late_sensor=sensor_idx, late_time=timestamp)
-            start, presses = timestamp, {sensor_idx: timestamp}
-        if start is not None:
-            if len(presses) == len(wanted):
-                finish_round()
-            elif float(now_ms) - start > phase_tol:
-                # This is called from the activity tick too, so a child who
-                # never presses is reported promptly rather than only after a
-                # later child happens to touch the robot.
-                finish_round()
+            if log.open_start is None:
+                log.open(timestamp, sensor_idx)
+            elif timestamp - log.open_start <= phase_tol:
+                # The first onset is the participant's contribution.
+                log.open_presses.setdefault(sensor_idx, timestamp)
+            else:
+                # An onset past the window starts the next round and may
+                # name who was late for the one being closed.
+                log.close(late_sensor=sensor_idx, late_time=timestamp)
+                log.open(timestamp, sensor_idx)
+        if log.open_start is not None and (
+                len(log.open_presses) == len(wanted)
+                or now_ms - log.open_start > phase_tol):
+            # Also judged from the tick, so a participant who never presses
+            # is reported promptly.
+            log.close()
+        return log
 
+    @staticmethod
+    def _streak(outcomes: list[tuple[float | None, dict | None]],
+                rules: _SyncRules) -> tuple[int, float | None, bool | None]:
+        """Consecutive in-cadence rounds ending at the latest outcome, plus
+        the last beat interval and whether it was on cadence. A rejection
+        restarts the streak and is stamped with the round it broke."""
         streak = 0
         last_interval_ms: float | None = None
         last_interval_ok: bool | None = None
         previous: float | None = None
-        for kind, current, _spread, rejection in outcomes:
-            if kind == "rejected":
-                # The failed round is the next round in the current streak.
-                # After it, the following valid group beat must be round 1.
+        for beat, rejection in outcomes:
+            if beat is None:
                 if rejection is not None:
                     rejection["round"] = streak + 1
-                streak = 0
-                previous = None
-                last_interval_ms = None
-                last_interval_ok = None
+                streak, previous = 0, None
+                last_interval_ms = last_interval_ok = None
                 continue
-            if previous is None:
-                streak = 1
-                previous = current
-                continue
-            last_interval_ms = current - previous
-            last_interval_ok = abs(last_interval_ms - target) <= cadence_tol
-            if last_interval_ok:
-                streak += 1
+            if previous is not None:
+                last_interval_ms = beat - previous
+                last_interval_ok = (abs(last_interval_ms - rules.target)
+                                    <= rules.cadence_tol)
+                streak = streak + 1 if last_interval_ok else 1
             else:
                 streak = 1
-            previous = current
-        last_round_ms = completed[-1][0] if completed else None
-        last_phase_spread_ms = completed[-1][1] if completed else None
-        fresh = bool(completed) and float(now_ms) - last_round_ms <= stale_after
-        missing = (sorted(wanted - set(presses))
-                   if start is not None and float(now_ms) - start <= phase_tol
-                   else [])
+            previous = beat
+        return streak, last_interval_ms, last_interval_ok
+
+    @staticmethod
+    def _reason(missing: list[int], any_completed: bool, fresh: bool,
+                last_interval_ok: bool | None) -> str:
         if missing:
-            reason = "Waiting for " + ", ".join(f"T{idx}" for idx in missing)
-        elif not completed:
-            reason = "Press all zones together to start"
-        elif not fresh:
-            reason = "Start the next synchronized round"
-        elif last_interval_ok is False:
-            reason = "Keep the next round on the target rhythm"
-        else:
-            reason = "Start the next synchronized round"
-        return {
-            "complete": fresh and streak >= rounds_needed,
-            "rounds": streak if fresh else 0,
-            "rounds_required": rounds_needed,
-            "sensors": selected,
-            "missing_sensors": missing,
-            "target_interval_ms": target,
-            "cadence_tolerance_ms": cadence_tol,
-            "phase_tolerance_ms": phase_tol,
-            "last_interval_ms": last_interval_ms,
-            "last_interval_ok": last_interval_ok,
-            "last_round_ms": last_round_ms,
-            "last_phase_spread_ms": last_phase_spread_ms,
-            "last_rejection": rejections[-1] if rejections else None,
-            "frequency_hz_by_sensor": frequency_hz_by_sensor,
-            "mode": mode,
-            "reason": reason,
-        }
+            return "Waiting for " + ", ".join(f"T{idx}" for idx in missing)
+        if not any_completed:
+            return "Press all zones together to start"
+        if fresh and last_interval_ok is False:
+            return "Keep the next round on the target rhythm"
+        return "Start the next synchronized round"
 
     @staticmethod
     def _selected_sensors(participants: int,

@@ -287,31 +287,6 @@ def test_touch_rhythm_outlier_resets_streak(clock):
     assert activity.unit_state(unit.unit_id) == "s"
 
 
-def test_group_touch_rhythm_matches_three_independent_sensors(clock):
-    spec = {"initial": "s", "states": {
-        "s": {"do": [], "transitions": [{
-            "to": "done", "when": {"group_touch_rhythm": {
-                "participants": 3, "tolerance_hz": 1,
-                "min_gap_ms": 50, "intervals": 2,
-            }},
-        }]},
-        "done": {"do": [], "transitions": []},
-    }}
-    activity = ScriptedActivity("group rhythm", "", spec)
-    robot = _FakeRobot([_FakeSkin(controller=_FakeCtrl())])
-    _start(activity, robot)
-    unit = _unit(activity)
-
-    for _ in range(3):
-        for sensor in (0, 1, 2):
-            activity._on_magnet(unit, {"act": [sensor]})
-            activity._on_magnet(unit, {"act": []})
-        clock.advance(0.1)
-
-    activity._on_tick()
-    assert activity.unit_state(unit.unit_id) == "done"
-
-
 def test_magnitude_rhythm_counts_force_crossings_without_release(clock):
     spec = {"initial": "s", "states": {
         "s": {"do": [], "transitions": [{
@@ -340,37 +315,6 @@ def test_magnitude_rhythm_counts_force_crossings_without_release(clock):
 
     activity._on_tick()
     assert activity.unit_state(unit.unit_id) == "done"
-
-
-def test_group_touch_rhythm_rejects_different_sensor_cadence(clock):
-    spec = {"initial": "s", "states": {
-        "s": {"do": [], "transitions": [{
-            "to": "done", "when": {"group_touch_rhythm": {
-                "participants": 3, "tolerance_hz": 1,
-                "min_gap_ms": 50, "intervals": 2,
-            }},
-        }]},
-        "done": {"do": [], "transitions": []},
-    }}
-    activity = ScriptedActivity("group rhythm", "", spec)
-    robot = _FakeRobot([_FakeSkin(controller=_FakeCtrl())])
-    _start(activity, robot)
-    unit = _unit(activity)
-
-    for sensor in (0, 1, 2):
-        activity._on_magnet(unit, {"act": [sensor]})
-        activity._on_magnet(unit, {"act": []})
-    for _ in range(1, 7):
-        clock.advance(0.1)
-        for sensor in (0, 1):
-            activity._on_magnet(unit, {"act": [sensor]})
-            activity._on_magnet(unit, {"act": []})
-        if _ in (3, 6):
-            activity._on_magnet(unit, {"act": [2]})
-            activity._on_magnet(unit, {"act": []})
-
-    activity._on_tick()
-    assert activity.unit_state(unit.unit_id) == "s"
 
 
 def _group_sync_spec(**overrides):
@@ -1478,7 +1422,7 @@ def test_group_sync_auto_mode_waits_for_enough_children(clock):
     status = unit.group_sync.status(**activity._sync_kwargs(cond),
                                     now_ms=sa.time.monotonic() * 1000.0)
     assert status["rounds"] == 0 and status["mode"] == "auto"
-    assert "Waiting for 1 more child" in status["reason"]
+    assert "Waiting for 1 more participant" in status["reason"]
 
 
 def test_sync_kwargs_mode_defaults():
@@ -1494,7 +1438,7 @@ def test_sync_kwargs_mode_defaults():
 
 def _hold_skin(ctrl, enter_ut=100.0):
     skin = _ZoneSkin(ctrl)
-    skin.touch["act_threshold_ut"] = enter_ut
+    cast(dict, skin.touch)["act_threshold_ut"] = enter_ut
     return skin
 
 
@@ -1675,3 +1619,63 @@ def test_sync_fill_hold_uses_the_armed_blocks_colours(clock):
     codes = decode_pixel_mask(mask, 68)
     zone0 = set(skin.touch_zone_map().zone_pixels(0))
     assert {i for i, c in enumerate(codes) if c == 2} == lit & zone0
+
+
+class _RecordingLogger:
+    def __init__(self):
+        self.events: list[tuple[str, str, str]] = []
+
+    def log(self, participant_id, type, action, target, metadata):
+        self.events.append((type, action, target))
+
+
+def test_group_sync_logs_rounds_under_generic_category(clock):
+    activity = ScriptedActivity("any name", "", _group_sync_spec(rounds=4))
+    logger = _RecordingLogger()
+    activity.event_logger = cast(Any, logger)
+    skin = _FakeSkin(controller=_FakeCtrl())
+    _start(activity, _FakeRobot([skin]))
+    unit = _unit(activity)
+
+    _emit_group_round(activity, unit, clock)
+    activity._on_tick()
+
+    assert ("sync", "round_accepted", unit.unit_id) in logger.events
+    assert not any(kind == "cpr" for kind, _, _ in logger.events)
+    # Activity state never leaks onto the hardware Skin.
+    assert not hasattr(skin, "cpr_sync_status")
+
+
+def test_progress_reports_sync_rounds_then_done(clock):
+    activity = ScriptedActivity("any name", "", _group_sync_spec(rounds=2))
+    _start(activity, _FakeRobot([_FakeSkin(controller=_FakeCtrl())]))
+    unit = _unit(activity)
+
+    [before] = activity.progress("robot-1")
+    assert before.state == "s" and not before.finished
+    assert before.lines[0] == "Synchronized rounds: 0 / 2"
+
+    _emit_group_round(activity, unit, clock)
+    clock.advance(0.08)
+    _emit_group_round(activity, unit, clock)
+    activity._on_tick()
+
+    [after] = activity.progress("robot-1")
+    assert after.state == "done" and after.finished and after.lines == ()
+    assert activity.progress("other-robot") == []
+
+
+def test_progress_counts_touches():
+    spec = {"initial": "s", "states": {
+        "s": {"do": [], "transitions": [{"to": "done",
+                                         "when": {"touch_count": {"min": 3}}}]},
+        "done": {"do": [], "transitions": []},
+    }}
+    activity = ScriptedActivity("touches", "", spec)
+    _start(activity, _FakeRobot([_FakeSkin(controller=_FakeCtrl())]))
+    unit = _unit(activity)
+    activity._on_magnet(unit, {"act": [0]})
+    activity._on_magnet(unit, {"act": []})
+
+    [item] = activity.progress("robot-1")
+    assert item.lines == ("Touches: 1 / 3",)

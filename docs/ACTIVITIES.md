@@ -78,7 +78,7 @@ hospital study's behaviours. Two layers:
   wheel/LED/sound verbs `thymio_drive` / `thymio_leds` / `thymio_sound`),
   control flow (`sequence`, `repeat`, `for_each_chamber`, `if_robot`, `wait`,
   `wait_for_touch`) and conditions (`elapsed_ms`, `touch_count`,
-  `gesture_count`, `touch_rhythm`, `group_touch_rhythm`, `group_touch_sync`,
+  `gesture_count`, `touch_rhythm`, `group_touch_sync`,
   `on_impact`, `on_lifted`, `organs`, `robot_is`,
   `any`/`all`/`not`, `always`). The catalogue is the single source
   of truth and also drives the editor blocks. Specs are validated by

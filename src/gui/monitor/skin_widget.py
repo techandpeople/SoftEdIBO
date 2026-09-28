@@ -25,10 +25,11 @@ from src.hardware.touch_source import CompensatedMagnetSource
 class SkinWidget(QGroupBox):
     """Widget for a single Skin - one ChamberWidget per AirChamber."""
 
-    touch_event   = Signal(str, int, str)  # (skin_id, chamber_id, action)
-    _touch_log    = Signal(int, str)       # thread-safe bridge -> touch_event log
+    # Chamber-button (simulated) touches: (skin_id, chamber_id, action).
+    touch_event   = Signal(str, int, str)
+    # Sensor touches: (skin_id, chamber_id, action, sensor_idx, intensity_ut).
     touch_detail_event = Signal(str, int, str, int, object)
-    _touch_detail_log = Signal(int, str, int, object)
+    _touch_detail_log = Signal(int, str, int, object)   # thread-safe bridge
 
     def __init__(self, skin: Skin) -> None:
         super().__init__(skin.skin_id)
@@ -39,15 +40,11 @@ class SkinWidget(QGroupBox):
         self._grid_view: SkinGridView | None = None
         self._organ_panel: OrganPanel | None = None
 
-        # Bubble skin sensor touches up as touch_event so the session panel logs
-        # them. The Skin's TouchEventRouter fires on the gateway thread, so hop
-        # through a QueuedConnection bridge before re-emitting on the GUI thread.
-        self._touch_log.connect(self._emit_touch_log, Qt.ConnectionType.QueuedConnection)
+        # Bubble skin sensor touches (with sensor + edge magnitude) up so the
+        # session panel logs them. The Skin's TouchEventRouter fires on the
+        # gateway thread, so hop through a QueuedConnection bridge first.
         self._touch_detail_log.connect(
             self._emit_touch_detail_log, Qt.ConnectionType.QueuedConnection)
-        # Hardware events use the detailed stream so session records include
-        # the compensated magnitude that triggered the touch.  The ordinary
-        # touch_event remains for simulated chamber-button presses.
         skin.on_touch_event_detail(
             lambda chamber_id, action, sensor_idx, intensity_ut:
             self._touch_detail_log.emit(chamber_id, action, sensor_idx, intensity_ut))
@@ -112,11 +109,6 @@ class SkinWidget(QGroupBox):
             self._chamber_widgets.append(cw)
             cols.addWidget(cw)
         outer.addLayout(cols)
-
-    def _emit_touch_log(self, chamber_id: int, action: str) -> None:
-        """Re-emit a router touch event as the widget's ``touch_event`` (on the
-        GUI thread) so it bubbles up to the session panel for DB logging."""
-        self.touch_event.emit(self._skin_id, chamber_id, action)
 
     def _emit_touch_detail_log(self, chamber_id: int, action: str,
                                sensor_idx: int, intensity_ut: object) -> None:

@@ -124,3 +124,24 @@ def test_builder_passthrough_without_saved_or_type():
     with _patched_saved(120.0):
         assert _touch_with_saved_threshold(cfg, "") is cfg
         assert _touch_with_saved_threshold(None, "thymio") is None
+
+
+def test_touch_tuning_round_trip_and_builder_overlay(tmp_path):
+    from src.config.settings import Settings
+    settings = Settings(path=tmp_path / "settings.yaml")
+    key = Settings.touch_tuning_key({"node_mac": "AA:02"}, "flat")
+    assert key == "AA:02"
+    settings.set_touch_tuning(key, "quadrant_thresholds", [120, 130])
+    settings.set_touch_tuning(key, "spike_threshold_ut", 40)
+    settings.set_touch_tuning(key, "not_a_field", 1.0)          # ignored
+
+    reread = Settings(path=tmp_path / "settings.yaml")
+    assert reread.touch_tuning(key, "quadrant_thresholds") == [120.0, 130.0]
+    assert reread.touch_tuning(key, "spike_threshold_ut") == 40.0
+    assert reread.touch_tuning(key, "not_a_field") is None
+
+    with patch("src.config.settings.Settings", lambda: reread):
+        out = _touch_with_saved_threshold({"node_mac": "AA:02"}, "flat")
+    assert out is not None
+    assert out["quadrant_thresholds"] == [120.0, 130.0]
+    assert out["rhythm_spike_ut"] == 40.0

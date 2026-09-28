@@ -1,6 +1,7 @@
 """Basic GUI smoke tests - verify panels and dialogs load correctly."""
 
 from datetime import datetime
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -453,7 +454,7 @@ class TestActuatorsDialogHoldMode:
 
         skin_cfgs = [{"skin_id": "s", "chambers": [
             {"slot": 0, "max_pressure": 30.0, "min_pressure": -2.0}]}]
-        dlg = TestActuatorsDialog(self.MAC, skin_cfgs, _RecordingGateway(),
+        dlg = TestActuatorsDialog(self.MAC, skin_cfgs, cast(Any, _RecordingGateway()),
                                   led_count=0, controller=ctrl)
         qtbot.addWidget(dlg)
         return dlg

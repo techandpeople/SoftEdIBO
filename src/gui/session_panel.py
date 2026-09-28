@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QDialog, QMessageBox, QWidget
 from src.activities import get_activity
 from src.activities.base_activity import BaseActivity
 from src.config.settings import Settings
+from src.core.press_rate import PressRateMeter
 from src.data import last_assignments as last_asgn
 from src.data.database import Database
 from src.data.models import InteractionEvent, ParticipantRecord, SessionAssignment, SessionRecord
@@ -64,7 +65,8 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         # Monotonic time prevents a system-clock adjustment from corrupting a
         # press/release duration; the datetime remains the exportable time.
         self._touch_presses: dict[tuple[str, int], tuple[float, datetime, float | None, int | None]] = {}
-        self._last_touch_press: dict[tuple[str, int], float] = {}
+        # Per-skin press intervals for the logged touch frequency.
+        self._press_rates: dict[str, PressRateMeter] = {}
         self._pending_touches: list[tuple[str, int, datetime, str]] = []
         # (skin_id, chamber_id, press timestamp) waiting for assignment
         self._assignment_panel: TouchAssignmentPanel | None = None
@@ -483,10 +485,8 @@ class SessionPanel(QWidget, Ui_SessionPanel):
     def _on_touch_detail_event(self, skin_id: str, chamber_id: int, action: str,
                                sensor_id: int, intensity_ut: object) -> None:
         """Receive physical touches with their compensated edge magnitude."""
-        try:
-            intensity = float(intensity_ut) if intensity_ut is not None else None
-        except (TypeError, ValueError):
-            intensity = None
+        intensity = (float(intensity_ut)
+                     if isinstance(intensity_ut, (int, float)) else None)
         self._on_touch_event(skin_id, chamber_id, action,
                              sensor_id=sensor_id, intensity_ut=intensity)
 
@@ -502,17 +502,17 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         metadata = ""
         if action == "press":
             pressed_at = time.monotonic()
-            frequency_key = (skin_id, sensor_id if sensor_id is not None else chamber_id)
-            previous_press = self._last_touch_press.get(frequency_key)
-            self._last_touch_press[frequency_key] = pressed_at
+            interval_ms = self._press_rates.setdefault(
+                skin_id, PressRateMeter()).record(
+                    sensor_id if sensor_id is not None else chamber_id,
+                    pressed_at * 1000.0)
             self._touch_presses[key] = (pressed_at, now, intensity_ut, sensor_id)
             details = {}
             if sensor_id is not None:
                 details["sensor_id"] = sensor_id
             if intensity_ut is not None:
                 details["intensity_ut"] = round(intensity_ut, 1)
-            if previous_press is not None and pressed_at > previous_press:
-                interval_ms = (pressed_at - previous_press) * 1000.0
+            if interval_ms is not None:
                 details["touch_interval_ms"] = round(interval_ms)
                 details["frequency_hz"] = round(1000.0 / interval_ms, 3)
             metadata = json.dumps(details) if details else ""
@@ -888,4 +888,4 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         self._session_participants = []
         self._pending_touches = []
         self._touch_presses = {}
-        self._last_touch_press = {}
+        self._press_rates = {}

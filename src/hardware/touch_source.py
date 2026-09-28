@@ -133,8 +133,8 @@ class CompensatedMagnetSource:
         except Exception:   # noqa: BLE001 - never let one bad reading kill the stream
             logger.exception("touch compensation failed; deriving activity from raw uT")
             out = self._derive_active(data)
-        dead: list[int] = []
-        for i, cb in enumerate(self._subs):
+        dead: list[Callable[[dict[str, Any]], None]] = []
+        for cb in list(self._subs):
             try:
                 cb(out)
             except RuntimeError:        # Qt signal source deleted - prune it

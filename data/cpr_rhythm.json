@@ -2,7 +2,7 @@
   "format": "softedibo.activity",
   "version": 1,
   "name": "CPR Rhythm",
-    "description": "Three participants make consecutive, synchronized compression rounds at a steady cadence.",
+  "description": "Three participants make consecutive, synchronized compression rounds at a steady cadence.",
   "spec": {
     "initial": "listening",
     "states": {

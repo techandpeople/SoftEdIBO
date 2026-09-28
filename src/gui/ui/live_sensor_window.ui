@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>LiveSensorWindow</class>
+ <widget class="QDialog" name="LiveSensorWindow">
+  <property name="geometry">
+   <rect><x>0</x><y>0</y><width>720</width><height>460</height></rect>
+  </property>
+  <property name="windowTitle">
+   <string>Live touch sensors</string>
+  </property>
+  <property name="whatsThis">
+   <string>Live readout of this skin's touch sensors: magnitude, activation state and press rate per sensor, plus a rolling plot with each sensor's threshold as a dashed line. Display only - it changes nothing.</string>
+  </property>
+  <layout class="QVBoxLayout" name="outer_layout">
+   <item>
+    <widget class="QLabel" name="synchrony_label">
+     <property name="text"><string>Current synchrony: -- ms</string></property>
+     <property name="whatsThis"><string>Spread between the latest presses of the sensors that are active right now. Small values mean the participants pressed together.</string></property>
+    </widget>
+   </item>
+   <item>
+    <layout class="QGridLayout" name="sensor_grid">
+     <item row="0" column="0">
+      <widget class="QLabel" name="sensor_header">
+       <property name="text"><string>Sensor</string></property>
+      </widget>
+     </item>
+     <item row="0" column="1">
+      <widget class="QLabel" name="magnitude_header">
+       <property name="text"><string>Magnitude</string></property>
+       <property name="whatsThis"><string>Compensated field magnitude in uT.</string></property>
+      </widget>
+     </item>
+     <item row="0" column="2">
+      <widget class="QLabel" name="level_header">
+       <property name="text"><string>Level</string></property>
+       <property name="whatsThis"><string>Magnitude as a bar scaled to three times the sensor's threshold.</string></property>
+      </widget>
+     </item>
+     <item row="0" column="3">
+      <widget class="QLabel" name="state_header">
+       <property name="text"><string>State</string></property>
+       <property name="whatsThis"><string>ACTIVE while the sensor is above its activation threshold.</string></property>
+      </widget>
+     </item>
+     <item row="0" column="4">
+      <widget class="QLabel" name="frequency_header">
+       <property name="text"><string>Frequency</string></property>
+       <property name="whatsThis"><string>Presses per second from the last two presses; resets after the tuning panel's frequency reset time without a press.</string></property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <widget class="MagnitudePlot" name="magnitude_plot">
+     <property name="whatsThis"><string>Recent magnitude per sensor; the dashed line is its activation threshold.</string></property>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>MagnitudePlot</class>
+   <extends>QWidget</extends>
+   <header>src.gui.monitor.magnitude_plot</header>
+   <container>1</container>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>

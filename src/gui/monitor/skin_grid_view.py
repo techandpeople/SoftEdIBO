@@ -20,7 +20,6 @@ to give the user a visual map of where each chamber sits and how full it is.
 from __future__ import annotations
 
 import logging
-import time
 from collections import deque
 from typing import Any
 
@@ -43,7 +42,6 @@ _CHAMBER_PULSE = QColor("#3498db")  # touched chamber highlight (blue)
 # zero over this window so brief contacts still flash visibly.
 _TOUCH_FADE_MS    = 400
 _TOUCH_TICK_MS    = 40        # repaint cadence while a pulse is alive
-_FREQUENCY_STALE_MS = 10000   # default hide cadence after 10 s without a press
 _SIM_PRESS_MAG_UT = 120.0     # above the default 100 uT rhythm threshold
 
 # 4-connectivity offsets used when grouping cells into regions.
@@ -86,9 +84,9 @@ class SkinGridView(QWidget):
         self._active_sensors:  dict[int, int] = {}
         self._active_chambers: dict[int, int] = {}
         self._held_sensors:    set[int] = set()
-        self._display_active:  set[int] = set()
-        self._last_sensor_press_ms: dict[int, float] = {}
-        self._sensor_frequency_hz: dict[int, float] = {}
+        # Frequency last written on each T button (None = "--"), so a label
+        # is only re-set when the skin's press rate changes.
+        self._shown_frequency: dict[int, float | None] = {}
         self._tick = QTimer(self)
         self._tick.setInterval(_TOUCH_TICK_MS)
         self._tick.timeout.connect(self._decay_pulses)
@@ -454,28 +452,14 @@ class SkinGridView(QWidget):
         if not isinstance(active, list):
             return
         changed = False
-        now_ms = time.monotonic() * 1000.0
-        new_active: set[int] = set()
         for raw in active:
             try:
                 idx = int(raw)
             except (TypeError, ValueError):
                 continue
-            new_active.add(idx)
             self._active_sensors[idx] = 255
             changed = True
-            if idx not in self._display_active:
-                previous = self._last_sensor_press_ms.get(idx)
-                if previous is not None:
-                    interval_ms = now_ms - previous
-                    if interval_ms > 0:
-                        self._sensor_frequency_hz[idx] = 1000.0 / interval_ms
-                        btn = self._sensor_buttons.get(idx)
-                        if btn is not None:
-                            btn.setText(
-                                f"T{idx}\n{self._sensor_frequency_hz[idx]:.1f} Hz")
-                self._last_sensor_press_ms[idx] = now_ms
-        self._display_active = new_active
+        self._show_frequencies()
         if changed:
             if not self._tick.isActive():
                 self._tick.start()
@@ -483,26 +467,29 @@ class SkinGridView(QWidget):
 
     def _decay_pulses(self) -> None:
         step = max(1, int(255 * (_TOUCH_TICK_MS / _TOUCH_FADE_MS)))
-        now_ms = time.monotonic() * 1000.0
-        frequency_stale_ms = float(
-            (self._skin.touch or {}).get("frequency_reset_ms",
-             _FREQUENCY_STALE_MS))
-        for idx, last_press_ms in list(self._last_sensor_press_ms.items()):
-            if (now_ms - last_press_ms) >= frequency_stale_ms:
-                if idx in self._sensor_frequency_hz:
-                    self._sensor_frequency_hz.pop(idx, None)
-                    btn = self._sensor_buttons.get(idx)
-                    if btn is not None:
-                        btn.setText(f"T{idx}\n-- Hz")
+        showing_rates = self._show_frequencies()
         # Held sensors stay at full brightness; only released sensors decay.
         for idx in self._held_sensors:
             self._active_sensors[idx] = 255
         self._fade_map(self._active_sensors, step, skip=self._held_sensors)
         self._fade_map(self._active_chambers, step)
         if (not self._active_sensors and not self._active_chambers
-            and not self._sensor_frequency_hz):
+            and not showing_rates):
             self._tick.stop()
         self.update()
+
+    def _show_frequencies(self) -> bool:
+        """Write the skin's per-sensor press rate onto the T buttons; True
+        while any rate is still shown (the tick must run to expire it)."""
+        rates = self._skin.press_rate.frequencies_hz()
+        for idx, btn in self._sensor_buttons.items():
+            rate = rates.get(idx)
+            shown = round(rate, 1) if rate is not None else None
+            if self._shown_frequency.get(idx) != shown:
+                self._shown_frequency[idx] = shown
+                btn.setText(f"T{idx}\n{shown:.1f} Hz" if shown is not None
+                            else f"T{idx}\n-- Hz")
+        return bool(rates)
 
     @staticmethod
     def _fade_map(pulses: dict[int, int], step: int,

@@ -233,7 +233,8 @@ def _touch_with_saved_threshold(touch_cfg: dict[str, Any] | None,
     general default: the Skin pushes it to the node at build and the pressure
     compensator rederives ``act`` at the same value. An explicit per-skin
     ``act_threshold_ut`` in the config always wins; without a saved value the
-    config passes through untouched."""
+    config passes through untouched. The touch tuning panel's per-node values
+    (``Settings.touch_tuning``) are overlaid the same way."""
     if not touch_cfg:
         return touch_cfg
     from src.config.settings import Settings
@@ -249,19 +250,14 @@ def _touch_with_saved_threshold(touch_cfg: dict[str, Any] | None,
         out[key] = value
 
     settings = Settings()
-    key = str(touch_cfg.get("node_mac") or skin_type or "")
-    quadrant_thresholds = settings.touch_quadrant_thresholds(key)
-    if quadrant_thresholds:
-        apply("quadrant_thresholds", quadrant_thresholds)
-    spike_threshold = settings.touch_spike_threshold(key)
-    if spike_threshold is not None:
-        apply("rhythm_spike_ut", spike_threshold)
-    frequency_reset_ms = settings.touch_frequency_reset_ms(key)
-    if frequency_reset_ms is not None:
-        apply("frequency_reset_ms", frequency_reset_ms)
-    sync_tolerance_ms = settings.touch_sync_tolerance_ms(key)
-    if sync_tolerance_ms is not None:
-        apply("rhythm_sync_tolerance_ms", sync_tolerance_ms)
+    key = settings.touch_tuning_key(touch_cfg, skin_type)
+    # Saved tuning field -> the touch-config key the runtime reads.
+    for field, config_key in (("quadrant_thresholds", "quadrant_thresholds"),
+                              ("spike_threshold_ut", "rhythm_spike_ut"),
+                              ("frequency_reset_ms", "frequency_reset_ms")):
+        value = settings.touch_tuning(key, field)
+        if value is not None:
+            apply(config_key, value)
     if not touch_cfg.get("act_threshold_ut") and skin_type:
         saved = settings.touch_threshold_ut(skin_type)
         if saved is not None:

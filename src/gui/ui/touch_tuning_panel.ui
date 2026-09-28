@@ -6,7 +6,7 @@
    <string>Touch tuning</string>
   </property>
   <property name="whatsThis">
-   <string>Live tuning for this skin's 4-sensor quadrant touch detection. Adjust per-quadrant thresholds and hysteresis, re-zero the sensors, or enable the node's adaptive baseline. Changes are runtime-only - copy good values into the skin's touch: block to keep them.</string>
+   <string>Live tuning for this skin's 4-sensor quadrant touch detection. Adjust per-quadrant thresholds and hysteresis, re-zero the sensors, or enable the node's adaptive baseline. Thresholds, spike delta and frequency reset are saved for this touch node; hysteresis and the adaptive baseline are runtime-only.</string>
   </property>
   <property name="styleSheet">
    <string notr="true">QDoubleSpinBox { min-width: 56px; }</string>
@@ -47,7 +47,7 @@
      <property name="toolTip"><string>Activation threshold for Q1 (TL) in uT.
 Set above resting value and below touch peak.
 Re-zero sensors first so rest values are near 0.</string></property>
-     <property name="whatsThis"><string>Activation threshold for quadrant Q1 (top left) in uT, applied to the live detector immediately. Set it above the resting value and below a touch peak; re-zero the sensors first so rest reads near 0. Runtime only - not saved.</string></property>
+     <property name="whatsThis"><string>Activation threshold for quadrant Q1 (top left) in uT, applied to the live detector immediately. Set it above the resting value and below a touch peak; re-zero the sensors first so rest reads near 0. Saved for this touch node.</string></property>
      <property name="decimals"><number>0</number></property>
      <property name="maximum"><double>2000.000000000000000</double></property>
      <property name="singleStep"><double>10.000000000000000</double></property>
@@ -59,7 +59,7 @@ Re-zero sensors first so rest values are near 0.</string></property>
      <property name="toolTip"><string>Activation threshold for Q2 (TR) in uT.
 Set above resting value and below touch peak.
 Re-zero sensors first so rest values are near 0.</string></property>
-     <property name="whatsThis"><string>Activation threshold for quadrant Q2 (top right) in uT, applied to the live detector immediately. Set it above the resting value and below a touch peak; re-zero the sensors first so rest reads near 0. Runtime only - not saved.</string></property>
+     <property name="whatsThis"><string>Activation threshold for quadrant Q2 (top right) in uT, applied to the live detector immediately. Set it above the resting value and below a touch peak; re-zero the sensors first so rest reads near 0. Saved for this touch node.</string></property>
      <property name="decimals"><number>0</number></property>
      <property name="maximum"><double>2000.000000000000000</double></property>
      <property name="singleStep"><double>10.000000000000000</double></property>
@@ -71,7 +71,7 @@ Re-zero sensors first so rest values are near 0.</string></property>
      <property name="toolTip"><string>Activation threshold for Q3 (BL) in uT.
 Set above resting value and below touch peak.
 Re-zero sensors first so rest values are near 0.</string></property>
-     <property name="whatsThis"><string>Activation threshold for quadrant Q3 (bottom left) in uT, applied to the live detector immediately. Set it above the resting value and below a touch peak; re-zero the sensors first so rest reads near 0. Runtime only - not saved.</string></property>
+     <property name="whatsThis"><string>Activation threshold for quadrant Q3 (bottom left) in uT, applied to the live detector immediately. Set it above the resting value and below a touch peak; re-zero the sensors first so rest reads near 0. Saved for this touch node.</string></property>
      <property name="decimals"><number>0</number></property>
      <property name="maximum"><double>2000.000000000000000</double></property>
      <property name="singleStep"><double>10.000000000000000</double></property>
@@ -83,7 +83,7 @@ Re-zero sensors first so rest values are near 0.</string></property>
      <property name="toolTip"><string>Activation threshold for Q4 (BR) in uT.
 Set above resting value and below touch peak.
 Re-zero sensors first so rest values are near 0.</string></property>
-     <property name="whatsThis"><string>Activation threshold for quadrant Q4 (bottom right) in uT, applied to the live detector immediately. Set it above the resting value and below a touch peak; re-zero the sensors first so rest reads near 0. Runtime only - not saved.</string></property>
+     <property name="whatsThis"><string>Activation threshold for quadrant Q4 (bottom right) in uT, applied to the live detector immediately. Set it above the resting value and below a touch peak; re-zero the sensors first so rest reads near 0. Saved for this touch node.</string></property>
      <property name="decimals"><number>0</number></property>
      <property name="maximum"><double>2000.000000000000000</double></property>
      <property name="singleStep"><double>10.000000000000000</double></property>
@@ -130,6 +130,13 @@ A sensor deactivates at (threshold - hysteresis), preventing flicker.</string></
        <property name="text"><string>Re-zero sensors</string></property>
       </widget>
      </item>
+     <item>
+      <widget class="QPushButton" name="live_btn">
+       <property name="toolTip"><string>Open a live readout of this skin's touch sensors</string></property>
+       <property name="whatsThis"><string>Open a window with each touch sensor's live magnitude, state and press rate, plus a rolling plot against its threshold.</string></property>
+       <property name="text"><string>Live sensor data</string></property>
+      </widget>
+     </item>
     </layout>
    </item>
    <item row="3" column="0" colspan="4">
@@ -171,7 +178,8 @@ tau is the drift time constant in ms (larger = slower tracking).</string></prope
      </item>
      <item row="4" column="1">
       <widget class="QDoubleSpinBox" name="spike_spin">
-          <property name="toolTip"><string>Minimum magnitude rise in uT required for a new CPR beat while a sensor remains active.</string></property>
+          <property name="toolTip"><string>Minimum magnitude rise in uT that counts as a new press while a sensor remains active.</string></property>
+          <property name="whatsThis"><string>Rhythm detection: while a sensor stays above its threshold (the field does not fully recover between fast presses), a rise of at least this many uT counts as a new press. Saved for this touch node.</string></property>
           <property name="decimals"><number>0</number></property>
           <property name="maximum"><double>2000.000000000000000</double></property>
           <property name="singleStep"><double>10.000000000000000</double></property>
@@ -186,6 +194,7 @@ tau is the drift time constant in ms (larger = slower tracking).</string></prope
      <item row="5" column="1">
       <widget class="QDoubleSpinBox" name="frequency_reset_spin">
           <property name="toolTip"><string>Time without a new press before the displayed frequency resets.</string></property>
+          <property name="whatsThis"><string>Display only: after this long without a press, a sensor's shown frequency (skin grid and live sensor window) goes back to "--". Saved for this touch node.</string></property>
           <property name="decimals"><number>0</number></property>
           <property name="minimum"><double>100.000000000000000</double></property>
           <property name="maximum"><double>60000.000000000000000</double></property>
@@ -193,21 +202,6 @@ tau is the drift time constant in ms (larger = slower tracking).</string></prope
           <property name="suffix"><string> ms</string></property>
       </widget>
      </item>
-    <item row="6" column="0">
-     <widget class="QLabel" name="sync_tolerance_label">
-        <property name="text"><string>Synchrony tolerance:</string></property>
-     </widget>
-    </item>
-    <item row="6" column="1">
-     <widget class="QDoubleSpinBox" name="sync_tolerance_spin">
-        <property name="toolTip"><string>Maximum time difference between the latest presses of the participating quadrants.</string></property>
-        <property name="decimals"><number>0</number></property>
-        <property name="minimum"><double>0.000000000000000</double></property>
-        <property name="maximum"><double>2000.000000000000000</double></property>
-        <property name="singleStep"><double>10.000000000000000</double></property>
-        <property name="suffix"><string> ms</string></property>
-     </widget>
-    </item>
   </layout>
  </widget>
  <resources/>

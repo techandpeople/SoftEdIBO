@@ -33,6 +33,7 @@ from src.hardware.fill_scaling import (DutyModel, duty_for_period,
 from src.hardware.touch_event_router import TouchEventRouter
 from src.hardware.units import pct_to_kpa
 from src.hardware.touch_profiles import touch_profiles
+from src.core.press_rate import DEFAULT_STALE_MS, PressRateMeter
 from src.hardware.touch_source import (DEFAULT_THRESHOLD_UT,
                                        CompensatedMagnetSource)
 
@@ -218,6 +219,10 @@ class Skin:
         self._touch_router = TouchEventRouter.from_touch_config(
             touch, len(self._chambers), name=self.skin_id)
         self._touch_router.attach(self.touch_source)
+        # Per-sensor press rate shared by the monitor displays.
+        self.press_rate = PressRateMeter(float(
+            (touch or {}).get("frequency_reset_ms", DEFAULT_STALE_MS)))
+        self._touch_router.subscribe_detail(self._record_press_rate)
 
     # ------------------------------------------------------------------
     # Construction helpers
@@ -1024,6 +1029,17 @@ class Skin:
         """Live-update the detection hysteresis."""
         if self._touch_detector is not None:
             self._touch_detector.set_hysteresis(float(hysteresis))
+
+    def set_touch_spike_ut(self, value: float) -> None:
+        """Live-update the rise (uT) that counts a new press while a sensor
+        stays active (read by the activity's compression detector)."""
+        if self.touch is not None:
+            self.touch["rhythm_spike_ut"] = float(value)
+
+    def _record_press_rate(self, _chamber_id: int, action: str,
+                           sensor_idx: int, _intensity_ut: float | None) -> None:
+        if action == "press":
+            self.press_rate.record(sensor_idx)
 
     def rebaseline_touch(self) -> bool:
         """Ask the touch node to re-zero its sensors (ESP-NOW `rebaseline`).

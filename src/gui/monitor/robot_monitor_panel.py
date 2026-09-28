@@ -90,7 +90,7 @@ class RobotMonitorPanel(QWidget):
             rw.set_paused(paused)
 
     def set_activity(self, activity) -> None:
-        """Attach the active activity so robot cards can mirror CPR state."""
+        """Attach the running activity so robot cards show its progress."""
         self._activity = activity
         for rw in self._robot_widgets:
             rw.set_activity(activity)

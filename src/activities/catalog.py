@@ -626,23 +626,8 @@ CONDITIONS: tuple[Verb, ...] = (
     ), template="same touch rhythm: every {target_interval_ms} +/- {tolerance_ms}, "
                 "{intervals} intervals\nignore gaps shorter than {min_gap_ms}",
        category="Conditions"),
-    Verb("group_touch_rhythm", "condition",
-         "True when several separate touch sensors have steady frequencies whose "
-         "latest values are close to the shared frequency (learned from the "
-         "children themselves).", (
-        VerbField("participants", "int", 3, min=2,
-                  description="Separate sensor streams that must agree."),
-        VerbField("tolerance_hz", "float", 5, min=0,
-                  description="Allowed difference from the shared frequency."),
-        VerbField("min_gap_ms", "ms", 20, min=0,
-                  description="Ignore faster changes as duplicate edges."),
-        VerbField("intervals", "int", 5, min=1,
-                  description="Steady intervals required from each stream."),
-    ), template="{participants} children match frequency within {tolerance_hz} Hz, "
-                "{intervals} intervals\nignore gaps shorter than {min_gap_ms}",
-       category="Conditions"),
     Verb("group_touch_sync", "condition",
-         "True after consecutive group compression rounds: every selected child "
+         "True after consecutive group press rounds: every selected child "
          "must press within one phase window on every beat, and the group beats "
          "must keep the chosen cadence; a late child or wrong beat resets the "
          "streak. 'mode' auto lets the children pick themselves: the first "
