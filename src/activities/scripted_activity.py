@@ -624,7 +624,7 @@ class ScriptedActivity(BaseActivity):
         """Expose CPR progress on the Skin for the live touch-sensor window."""
         if unit.skin is None or unit.cpr_sync_params is None:
             return
-        if unit.state.lower() in {"complete", "success", "done"}:
+        if catalog.is_final_state(self._spec, unit.state):
             status = {"active": True, "complete": True,
                       "rounds": unit.cpr_sync_params.get("rounds", 6),
                       "rounds_required": unit.cpr_sync_params.get("rounds", 6),

@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from src.activities import available_activities, skin_condition
+from src.activities import activity_kind, available_activities, skin_condition
 from src.activities.base_activity import BaseActivity
 from src.core import node_sharing
 from src.data.database import Database
@@ -188,11 +188,15 @@ class SessionSetupDialog(BaseDialog, Ui_SessionSetupDialog):
     # ------------------------------------------------------------------
 
     def _on_activity_changed(self, index: int) -> None:
-        """Show the new activity's target skin and re-check skin mismatches."""
+        """Show the new activity's target (robot kind + skin condition) and
+        re-check skin mismatches."""
         activity: BaseActivity | None = self.activity_combo.itemData(index)
+        target = getattr(activity, "target", None) or {}
+        kind = target.get("kind") if isinstance(target, dict) else None
         skin = getattr(activity, "skin", None)
         self.target_skin_label.setText(
-            skin_condition.label(skin) if skin else "Any")
+            f"{activity_kind.label(kind) if kind else 'Any robot'} / "
+            f"{skin_condition.label(skin) if skin else 'any skin'}")
         self._update_selection_warnings()
 
     def _update_selection_warnings(self) -> None:

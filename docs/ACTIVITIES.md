@@ -148,32 +148,71 @@ hospital study's behaviours. Two layers:
   `all_good`/`all_bad` mean "every organ matches", `count` compares the good and
   bad counts via their operators (e.g. `good >= 3 and bad <= 0` to cure).
 
-  A spec may declare a **target**: new-style targets carry a **skin
-  condition** - `{"skin": "natural" | "wrinkles" | "organs"}` (see
-  [`skin_condition.py`](../src/activities/skin_condition.py)) - meaning the
-  behaviour is written for that silicone set and runs on **any** robot;
-  robot-specific parts are gated inside the spec with `if_robot` blocks (or
-  `robot_is` transition conditions). The session setup pre-selects the
-  matching activity and warns when a chosen robot's configured skin variants
-  don't match the condition. Legacy `{"kind": thymio|turtle|tree}` targets
-  (see [`activity_kind.py`](../src/activities/activity_kind.py)) still narrow
-  the behaviour to one robot topology.
+  A spec may declare a **target** with a **robot kind** and/or a **skin
+  condition**: `{"kind": "thymio" | "turtle" | "tree", "skin": "natural" |
+  "wrinkles" | "organs"}` (see [`activity_kind.py`](../src/activities/activity_kind.py)
+  and [`skin_condition.py`](../src/activities/skin_condition.py)). The kind
+  narrows the behaviour to one robot topology (the study runs Turtle
+  activities and Thymio activities, never mixed); the skin says which silicone
+  set it is written for, so the session setup pre-selects the matching
+  activity and warns when a chosen robot's configured skin variants don't
+  match. Either part may be left out ("any"); robot-specific parts of an
+  any-robot behaviour are gated with `if_robot` blocks (or `robot_is`
+  transition conditions).
+
+  A phase may be flagged `"final": true` - the terminal phase of the story
+  (the cured robot). The runtime reads it through `catalog.is_final_state`
+  (the legacy names `complete` / `success` / `done` still count) for the live
+  CPR status.
 
 - **Authoring:** **Tools -> Activity Editor...**
   ([`activity_editor_dialog.py`](../src/gui/activity_editor_dialog.py)) is a
   thin frame around the editor panel
   ([`behavior_editor_panel.py`](../src/gui/behavior_editor_panel.py)), a
-  Scratch-like **block editor** (Blockly in a `QWebEngineView`). Blocks compile
-  to a spec on Save and are stored in the `declarative_activities` table; the
-  exact workspace is stashed under the spec's ignored `_blockly` key for exact
-  round-trip editing. A spec **without** `_blockly` (hand-authored, or imported
-  from a `.json` file like those in `config/examples/behaviours/`) is rebuilt
-  into blocks from the spec itself, so it opens editable and re-saveable rather
-  than blank. **Blockly / QtWebEngine load only inside the editor** -
-  never during a session. Blockly is loaded from a vendored copy
-  (`scripts/fetch_blockly.sh`) or the CDN as a fallback. (The former
-  **Presets** tab is gone - behaviours authored here *are* the activities, so
-  there is no separate per-activity preset surface any more.)
+  Scratch-like **block editor** (Blockly in a `QWebEngineView`,
+  [`editor.html`](../src/gui/blockly/editor.html)).
+
+  **The blocks are generated from the catalogue.** On load the panel hands
+  the page `catalog.editor_catalog()` (every verb with its `template` - the
+  block's rows and words with `{field}` slots - its fields' types, choice
+  labels, ranges and `show_when` rules - plus the colour palette) through
+  `initEditor(payload)`. The page builds one block per verb (and per
+  `Variant`, e.g. "set LED quarters"), the toolbox from `CATEGORIES`, and the
+  compile / decompile code from the field list, so **adding a verb is one
+  catalogue entry** - the page only changes for a new field *type*. Only the
+  three structural blocks are hand-written: the behaviour root (target robot
+  + skin), the phase (name, `final` checkbox, `do` / `on touch` /
+  `transitions`) and the transition. Field types: numbers with bounds, times
+  as a number **plus a unit** (ms / s / min, stored as ms), colours as a
+  **swatch** (study palette + custom picker, no more pasting `#tags`),
+  `phase` fields as a **dropdown of the phases in the workspace** (renaming a
+  phase rewrites every reference), and conditional rows that appear only when
+  another field calls for them (beat's soft-chamber row, the rhythm row of
+  zone fill, fixed sensors of group sync).
+
+  Save compiles the blocks to a spec, validates it (`validate_spec`, hard
+  errors) and **lints** it (`lint_spec` + the page's `getWarnings()`:
+  unreachable phases, fill jumps to a missing phase, a final phase with
+  transitions, an `always` transition shadowing later ones, a `repeat
+  forever` with nothing that takes time, duplicate phase names, loose
+  blocks) - warnings can be overridden with "Save anyway". Specs are stored
+  in the `declarative_activities` table; the exact workspace is stashed under
+  the spec's ignored `_blockly` key (`{"format": 2, "workspace": ...}`) so
+  block positions round-trip. On load the saved workspace must compile back to
+  the saved spec, otherwise - and for a spec **without** a blob (hand-authored,
+  imported from `config/examples/behaviours/`, or saved by the older editor) -
+  the blocks are **rebuilt from the spec itself**, so nothing opens blank or
+  stale. **Blockly / QtWebEngine load only inside the editor** - never during
+  a session. Blockly is loaded from a vendored copy (`scripts/fetch_blockly.sh`)
+  or the CDN as a fallback. (The former **Presets** tab is gone - behaviours
+  authored here *are* the activities.)
+
+  The page's JavaScript is tested without Qt: `tests/test_editor_js.py`
+  drives `editor.html` in a headless Chromium through
+  [`tests/editor_harness.py`](../tests/editor_harness.py) (round-trips of
+  every example behaviour, phase renames, unit conversion, legacy-blob
+  fallback); it skips when no Chromium/Chrome is found (`SOFTEDIBO_CHROME`
+  points at one).
 
 Saved behaviours appear in the session activity dropdown via
 [`available_activities(db)` / `get_activity(name, db)`](../src/activities/__init__.py).

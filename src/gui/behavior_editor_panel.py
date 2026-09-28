@@ -8,10 +8,15 @@ they are compiled to the declarative spec interpreted by
 session activity list and runs **without** this editor - Blockly / QtWebEngine
 are only ever imported here, never during a session.
 
+The page generates its blocks from the verb catalogue: once loaded, the panel
+hands it :func:`~src.activities.catalog.editor_catalog` (plus the colour
+palette) through ``initEditor(payload)``, and from then on drives it through
+``getSpec()``, ``getWarnings()``, ``loadSpec(json)`` and ``newWorkspace()``
+(see ``blockly/editor.html``). Saving validates the compiled spec (hard
+errors) and lints it (advisory warnings the user may override).
+
 This is a plain :class:`QWidget` so it can be embedded as the "Visual Editor"
-tab of :class:`~src.gui.activity_editor_dialog.ActivityEditorDialog`. Python
-drives the page through three JS globals (see ``blockly/editor.html``):
-``getSpec()``, ``loadSpec(json)`` and ``newWorkspace()``.
+tab of :class:`~src.gui.activity_editor_dialog.ActivityEditorDialog`.
 """
 
 from __future__ import annotations
@@ -30,7 +35,8 @@ from PySide6.QtWidgets import (
 
 from src.activities.activity_io import (
     ActivityFileError, deserialize_activity, serialize_activity)
-from src.activities.catalog import SpecError, validate_spec
+from src.activities.catalog import (
+    SpecError, editor_catalog, lint_spec, validate_spec)
 from src.config.settings import Settings
 from src.data.database import Database
 from src.data.models import DeclarativeActivity
@@ -156,10 +162,19 @@ class BehaviorEditorPanel(QWidget, Ui_BehaviorEditorPanel):
     # ------------------------------------------------------------------
 
     def _on_load_finished(self, ok: bool) -> None:
-        self._ready = bool(ok)
-        self._set_buttons_enabled(ok)
         if not ok:
             self._status("Editor failed to load - see the editor message.")
+            return
+        # Hand the page the verb catalogue: it builds every block, the toolbox
+        # and its compile/decompile code from it (see editor.html).
+        payload = json.dumps({"catalog": editor_catalog(),
+                              "palette": list(_PALETTE)})
+        self._web.page().runJavaScript(f"initEditor({payload})",
+                                       self._on_editor_ready)
+
+    def _on_editor_ready(self, _result: object = None) -> None:
+        self._ready = True
+        self._set_buttons_enabled(True)
 
     def _set_buttons_enabled(self, on: bool) -> None:
         for w in (self.newButton, self.deleteButton, self.saveButton,
@@ -236,10 +251,16 @@ class BehaviorEditorPanel(QWidget, Ui_BehaviorEditorPanel):
             QMessageBox.warning(self, "Name required",
                                 "Give the behaviour a name before saving.")
             return
-        # Pull the compiled spec out of the page, then finish in the callback.
-        self._web.page().runJavaScript("getSpec()", self._save_with_spec)
+        # Pull the editor's own warnings first, then the compiled spec.
+        self._web.page().runJavaScript(
+            "getWarnings()",
+            lambda warnings_json: self._web.page().runJavaScript(
+                "getSpec()",
+                lambda spec_json: self._save_with_spec(spec_json,
+                                                       warnings_json)))
 
-    def _save_with_spec(self, spec_json: str | None) -> None:
+    def _save_with_spec(self, spec_json: str | None,
+                        warnings_json: str | None = None) -> None:
         if not spec_json:
             QMessageBox.warning(self, "Nothing to save",
                                 "The editor returned no behaviour.")
@@ -253,6 +274,9 @@ class BehaviorEditorPanel(QWidget, Ui_BehaviorEditorPanel):
                 f"The blocks don't form a valid behaviour:\n\n{exc}\n\n"
                 "Every behaviour needs at least one phase, and each transition "
                 "must point at a phase that exists.")
+            return
+        warnings = self._collect_warnings(spec, warnings_json)
+        if warnings and not self._confirm_warnings(warnings):
             return
 
         name = self.nameEdit.text().strip()
@@ -269,6 +293,31 @@ class BehaviorEditorPanel(QWidget, Ui_BehaviorEditorPanel):
         self._pending_description = None
         self._reload_combo(select_id=rec.activity_id)
         self._status(f"Saved {rec.activity_id} - '{name}'.")
+
+    @staticmethod
+    def _collect_warnings(spec: dict, warnings_json: str | None) -> list[str]:
+        """Editor-side warnings (duplicate phases, loose blocks) followed by
+        the catalogue's lint of the compiled spec."""
+        out: list[str] = []
+        try:
+            out.extend(str(w) for w in json.loads(warnings_json or "[]"))
+        except json.JSONDecodeError:
+            pass
+        out.extend(lint_spec(spec))
+        return out
+
+    def _confirm_warnings(self, warnings: list[str]) -> bool:
+        """Show the lint warnings; True when the user wants to save anyway."""
+        text = "\n".join(f"- {w}" for w in warnings)
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle("Check the behaviour")
+        box.setText("The behaviour will run, but some things look unintended:")
+        box.setInformativeText(text)
+        save = box.addButton("Save anyway", QMessageBox.ButtonRole.AcceptRole)
+        box.addButton("Go back", QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        return box.clickedButton() is save
 
     # ------------------------------------------------------------------
     # Import / export (portable .json files)

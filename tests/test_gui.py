@@ -119,8 +119,8 @@ class TestSessionSetupDialog:
         _seed_behaviour(db)
         dlg = SessionSetupDialog(robots=[], db=db)
         qtbot.addWidget(dlg)
-        # The seed behaviour has no skin target, so the label shows "Any".
-        assert dlg.target_skin_label.text() == "Any"
+        # The seed behaviour has no target, so the label shows "any / any".
+        assert dlg.target_skin_label.text() == "Any robot / any skin"
 
     def test_no_robots_label_shown_when_empty(self, qtbot, db):
         dlg = SessionSetupDialog(robots=[], db=db)

@@ -1,92 +1,52 @@
 <!DOCTYPE html>
-<!--
-  Block editor for the SoftEdIBO behaviour engine (Tools => Activity Editor...).
-
-  Scratch-like authoring: drag blocks to build a behaviour, which compiles to
-  the declarative spec interpreted by ScriptedActivity (src/activities/
-  scripted_activity.py). The editor (Blockly) is only ever loaded inside this
-  dialog - never during a session.
-
-  Python talks to this page through three global functions, called via
-  QWebEngineView.page().runJavaScript:
-    getSpec()        -> JSON string of {initial, states, _blockly}
-    loadSpec(json)   -> restore a saved behaviour into the workspace
-    newWorkspace()   -> reset to one empty phase
-
-  Colours are plain "#rrggbb" tags in the colour blocks. The hosting panel
-  shows a "Colour helper" side panel to pick a colour visually, copy its tag
-  and preview it live on the connected robots - see behavior_editor_panel.py.
-
-  Blockly is loaded from a vendored copy (./blockly.min.js) when present, else
-  from the unpkg CDN. Run scripts/fetch_blockly.sh to vendor it for offline use.
--->
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Activity Editor - Visual</title>
+  <title>SoftEdIBO behaviour editor</title>
   <style>
-    html, body { margin: 0; height: 100%; font-family: sans-serif; }
+    html, body { margin: 0; height: 100%; overflow: hidden; font-family: sans-serif; }
     #blocklyDiv { position: absolute; top: 0; left: 0; right: 0; bottom: 0; }
     #error { padding: 16px; color: #b00; display: none; white-space: pre-wrap; }
+    .se-picker { padding: 6px; width: 176px; }
+    .se-picker-grid { display: grid; grid-template-columns: repeat(6, 24px); gap: 4px; }
+    .se-swatch { width: 24px; height: 24px; border-radius: 4px; border: 1px solid #999;
+                 cursor: pointer; box-sizing: border-box; }
+    .se-swatch.selected { border: 3px solid #333; }
+    .se-picker-custom { margin-top: 8px; display: flex; align-items: center; gap: 6px;
+                        font-size: 12px; }
+    .se-picker-custom input[type=color] { width: 40px; height: 24px; padding: 0;
+                                          border: 1px solid #999; }
+    .se-picker-custom input[type=text] { width: 70px; font-family: monospace; }
   </style>
 </head>
 <body>
   <div id="blocklyDiv"></div>
   <div id="error"></div>
-  <xml id="toolbox" style="display:none">
-    <category name="Phases" colour="290">
-      <block type="se_behaviour"></block>
-      <block type="se_state"></block>
-      <block type="se_transition"></block>
-    </category>
-    <category name="Lights" colour="230">
-      <block type="se_set_led"></block>
-      <block type="se_set_led_halves"></block>
-      <block type="se_set_led_quarters"></block>
-      <block type="se_fade"></block>
-      <block type="se_touch_progress"></block>
-      <block type="se_zone_fill"></block>
-      <block type="se_sync_fill"></block>
-      <block type="se_score_fill"></block>
-    </category>
-    <category name="Chambers" colour="30">
-      <block type="se_inflate"></block>
-      <block type="se_deflate"></block>
-      <block type="se_set_pressure"></block>
-      <block type="se_beat"></block>
-      <block type="se_stop"></block>
-    </category>
-    <category name="Thymio" colour="160">
-      <block type="se_thymio_drive"></block>
-      <block type="se_thymio_leds"></block>
-      <block type="se_thymio_sound"></block>
-    </category>
-    <category name="Control" colour="120">
-      <block type="se_wait"></block>
-      <block type="se_wait_for_touch"></block>
-      <block type="se_repeat"></block>
-      <block type="se_for_each"></block>
-      <block type="se_if_robot"></block>
-    </category>
-    <category name="Conditions" colour="20">
-      <block type="se_elapsed"></block>
-      <block type="se_touch_count"></block>
-      <block type="se_gesture_count"></block>
-      <block type="se_touch_rhythm"></block>
-      <block type="se_group_touch_rhythm"></block>
-      <block type="se_group_touch_sync"></block>
-      <block type="se_on_impact"></block>
-      <block type="se_on_lifted"></block>
-      <block type="se_organs"></block>
-      <block type="se_robot_is"></block>
-      <block type="se_any"></block>
-      <block type="se_all"></block>
-      <block type="se_not"></block>
-      <block type="se_always"></block>
-    </category>
-  </xml>
 
   <script>
+    // =====================================================================
+    // SoftEdIBO behaviour editor.
+    //
+    // Python drives this page through a handful of globals:
+    //   initEditor(payload)  - {catalog, palette}: the verb catalogue exported
+    //                          by src/activities/catalog.py (editor_catalog())
+    //                          plus the colour palette. Called once after the
+    //                          page loads; every block, the toolbox and the
+    //                          compile/decompile code are generated from it.
+    //   getSpec()            - compile the workspace to a behaviour spec (JSON).
+    //   getWarnings()        - editor-side warnings (duplicate phases, stray
+    //                          blocks) as a JSON list of strings.
+    //   loadSpec(json)       - show a spec (its saved workspace, or rebuilt
+    //                          from the spec itself).
+    //   newWorkspace()       - a fresh behaviour with one empty phase.
+    //
+    // Only three blocks are written by hand - the structural ones: the
+    // behaviour root (target robot + skin), the phase, and the transition.
+    // Everything else comes from the catalogue: each verb's `template` gives
+    // the block's rows and words, each field's `type` picks the widget and
+    // how it is read back into the spec.
+    // =====================================================================
+
     // ---- Load Blockly: vendored first, CDN fallback --------------------
     function loadScript(src, onload, onerror) {
       var s = document.createElement('script');
@@ -95,10 +55,9 @@
     }
     // The bundled build always ships blockly.min.js (softedibo.spec fails the
     // build without it), so reaching the CDN means an incomplete install - not
-    // a normal offline run. Say that, rather than blaming the network: the CDN
-    // hop silently masked a missing asset for every machine that had internet.
-    loadScript('./blockly.min.js', init, function () {
-      loadScript('https://unpkg.com/blockly/blockly.min.js', init, function () {
+    // a normal offline run. Say that, rather than blaming the network.
+    loadScript('./blockly.min.js', onBlocklyLoaded, function () {
+      loadScript('https://unpkg.com/blockly/blockly.min.js', onBlocklyLoaded, function () {
         var e = document.getElementById('error');
         e.style.display = 'block';
         e.textContent = 'Could not load the block editor.\n\n'
@@ -109,884 +68,771 @@
     });
 
     var workspace = null;
-    var DEFAULT_COLOUR = '#8e44ad';
-    var PATTERN_OPTIONS = [['solid', 'solid'], ['pulse', 'pulse'],
-                           ['blink', 'blink'], ['comet', 'comet'], ['off', 'off']];
-    // Pump strength on a friendly 1-5 dial instead of a raw 0-255 PWM. 1 = the
-    // gentlest usable stroke (the calibrated per-skin-type minimum), 5 = full
-    // power. Mapped onto the calibrated duty range at runtime (fill_scaling.
-    // duty_for_power); 5 is the default and leaves any "over ms" slow-fill acting.
-    // Listed 5->1 so the dropdown defaults to its first option, 5 (full) - the
-    // historical "full speed" default - with no imperative init needed.
-    var POWER_OPTIONS = [['5 (full)', '5'], ['4', '4'], ['3', '3'],
-                         ['2', '2'], ['1 (gentle)', '1']];
-    // Gesture kinds for the "skip after N gestures" condition: a raw touch (any
-    // press, no model needed) or an ML-classified gesture (needs a trained model
-    // for the skin type). Kept in sync with gesture_taxonomy.GESTURE_CLASSES
-    // (tap / press / compressions) - 'compressions' is the study's active gesture.
-    var GESTURE_KINDS = [['a touch', 'touch'], ['a tap', 'tap'],
-                         ['a press', 'press'], ['compressions', 'compressions']];
+    var CATALOG = null;          // editor_catalog() payload
+    var PALETTE = [];            // quick-pick colours for the swatch field
+    var VERBS = {};              // verb name -> verb def
+    var BLOCK_DEFS = {};         // block type -> {verb, count}
+    var CATEGORY_HUE = {};       // category name -> hue
+    var mediaPath = null;
+    var blocklyReady = false;
+    var pending = [];            // ops requested before the editor was ready
 
-    function init() {
-      if (workspace) return;            // both loaders fired - ignore the 2nd
+    var MS_UNITS = [['ms', '1'], ['s', '1000'], ['min', '60000']];
+    var ANY_ROBOT = 'any', ANY_SKIN = 'any';
+
+    // ---- Boot ----------------------------------------------------------
+    function onBlocklyLoaded() {
+      if (blocklyReady) return;           // both loaders fired - ignore the 2nd
       // Blockly needs a "media" folder (sprites for the trashcan/zoom/dropdown
       // icons + click/delete sounds). Use a vendored ./media/ when present
-      // (offline), else the CDN - otherwise those assets 404 ("Failed to
-      // fetch") and the icons go missing. Probe a sprite to decide.
-      resolveMedia(function (media) {
-        if (workspace) return;
-        defineBlocks();
-        workspace = Blockly.inject('blocklyDiv', {
-          media: media,
-          toolbox: document.getElementById('toolbox'),
-          trashcan: true,
-          zoom: { controls: true, wheel: true, startScale: 0.9 },
-          grid: { spacing: 20, length: 3, colour: '#eee', snap: true },
-        });
-        newWorkspace();
-      });
-    }
-
-    function resolveMedia(cb) {
-      // Probe the vendored icon sheet (Blockly 13 ships sprites.svg). Present
-      // => use the offline copy; absent => fall back to the CDN media folder.
+      // (offline), else the CDN. Probe a sprite to decide.
       var img = new Image();
-      img.onload = function () { cb('./media/'); };
-      img.onerror = function () { cb('https://unpkg.com/blockly/media/'); };
+      img.onload = function () { mediaPath = './media/'; blocklyReady = true; maybeStart(); };
+      img.onerror = function () { mediaPath = 'https://unpkg.com/blockly/media/';
+                                  blocklyReady = true; maybeStart(); };
       img.src = './media/sprites.svg';
     }
 
-    // ---- Block definitions --------------------------------------------
-    function defineBlocks() {
-      var CH = [['current', 'current'], ['all', 'all'],
-                ['0', '0'], ['1', '1'], ['2', '2'], ['3', '3']];
-      // LED ring selector. The multiplexed board defines three independent
-      // rings (0..2; Tree populates all three, Turtle only ring 0); the direct
-      // board has one and ignores higher indices.
-      // Fill orders of the zone/sync fill blocks (see src/activities/led_canvas.py).
-      var HOLD = [['nothing', 'none'], ['glow the lit pixels', 'glow'],
-                  ['dim the unlit pixels', 'dim']];
-      var FILL = [['scattered', 'random'], ['in order', 'contiguous'],
-                  ['from the sensor', 'centre']];
-      var RING = [['all rings', 'all'], ['ring 0', '0'], ['ring 1', '1'],
-                  ['ring 2', '2']];
-      // Robot kinds for the `if robot is` / `robot is` blocks (activity_kind.KINDS).
-      var ROBOTS = [['Thymio', 'thymio'], ['Turtle', 'turtle'], ['Tree', 'tree']];
-      Blockly.defineBlocksWithJsonArray([
-        { type: 'se_state',
-          message0: 'phase %1', args0: [{ type: 'field_input', name: 'NAME', text: 'phase1' }],
-          message1: 'do %1', args1: [{ type: 'input_statement', name: 'DO', check: 'Step' }],
-          message2: 'on touch %1', args2: [{ type: 'input_statement', name: 'ONTOUCH', check: 'Step' }],
-          message3: 'transitions %1', args3: [{ type: 'input_statement', name: 'TRANSITIONS', check: 'Transition' }],
-          previousStatement: 'State', nextStatement: 'State', colour: 290,
-          tooltip: 'One phase: actions to run, an optional touch reaction, and transitions out.' },
-
-        { type: 'se_transition',
-          message0: 'go to phase %1 when %2',
-          args0: [{ type: 'field_input', name: 'TO', text: 'phase2' },
-                  { type: 'input_value', name: 'WHEN', check: 'Cond' }],
-          previousStatement: 'Transition', nextStatement: 'Transition', colour: 20,
-          tooltip: 'Move to another phase when the condition becomes true.' },
-
-        // --- actions ---
-        { type: 'se_set_led',
-          message0: 'set LED colour %1 pattern %2 period(ms) %3 smooth(ms) %4 angle %5 ring %6',
-          args0: [{ type: 'field_input', name: 'COLOR', text: DEFAULT_COLOUR },
-                  { type: 'field_dropdown', name: 'PATTERN', options: PATTERN_OPTIONS },
-                  { type: 'field_number', name: 'PERIOD', value: 0, min: 0 },
-                  { type: 'field_number', name: 'SMOOTH', value: 250, min: 0 },
-                  { type: 'field_number', name: 'ANGLE', value: 0, min: 0, max: 360 },
-                  { type: 'field_dropdown', name: 'RING', options: RING }],
-          previousStatement: 'Step', nextStatement: 'Step', colour: 230,
-          tooltip: 'Light a ring. The colour is a "#rrggbb" tag - use '
-                 + 'the Colour helper panel on the right to pick one and copy '
-                 + 'it. "pattern" comet sweeps a single rotating light. "period" '
-                 + 'is the pulse/blink speed or comet revolution in ms (ignored '
-                 + 'for solid/off). "smooth" is the cross-fade time of this change '
-                 + '(0 snaps). "ring" picks one of the multiplexed board\'s three '
-                 + 'rings (0..2) or "all rings"; the direct board has one ring.' },
-
-        { type: 'se_set_led_halves',
-          message0: 'set LED halves %1 %2 pattern %3 period(ms) %4 smooth(ms) %5 angle %6 ring %7',
-          args0: [{ type: 'field_input', name: 'C1', text: '#8e44ad' },
-                  { type: 'field_input', name: 'C2', text: '#f1c40f' },
-                  { type: 'field_dropdown', name: 'PATTERN', options: PATTERN_OPTIONS },
-                  { type: 'field_number', name: 'PERIOD', value: 0, min: 0 },
-                  { type: 'field_number', name: 'SMOOTH', value: 250, min: 0 },
-                  { type: 'field_number', name: 'ANGLE', value: 0, min: 0, max: 360 },
-                  { type: 'field_dropdown', name: 'RING', options: RING }],
-          previousStatement: 'Step', nextStatement: 'Step', colour: 230,
-          tooltip: 'Split a ring into two colours (e.g. half purple, half '
-                 + 'yellow). Pattern/period animate both halves together; pattern '
-                 + 'comet gives one rotating comet per colour (two comets). '
-                 + '"smooth" is the cross-fade time; "angle" rotates the split '
-                 + 'around the ring (e.g. 90 = top/bottom instead of left/right). '
-                 + '"ring" picks one of the multiplexed board\'s three rings.' },
-
-        { type: 'se_set_led_quarters',
-          message0: 'set LED quarters %1 %2 %3 %4 pattern %5 period(ms) %6 smooth(ms) %7 angle %8 ring %9',
-          args0: [{ type: 'field_input', name: 'C1', text: '#8e44ad' },
-                  { type: 'field_input', name: 'C2', text: '#f1c40f' },
-                  { type: 'field_input', name: 'C3', text: '#16a085' },
-                  { type: 'field_input', name: 'C4', text: '#e74c3c' },
-                  { type: 'field_dropdown', name: 'PATTERN', options: PATTERN_OPTIONS },
-                  { type: 'field_number', name: 'PERIOD', value: 0, min: 0 },
-                  { type: 'field_number', name: 'SMOOTH', value: 250, min: 0 },
-                  { type: 'field_number', name: 'ANGLE', value: 0, min: 0, max: 360 },
-                  { type: 'field_dropdown', name: 'RING', options: RING }],
-          previousStatement: 'Step', nextStatement: 'Step', colour: 230,
-          tooltip: 'Split a ring into four colours (quarters). Pattern comet gives '
-                 + 'one rotating comet per colour (four comets). "smooth" is the '
-                 + 'cross-fade time; "angle" rotates the split around the ring. '
-                 + '"ring" picks one of the multiplexed board\'s three rings.' },
-
-        { type: 'se_fade',
-          message0: 'fade between %1 and %2 over %3 ms on ring %4',
-          args0: [{ type: 'field_input', name: 'C1', text: '#8e44ad' },
-                  { type: 'field_input', name: 'C2', text: '#f1c40f' },
-                  { type: 'field_number', name: 'PERIOD', value: 2000, min: 200 },
-                  { type: 'field_dropdown', name: 'RING', options: RING }],
-          previousStatement: 'Step', nextStatement: 'Step', colour: 230,
-          tooltip: 'Smoothly cross-fade a ring back and forth between two '
-                 + 'colours. Wrap in "repeat forever" for a continuous fade. '
-                 + '"ring" picks one of the multiplexed board\'s three rings '
-                 + '(0..2) or "all rings".' },
-
-        { type: 'se_zone_fill',
-          message0: 'zone fill - each %1 lights %2 % of the touched zone, %3',
-          args0: [{ type: 'field_dropdown', name: 'KIND',
-                    options: [['touch', 'touch'], ['rhythmic touch', 'rhythmic']] },
-                  { type: 'field_number', name: 'STEP', value: 25, min: 1, max: 100 },
-                  { type: 'field_dropdown', name: 'FILL', options: FILL }],
-          message1: 'rhythm: every %1 ms +/- %2 ms, ignore repeats under %3 ms',
-          args1: [{ type: 'field_number', name: 'TARGET', value: 550, min: 1 },
-                  { type: 'field_number', name: 'TOLERANCE', value: 150, min: 0 },
-                  { type: 'field_number', name: 'MIN_GAP', value: 250, min: 0 }],
-          message2: 'from %1 to %2 on ring %3, smooth %4 ms',
-          args2: [{ type: 'field_input', name: 'BG', text: '#222222' },
-                  { type: 'field_input', name: 'ON', text: '#2ecc71' },
-                  { type: 'field_dropdown', name: 'RING', options: RING },
-                  { type: 'field_number', name: 'SMOOTH', value: 250, min: 0 }],
-          message3: 'while held: %1 by press strength, full at %2 uT',
-          args3: [{ type: 'field_dropdown', name: 'HOLD', options: HOLD },
-                  { type: 'field_number', name: 'HOLD_FULL', value: 300, min: 1 }],
-          message4: 'when every zone is full go to phase %1',
-          args4: [{ type: 'field_input', name: 'TO', text: '' }],
-          previousStatement: 'Step', nextStatement: 'Step', colour: 230,
-          tooltip: 'Put it in a phase\'s "on touch". The LED strip is split into '
-                 + 'one zone per touch sensor (quadrants on the Thymio skin); each '
-                 + 'qualifying press lights the given share of the zone that was '
-                 + 'touched - scattered, in order, or growing out from the sensor. '
-                 + '"rhythmic touch" only counts a press that keeps the zone\'s '
-                 + 'cadence (its interval to the previous press in the same zone is '
-                 + 'within the tolerance; the first press just starts the clock). '
-                 + 'Once every zone is full it jumps to the named phase - leave it '
-                 + 'blank to let a transition move on. "While held" adds live '
-                 + 'feedback scaled by how hard the child presses (the sensor\'s '
-                 + 'uT above the touch threshold, full effect at the given uT): '
-                 + 'glow brightens the held zone\'s lit pixels towards white, dim '
-                 + 'fades its still-unlit pixels towards black; both clear on '
-                 + 'release. Needs the skin\'s LED strip and sensor positions '
-                 + 'configured (Test Actuators / Skin dialog).' },
-
-        { type: 'se_sync_fill',
-          message0: 'sync fill - light the whole strip as the group\'s rounds complete, %1',
-          args0: [{ type: 'field_dropdown', name: 'FILL', options: FILL }],
-          message1: 'from %1 to %2 on ring %3, smooth %4 ms, decay %5 ms',
-          args1: [{ type: 'field_input', name: 'BG', text: '#222222' },
-                  { type: 'field_input', name: 'ON', text: '#2ecc71' },
-                  { type: 'field_dropdown', name: 'RING', options: RING },
-                  { type: 'field_number', name: 'SMOOTH', value: 250, min: 0 },
-                  { type: 'field_number', name: 'DECAY', value: 150, min: 0 }],
-          message2: 'while held: %1 by press strength, full at %2 uT',
-          args2: [{ type: 'field_dropdown', name: 'HOLD', options: HOLD },
-                  { type: 'field_number', name: 'HOLD_FULL', value: 300, min: 1 }],
-          previousStatement: 'Step', nextStatement: 'Step', colour: 230,
-          tooltip: 'Put it in the phase\'s "do". Lights a share of ALL the strip\'s '
-                 + 'pixels equal to completed rounds / rounds required of this '
-                 + 'phase\'s "children synchronize" condition, updating every tick. '
-                 + 'When the streak breaks the pixels go out one every "decay" ms '
-                 + '(0 = all at once). "While held" tints the held zone by press '
-                 + 'strength (glow its lit pixels / dim its unlit ones). Needs the '
-                 + 'skin\'s LED strip configured.' },
-
-        { type: 'se_score_fill',
-          message0: 'score fill - %1 children, %2 mode, %3',
-          args0: [{ type: 'field_number', name: 'PARTICIPANTS', value: 3, min: 1, max: 4 },
-                  { type: 'field_dropdown', name: 'MODE',
-                    options: [['auto (whoever presses)', 'auto'], ['fixed (sensors 0..N-1)', 'fixed']] },
-                  { type: 'field_dropdown', name: 'FILL', options: FILL }],
-          message1: 'round every %1 ms +/- %2 ms; together within %3 ms; ignore repeats under %4 ms',
-          args1: [{ type: 'field_number', name: 'TARGET', value: 550, min: 1 },
-                  { type: 'field_number', name: 'CADENCE', value: 100, min: 0 },
-                  { type: 'field_number', name: 'PHASE', value: 150, min: 0 },
-                  { type: 'field_number', name: 'MIN_GAP', value: 250, min: 0 }],
-          message2: 'each good round lights %1 % of the strip, each miss turns %2 % off',
-          args2: [{ type: 'field_number', name: 'GAIN', value: 15, min: 1, max: 100 },
-                  { type: 'field_number', name: 'PENALTY', value: 5, min: 0, max: 100 }],
-          message3: 'from %1 to %2 on ring %3, smooth %4 ms',
-          args3: [{ type: 'field_input', name: 'BG', text: '#8e44ad' },
-                  { type: 'field_input', name: 'ON', text: '#f1c40f' },
-                  { type: 'field_dropdown', name: 'RING', options: RING },
-                  { type: 'field_number', name: 'SMOOTH', value: 250, min: 0 }],
-          message4: 'while held: %1 by press strength, full at %2 uT',
-          args4: [{ type: 'field_dropdown', name: 'HOLD', options: HOLD },
-                  { type: 'field_number', name: 'HOLD_FULL', value: 300, min: 1 }],
-          message5: 'when the strip is full go to phase %1',
-          args5: [{ type: 'field_input', name: 'TO', text: '' }],
-          previousStatement: 'Step', nextStatement: 'Step', colour: 230,
-          tooltip: 'Put it in the phase\'s "do". A running SCORE shown on the whole '
-                 + 'strip: every round where all the children press together (within '
-                 + 'the phase window) and on the cadence lights the gain share; every '
-                 + 'failed round (a child missing, or one child pressing alone) turns '
-                 + 'the penalty share off again; a round together but off cadence '
-                 + 'changes nothing. A few slips hardly show, lots of random pressing '
-                 + 'drains the strip back to the background colour. Once the strip is '
-                 + 'full it jumps to the named phase. "While held" tints the touched '
-                 + 'zone by press strength. Needs the skin\'s LED strip configured.' },
-
-        { type: 'se_touch_progress',
-          message0: 'touch fill - %1 arcs, %2 touch(es) each',
-          args0: [{ type: 'field_number', name: 'SEGMENTS', value: 4, min: 1, max: 8 },
-                  { type: 'field_number', name: 'PER', value: 1, min: 1 }],
-          message1: 'from %1 to %2 on ring %3',
-          args1: [{ type: 'field_input', name: 'BG', text: '#222222' },
-                  { type: 'field_input', name: 'ON', text: '#2ecc71' },
-                  { type: 'field_dropdown', name: 'RING', options: RING }],
-          message2: 'when full go to phase %1',
-          args2: [{ type: 'field_input', name: 'TO', text: '' }],
-          previousStatement: 'Step', nextStatement: 'Step', colour: 230,
-          tooltip: 'A touch-counter you can see. Put it in a phase\'s "on touch": '
-                 + 'every "each" touches lights one more of the ring\'s arcs '
-                 + '(4 arcs = quarters), from the "from" colour to the "to" '
-                 + 'colour. Once every arc is lit it jumps to the named phase - '
-                 + 'leave that blank to just fill and let a transition move on. '
-                 + 'Counts touches since the phase started, so it resets each phase.' },
-
-        { type: 'se_inflate',
-          message0: 'inflate chamber %1 to %2 %% over %3 ms power %4',
-          args0: [{ type: 'field_dropdown', name: 'CHAMBER', options: CH },
-                  { type: 'field_number', name: 'PCT', value: 60, min: 0, max: 100 },
-                  { type: 'field_number', name: 'PERIOD', value: 0, min: 0 },
-                  { type: 'field_dropdown', name: 'POWER', options: POWER_OPTIONS }],
-          previousStatement: 'Step', nextStatement: 'Step', colour: 30,
-          tooltip: '"over (ms)" optionally fills gently over about that long by '
-                 + 'slowing the pump (needs a calibrated fill time). "power" is '
-                 + 'the pump strength on a 1-5 dial: 1 = gentlest usable, 5 = full '
-                 + '(the default, which leaves "over ms" in charge). Lower it for '
-                 + 'a gentler, quieter fill - no calibration needed.' },
-
-        { type: 'se_deflate',
-          message0: 'deflate chamber %1',
-          args0: [{ type: 'field_dropdown', name: 'CHAMBER', options: CH }],
-          previousStatement: 'Step', nextStatement: 'Step', colour: 30 },
-
-        { type: 'se_set_pressure',
-          message0: 'set chamber %1 to %2 %% power %3',
-          args0: [{ type: 'field_dropdown', name: 'CHAMBER', options: CH },
-                  { type: 'field_number', name: 'PCT', value: 0, min: 0, max: 100 },
-                  { type: 'field_dropdown', name: 'POWER', options: POWER_OPTIONS }],
-          previousStatement: 'Step', nextStatement: 'Step', colour: 30,
-          tooltip: 'Set a chamber to an exact fill %. Set it to 0 % to empty '
-                 + '(wrinkle) the chamber. "power" is the pump strength on a 1-5 '
-                 + 'dial: 1 = gentlest, 5 = full (default).' },
-
-        { type: 'se_stop',
-          message0: 'hold all chambers',
-          previousStatement: 'Step', nextStatement: 'Step', colour: 30 },
-
-        // --- Thymio wheeled base (no-ops on robots without wheels; wrap in
-        // "if robot is Thymio" so the Turtle/Tree skip it explicitly) ---
-        { type: 'se_thymio_drive',
-          message0: 'drive Thymio - left wheel %1 right wheel %2 for %3 ms',
-          args0: [{ type: 'field_number', name: 'LEFT', value: 100, min: -500, max: 500 },
-                  { type: 'field_number', name: 'RIGHT', value: 100, min: -500, max: 500 },
-                  { type: 'field_number', name: 'MS', value: 1000, min: 0 }],
-          previousStatement: 'Step', nextStatement: 'Step', colour: 160,
-          tooltip: 'Set the Thymio wheel speeds (-500..500; negative = backwards, '
-                 + 'opposite signs turn on the spot). "for N ms" drives that long '
-                 + 'then stops; 0 keeps driving until the next drive block. '
-                 + '0 / 0 stops the wheels.' },
-
-        { type: 'se_thymio_leds',
-          message0: 'Thymio top LED colour %1',
-          args0: [{ type: 'field_input', name: 'COLOR', text: DEFAULT_COLOUR }],
-          previousStatement: 'Step', nextStatement: 'Step', colour: 160,
-          tooltip: 'Colour the Thymio\'s top LED. The colour is a "#rrggbb" tag - '
-                 + 'use the Colour helper panel to pick one and copy it.' },
-
-        { type: 'se_thymio_sound',
-          message0: 'Thymio sound - system %1 or tone %2 Hz for %3 ms or SD track %4',
-          args0: [{ type: 'field_number', name: 'SYS', value: 2, min: -1, max: 7 },
-                  { type: 'field_number', name: 'FREQ', value: 0, min: 0 },
-                  { type: 'field_number', name: 'DUR', value: 200, min: 0 },
-                  { type: 'field_number', name: 'TRACK', value: -1, min: -1 }],
-          previousStatement: 'Step', nextStatement: 'Step', colour: 160,
-          tooltip: 'Play a sound. "SD track" >= 0 plays a recording off the microSD '
-                 + '(needs a card) and wins. Else a "tone Hz" > 0 plays that tone for '
-                 + '"for N ms"; else the built-in system sound (0-7; -1 stops). The '
-                 + 'wheels keep driving through the sound.' },
-
-        // --- control ---
-        { type: 'se_wait',
-          message0: 'wait %1 ms', args0: [{ type: 'field_number', name: 'MS', value: 500, min: 0 }],
-          previousStatement: 'Step', nextStatement: 'Step', colour: 120 },
-
-        { type: 'se_wait_for_touch',
-          message0: 'wait for touch on chamber %1',
-          args0: [{ type: 'field_dropdown', name: 'CHAMBER',
-                   options: [['any', 'current'], ['0', '0'], ['1', '1'], ['2', '2'], ['3', '3']] }],
-          previousStatement: 'Step', nextStatement: 'Step', colour: 120 },
-
-        { type: 'se_for_each',
-          message0: 'for each chamber',
-          message1: 'do %1', args1: [{ type: 'input_statement', name: 'DO', check: 'Step' }],
-          previousStatement: 'Step', nextStatement: 'Step', colour: 120 },
-
-        { type: 'se_if_robot',
-          message0: 'if robot is %1',
-          args0: [{ type: 'field_dropdown', name: 'ROBOT', options: ROBOTS }],
-          message1: 'do %1', args1: [{ type: 'input_statement', name: 'DO', check: 'Step' }],
-          message2: 'else %1', args2: [{ type: 'input_statement', name: 'ELSE', check: 'Step' }],
-          previousStatement: 'Step', nextStatement: 'Step', colour: 120,
-          tooltip: 'Run "do" only when the session robot is the chosen kind, '
-                 + 'else run "else". This is how one behaviour covers every '
-                 + 'robot - e.g. put the Thymio drive blocks under '
-                 + '"if robot is Thymio" and the Turtle/Tree skip them. '
-                 + 'Chain another "if robot is" inside "else" for 3 ways.' },
-
-        // --- conditions ---
-        { type: 'se_elapsed',
-          message0: 'after %1 ms', args0: [{ type: 'field_number', name: 'MS', value: 120000, min: 0 }],
-          output: 'Cond', colour: 20 },
-
-        { type: 'se_touch_count',
-          message0: 'touched at least %1 times', args0: [{ type: 'field_number', name: 'MIN', value: 15, min: 1 }],
-          output: 'Cond', colour: 20 },
-
-        { type: 'se_gesture_count',
-          message0: 'after %1 %2 times',
-          args0: [{ type: 'field_dropdown', name: 'KIND', options: GESTURE_KINDS },
-                  { type: 'field_number', name: 'MIN', value: 3, min: 1 }],
-          output: 'Cond', colour: 20,
-          tooltip: 'True once the child made this gesture at least N times in the '
-                 + 'phase. "a touch" counts any press (no model needed); the rest '
-                 + '(tap / press / compressions) are ML gestures and need a trained '
-                 + 'touch model for the skin type, else they never fire. Pair it '
-                 + 'with a "go to phase" transition to skip after N gestures.' },
-
-              { type: 'se_touch_rhythm',
-                message0: 'same touch rhythm: every %1 ms +/- %2 ms, %3 intervals',
-                args0: [{ type: 'field_number', name: 'TARGET', value: 550, min: 1 },
-                  { type: 'field_number', name: 'TOLERANCE', value: 150, min: 0 },
-                  { type: 'field_number', name: 'INTERVALS', value: 5, min: 1 }],
-                message1: 'ignore gaps shorter than %1 ms',
-                args1: [{ type: 'field_number', name: 'MIN_GAP', value: 250, min: 0 }],
-                output: 'Cond', colour: 20,
-                tooltip: 'True when consecutive touch presses arrive at the same '
-                 + 'cadence. The first press starts the measurement; multiple '
-                 + 'sensors in one press count only once.' },
-
-              { type: 'se_group_touch_rhythm',
-                message0: '%1 children match frequency within %2 Hz, %3 intervals',
-                args0: [{ type: 'field_number', name: 'PARTICIPANTS', value: 3, min: 2 },
-                  { type: 'field_number', name: 'TOLERANCE', value: 5, min: 0 },
-                  { type: 'field_number', name: 'INTERVALS', value: 5, min: 1 }],
-                message1: 'ignore gaps shorter than %1 ms',
-                args1: [{ type: 'field_number', name: 'MIN_GAP', value: 250, min: 0 }],
-                output: 'Cond', colour: 20,
-                tooltip: 'True when the requested number of separate sensors have '
-                 + 'steady frequencies within the selected Hz tolerance. The '
-                 + 'shared frequency itself is learned from the children.' },
-
-              { type: 'se_group_touch_sync',
-                message0: '%1 children synchronize, %2',
-                args0: [{ type: 'field_number', name: 'PARTICIPANTS', value: 3, min: 1, max: 4 },
-                  { type: 'field_dropdown', name: 'MODE',
-                    options: [['whoever touches first (others may join)', 'auto'],
-                              ['exactly the zones below', 'fixed']] }],
-                message1: 'fixed zones %1, %2, %3',
-                args1: [{ type: 'field_number', name: 'S0', value: 0, min: 0 },
-                  { type: 'field_number', name: 'S1', value: 1, min: 0 },
-                  { type: 'field_number', name: 'S2', value: 2, min: 0 }],
-                message2: 'every %1 ms +/- %2 ms; together within %3 ms; %4 rounds',
-                args2: [{ type: 'field_number', name: 'TARGET', value: 550, min: 1 },
-                  { type: 'field_number', name: 'CADENCE', value: 100, min: 0 },
-                  { type: 'field_number', name: 'PHASE', value: 150, min: 0 },
-                  { type: 'field_number', name: 'ROUNDS', value: 6, min: 1 }],
-                message3: 'ignore repeats faster than %1 ms',
-                args3: [{ type: 'field_number', name: 'MIN_GAP', value: 250, min: 0 }],
-                output: 'Cond', colour: 20,
-                tooltip: 'Counts a round only when every child in the group presses once '
-                 + 'within the phase window. Success needs consecutive complete rounds '
-                 + 'at the target tempo; a late child or wrong beat resets the streak. '
-                 + '"whoever touches first": the first N zones pressed form the group '
-                 + 'and any further zone that presses joins for good (a fourth child '
-                 + 'may come in, and from then on all four must keep every round). '
-                 + '"exactly the zones below": only the listed sensor zones count.' },
-
-        { type: 'se_on_impact',
-          message0: 'Thymio hit at least %1 times, at least %2',
-          args0: [{ type: 'field_number', name: 'MIN', value: 1, min: 1 },
-                  { type: 'field_dropdown', name: 'LEVEL',
-                    options: [['a touch', '1'], ['a knock', '2'], ['a slap', '3']] }],
-          output: 'Cond', colour: 20,
-          tooltip: 'True once the Thymio was hit at least N times in this phase, at '
-                 + 'the chosen intensity or harder (touch < knock < slap). Needs the '
-                 + 'gateway/C6 wireless link; robots without impact sensing never fire it.' },
-
-        { type: 'se_on_lifted',
-          message0: 'Thymio lifted at least %1 times', args0: [{ type: 'field_number', name: 'MIN', value: 1, min: 1 }],
-          output: 'Cond', colour: 20,
-          tooltip: 'True once the Thymio was lifted off the table at least N times in '
-                 + 'this phase (its ground sensors stop seeing the surface). Needs the '
-                 + 'gateway/C6 wireless link; robots without ground sensing never fire it.' },
-
-        { type: 'se_organs',
-          message0: 'organs %1 good %2 %3 bad %4 %5',
-          args0: [{ type: 'field_dropdown', name: 'SCOPE',
-                    options: [['by count', 'count'], ['all good', 'all_good'], ['all bad', 'all_bad']] },
-                  { type: 'field_dropdown', name: 'GOOD_OP',
-                    options: [['>=', '>='], ['<=', '<='], ['=', '==']] },
-                  { type: 'field_number', name: 'GOOD', value: 3, min: 0 },
-                  { type: 'field_dropdown', name: 'BAD_OP',
-                    options: [['>=', '>='], ['<=', '<='], ['=', '==']] },
-                  { type: 'field_number', name: 'BAD', value: 0, min: 0 }],
-          output: 'Cond', colour: 20,
-          tooltip: 'Organ status (good/bad organs plugged into the skin). '
-                 + '"by count" uses the good/bad comparisons; "all good" / '
-                 + '"all bad" mean every organ matches and ignore the numbers.' },
-
-        { type: 'se_any',
-          message0: 'any of: %1 %2 %3',
-          args0: [{ type: 'input_dummy' },
-                  { type: 'input_value', name: 'A', check: 'Cond' },
-                  { type: 'input_value', name: 'B', check: 'Cond' }],
-          output: 'Cond', colour: 20 },
-
-        { type: 'se_all',
-          message0: 'all of: %1 %2 %3',
-          args0: [{ type: 'input_dummy' },
-                  { type: 'input_value', name: 'A', check: 'Cond' },
-                  { type: 'input_value', name: 'B', check: 'Cond' }],
-          output: 'Cond', colour: 20 },
-
-        { type: 'se_not',
-          message0: 'not %1', args0: [{ type: 'input_value', name: 'C', check: 'Cond' }],
-          output: 'Cond', colour: 20 },
-
-        { type: 'se_robot_is',
-          message0: 'robot is %1',
-          args0: [{ type: 'field_dropdown', name: 'ROBOT', options: ROBOTS }],
-          output: 'Cond', colour: 20,
-          tooltip: 'True when the session robot is the chosen kind - lets a '
-                 + 'phase transition fire only on one robot.' },
-
-        { type: 'se_always',
-          message0: 'always', output: 'Cond', colour: 20 },
-      ]);
-
-      defineBehaviourBlock();
-      defineBeatBlock();
-      defineRepeatBlock();
+    function initEditor(payload) {
+      var p = (typeof payload === 'string') ? JSON.parse(payload) : payload;
+      CATALOG = p.catalog || p;
+      PALETTE = p.palette || [];
+      maybeStart();
     }
 
-    // ---- behaviour root: declares the target skin condition -------------
-    // The "for skin" dropdown is the activity's target (spec.target.skin).
-    // One behaviour covers every robot - robot-specific parts go inside
-    // "if robot is ..." blocks - and the session pre-selects the activity that
-    // matches the skins the robots are dressed in. 'any' = target-less.
-    function defineBehaviourBlock() {
+    function maybeStart() {
+      if (workspace || !blocklyReady || !CATALOG) return;
+      CATALOG.categories.forEach(function (c) { CATEGORY_HUE[c.name] = c.colour; });
+      CATALOG.verbs.forEach(function (v) { VERBS[v.name] = v; });
+      defineFields();
+      defineStructuralBlocks();
+      defineCatalogBlocks();
+      workspace = Blockly.inject('blocklyDiv', {
+        media: mediaPath,
+        toolbox: buildToolbox(),
+        trashcan: true,
+        comments: true,
+        zoom: { controls: true, wheel: true, startScale: 0.9 },
+        grid: { spacing: 20, length: 3, colour: '#eee', snap: true },
+      });
+      var ops = pending; pending = [];
+      if (!ops.length) newWorkspace();
+      ops.forEach(function (fn) { fn(); });
+    }
+
+    function whenReady(fn) {
+      if (workspace) fn(); else pending.push(fn);
+    }
+
+    // ---- Custom fields ------------------------------------------------
+    var FieldSwatch, FieldPhase;
+
+    function normaliseHex(v) {
+      if (typeof v !== 'string') return null;
+      var s = v.trim().toLowerCase();
+      if (/^[0-9a-f]{6}$/.test(s)) s = '#' + s;
+      if (/^#[0-9a-f]{3}$/.test(s)) s = '#' + s[1] + s[1] + s[2] + s[2] + s[3] + s[3];
+      return /^#[0-9a-f]{6}$/.test(s) ? s : null;
+    }
+
+    function defineFields() {
+      // A colour swatch: click to pick from the study palette or any colour.
+      FieldSwatch = class extends Blockly.Field {
+        constructor(value, validator) {
+          super(Blockly.Field.SKIP_SETUP);
+          this.SERIALIZABLE = true;
+          this.CURSOR = 'pointer';
+          this.setValue(normaliseHex(value) || '#000000');
+          if (validator) this.setValidator(validator);
+        }
+        initView() {
+          this.size_ = new Blockly.utils.Size(28, 18);
+          this.createBorderRect_();
+          var r = this.getBorderRect();
+          r.style.fillOpacity = '1';
+          r.setAttribute('stroke', '#fff');
+          r.setAttribute('rx', '4'); r.setAttribute('ry', '4');
+          this.paint_();
+        }
+        paint_() {
+          var r = this.borderRect_;
+          if (!r) return;
+          r.style.fill = this.getValue();
+          r.setAttribute('width', String(this.size_.width));
+          r.setAttribute('height', String(this.size_.height));
+        }
+        render_() { this.paint_(); }
+        applyColour() { this.paint_(); }
+        doClassValidation_(v) { return normaliseHex(v); }
+        doValueUpdate_(v) { super.doValueUpdate_(v); this.paint_(); }
+        getText_() { return this.getValue(); }
+        showEditor_() {
+          var self = this;
+          var div = document.createElement('div');
+          div.className = 'se-picker';
+          var grid = document.createElement('div');
+          grid.className = 'se-picker-grid';
+          PALETTE.forEach(function (hex) {
+            var sw = document.createElement('div');
+            sw.className = 'se-swatch' + (hex === self.getValue() ? ' selected' : '');
+            sw.style.background = hex;
+            sw.title = hex;
+            sw.addEventListener('mousedown', function (e) {
+              e.preventDefault();
+              self.setValue(hex);
+              Blockly.DropDownDiv.hideIfOwner(self);
+            });
+            grid.appendChild(sw);
+          });
+          div.appendChild(grid);
+          var custom = document.createElement('div');
+          custom.className = 'se-picker-custom';
+          var input = document.createElement('input');
+          input.type = 'color'; input.value = self.getValue();
+          var text = document.createElement('input');
+          text.type = 'text'; text.value = self.getValue(); text.maxLength = 7;
+          input.addEventListener('input', function () {
+            self.setValue(input.value); text.value = input.value;
+          });
+          text.addEventListener('change', function () {
+            var hex = normaliseHex(text.value);
+            if (hex) { self.setValue(hex); input.value = hex; }
+            else text.value = self.getValue();
+          });
+          custom.appendChild(document.createTextNode('custom'));
+          custom.appendChild(input);
+          custom.appendChild(text);
+          div.appendChild(custom);
+          Blockly.DropDownDiv.clearContent();
+          Blockly.DropDownDiv.getContentDiv().appendChild(div);
+          Blockly.DropDownDiv.showPositionedByField(this, null);
+        }
+        static fromJson(o) { return new FieldSwatch(o.colour); }
+      };
+
+      // A dropdown of the phases currently in the workspace. Any string is a
+      // valid value (a saved spec may name a phase whose block is built a
+      // moment later, or was deleted); the options always include the current
+      // value so it keeps showing.
+      FieldPhase = class extends Blockly.FieldDropdown {
+        constructor(optional) {
+          super(function () { return this.phaseOptions_(); });
+          this.optional_ = !!optional;
+        }
+        phaseOptions_() {
+          var opts = [];
+          if (this.optional_) opts.push(['(no jump)', '']);
+          var seen = {};
+          var block = this.getSourceBlock && this.getSourceBlock();
+          var ws = block && block.workspace;
+          if (ws && !ws.isFlyout) {
+            ws.getBlocksByType('se_state', true).forEach(function (b) {
+              var n = b.getFieldValue('NAME');
+              if (n && !seen[n]) { seen[n] = 1; opts.push([n, n]); }
+            });
+          }
+          var cur = this.getValue();
+          if (typeof cur === 'string' && cur !== '' && !seen[cur]) {
+            opts.push([cur + (ws && !ws.isFlyout ? ' (missing)' : ''), cur]);
+          }
+          if (!opts.length) opts.push(['phase1', 'phase1']);
+          return opts;
+        }
+        doClassValidation_(v) { return (typeof v === 'string') ? v : null; }
+        getText_() {
+          var v = this.getValue();
+          var hit = null;
+          this.getOptions(false).forEach(function (o) { if (o[1] === v) hit = o[0]; });
+          return hit !== null ? hit : (v || '');
+        }
+      };
+    }
+
+    function setPhaseField(block, name, value) {
+      var f = block.getField(name);
+      if (!f) return;
+      f.getOptions(false);                 // drop the cached option list
+      f.setValue(value == null ? '' : String(value));
+    }
+
+    // ---- Structural blocks: behaviour root, phase, transition ----------
+    function defineStructuralBlocks() {
+      var hue = CATEGORY_HUE['Phases'];
+      var robots = [['any robot', ANY_ROBOT]].concat(
+        CATALOG.robots.map(function (r) { return [r.label, r.value]; }));
+      var skins = [['any skin', ANY_SKIN]].concat(
+        CATALOG.skins.map(function (s) { return [s.label, s.value]; }));
+
       Blockly.Blocks['se_behaviour'] = {
         init: function () {
           this.appendDummyInput()
-            .appendField('behaviour for skin')
-            .appendField(new Blockly.FieldDropdown([
-              ['any skin', 'any'],
-              ['Natural', 'natural'],
-              ['Wrinkles', 'wrinkles'],
-              ['Organs', 'organs'],
-            ]), 'SKIN');
+            .appendField('behaviour for robot')
+            .appendField(new Blockly.FieldDropdown(robots), 'ROBOT')
+            .appendField('skin')
+            .appendField(new Blockly.FieldDropdown(skins), 'SKIN');
           this.appendStatementInput('STATES')
             .setCheck('State')
             .appendField('- starts at the first phase');
-          this.setColour(290);
+          this.setColour(hue);
+          this.setDeletable(false);
           this.setTooltip(
-            'Root of a behaviour. Stack phases inside. "for skin" declares '
-            + 'which skin set the activity is written for (Natural / Wrinkles '
-            + '/ Organs); the session pre-selects the matching activity and '
-            + 'warns when a robot wears different skins. The behaviour runs '
-            + 'on ANY robot - wrap robot-specific parts (e.g. the Thymio '
-            + 'wheels) in "if robot is ..." blocks.');
+            'Root of a behaviour. Stack phases inside; the first one is where '
+            + 'it starts. "for robot" narrows the activity to one robot kind '
+            + '(Thymio / Turtle / Tree) or leaves it open; "skin" declares '
+            + 'which silicone set it is written for (Natural / Wrinkles / '
+            + 'Organs) so the session pre-selects the matching activity and '
+            + 'warns when a robot wears different skins.');
+        },
+      };
+
+      Blockly.Blocks['se_state'] = {
+        init: function () {
+          var self = this;
+          this.appendDummyInput()
+            .appendField('phase')
+            .appendField(new Blockly.FieldTextInput('phase1', function (name) {
+              name = (name || '').trim();
+              if (!name) return null;
+              renamePhaseRefs(self, this.getValue(), name);
+              return name;
+            }), 'NAME')
+            .appendField(new Blockly.FieldCheckbox('FALSE'), 'FINAL')
+            .appendField('final');
+          this.appendStatementInput('DO').setCheck('Step').appendField('do');
+          this.appendStatementInput('ONTOUCH').setCheck('Step').appendField('on touch');
+          this.appendStatementInput('TRANSITIONS').setCheck('Transition')
+            .appendField('transitions');
+          this.setPreviousStatement(true, 'State');
+          this.setNextStatement(true, 'State');
+          this.setColour(hue);
+          this.setTooltip(
+            'One phase: "do" runs once when the phase starts (wrap a beat in '
+            + '"repeat forever" to keep it going), "on touch" runs on every '
+            + 'press, and the transitions say when to move to another phase. '
+            + 'Tick "final" on the phase where the story ends (the cured '
+            + 'robot) - the live CPR window and the session controls use it.');
+        },
+      };
+
+      Blockly.Blocks['se_transition'] = {
+        init: function () {
+          this.appendValueInput('WHEN')
+            .setCheck('Cond')
+            .appendField('go to phase')
+            .appendField(new FieldPhase(false), 'TO')
+            .appendField('when');
+          this.setPreviousStatement(true, 'Transition');
+          this.setNextStatement(true, 'Transition');
+          this.setColour(CATEGORY_HUE['Conditions']);
+          this.setTooltip('Move to another phase when the condition becomes '
+            + 'true. Transitions are checked in order, every tick.');
         },
       };
     }
 
-    // When a loaded spec carries a target, push its skin condition into the
-    // root block ('any' when absent or legacy robot-kind-targeted).
-    function syncTargetUi(spec) {
-      var roots = workspace.getBlocksByType('se_behaviour', false);
-      if (!roots.length) return;
-      var skin = (spec && spec.target && spec.target.skin) || 'any';
-      if (spec && spec.target && spec.target.kind && !spec.target.skin) {
-        console.warn('legacy robot-kind target', spec.target.kind,
-                     '- re-save to convert to a skin target');
+    // ---- Catalogue-generated blocks -----------------------------------
+    function encodeChoice(v) { return (typeof v === 'string') ? v : JSON.stringify(v); }
+
+    function decodeChoice(field, s) {
+      var hit;
+      (field.choices || []).forEach(function (c) {
+        if (hit === undefined && encodeChoice(c.value) === String(s)) hit = c.value;
+      });
+      return hit === undefined ? s : hit;
+    }
+
+    function dropdownOptions(field) {
+      return (field.choices || []).map(function (c) {
+        return [String(c.label), encodeChoice(c.value)];
+      });
+    }
+
+    function fieldMin(f, fallback) { return (f.min != null) ? f.min : fallback; }
+    function fieldMax(f, fallback) { return (f.max != null) ? f.max : fallback; }
+
+    // Split a template row into literal words and {field} placeholders.
+    function tokens(row) {
+      var out = [], re = /\{(\w+)\}/g, last = 0, m;
+      while ((m = re.exec(row)) !== null) {
+        if (m.index > last) out.push({ text: row.slice(last, m.index) });
+        out.push({ field: m[1] });
+        last = re.lastIndex;
       }
-      try { roots[0].setFieldValue(skin, 'SKIN'); }
-      catch (e) { console.warn('target skin', skin, e); }
+      if (last < row.length) out.push({ text: row.slice(last) });
+      return out;
     }
 
-    // ---- beat: a block whose fields change with the chosen mode --------
-    // "beat" was the one block nobody could read, so it is built by hand to
-    // (a) spell each mode out in plain words and (b) hide the "soft chambers"
-    // row unless the mode actually uses it.
-    function defineBeatBlock() {
-      Blockly.Blocks['se_beat'] = {
+    function splitMs(ms) {
+      ms = Number(ms) || 0;
+      if (ms !== 0 && ms % 60000 === 0) return [ms / 60000, '60000'];
+      if (ms !== 0 && ms % 1000 === 0) return [ms / 1000, '1000'];
+      return [ms, '1'];
+    }
+
+    function blockTypeFor(verb, variantId) {
+      return 'se_' + verb + (variantId ? '__' + variantId : '');
+    }
+
+    function slotCount(field, def) {
+      return def.count || field.count || (Array.isArray(field.default) ? field.default.length : 1);
+    }
+
+    // Append the widget(s) for one field to a Blockly input.
+    function appendFieldWidgets(block, input, f, def) {
+      var i, n;
+      switch (f.type) {
+        case 'int':
+          input.appendField(new Blockly.FieldNumber(
+            f.default != null ? f.default : 0, fieldMin(f, -Infinity),
+            fieldMax(f, Infinity), 1), f.name);
+          break;
+        case 'float':
+          input.appendField(new Blockly.FieldNumber(
+            f.default != null ? f.default : 0, fieldMin(f, -Infinity),
+            fieldMax(f, Infinity), 0.01), f.name);
+          break;
+        case 'pct':
+          input.appendField(new Blockly.FieldNumber(
+            f.default != null ? f.default : 0, fieldMin(f, 0), fieldMax(f, 100), 1),
+            f.name);
+          break;
+        case 'ms': {
+          var parts = splitMs(f.default);
+          input.appendField(new Blockly.FieldNumber(
+            parts[0], fieldMin(f, 0) / 60000, fieldMax(f, Infinity), 0.001), f.name);
+          input.appendField(new Blockly.FieldDropdown(MS_UNITS), f.name + '__unit');
+          block.setFieldValue(parts[1], f.name + '__unit');
+          break;
+        }
+        case 'color':
+          input.appendField(new FieldSwatch(f.default || '#000000'), f.name);
+          break;
+        case 'colors':
+          n = slotCount(f, def);
+          for (i = 0; i < n; i++) {
+            var c = (f.default || [])[i] || '#888888';
+            input.appendField(new FieldSwatch(c), f.name + '__' + i);
+          }
+          break;
+        case 'ints':
+          n = slotCount(f, def);
+          for (i = 0; i < n; i++) {
+            var d = (f.default || [])[i];
+            input.appendField(new Blockly.FieldNumber(
+              d != null ? d : i, fieldMin(f, -Infinity), fieldMax(f, Infinity), 1),
+              f.name + '__' + i);
+          }
+          break;
+        case 'enum': case 'chamber': case 'ring': case 'power':
+          input.appendField(new Blockly.FieldDropdown(dropdownOptions(f)), f.name);
+          if (f.default != null) block.setFieldValue(encodeChoice(f.default), f.name);
+          break;
+        case 'phase':
+          input.appendField(new FieldPhase(true), f.name);
+          break;
+        case 'text':
+          input.appendField(new Blockly.FieldTextInput(f.default || ''), f.name);
+          break;
+        default:
+          throw new Error('unknown field type ' + f.type + ' on ' + f.name);
+      }
+    }
+
+    function defineCatalogBlocks() {
+      CATALOG.verbs.forEach(function (verb) {
+        defineVerbBlock(verb, null);
+        (verb.variants || []).forEach(function (v) { defineVerbBlock(verb, v); });
+      });
+    }
+
+    function defineVerbBlock(verb, variant) {
+      var type = blockTypeFor(verb.name, variant && variant.id);
+      var def = { verb: verb, variant: variant, count: variant ? variant.count : 0 };
+      BLOCK_DEFS[type] = def;
+      var fieldsByName = {};
+      verb.fields.forEach(function (f) { fieldsByName[f.name] = f; });
+      var template = variant ? variant.template : verb.template;
+      var hue = CATEGORY_HUE[verb.category] != null ? CATEGORY_HUE[verb.category] : 0;
+      var tooltip = verb.description;
+      var extras = verb.fields.filter(function (f) { return !f.hidden && f.description; })
+        .map(function (f) { return f.name.replace(/_/g, ' ') + ': ' + f.description; });
+      if (extras.length) tooltip += '\n\n' + extras.join('\n');
+
+      Blockly.Blocks[type] = {
         init: function () {
           var self = this;
-          this.appendDummyInput()
-            .appendField('beat -')
-            .appendField(new Blockly.FieldDropdown([
-              ['all chambers together', 'sync'],
-              ['one chamber at a time', 'sequential'],
-              ['chambers in random order', 'random'],
-              ['some strong, the rest soft', 'aligned'],
-            ], function (mode) { self.updateShape_(mode); return mode; }), 'MODE');
-          this.appendDummyInput()
-            .appendField('strength')
-            .appendField(new Blockly.FieldNumber(60, 0, 100), 'PCT')
-            .appendField('%');
-          this.appendDummyInput('SOFT_ROW')
-            .appendField('soft chambers at')
-            .appendField(new Blockly.FieldNumber(20, 0, 100), 'PCT2')
-            .appendField('% , how many strong')
-            .appendField(new Blockly.FieldNumber(2, 0), 'ALIGNED');
-          this.appendDummyInput()
-            .appendField('one cycle every')
-            .appendField(new Blockly.FieldNumber(2000, 100), 'PERIOD')
-            .appendField('ms , power')
-            .appendField(new Blockly.FieldDropdown(POWER_OPTIONS), 'POWER');
-          this.setPreviousStatement(true, 'Step');
-          this.setNextStatement(true, 'Step');
-          this.setColour(30);
-          this.setTooltip(
-            'One heartbeat cycle across the chambers - wrap it in '
-            + '"repeat forever" for a continuous beat. "strength" is the peak '
-            + 'fill %. Only "some strong, the rest soft" uses the soft-chamber '
-            + 'row (those chambers beat to the soft %, the rest to strength). '
-            + '"power" is the pump strength on a 1-5 dial (1 = gentlest, '
-            + '5 = full) for the up-strokes; the release stays full speed.');
-          this.updateShape_(this.getFieldValue('MODE'));
+          this.rows_ = [];            // [{input, fields:[fieldDef], conditional}]
+          this.condCount_ = 0;
+          template.split('\n').forEach(function (row, rowIdx) {
+            var toks = tokens(row);
+            var stmt = null, cond = null, conds = null;
+            toks.forEach(function (t) {
+              if (!t.field) return;
+              var f = fieldsByName[t.field];
+              if (!f) throw new Error(verb.name + ': template names unknown field ' + t.field);
+              if (f.type === 'steps') stmt = f;
+              else if (f.type === 'cond') cond = f;
+              else if (f.type === 'conds') conds = f;
+            });
+            var input;
+            if (stmt) input = self.appendStatementInput(stmt.name).setCheck('Step');
+            else if (cond) input = self.appendValueInput(cond.name).setCheck('Cond');
+            else input = self.appendDummyInput('row' + rowIdx);
+            var rowFields = [];
+            toks.forEach(function (t) {
+              if (t.text !== undefined) {
+                var txt = t.text.trim();
+                if (txt) input.appendField(txt);
+                return;
+              }
+              var f = fieldsByName[t.field];
+              if (f.type === 'steps' || f.type === 'cond') return;   // the input itself
+              if (f.type === 'conds') {
+                input.appendField(new Blockly.FieldDropdown(
+                  [['2', '2'], ['3', '3'], ['4', '4']],
+                  function (v) { self.reshapeConds_(Number(v)); return v; }),
+                  f.name + '__count');
+                self.condsField_ = f;
+                return;
+              }
+              appendFieldWidgets(self, input, f, def);
+              rowFields.push(f);
+            });
+            var conditional = rowFields.length > 0 &&
+              rowFields.every(function (f) { return !!f.show_when; });
+            self.rows_.push({ input: input, fields: rowFields, conditional: conditional });
+          });
+          if (this.condsField_) this.reshapeConds_(2);
+          // Fields that control another field's visibility re-shape on change.
+          var controllers = {};
+          verb.fields.forEach(function (f) { if (f.show_when) controllers[f.show_when.field] = 1; });
+          Object.keys(controllers).forEach(function (name) {
+            var fld = self.getField(name);
+            if (!fld) return;
+            fld.setValidator(function (v) {
+              var o = {}; o[name] = v;
+              self.updateShape_(o);
+              return v;
+            });
+          });
+          if (verb.kind === 'condition') this.setOutput(true, 'Cond');
+          else { this.setPreviousStatement(true, 'Step'); this.setNextStatement(true, 'Step'); }
+          this.setColour(hue);
+          this.setTooltip(tooltip);
+          this.updateShape_({});
         },
-        updateShape_: function (mode) {
-          var row = this.getInput('SOFT_ROW');
-          if (row) row.setVisible(mode === 'aligned');
+        // Show/hide the conditional fields (and rows that are nothing but
+        // conditional fields) from the controlling fields' current values.
+        updateShape_: function (overrides) {
+          var self = this;
+          overrides = overrides || {};
+          this.rows_.forEach(function (row) {
+            var anyVisible = false;
+            row.fields.forEach(function (f) {
+              var vis = fieldVisible(self, f, overrides);
+              fieldWidgetNames(self, f, def).forEach(function (n) {
+                var w = self.getField(n);
+                if (w) w.setVisible(vis);
+              });
+              if (vis) anyVisible = true;
+            });
+            if (row.conditional) row.input.setVisible(anyVisible);
+          });
           if (this.rendered) this.render();
         },
+        // Add/remove the condition slots to match n (2-4). Called by the
+        // count dropdown's validator; programmatic callers go through
+        // setCondCount_, which sets the dropdown and lands here.
+        reshapeConds_: function (n) {
+          n = Math.max(2, Math.min(4, n || 2));
+          var name = this.condsField_ ? this.condsField_.name : 'conds';
+          for (var i = 0; i < 4; i++) {
+            var inp = this.getInput(name + '__' + i);
+            if (i < n && !inp) this.appendValueInput(name + '__' + i).setCheck('Cond');
+            else if (i >= n && inp) this.removeInput(name + '__' + i);
+          }
+          this.condCount_ = n;
+        },
+        setCondCount_: function (n) {
+          n = Math.max(2, Math.min(4, n || 2));
+          var name = this.condsField_ ? this.condsField_.name : 'conds';
+          this.setFieldValue(String(n), name + '__count');
+          this.reshapeConds_(n);
+        },
         saveExtraState: function () {
-          return { mode: this.getFieldValue('MODE') };
+          return this.condsField_ ? { n: this.condCount_ } : null;
         },
         loadExtraState: function (state) {
-          this.updateShape_(state && state.mode);
+          if (this.condsField_ && state && state.n) this.setCondCount_(state.n);
         },
       };
     }
 
-    // ---- repeat: hide the count when looping forever ------------------
-    // "forever" ignores any count, so the "N =" box only makes sense in the
-    // "N times" mode; it is built by hand so that box can disappear instead
-    // of sitting there confusingly when the loop runs forever.
-    function defineRepeatBlock() {
-      Blockly.Blocks['se_repeat'] = {
-        init: function () {
-          var self = this;
-          this.appendDummyInput()
-            .appendField('repeat')
-            .appendField(new Blockly.FieldDropdown([
-              ['forever', 'forever'],
-              ['N times', 'times'],
-            ], function (mode) { self.updateShape_(mode); return mode; }), 'MODE');
-          this.appendDummyInput('TIMES_ROW')
-            .appendField('N =')
-            .appendField(new Blockly.FieldNumber(4, 1), 'TIMES');
-          this.appendStatementInput('DO')
-            .setCheck('Step')
-            .appendField('do');
-          this.setPreviousStatement(true, 'Step');
-          this.setNextStatement(true, 'Step');
-          this.setColour(120);
-          this.setTooltip(
-            'Repeat the nested steps forever, or a set number of times (N). '
-            + 'The "N =" box only appears when you pick "N times".');
-          this.updateShape_(this.getFieldValue('MODE'));
-        },
-        updateShape_: function (mode) {
-          var row = this.getInput('TIMES_ROW');
-          if (row) row.setVisible(mode === 'times');
-          if (this.rendered) this.render();
-        },
-        saveExtraState: function () {
-          return { mode: this.getFieldValue('MODE') };
-        },
-        loadExtraState: function (state) {
-          this.updateShape_(state && state.mode);
-        },
-      };
+    // The Blockly field names a catalogue field occupies on a block.
+    function fieldWidgetNames(block, f, def) {
+      var out = [], n, i;
+      if (f.type === 'ms') return [f.name, f.name + '__unit'];
+      if (f.type === 'colors' || f.type === 'ints') {
+        n = slotCount(f, def);
+        for (i = 0; i < n; i++) out.push(f.name + '__' + i);
+        return out;
+      }
+      return [f.name];
     }
 
-    // ---- Compile workspace -> spec ------------------------------------
-    function num(b, f) { return Number(b.getFieldValue(f)); }
-
-    // The 1-5 "power" dial. 5 (full) is the default and means "no explicit duty
-    // - full speed, letting any 'over ms' slow-fill act", so omit it to keep
-    // specs clean and back-compatible. 1-4 carry an explicit gentler power the
-    // runtime maps onto the skin type's calibrated duty range.
-    function withPower(obj, b) {
-      var p = num(b, 'POWER');
-      if (p && p < 5) obj.power = p;
-      return obj;
+    function fieldVisible(block, f, overrides) {
+      if (!f.show_when) return true;
+      var ctrl = f.show_when.field;
+      var raw = (overrides && overrides[ctrl] !== undefined)
+        ? overrides[ctrl] : block.getFieldValue(ctrl);
+      var ctrlDef = BLOCK_DEFS[block.type].verb.fields.filter(function (x) { return x.name === ctrl; })[0];
+      var val = ctrlDef ? decodeChoice(ctrlDef, raw) : raw;
+      return f.show_when.values.some(function (v) { return v === val; });
     }
 
-    // 'all' rings is the default whole-ring behaviour, so omit it to keep
-    // specs clean (and back-compatible with behaviours authored before rings).
-    function withRing(obj, b) {
-      var r = b.getFieldValue('RING');
-      if (r && r !== 'all') obj.ring = r;
-      return obj;
+    // ---- Toolbox --------------------------------------------------------
+    function buildToolbox() {
+      var byCat = {};
+      CATALOG.verbs.forEach(function (v) {
+        if (!v.in_toolbox) return;
+        (byCat[v.category] = byCat[v.category] || []).push({ kind: 'block', type: blockTypeFor(v.name) });
+        (v.variants || []).forEach(function (x) {
+          byCat[v.category].push({ kind: 'block', type: blockTypeFor(v.name, x.id) });
+        });
+      });
+      var contents = CATALOG.categories.map(function (c) {
+        var blocks = c.name === 'Phases'
+          ? [{ kind: 'block', type: 'se_state' }, { kind: 'block', type: 'se_transition' }]
+          : (byCat[c.name] || []);
+        return { kind: 'category', name: c.name, colour: String(c.colour), contents: blocks };
+      });
+      return { kind: 'categoryToolbox', contents: contents };
+    }
+
+    // ---- Keep phase references in step with renames --------------------
+    // Renaming a phase (typing in its name box) rewrites every "go to phase"
+    // and fill-jump that pointed at the old name. Off while a spec is being
+    // loaded: then the name boxes are being set from the spec and the
+    // references already carry their final names.
+    var loadingSpec = false;
+
+    function renamePhaseRefs(stateBlock, oldName, newName) {
+      if (loadingSpec || !workspace || !oldName || oldName === newName) return;
+      if (stateBlock.workspace !== workspace || stateBlock.isInFlyout) return;
+      workspace.getAllBlocks(false).forEach(function (blk) {
+        blk.inputList.forEach(function (input) {
+          input.fieldRow.forEach(function (f) {
+            if (f instanceof FieldPhase && f.getValue() === oldName) {
+              f.getOptions(false);
+              f.setValue(newName);
+            }
+          });
+        });
+      });
+    }
+
+    // ---- Compile workspace -> spec --------------------------------------
+    function readField(block, f, def) {
+      var i, n, out;
+      switch (f.type) {
+        case 'int': return Math.round(Number(block.getFieldValue(f.name)));
+        case 'float': case 'pct': return Number(block.getFieldValue(f.name));
+        case 'ms':
+          return Math.round(Number(block.getFieldValue(f.name))
+                            * Number(block.getFieldValue(f.name + '__unit')));
+        case 'color': case 'text': return block.getFieldValue(f.name);
+        case 'phase': return block.getFieldValue(f.name) || '';
+        case 'colors': case 'ints':
+          n = slotCount(f, def); out = [];
+          for (i = 0; i < n; i++) {
+            var v = block.getFieldValue(f.name + '__' + i);
+            out.push(f.type === 'ints' ? Math.round(Number(v)) : v);
+          }
+          return out;
+        case 'enum': case 'chamber': case 'ring': case 'power':
+          return decodeChoice(f, block.getFieldValue(f.name));
+        case 'steps': return stepsFromStack(block.getInputTargetBlock(f.name));
+        case 'cond': return condToObj(block.getInputTargetBlock(f.name));
+        case 'conds':
+          out = [];
+          for (i = 0; i < block.condCount_; i++) {
+            var child = block.getInputTargetBlock(f.name + '__' + i);
+            if (child) out.push(condToObj(child));
+          }
+          return out;
+        default: return undefined;
+      }
+    }
+
+    function sameValue(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
+
+    // Verb-specific touch-ups after the generic read.
+    var FINALIZE = {
+      group_touch_sync: function (o) {
+        if (Array.isArray(o.sensors)) o.sensors = o.sensors.slice(0, Math.max(1, o.participants || 1));
+      },
+    };
+
+    function blockToObj(b) {
+      var def = BLOCK_DEFS[b.type];
+      if (!def) return null;
+      var params = {};
+      def.verb.fields.forEach(function (f) {
+        if (f.hidden) return;
+        if (!fieldVisible(b, f, null)) return;
+        var v = readField(b, f, def);
+        if (v === undefined) return;
+        if (f.omit_default && sameValue(v, f.default)) return;
+        params[f.name] = v;
+      });
+      if (FINALIZE[def.verb.name]) FINALIZE[def.verb.name](params, b);
+      var out = {};
+      // A verb whose only field is a condition slot (any / all / not) is
+      // written bare in the spec: {"any": [...]}, {"not": {...}}.
+      var only = def.verb.fields.length === 1 ? def.verb.fields[0] : null;
+      if (only && (only.type === 'conds' || only.type === 'cond')) {
+        out[def.verb.name] = params[only.name];
+      } else {
+        out[def.verb.name] = params;
+      }
+      return out;
     }
 
     function stepsFromStack(block) {
       var out = [];
       while (block) {
-        var o = stepToObj(block);
+        var o = blockToObj(block);
         if (o) out.push(o);
         block = block.getNextBlock();
       }
       return out;
     }
 
-    function stepToObj(b) {
-      switch (b.type) {
-        case 'se_set_led':
-          return { set_led: withRing({ color: b.getFieldValue('COLOR'),
-                              pattern: b.getFieldValue('PATTERN'),
-                              period_ms: num(b, 'PERIOD'),
-                              fade_ms: num(b, 'SMOOTH'),
-                              angle: num(b, 'ANGLE') }, b) };
-        case 'se_set_led_halves':
-          return { set_led_halves: withRing({ colors: [b.getFieldValue('C1'), b.getFieldValue('C2')],
-                                     pattern: b.getFieldValue('PATTERN'),
-                                     period_ms: num(b, 'PERIOD'),
-                                     fade_ms: num(b, 'SMOOTH'),
-                                     angle: num(b, 'ANGLE') }, b) };
-        case 'se_set_led_quarters':
-          return { set_led_halves: withRing({ colors: [b.getFieldValue('C1'), b.getFieldValue('C2'),
-                                              b.getFieldValue('C3'), b.getFieldValue('C4')],
-                                     pattern: b.getFieldValue('PATTERN'),
-                                     period_ms: num(b, 'PERIOD'),
-                                     fade_ms: num(b, 'SMOOTH'),
-                                     angle: num(b, 'ANGLE') }, b) };
-        case 'se_fade':
-          return { fade: withRing({ color1: b.getFieldValue('C1'), color2: b.getFieldValue('C2'),
-                           period_ms: num(b, 'PERIOD') }, b) };
-        case 'se_zone_fill': {
-          var zf = withRing({ kind: b.getFieldValue('KIND'), step_pct: num(b, 'STEP'),
-                              fill: b.getFieldValue('FILL'),
-                              on_color: b.getFieldValue('ON'),
-                              bg_color: b.getFieldValue('BG'),
-                              target_interval_ms: num(b, 'TARGET'),
-                              tolerance_ms: num(b, 'TOLERANCE'),
-                              min_gap_ms: num(b, 'MIN_GAP'),
-                              hold: b.getFieldValue('HOLD') || 'none',
-                              hold_full_ut: num(b, 'HOLD_FULL'),
-                              fade_ms: num(b, 'SMOOTH') }, b);
-          var zfTo = (b.getFieldValue('TO') || '').trim();
-          if (zfTo) zf.to = zfTo;
-          return { zone_fill: zf };
-        }
-        case 'se_sync_fill':
-          return { sync_fill: withRing({ fill: b.getFieldValue('FILL'),
-                                         on_color: b.getFieldValue('ON'),
-                                         bg_color: b.getFieldValue('BG'),
-                                         fade_ms: num(b, 'SMOOTH'),
-                                         decay_ms: num(b, 'DECAY'),
-                                         hold: b.getFieldValue('HOLD') || 'none',
-                                         hold_full_ut: num(b, 'HOLD_FULL') }, b) };
-        case 'se_score_fill': {
-          var sf = withRing({ mode: b.getFieldValue('MODE') || 'auto',
-                              participants: num(b, 'PARTICIPANTS'),
-                              target_interval_ms: num(b, 'TARGET'),
-                              cadence_tolerance_ms: num(b, 'CADENCE'),
-                              phase_tolerance_ms: num(b, 'PHASE'),
-                              min_gap_ms: num(b, 'MIN_GAP'),
-                              gain_pct: num(b, 'GAIN'), penalty_pct: num(b, 'PENALTY'),
-                              fill: b.getFieldValue('FILL'),
-                              on_color: b.getFieldValue('ON'),
-                              bg_color: b.getFieldValue('BG'),
-                              hold: b.getFieldValue('HOLD') || 'none',
-                              hold_full_ut: num(b, 'HOLD_FULL'),
-                              fade_ms: num(b, 'SMOOTH') }, b);
-          var sfTo = (b.getFieldValue('TO') || '').trim();
-          if (sfTo) sf.to = sfTo;
-          return { score_fill: sf };
-        }
-        case 'se_touch_progress': {
-          var tp = withRing({ segments: num(b, 'SEGMENTS'), per: num(b, 'PER'),
-                              on_color: b.getFieldValue('ON'),
-                              bg_color: b.getFieldValue('BG') }, b);
-          var tpTo = (b.getFieldValue('TO') || '').trim();
-          if (tpTo) tp.to = tpTo;
-          return { touch_progress: tp };
-        }
-        case 'se_beat':
-          return { beat: withPower({ mode: b.getFieldValue('MODE'), pct: num(b, 'PCT'),
-                           pct2: num(b, 'PCT2'), aligned: num(b, 'ALIGNED'),
-                           period_ms: num(b, 'PERIOD') }, b) };
-        case 'se_inflate':
-          return { inflate: withPower({ chamber: b.getFieldValue('CHAMBER'), pct: num(b, 'PCT'),
-                              period_ms: num(b, 'PERIOD') }, b) };
-        case 'se_deflate':
-          return { deflate: { chamber: b.getFieldValue('CHAMBER') } };
-        case 'se_set_pressure':
-          return { set_pressure: withPower({ chamber: b.getFieldValue('CHAMBER'), pct: num(b, 'PCT') }, b) };
-        case 'se_stop':
-          return { stop: {} };
-        case 'se_thymio_drive':
-          return { thymio_drive: { left: num(b, 'LEFT'), right: num(b, 'RIGHT'),
-                                   ms: num(b, 'MS') } };
-        case 'se_thymio_leds':
-          return { thymio_leds: { color: b.getFieldValue('COLOR') } };
-        case 'se_thymio_sound':
-          return { thymio_sound: { sys: num(b, 'SYS'), freq: num(b, 'FREQ'),
-                                   dur: num(b, 'DUR'), track: num(b, 'TRACK') } };
-        case 'se_wait':
-          return { wait: { ms: num(b, 'MS') } };
-        case 'se_wait_for_touch':
-          return { wait_for_touch: { chamber: b.getFieldValue('CHAMBER') } };
-        case 'se_repeat': {
-          var o = { do: stepsFromStack(b.getInputTargetBlock('DO')) };
-          if (b.getFieldValue('MODE') === 'forever') o.forever = true;
-          else o.times = num(b, 'TIMES');
-          return { repeat: o };
-        }
-        case 'se_for_each':
-          return { for_each_chamber: { do: stepsFromStack(b.getInputTargetBlock('DO')) } };
-        case 'se_if_robot':
-          return { if_robot: { robot: b.getFieldValue('ROBOT'),
-                               do: stepsFromStack(b.getInputTargetBlock('DO')),
-                               else: stepsFromStack(b.getInputTargetBlock('ELSE')) } };
-        default:
-          return null;
-      }
-    }
-
     function condToObj(b) {
       if (!b) return { always: true };
-      switch (b.type) {
-        case 'se_elapsed':     return { elapsed_ms: num(b, 'MS') };
-        case 'se_touch_count': return { touch_count: { min: num(b, 'MIN') } };
-        case 'se_gesture_count': return { gesture_count: { kind: b.getFieldValue('KIND'),
-                                                           min: num(b, 'MIN') } };
-        case 'se_touch_rhythm': return { touch_rhythm: {
-          target_interval_ms: num(b, 'TARGET'), tolerance_ms: num(b, 'TOLERANCE'),
-          min_gap_ms: num(b, 'MIN_GAP'), intervals: num(b, 'INTERVALS') } };
-        case 'se_group_touch_rhythm': return { group_touch_rhythm: {
-          participants: num(b, 'PARTICIPANTS'), tolerance_hz: num(b, 'TOLERANCE'),
-          min_gap_ms: num(b, 'MIN_GAP'), intervals: num(b, 'INTERVALS') } };
-        case 'se_group_touch_sync': {
-          var participants = num(b, 'PARTICIPANTS');
-          var syncMode = b.getFieldValue('MODE') || 'auto';
-          var gts = {
-            mode: syncMode,
-            participants: participants,
-            target_interval_ms: num(b, 'TARGET'),
-            cadence_tolerance_ms: num(b, 'CADENCE'),
-            phase_tolerance_ms: num(b, 'PHASE'),
-            min_gap_ms: num(b, 'MIN_GAP'), rounds: num(b, 'ROUNDS') };
-          // Only a fixed group carries a sensor list: the runtime treats a
-          // spec WITH "sensors" as fixed regardless of mode.
-          if (syncMode === 'fixed')
-            gts.sensors = [num(b, 'S0'), num(b, 'S1'), num(b, 'S2')].slice(0, Math.min(participants, 3));
-          return { group_touch_sync: gts };
-        }
-        case 'se_on_impact':   return { on_impact: { min: num(b, 'MIN'),
-                                                     level: num(b, 'LEVEL') } };
-        case 'se_on_lifted':   return { on_lifted: { min: num(b, 'MIN') } };
-        case 'se_organs':      return { organs: { scope: b.getFieldValue('SCOPE'),
-                                                  good_op: b.getFieldValue('GOOD_OP'), good: num(b, 'GOOD'),
-                                                  bad_op: b.getFieldValue('BAD_OP'), bad: num(b, 'BAD') } };
-        case 'se_any':         return { any: [condToObj(b.getInputTargetBlock('A')),
-                                              condToObj(b.getInputTargetBlock('B'))] };
-        case 'se_all':         return { all: [condToObj(b.getInputTargetBlock('A')),
-                                              condToObj(b.getInputTargetBlock('B'))] };
-        case 'se_not':         return { not: condToObj(b.getInputTargetBlock('C')) };
-        case 'se_robot_is':    return { robot_is: { robot: b.getFieldValue('ROBOT') } };
-        default:               return { always: true };
-      }
+      var o = blockToObj(b);
+      return o || { always: true };
     }
 
     function transitionsFromStack(block) {
       var out = [];
       while (block) {
-        out.push({ to: block.getFieldValue('TO'),
+        out.push({ to: block.getFieldValue('TO') || '',
                    when: condToObj(block.getInputTargetBlock('WHEN')) });
         block = block.getNextBlock();
       }
       return out;
     }
 
-    function getSpec() {
-      var roots = workspace.getBlocksByType('se_behaviour', false);
-      var states = {}, initial = null, skin = null;
+    function compileSpec() {
+      var roots = workspace.getBlocksByType('se_behaviour', true);
+      var states = {}, initial = null, robot = ANY_ROBOT, skin = ANY_SKIN;
       if (roots.length) {
-        skin = roots[0].getFieldValue('SKIN');
+        robot = roots[0].getFieldValue('ROBOT') || ANY_ROBOT;
+        skin = roots[0].getFieldValue('SKIN') || ANY_SKIN;
         var s = roots[0].getInputTargetBlock('STATES');
         while (s) {
           var name = s.getFieldValue('NAME');
           if (initial === null) initial = name;
-          states[name] = {
+          var st = {
             do: stepsFromStack(s.getInputTargetBlock('DO')),
             on_touch: stepsFromStack(s.getInputTargetBlock('ONTOUCH')),
             transitions: transitionsFromStack(s.getInputTargetBlock('TRANSITIONS')),
           };
+          if (s.getFieldValue('FINAL') === 'TRUE') st.final = true;
+          states[name] = st;
           s = s.getNextBlock();
         }
       }
-      // _blockly carries the exact workspace so the editor can round-trip; the
-      // runtime/validator ignore unknown top-level keys.
-      var spec = { initial: initial, states: states,
-                   _blockly: Blockly.serialization.workspaces.save(workspace) };
-      // 'any' = target-less behaviour: omit the key entirely.
-      if (skin && skin !== 'any') spec.target = { skin: skin };
+      var spec = { initial: initial, states: states };
+      var target = {};
+      if (robot !== ANY_ROBOT) target.kind = robot;
+      if (skin !== ANY_SKIN) target.skin = skin;
+      if (Object.keys(target).length) spec.target = target;
+      return spec;
+    }
+
+    function getSpec() {
+      var spec = compileSpec();
+      // _blockly carries the exact workspace so the editor can round-trip
+      // block positions and collapsed state; the runtime/validator ignore it.
+      spec._blockly = { format: 2,
+                        workspace: Blockly.serialization.workspaces.save(workspace) };
       return JSON.stringify(spec);
     }
 
-    // ---- Load / reset -------------------------------------------------
-    function loadSpec(json) {
-      try {
-        var spec = (typeof json === 'string') ? JSON.parse(json) : json;
-        if (spec && spec._blockly) {
-          Blockly.serialization.workspaces.load(spec._blockly, workspace);
-          renderAllBlocks();
-          syncTargetUi(spec);
-          return;
+    function getWarnings() {
+      var out = [];
+      if (!workspace) return JSON.stringify(out);
+      var roots = workspace.getBlocksByType('se_behaviour', true);
+      var seen = {}, dupes = {};
+      if (roots.length) {
+        var s = roots[0].getInputTargetBlock('STATES');
+        while (s) {
+          var n = s.getFieldValue('NAME');
+          if (seen[n]) dupes[n] = 1; else seen[n] = 1;
+          s = s.getNextBlock();
         }
-        // A hand-authored or imported spec carries no _blockly workspace blob.
-        // Rebuild the blocks from the spec itself so it is visible, editable and
-        // re-saveable (otherwise the editor would open blank and Save would
-        // overwrite the import with an empty behaviour).
-        if (spec && spec.states) {
-          buildBlocksFromSpec(spec);
-          return;
-        }
-      } catch (e) {
-        console.warn('loadSpec failed, starting fresh:', e);
       }
-      newWorkspace();
+      Object.keys(dupes).forEach(function (n) {
+        out.push("Two phases are called '" + n + "' - only the last one is kept. Rename one.");
+      });
+      var stray = workspace.getTopBlocks(false).filter(function (b) { return b.type !== 'se_behaviour'; });
+      if (stray.length) {
+        out.push(stray.length + ' block(s) are lying loose outside the behaviour and will be ignored.');
+      }
+      return JSON.stringify(out);
     }
 
-    // ---- Rebuild blocks from a bare spec (inverse of getSpec) ----------
-    function newStepBlock(type) {
+    // ---- Load / reset -------------------------------------------------
+    function stripEditorKeys(spec) {
+      var copy = JSON.parse(JSON.stringify(spec));
+      delete copy._blockly;
+      return copy;
+    }
+
+    function loadSpec(json) {
+      whenReady(function () { loadSpecNow(json); });
+    }
+
+    function loadSpecNow(json) {
+      loadingSpec = true;
+      try { loadSpecGuarded(json); }
+      finally { loadingSpec = false; }
+    }
+
+    function loadSpecGuarded(json) {
+      var spec = null;
+      try { spec = (typeof json === 'string') ? JSON.parse(json) : json; }
+      catch (e) { console.warn('loadSpec: bad JSON, starting fresh:', e); }
+      if (!spec || !spec.states) { newWorkspace(); return; }
+      var blob = spec._blockly;
+      if (blob && blob.format === 2 && blob.workspace) {
+        try {
+          Blockly.serialization.workspaces.load(blob.workspace, workspace);
+          renderAllBlocks();
+          // The saved workspace must compile back to the saved spec; if the
+          // catalogue moved on since it was saved, rebuild from the spec
+          // (the authoritative copy) rather than show stale blocks.
+          if (sameValue(normaliseSpec(compileSpec()), normaliseSpec(stripEditorKeys(spec)))) return;
+          console.warn('saved workspace no longer matches its spec - rebuilding from the spec');
+        } catch (e) {
+          console.warn('saved workspace failed to load - rebuilding from the spec:', e);
+        }
+      }
+      buildBlocksFromSpec(spec);
+    }
+
+    // Canonical form for comparing a compiled spec with a stored one: the
+    // editor always emits every visible field, so only key sets that both
+    // carry are compared, and scalar shorthands are expanded.
+    function normaliseSpec(spec) {
+      return { initial: spec.initial, target: spec.target || null,
+               states: spec.states };
+    }
+
+    // ---- Rebuild blocks from a bare spec (inverse of compileSpec) ------
+    function newBlock(type) {
       var b = workspace.newBlock(type);
       b.initSvg();
       return b;
@@ -998,33 +844,30 @@
       catch (e) { console.warn('setFieldValue', name, val, e); }
     }
 
-    // Set the 1-5 power dropdown from a spec: an explicit 'power', or a legacy
-    // raw 'duty' converted to the nearest level (floor ~190 -> 1, 255 -> 5), else
-    // the default 5 (full).
-    function setPower(b, p) {
-      if (!p) return;
-      if (p.power != null) { setF(b, 'POWER', String(p.power)); return; }
+    // The 1-5 power dial from a spec: an explicit 'power', or a legacy raw
+    // 'duty' converted to the nearest level (floor ~190 -> 1, 255 -> 5).
+    function powerFrom(p) {
+      if (p.power != null) return Number(p.power);
       if (p.duty) {
         var MIN = 190, span = 255 - MIN;
         var duty = Math.max(MIN, Math.min(255, p.duty));
-        var lvl = 1 + Math.round((duty - MIN) / span * 4);
-        setF(b, 'POWER', String(Math.max(1, Math.min(5, lvl))));
+        return Math.max(1, Math.min(5, 1 + Math.round((duty - MIN) / span * 4)));
       }
+      return null;
     }
 
     function connectStack(parent, inputName, firstChild) {
-      if (firstChild) {
+      if (firstChild && parent.getInput(inputName)) {
         parent.getInput(inputName).connection.connect(firstChild.previousConnection);
       }
     }
 
     function connectCond(parent, inputName, child) {
-      if (child && child.outputConnection) {
+      if (child && child.outputConnection && parent.getInput(inputName)) {
         parent.getInput(inputName).connection.connect(child.outputConnection);
       }
     }
 
-    // Build a statement stack from an array of steps; return its first block.
     function buildStack(steps) {
       var first = null, prev = null;
       (steps || []).forEach(function (step) {
@@ -1037,225 +880,106 @@
       return first;
     }
 
+    // Pick the block (base or variant) whose slot count fits the spec's list.
+    function pickBlockType(verb, p) {
+      var listField = verb.fields.filter(function (f) { return f.type === 'colors' || f.type === 'ints'; })[0];
+      if (listField && Array.isArray(p[listField.name])) {
+        var n = p[listField.name].length, best = null;
+        (verb.variants || []).forEach(function (v) {
+          if (v.count <= n && (!best || v.count > best.count)) best = v;
+        });
+        var baseCount = listField.count || (listField.default || []).length;
+        if (best && best.count > baseCount) return blockTypeFor(verb.name, best.id);
+      }
+      return blockTypeFor(verb.name);
+    }
+
+    function writeField(b, f, def, v) {
+      var i, n;
+      if (v === undefined || v === null) return;
+      switch (f.type) {
+        case 'ms': {
+          var parts = splitMs(v);
+          setF(b, f.name, parts[0]); setF(b, f.name + '__unit', parts[1]);
+          break;
+        }
+        case 'colors': case 'ints':
+          n = slotCount(f, def);
+          for (i = 0; i < n && i < v.length; i++) setF(b, f.name + '__' + i, v[i]);
+          break;
+        case 'enum': case 'chamber': case 'ring': case 'power':
+          setF(b, f.name, encodeChoice(decodeChoice(f, v)));
+          break;
+        case 'phase': setPhaseField(b, f.name, v); break;
+        case 'steps': connectStack(b, f.name, buildStack(v)); break;
+        case 'cond': connectCond(b, f.name, buildCond(v)); break;
+        case 'conds':
+          b.setCondCount_(Math.max(2, (v || []).length));
+          (v || []).forEach(function (c, idx) {
+            if (idx < 4) connectCond(b, f.name + '__' + idx, buildCond(c));
+          });
+          break;
+        default: setF(b, f.name, v);
+      }
+    }
+
+    function buildVerbBlock(verbName, p) {
+      var verb = VERBS[verbName];
+      if (!verb) return null;
+      var raw = p;
+      if (!p || typeof p !== 'object' || Array.isArray(p)) p = { _value: p };
+      var b = newBlock(pickBlockType(verb, p));
+      var def = BLOCK_DEFS[b.type];
+      // Scalar shorthand ({"wait": 500}) fills the first plain field.
+      if (p._value !== undefined) {
+        var first = verb.fields.filter(function (f) {
+          return !f.hidden && ['steps', 'cond', 'conds'].indexOf(f.type) < 0;
+        })[0];
+        if (first) { p = {}; p[first.name] = raw; }
+      }
+      verb.fields.forEach(function (f) {
+        if (f.hidden) return;
+        var v = p[f.name];
+        if (f.type === 'power') v = powerFrom(p);
+        if (f.name === 'forever' && verb.name === 'repeat') {
+          v = !!p.forever || p.times == null || p.times === 'forever';
+        }
+        if (f.name === 'mode' && verb.name === 'group_touch_sync') {
+          v = Array.isArray(p.sensors) ? 'fixed' : (p.mode === 'fixed' ? 'fixed' : 'auto');
+        }
+        writeField(b, f, def, v);
+      });
+      if (b.updateShape_) b.updateShape_({});
+      return b;
+    }
+
     function buildStep(step) {
       if (!step || typeof step !== 'object') return null;
       var verb = Object.keys(step)[0];
       var p = step[verb];
-      if (!p || typeof p !== 'object') p = { _value: p };
-      var b;
-      switch (verb) {
-        case 'set_led':
-          b = newStepBlock('se_set_led');
-          setF(b, 'COLOR', p.color); setF(b, 'PATTERN', p.pattern);
-          setF(b, 'PERIOD', p.period_ms); setF(b, 'SMOOTH', p.fade_ms);
-          setF(b, 'ANGLE', p.angle); setF(b, 'RING', p.ring); break;
-        case 'set_led_halves':
-          var cols = p.colors || [];
-          if (cols.length >= 4) {            // four colours rebuild as the quarters block
-            b = newStepBlock('se_set_led_quarters');
-            setF(b, 'C1', cols[0]); setF(b, 'C2', cols[1]);
-            setF(b, 'C3', cols[2]); setF(b, 'C4', cols[3]);
-          } else {
-            b = newStepBlock('se_set_led_halves');
-            setF(b, 'C1', cols[0]); setF(b, 'C2', cols[1]);
-          }
-          setF(b, 'PATTERN', p.pattern); setF(b, 'PERIOD', p.period_ms);
-          setF(b, 'SMOOTH', p.fade_ms); setF(b, 'ANGLE', p.angle);
-          setF(b, 'RING', p.ring); break;
-        case 'fade':
-          b = newStepBlock('se_fade');
-          setF(b, 'C1', p.color1); setF(b, 'C2', p.color2);
-          setF(b, 'PERIOD', p.period_ms); setF(b, 'RING', p.ring); break;
-        case 'beat':
-          b = newStepBlock('se_beat');
-          setF(b, 'MODE', p.mode);
-          if (b.updateShape_) b.updateShape_(p.mode);
-          setF(b, 'PCT', p.pct); setF(b, 'PCT2', p.pct2);
-          setF(b, 'ALIGNED', p.aligned); setF(b, 'PERIOD', p.period_ms);
-          setPower(b, p); break;
-        case 'zone_fill':
-          b = newStepBlock('se_zone_fill');
-          setF(b, 'KIND', p.kind != null ? p.kind : 'touch');
-          setF(b, 'STEP', p.step_pct != null ? p.step_pct : 25);
-          setF(b, 'FILL', p.fill != null ? p.fill : 'random');
-          setF(b, 'ON', p.on_color != null ? p.on_color : '#2ecc71');
-          setF(b, 'BG', p.bg_color != null ? p.bg_color : '#222222');
-          setF(b, 'TARGET', p.target_interval_ms != null ? p.target_interval_ms : 550);
-          setF(b, 'TOLERANCE', p.tolerance_ms != null ? p.tolerance_ms : 150);
-          setF(b, 'MIN_GAP', p.min_gap_ms != null ? p.min_gap_ms : 250);
-          setF(b, 'HOLD', p.hold != null ? p.hold : 'none');
-          setF(b, 'HOLD_FULL', p.hold_full_ut != null ? p.hold_full_ut : 300);
-          setF(b, 'RING', p.ring); setF(b, 'SMOOTH', p.fade_ms != null ? p.fade_ms : 250);
-          setF(b, 'TO', p.to != null ? p.to : ''); break;
-        case 'sync_fill':
-          b = newStepBlock('se_sync_fill');
-          setF(b, 'FILL', p.fill != null ? p.fill : 'random');
-          setF(b, 'ON', p.on_color != null ? p.on_color : '#2ecc71');
-          setF(b, 'BG', p.bg_color != null ? p.bg_color : '#222222');
-          setF(b, 'RING', p.ring); setF(b, 'SMOOTH', p.fade_ms != null ? p.fade_ms : 250);
-          setF(b, 'DECAY', p.decay_ms != null ? p.decay_ms : 150);
-          setF(b, 'HOLD', p.hold != null ? p.hold : 'none');
-          setF(b, 'HOLD_FULL', p.hold_full_ut != null ? p.hold_full_ut : 300); break;
-        case 'score_fill':
-          b = newStepBlock('se_score_fill');
-          setF(b, 'MODE', p.mode != null ? p.mode : 'auto');
-          setF(b, 'PARTICIPANTS', p.participants != null ? p.participants : 3);
-          setF(b, 'TARGET', p.target_interval_ms != null ? p.target_interval_ms : 550);
-          setF(b, 'CADENCE', p.cadence_tolerance_ms != null ? p.cadence_tolerance_ms : 100);
-          setF(b, 'PHASE', p.phase_tolerance_ms != null ? p.phase_tolerance_ms : 150);
-          setF(b, 'MIN_GAP', p.min_gap_ms != null ? p.min_gap_ms : 250);
-          setF(b, 'GAIN', p.gain_pct != null ? p.gain_pct : 15);
-          setF(b, 'PENALTY', p.penalty_pct != null ? p.penalty_pct : 5);
-          setF(b, 'FILL', p.fill != null ? p.fill : 'random');
-          setF(b, 'ON', p.on_color != null ? p.on_color : '#f1c40f');
-          setF(b, 'BG', p.bg_color != null ? p.bg_color : '#8e44ad');
-          setF(b, 'HOLD', p.hold != null ? p.hold : 'none');
-          setF(b, 'HOLD_FULL', p.hold_full_ut != null ? p.hold_full_ut : 300);
-          setF(b, 'RING', p.ring); setF(b, 'SMOOTH', p.fade_ms != null ? p.fade_ms : 250);
-          setF(b, 'TO', p.to != null ? p.to : ''); break;
-        case 'touch_progress':
-          b = newStepBlock('se_touch_progress');
-          setF(b, 'SEGMENTS', p.segments != null ? p.segments : 4);
-          setF(b, 'PER', p.per != null ? p.per : 1);
-          setF(b, 'ON', p.on_color != null ? p.on_color : '#2ecc71');
-          setF(b, 'BG', p.bg_color != null ? p.bg_color : '#222222');
-          setF(b, 'RING', p.ring);
-          setF(b, 'TO', p.to != null ? p.to : ''); break;
-        case 'inflate':
-          b = newStepBlock('se_inflate');
-          setF(b, 'CHAMBER', p.chamber); setF(b, 'PCT', p.pct);
-          setF(b, 'PERIOD', p.period_ms); setPower(b, p); break;
-        case 'deflate':
-          b = newStepBlock('se_deflate'); setF(b, 'CHAMBER', p.chamber); break;
-        case 'set_pressure': case 'wrinkle':
-          b = newStepBlock('se_set_pressure');
-          setF(b, 'CHAMBER', p.chamber);
-          setF(b, 'PCT', verb === 'wrinkle' ? 0 : p.pct);
-          setPower(b, p); break;
-        case 'stop': b = newStepBlock('se_stop'); break;
-        case 'thymio_drive':
-          b = newStepBlock('se_thymio_drive');
-          setF(b, 'LEFT', p.left); setF(b, 'RIGHT', p.right);
-          setF(b, 'MS', p.ms); break;
-        case 'thymio_leds':
-          b = newStepBlock('se_thymio_leds'); setF(b, 'COLOR', p.color); break;
-        case 'thymio_sound':
-          b = newStepBlock('se_thymio_sound');
-          setF(b, 'SYS', p.sys != null ? p.sys : 2);
-          setF(b, 'FREQ', p.freq != null ? p.freq : 0);
-          setF(b, 'DUR', p.dur != null ? p.dur : 200);
-          setF(b, 'TRACK', p.track != null ? p.track : -1); break;
-        case 'wait':
-          b = newStepBlock('se_wait');
-          setF(b, 'MS', p.ms != null ? p.ms : p._value); break;
-        case 'wait_for_touch':
-          b = newStepBlock('se_wait_for_touch');
-          setF(b, 'CHAMBER', p.chamber != null ? p.chamber : 'current'); break;
-        case 'repeat':
-          b = newStepBlock('se_repeat');
-          if (p.forever || p.times == null) setF(b, 'MODE', 'forever');
-          else { setF(b, 'MODE', 'times'); setF(b, 'TIMES', p.times); }
-          connectStack(b, 'DO', buildStack(p.do)); break;
-        case 'for_each_chamber':
-          b = newStepBlock('se_for_each');
-          connectStack(b, 'DO', buildStack(p.do)); break;
-        case 'if_robot':
-          b = newStepBlock('se_if_robot');
-          setF(b, 'ROBOT', p.robot);
-          connectStack(b, 'DO', buildStack(p.do));
-          connectStack(b, 'ELSE', buildStack(p['else'])); break;
-        default: return null;
+      if (verb === 'wrinkle') {          // deprecated alias of set_pressure 0 %
+        verb = 'set_pressure';
+        p = Object.assign({}, (p && typeof p === 'object') ? p : {}, { pct: 0 });
       }
-      return b;
+      return buildVerbBlock(verb, p);
     }
 
     function buildCond(cond) {
-      if (!cond || typeof cond !== 'object') return newStepBlock('se_always');
+      if (!cond || typeof cond !== 'object') return newBlock('se_always');
       var name = Object.keys(cond)[0];
-      var v = cond[name];
       if (name === 'or') name = 'any';
       if (name === 'and') name = 'all';
-      var b;
-      switch (name) {
-        case 'elapsed_ms':
-          b = newStepBlock('se_elapsed');
-          setF(b, 'MS', (v && v.ms != null) ? v.ms : v); break;
-        case 'touch_count':
-          b = newStepBlock('se_touch_count');
-          setF(b, 'MIN', (v && v.min != null) ? v.min : v); break;
-        case 'gesture_count':
-          b = newStepBlock('se_gesture_count');
-          setF(b, 'KIND', (v && v.kind != null) ? v.kind : 'touch');
-          setF(b, 'MIN', (v && v.min != null) ? v.min : v); break;
-        case 'touch_rhythm':
-          b = newStepBlock('se_touch_rhythm'); v = v || {};
-          setF(b, 'TARGET', v.target_interval_ms);
-          setF(b, 'TOLERANCE', v.tolerance_ms);
-          setF(b, 'MIN_GAP', v.min_gap_ms);
-          setF(b, 'INTERVALS', v.intervals); break;
-        case 'group_touch_rhythm':
-          b = newStepBlock('se_group_touch_rhythm'); v = v || {};
-          setF(b, 'PARTICIPANTS', v.participants);
-          setF(b, 'TOLERANCE', v.tolerance_hz != null ? v.tolerance_hz
-                                                       : v.tolerance_pct);
-          setF(b, 'MIN_GAP', v.min_gap_ms);
-          setF(b, 'INTERVALS', v.intervals); break;
-        case 'group_touch_sync':
-          b = newStepBlock('se_group_touch_sync'); v = v || {};
-          setF(b, 'PARTICIPANTS', v.participants);
-          // A saved spec listing sensors is a fixed group (that is how the
-          // runtime reads it); otherwise honour its mode, default auto.
-          setF(b, 'MODE', Array.isArray(v.sensors) ? 'fixed'
-                                                   : (v.mode === 'fixed' ? 'fixed' : 'auto'));
-          var sensors = Array.isArray(v.sensors) ? v.sensors : [0, 1, 2];
-          setF(b, 'S0', sensors[0] == null ? 0 : sensors[0]);
-          setF(b, 'S1', sensors[1] == null ? 1 : sensors[1]);
-          setF(b, 'S2', sensors[2] == null ? 2 : sensors[2]);
-          setF(b, 'TARGET', v.target_interval_ms);
-          setF(b, 'CADENCE', v.cadence_tolerance_ms);
-          setF(b, 'PHASE', v.phase_tolerance_ms);
-          setF(b, 'MIN_GAP', v.min_gap_ms);
-          setF(b, 'ROUNDS', v.rounds); break;
-        case 'on_impact': {
-          b = newStepBlock('se_on_impact');
-          var im = (v && v.min != null) ? v.min : v;
-          setF(b, 'MIN', im == null ? 1 : im);
-          setF(b, 'LEVEL', String((v && v.level != null) ? v.level : 1)); break;
-        }
-        case 'on_lifted': {
-          b = newStepBlock('se_on_lifted');
-          var lf = (v && v.min != null) ? v.min : v;
-          setF(b, 'MIN', lf == null ? 1 : lf); break;
-        }
-        case 'organs':
-          b = newStepBlock('se_organs'); v = v || {};
-          setF(b, 'SCOPE', v.scope); setF(b, 'GOOD_OP', v.good_op);
-          setF(b, 'GOOD', v.good); setF(b, 'BAD_OP', v.bad_op);
-          setF(b, 'BAD', v.bad); break;
-        case 'any':
-          b = newStepBlock('se_any');
-          connectCond(b, 'A', buildCond((v || [])[0]));
-          connectCond(b, 'B', buildCond((v || [])[1])); break;
-        case 'all':
-          b = newStepBlock('se_all');
-          connectCond(b, 'A', buildCond((v || [])[0]));
-          connectCond(b, 'B', buildCond((v || [])[1])); break;
-        case 'not':
-          b = newStepBlock('se_not'); connectCond(b, 'C', buildCond(v)); break;
-        case 'robot_is':
-          b = newStepBlock('se_robot_is');
-          setF(b, 'ROBOT', (v && v.robot != null) ? v.robot : v); break;
-        default:
-          b = newStepBlock('se_always'); break;
-      }
-      return b;
+      var v = cond[name];
+      if (name === 'any' || name === 'all') v = { conds: v };
+      if (name === 'not') v = { cond: v };
+      return buildVerbBlock(name, v) || newBlock('se_always');
     }
 
     function buildTransitions(transitions) {
       var first = null, prev = null;
       (transitions || []).forEach(function (tr) {
-        var b = newStepBlock('se_transition');
-        setF(b, 'TO', tr.to);
+        var b = newBlock('se_transition');
+        setPhaseField(b, 'TO', tr.to);
         connectCond(b, 'WHEN', buildCond(tr.when));
         if (prev) prev.nextConnection.connect(b.previousConnection);
         else first = b;
@@ -1266,33 +990,38 @@
 
     function buildBlocksFromSpec(spec) {
       workspace.clear();
-      var root = newStepBlock('se_behaviour');
-      if (spec.target && spec.target.skin) setF(root, 'SKIN', spec.target.skin);
+      var root = newBlock('se_behaviour');
+      var target = spec.target || {};
+      setF(root, 'ROBOT', target.kind || ANY_ROBOT);
+      setF(root, 'SKIN', target.skin || ANY_SKIN);
       root.moveBy(30, 30);
       var states = spec.states || {};
       var order = Object.keys(states);
       // Keep the declared initial phase first, so the editor's "starts at the
       // first phase" matches the spec's initial state.
       if (spec.initial && order.indexOf(spec.initial) > 0) {
-        order = [spec.initial].concat(order.filter(function (n) {
-          return n !== spec.initial;
-        }));
+        order = [spec.initial].concat(order.filter(function (n) { return n !== spec.initial; }));
       }
-      var prevState = null;
+      // Create every phase block first so phase dropdowns can list them all,
+      // then fill the bodies.
+      var blocks = {}, prevState = null;
       order.forEach(function (name) {
-        var st = states[name] || {};
-        var sb = newStepBlock('se_state');
+        var sb = newBlock('se_state');
         setF(sb, 'NAME', name);
-        connectStack(sb, 'DO', buildStack(st.do));
-        connectStack(sb, 'ONTOUCH', buildStack(st.on_touch));
-        connectStack(sb, 'TRANSITIONS', buildTransitions(st.transitions));
+        if (states[name] && states[name].final) setF(sb, 'FINAL', 'TRUE');
+        blocks[name] = sb;
         if (prevState) prevState.nextConnection.connect(sb.previousConnection);
         else connectStack(root, 'STATES', sb);
         prevState = sb;
       });
+      order.forEach(function (name) {
+        var st = states[name] || {}, sb = blocks[name];
+        connectStack(sb, 'DO', buildStack(st.do));
+        connectStack(sb, 'ONTOUCH', buildStack(st.on_touch));
+        connectStack(sb, 'TRANSITIONS', buildTransitions(st.transitions));
+      });
       root.render();
       renderAllBlocks();
-      syncTargetUi(spec);
     }
 
     // After a programmatic deserialize, Blockly 13 can leave nested blocks
@@ -1312,14 +1041,23 @@
     }
 
     function newWorkspace() {
-      if (!workspace) return;
-      workspace.clear();
-      var root = workspace.newBlock('se_behaviour');
-      var st = workspace.newBlock('se_state');
-      root.initSvg(); st.initSvg();
-      root.getInput('STATES').connection.connect(st.previousConnection);
-      root.moveBy(30, 30);
-      root.render();
+      whenReady(function () {
+        loadingSpec = true;
+        try { resetWorkspace(); }
+        finally { loadingSpec = false; }
+      });
+    }
+
+    function resetWorkspace() {
+      {
+        workspace.clear();
+        var root = newBlock('se_behaviour');
+        var st = newBlock('se_state');
+        root.getInput('STATES').connection.connect(st.previousConnection);
+        root.moveBy(30, 30);
+        root.render();
+        renderAllBlocks();
+      }
     }
   </script>
 </body>

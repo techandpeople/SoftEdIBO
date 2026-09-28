@@ -76,7 +76,7 @@
     <layout class="QHBoxLayout" name="editor_row">
      <item>
       <widget class="QWidget" name="webContainer" native="true">
-       <property name="whatsThis"><string>Drag blocks here to build the activity behaviour. Phases are States; inside each State you stack actions (set the LED, beat, inflate, wait, wait for touch...) and add Transitions that move to another phase after a time, enough touches, or an organ condition.</string></property>
+       <property name="whatsThis"><string>Drag blocks here to build the activity behaviour. The root block says which robot and skin it is for; inside it you stack phases. In each phase you stack actions (set the LED, beat, inflate, wait, wait for touch...) and add transitions that move to another phase after a time, enough touches, a rhythm, or an organ condition. Tick "final" on the last phase. Times take a unit (ms / s / min); colours have a swatch picker; "go to phase" lists the phases you defined.</string></property>
        <property name="sizePolicy">
         <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
          <horstretch>1</horstretch><verstretch>1</verstretch>
@@ -96,11 +96,11 @@
        <property name="maximumSize">
         <size><width>230</width><height>16777215</height></size>
        </property>
-       <property name="whatsThis"><string>Pick a colour visually here, Copy it, then paste the #tag into the colour field of a "set LED" or "set LED halves" block. The selected colour previews live on the connected robots.</string></property>
+       <property name="whatsThis"><string>Preview a colour on the connected robots while you author: pick it here and the LED rings light up with it. Colour blocks have their own swatch picker (click the coloured square on the block); Copy puts this colour's #tag on the clipboard if you want to type it into a block.</string></property>
        <layout class="QVBoxLayout" name="colourLayout">
         <item>
          <widget class="QLabel" name="colourHelp">
-          <property name="text"><string>Pick a colour, press Copy, then paste the #tag into a block's colour field.</string></property>
+          <property name="text"><string>Preview a colour on the robots. Blocks have their own colour swatch - click it.</string></property>
           <property name="wordWrap"><bool>true</bool></property>
          </widget>
         </item>
@@ -135,13 +135,13 @@
           <item>
            <widget class="QLineEdit" name="hexEdit">
             <property name="readOnly"><bool>true</bool></property>
-            <property name="whatsThis"><string>The selected colour's #rrggbb tag. Copy it into a block's colour field.</string></property>
+            <property name="whatsThis"><string>The selected colour's #rrggbb tag.</string></property>
            </widget>
           </item>
           <item>
            <widget class="QPushButton" name="copyHexButton">
             <property name="text"><string>Copy</string></property>
-            <property name="whatsThis"><string>Copy the #tag to the clipboard so you can paste it into a colour block.</string></property>
+            <property name="whatsThis"><string>Copy the #tag to the clipboard.</string></property>
            </widget>
           </item>
          </layout>

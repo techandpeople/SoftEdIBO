@@ -4,6 +4,7 @@ import time
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -348,18 +349,28 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         all_row.addStretch()
         vbox.addLayout(all_row)
 
-        # Per-slot rows
-        for slot in slots:
-            slot_row = QHBoxLayout()
-            slot_row.addWidget(QLabel(f"  Slot {slot}:"))
+        # Per-slot rows in a grid, so the valve columns line up under one
+        # header each instead of repeating "Inflate/Deflate Valve" per button.
+        grid = QGridLayout()
+        col_inf_valve = 5
+        col_def_valve = 6
+        col_pressure = 7
+        for col, title in ((col_inf_valve, "Inflate Valve"),
+                           (col_def_valve, "Deflate Valve"),
+                           (col_pressure, "Pressure")):
+            header = QLabel(f"<b>{title}</b>")
+            header.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            grid.addWidget(header, 0, col)
+        for row, slot in enumerate(slots, start=1):
+            grid.addWidget(QLabel(f"  Slot {slot}:"), row, 0)
             inf_btn = QPushButton("Inflate")
             def_btn = QPushButton("Deflate")
             inf_btn.clicked.connect(lambda _=False, s=slot: self._chamber_dir(s, 0))
             def_btn.clicked.connect(lambda _=False, s=slot: self._chamber_dir(s, 1))
             self._chamber_btns[(slot, 0)] = inf_btn
             self._chamber_btns[(slot, 1)] = def_btn
-            slot_row.addWidget(inf_btn)
-            slot_row.addWidget(def_btn)
+            grid.addWidget(inf_btn, row, 1)
+            grid.addWidget(def_btn, row, 2)
 
             # Leak-compensating hold toggle: the node regulates the chamber on
             # its gauge with a continuous, loss-matched pump duty (pressure
@@ -385,7 +396,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
                 hold_btn.toggled.connect(
                     lambda on, s=slot: self._toggle_hold(s, on))
                 self._hold_btns[slot] = hold_btn
-                slot_row.addWidget(hold_btn)
+                grid.addWidget(hold_btn, row, 3)
 
             vent_btn = QPushButton("Vent")
             vent_btn.setCheckable(True)
@@ -399,7 +410,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
             vent_btn.toggled.connect(
                 lambda on, s=slot: self._toggle_vent_slot(s, on))
             self._vent_btns[slot] = vent_btn
-            slot_row.addWidget(vent_btn)
+            grid.addWidget(vent_btn, row, 4)
 
             # Manual valve toggle controls (monospace font for fixed width). The
             # label flips on click (optimistic), but the GREEN fill is driven only
@@ -416,28 +427,27 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
                 "the firmware dead-man doesn't close it after ~5 s; closing the "
                 "dialog or STOP ALL releases it.")
 
-            val_inf_btn = QPushButton("Inflate Valve: CLOSED")
-            val_inf_btn.setMaximumWidth(180)
+            val_inf_btn = QPushButton("CLOSED")
             val_inf_btn.setStyleSheet(self._VALVE_STYLE)
             val_inf_btn.setWhatsThis(valve_help)
             val_inf_btn.clicked.connect(lambda _=False, s=slot, btn=val_inf_btn: self._toggle_valve(s, 0, btn))
             self._valve_states[(slot, 0)] = (False, val_inf_btn)
-            slot_row.addWidget(val_inf_btn)
+            grid.addWidget(val_inf_btn, row, col_inf_valve)
 
-            val_def_btn = QPushButton("Deflate Valve: CLOSED")
-            val_def_btn.setMaximumWidth(180)
+            val_def_btn = QPushButton("CLOSED")
             val_def_btn.setStyleSheet(self._VALVE_STYLE)
             val_def_btn.setWhatsThis(valve_help)
             val_def_btn.clicked.connect(lambda _=False, s=slot, btn=val_def_btn: self._toggle_valve(s, 1, btn))
             self._valve_states[(slot, 1)] = (False, val_def_btn)
-            slot_row.addWidget(val_def_btn)
+            grid.addWidget(val_def_btn, row, col_def_valve)
 
             pressure_lbl = QLabel("-")
             pressure_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             pressure_lbl.setMinimumWidth(110)
-            slot_row.addWidget(pressure_lbl)
+            grid.addWidget(pressure_lbl, row, col_pressure)
             self._pressure_labels[slot] = pressure_lbl
-            vbox.addLayout(slot_row)
+        grid.setColumnStretch(col_pressure + 1, 1)
+        vbox.addLayout(grid)
 
         return box
 
@@ -673,8 +683,8 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
             return
         _, btn = entry
         self._valve_states[key] = (is_open, btn)
-        side_name = "Inflate" if key[1] == 0 else "Deflate"
-        btn.setText(f"{side_name} Valve: {'OPEN  ' if is_open else 'CLOSED'}")
+        # The column header names the side; the button only shows the state.
+        btn.setText("OPEN" if is_open else "CLOSED")
         btn.setStyleSheet(self._VALVE_OPEN_STYLE if (is_open and confirmed)
                           else self._VALVE_STYLE)
 
