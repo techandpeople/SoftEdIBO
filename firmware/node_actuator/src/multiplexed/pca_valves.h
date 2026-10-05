@@ -8,18 +8,13 @@
 
 // Two PCA9685 PWM expanders drive 3x ULN2803A -> 24 valve outputs (UNL1..24).
 //
-// Mapping (verified from netlist):
+// Wiring (verified from netlist):
 //   PCA #1 LED0-7  -> U6  -> UNL[i+1]  = pca1.LED[i]  for i = 0..7    (sequential)
 //   PCA #1 LED8-15 -> U8  -> UNL[24-i] = pca1.LED[i]  for i = 8..15   (REVERSED)
 //   PCA #2 LED0-7  -> U20 -> UNL[24-i] = pca2.LED[i]  for i = 0..7    (REVERSED)
 //
-// Per-chamber valve assignment:
-//   chamber c (0..11): inflate = UNL[c*2 + 1], deflate = UNL[c*2 + 2]
-//
-// On the firmware's PCA channels:
-//   c < 4       -> pca1 channels (c*2)   inflate, (c*2 + 1) deflate
-//   4 <= c < 8  -> pca1 channels (23-2c) inflate, (22-2c)   deflate    (REVERSED)
-//   c >= 8      -> pca2 channels (23-2c) inflate, (22-2c)   deflate    (REVERSED)
+// Chambers follow the physical connector layout, not UNL order: each chamber
+// owns one neighbouring connector pair (see VALVE_MAP below).
 
 namespace pca_valves {
 
@@ -28,8 +23,53 @@ constexpr int  I2C_CLOCK        = 400000;        // 400 kHz fast I2C
 constexpr uint8_t SCAN_RANGE_LO = 0x40;
 constexpr uint8_t SCAN_RANGE_HI = 0x4F;
 
-inline Adafruit_PWMServoDriver pca1(0x40);  // address replaced after scan
-inline Adafruit_PWMServoDriver pca2(0x41);
+// Fixed addresses, set by the A0..A5 jumpers: U21 has A0 low (J63 to GND),
+// U5 has A0 high (J62 to 3V3). pca1 = U5 (UNL1-16), pca2 = U21 (UNL17-24).
+constexpr uint8_t PCA1_ADDR = 0x41;
+constexpr uint8_t PCA2_ADDR = 0x40;
+
+inline Adafruit_PWMServoDriver pca1(PCA1_ADDR);
+inline Adafruit_PWMServoDriver pca2(PCA2_ADDR);
+// Per-chamber valve outputs: {chip (0 = pca1, 1 = pca2), inflate channel,
+// deflate channel}. Connector names are the PCB references.
+struct ValveOutputs {
+    uint8_t chip;
+    uint8_t inflate_ch;
+    uint8_t deflate_ch;
+};
+
+constexpr ValveOutputs VALVE_MAP[] = {
+    {0, 12, 14},  // chamber 0:  J17 / J21
+    {0,  9, 11},  // chamber 1:  J9  / J14
+    {0,  8, 10},  // chamber 2:  J18 / J22
+    {0,  2,  0},  // chamber 3:  J3  / J2
+    {0,  3,  1},  // chamber 4:  J15 / J19
+    {0,  6,  4},  // chamber 5:  J4  / J5
+    {0,  7,  5},  // chamber 6:  J16 / J20
+    {1,  5,  0},  // chamber 7:  J10 / J52
+    {1,  6,  7},  // chamber 8:  J30 / J28
+    {1,  1,  4},  // chamber 9:  J44 / J29
+    {1,  2,  3},  // chamber 10: J53 / J51
+    {0, 13, 15},  // chamber 11: J6  / J7
+};
+static_assert(sizeof(VALVE_MAP) / sizeof(VALVE_MAP[0]) == MAX_CHAMBERS,
+              "VALVE_MAP needs one entry per chamber");
+
+// Every valve output must belong to exactly one chamber.
+constexpr bool valveMapIsUnique() {
+    for (int a = 0; a < MAX_CHAMBERS * 2; a++) {
+        for (int b = a + 1; b < MAX_CHAMBERS * 2; b++) {
+            const ValveOutputs& va = VALVE_MAP[a / 2];
+            const ValveOutputs& vb = VALVE_MAP[b / 2];
+            uint8_t cha = (a % 2) ? va.deflate_ch : va.inflate_ch;
+            uint8_t chb = (b % 2) ? vb.deflate_ch : vb.inflate_ch;
+            if (va.chip == vb.chip && cha == chb) return false;
+        }
+    }
+    return true;
+}
+static_assert(valveMapIsUnique(), "VALVE_MAP assigns a valve output twice");
+
 inline uint8_t pca1_addr = 0;
 inline uint8_t pca2_addr = 0;
 inline bool    initialized = false;
@@ -67,19 +107,21 @@ inline bool init() {
 
     uint8_t addrs[16];
     int n = scanI2C(addrs, 16);
-    if (n < 2) {
-        LOG("ERROR: PCA9685 address conflict - only %d chip(s) found, "
-            "need 2 distinct addresses (check A0..A5 pins).\n", n);
+    for (int i = 0; i < n; i++) LOG("PCA9685 responder %d at 0x%02X\n", i, addrs[i]);
+
+    bool has1 = false, has2 = false;
+    for (int i = 0; i < n; i++) {
+        has1 |= addrs[i] == PCA1_ADDR;
+        has2 |= addrs[i] == PCA2_ADDR;
+    }
+    if (!has1 || !has2) {
+        LOG("ERROR: PCA9685 missing - need U5 at 0x%02X and U21 at 0x%02X "
+            "(check A0..A5 jumpers).\n", PCA1_ADDR, PCA2_ADDR);
         return false;
     }
+    pca1_addr = PCA1_ADDR;
+    pca2_addr = PCA2_ADDR;
 
-    pca1_addr = addrs[0];
-    pca2_addr = addrs[1];
-    LOG("TODO: PCA9685 #1 at 0x%02X, #2 at 0x%02X - confirm against PCB\n",
-        pca1_addr, pca2_addr);
-
-    pca1 = Adafruit_PWMServoDriver(pca1_addr);
-    pca2 = Adafruit_PWMServoDriver(pca2_addr);
     pca1.begin();
     pca1.setPWMFreq(PCA_FREQ_HZ);
     pca2.begin();
@@ -112,18 +154,11 @@ inline void setChamberValve(int chamber, bool inflate_open, bool deflate_open) {
         valveOpen[chamber * 2 + 0] = inflate_open;
         valveOpen[chamber * 2 + 1] = deflate_open;
     }
-    if (chamber < 4) {
-        setBinary(pca1, chamber * 2,     inflate_open);
-        setBinary(pca1, chamber * 2 + 1, deflate_open);
-    } else {
-        // U8 and U20 inputs are wired in REVERSED order (see netlist comment above):
-        // chambers 4..7 -> pca1 channels 15/14 .. 9/8, 8..11 -> pca2 7/6 .. 1/0.
-        int c = chamber;
-        int inf_chan = 23 - 2 * c;
-        int def_chan = 22 - 2 * c;
-        setBinary(c < 8 ? pca1 : pca2, inf_chan, inflate_open);
-        setBinary(c < 8 ? pca1 : pca2, def_chan, deflate_open);
-    }
+    if (chamber < 0 || chamber >= MAX_CHAMBERS) return;
+    const ValveOutputs& v = VALVE_MAP[chamber];
+    Adafruit_PWMServoDriver& chip = v.chip == 0 ? pca1 : pca2;
+    setBinary(chip, v.inflate_ch, inflate_open);
+    setBinary(chip, v.deflate_ch, deflate_open);
 }
 
 inline void closeAllValves() {
