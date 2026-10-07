@@ -27,3 +27,22 @@ def app_state_dir(app_name: str = APP_NAME) -> Path:
     if xdg_state:
         return Path(xdg_state) / app_name
     return Path.home() / ".local" / "state" / app_name
+
+
+# Name of the file, inside the state directory, that holds the bundle location.
+BUNDLE_MARKER = "bundle_path.txt"
+
+
+def record_bundle_dir(bundle: Path, state_dir: Path | None = None) -> None:
+    """Note where the running frozen bundle keeps its read-only assets.
+
+    A portable build can be extracted anywhere, so developer tooling (e.g.
+    ``make copy-firmware-to-win``) reads this marker instead of guessing the
+    install location. Best effort: a read-only state directory is not an error.
+    """
+    state_dir = state_dir or app_state_dir()
+    try:
+        state_dir.mkdir(parents=True, exist_ok=True)
+        (state_dir / BUNDLE_MARKER).write_text(str(bundle), encoding="utf-8")
+    except OSError:
+        pass

@@ -32,10 +32,10 @@ BLOCKLY := src/gui/blockly/blockly.min.js
 
 .DEFAULT_GOAL := help
 
-.PHONY: help sys-deps venv install install-dev ui run run-debug test typecheck check \
+.PHONY: help sys-deps venv install install-dev ui run run-debug run-wayland test typecheck check \
         blockly firmware fw-gateway fw-actuator fw-magnet fw-thymio \
-        flash erase monitor bundle clean clean-ui \
-        usb-list attach attach-auto detach
+        flash flash-nodes erase monitor bundle clean clean-ui \
+        usb-list attach attach-auto detach copy-firmware-to-win
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
@@ -81,6 +81,9 @@ run: ui ## Run the app
 run-debug: ui ## Run the app with --debug logging
 	$(PY) scripts/run.py --debug
 
+run-wayland: ui ## Run the app on native Wayland (WSLg) instead of xcb
+	QT_QPA_PLATFORM=wayland $(PY) scripts/run.py
+
 test: ui ## Run the test suite (headless)
 	QT_QPA_PLATFORM=offscreen $(PY) -m pytest -q
 
@@ -123,6 +126,24 @@ erase: ## Erase BOARD/ENV flash (recovers a failed-OTA boot loop)
 monitor: ## Serial monitor for BOARD/ENV (optionally PORT=...)
 	$(PIO) device monitor -d firmware/$(BOARD) -e $(ENV) $(MON_PORT_ARG)
 
+# Over-the-air update of every online node through the gateway (dev mirror of
+# Tools -> Update Nodes (OTA)...; close the app first, it holds the serial port).
+#   make flash-nodes LED=rgb            force the RGB build (LED=auto|rgb|rgbw)
+#   make flash-nodes OTA=espnow         slow transport, no gateway access point
+#   make flash-nodes FW_DEBUG=1 DRY=1   debug builds; DRY=1 only lists the plan
+#   make flash-nodes TYPE=node_direct   also flash online nodes no robot lists,
+#                                       as that board type
+LED      ?= auto
+TYPE     ?=
+OTA      ?= wifi
+FW_DEBUG ?=
+DRY      ?=
+
+flash-nodes: ## OTA-flash every online node via the gateway (LED=auto|rgb|rgbw, OTA=wifi|espnow)
+	$(PY) scripts/ota_nodes.py --led $(LED) --transport $(OTA) \
+		$(if $(TYPE),--type $(TYPE),) $(if $(FW_DEBUG),--debug,) \
+		$(if $(DRY),--dry-run,) $(if $(PORT),--port $(PORT),)
+
 # --- WSL USB passthrough (usbipd-win) -----------------------------------------
 #
 # Forwards the gateway's USB from Windows into WSL. Selected by hardware id
@@ -148,7 +169,11 @@ endef
 
 attach: ## Attach the gateway USB to WSL (binds first if needed)
 	$(gw_bind)
-	$(USBIPD) attach --wsl $(GW_SEL)
+	@if $(USBIPD) list | tr -d '\r' | grep -E '$(GW_MATCH)' | grep -q 'Attached'; then \
+		echo "Gateway already attached to WSL."; \
+	else \
+		$(USBIPD) attach --wsl $(GW_SEL); \
+	fi
 
 attach-auto: ## Keep the gateway attached across resets/re-plugs (blocks; Ctrl+C stops)
 	$(gw_bind)
@@ -156,6 +181,37 @@ attach-auto: ## Keep the gateway attached across resets/re-plugs (blocks; Ctrl+C
 
 detach: ## Give the gateway USB back to Windows
 	$(USBIPD) detach $(GW_SEL)
+
+# --- Copy firmware into the Windows app ---------------------------------------
+#
+# Drops the freshly built firmware/*/*.bin into the Windows app's bundle, so its
+# wizard/OTA flash them without waiting for a release. The bundle is located
+# through what the app itself left in %LOCALAPPDATA%\SoftEdIBO: bundle_path.txt
+# (written at every start, see src/app_paths.py) or, for a build that predates
+# it, the install folder named in the self-updater's update.log.
+# Override with WIN_BUNDLE=<app folder>/_internal (a WSL path).
+
+WIN_BUNDLE ?=
+
+copy-firmware-to-win: ## Copy the built firmware .bin files into the Windows app
+	@bundle="$(WIN_BUNDLE)"; \
+	if [ -z "$$bundle" ]; then \
+		state="$$(wslpath "$$(cmd.exe /C 'echo %LOCALAPPDATA%' 2>/dev/null | tr -d '\r')")/SoftEdIBO"; \
+		win=""; \
+		if [ -f "$$state/bundle_path.txt" ]; then \
+			win="$$(tr -d '\r' < "$$state/bundle_path.txt")"; \
+		elif [ -f "$$state/update.log" ]; then \
+			win="$$(tr -d '\r' < "$$state/update.log" | sed -n 's/^.* Updating //p' | tail -n 1)"; \
+			[ -n "$$win" ] && win="$$win\\_internal"; \
+		fi; \
+		[ -n "$$win" ] && bundle="$$(wslpath "$$win")"; \
+	fi; \
+	if [ -z "$$bundle" ] || [ ! -d "$$bundle/firmware" ]; then \
+		echo "Windows app not found ($${bundle:-no record of it}). Start it once, or pass WIN_BUNDLE=<app folder>/_internal."; \
+		exit 1; \
+	fi; \
+	echo "Copying firmware => $$bundle/firmware"; \
+	cd firmware && cp -v --parents */*.bin "$$bundle/firmware/"
 
 # --- Cleanup ------------------------------------------------------------------
 

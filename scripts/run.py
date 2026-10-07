@@ -82,6 +82,11 @@ try:
 except (RuntimeError, ValueError, AttributeError, io.UnsupportedOperation):
     pass    # no dumpable stream - Python-level crash handling still works
 
+# Let developer tooling find a portable build wherever it was extracted.
+if _frozen:
+    from src.app_paths import record_bundle_dir
+    record_bundle_dir(Path(getattr(sys, "_MEIPASS", "")))
+
 from src.log import setup as setup_logging
 
 _debug = "--debug" in sys.argv
