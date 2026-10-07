@@ -33,6 +33,7 @@
 #include "chambers.h"
 #include "leds.h"
 #include "organ.h"
+#include "button.h"
 #include "magnet.h"
 #include "cmd_queue.h"
 #include "commands.h"
@@ -78,6 +79,7 @@ void setup() {
     chambers::loadTare();      // per-chamber ambient zero (NVS) before any read
     leds::hardware_init();
     organ::hardware_init();
+    button::hardware_init();
     magnet::hardware_init();   // optional MLX90393 touch board (auto-detected)
 
     if (!se::begin(onReceived)) {
@@ -107,7 +109,7 @@ void setup() {
     // below which pressure a deflate needs a time budget instead of the sensor.
     char ready_msg[160];
     snprintf(ready_msg, sizeof(ready_msg),
-             "{\"status\":\"node_direct_ready\",\"fw\":\"hold-5\",\"rgbw\":" LED_RGBW_JSON ",\"kpa_min\":%.0f}",
+             "{\"status\":\"node_direct_ready\",\"fw\":\"button-1\",\"rgbw\":" LED_RGBW_JSON ",\"kpa_min\":%.0f}",
              (double)pressure::FLOOR_KPA);
     se::broadcast(ready_msg);
 
@@ -200,6 +202,9 @@ void loop() {
 
     // ---- Organ + cover sensing (broadcasts on change + heartbeat) ----
     organ::tick(now);
+
+    // ---- Push button (broadcasts on press/release + heartbeat) ----
+    button::tick(now);
 
     // ---- Magnet/touch sensing (streams ~10 Hz; no-op if no sensors) ----
     magnet::tick(now);

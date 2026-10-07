@@ -86,6 +86,11 @@ class _Unit:
     impact_cb: Any = None
     lifted_count: int = 0
     lifted_cb: Any = None
+    # Push button on the skin's board: its live state, the presses counted in
+    # the current state, and the listener installed on the controller.
+    button_down: bool = False
+    button_count: int = 0
+    button_cb: Any = None
     touch_seq: int = 0
     touch_seq_by_chamber: dict[int, int] = field(default_factory=dict)
     active_touch: set[int] = field(default_factory=set)
@@ -213,6 +218,7 @@ class ScriptedActivity(BaseActivity):
                 self._subscribe_gestures(unit)
                 self._subscribe_impact(unit)
                 self._subscribe_lifted(unit)
+                self._subscribe_button(unit)
                 self._setup_organs(unit, skin)
             if not skins:
                 # A robot without skins (e.g. a bare Thymio) still runs the
@@ -280,6 +286,7 @@ class ScriptedActivity(BaseActivity):
             self._thymio_call(unit, "set_motors", 0, 0)
             self._unsubscribe_impact(unit)
             self._unsubscribe_lifted(unit)
+            self._unsubscribe_button(unit)
             self._unsubscribe_touch(unit)
         self._units.clear()
         logger.info("ScriptedActivity %r stopped", self.name)
@@ -393,6 +400,7 @@ class ScriptedActivity(BaseActivity):
         unit.impact_count = 0
         unit.impact_levels.clear()
         unit.lifted_count = 0
+        unit.button_count = 0
         unit.gesture_counts.clear()
         unit.rhythm.reset()
         unit.group_sync.reset()
@@ -484,6 +492,11 @@ class ScriptedActivity(BaseActivity):
             else:
                 need = val if val is not None else 1
             return unit.lifted_count >= int(need)
+        if name == "button_pressed":
+            return unit.button_down
+        if name == "button_count":
+            need = val.get("min", 1) if isinstance(val, dict) else val
+            return unit.button_count >= int(need if need is not None else 1)
         if name == "any":
             return any(self._eval_cond(unit, c) for c in (val or []))
         if name == "all":
@@ -821,6 +834,10 @@ class ScriptedActivity(BaseActivity):
             branch = ("do" if self._unit_kind(unit) == params.get("robot")
                       else "else")
             yield from self._run_steps(unit, params.get(branch) or [], ctx)
+        elif verb == "if":
+            branch = ("do" if self._eval_cond(
+                unit, params.get("cond", {"always": True})) else "else")
+            yield from self._run_steps(unit, params.get(branch) or [], ctx)
         elif verb == "repeat":
             yield from self._run_repeat(unit, params, ctx)
         elif verb == "for_each_chamber":
@@ -1003,6 +1020,44 @@ class ScriptedActivity(BaseActivity):
         """Robot read-thread callback: count a lift-off event for `on_lifted`."""
         if lifted:
             unit.lifted_count += 1
+
+    # ------------------------------------------------------------------
+    # Button input (for `button_pressed` / `button_count` conditions)
+    # ------------------------------------------------------------------
+
+    def _subscribe_button(self, unit: _Unit) -> None:
+        """Follow the push button on the skin's board, if its controller
+        reports one; other controllers skip it."""
+        on_button = getattr(unit.ctrl, "on_button", None)
+        if on_button is None:
+            return
+        cb = lambda pressed, u=unit: self._on_button(u, pressed)   # noqa: E731
+        try:
+            on_button(cb)
+        except Exception:   # noqa: BLE001
+            logger.exception("on_button subscribe failed on %s", unit.unit_id)
+            return
+        unit.button_cb = cb
+
+    def _unsubscribe_button(self, unit: _Unit) -> None:
+        if unit.button_cb is None:
+            return
+        remove = getattr(unit.ctrl, "remove_button_listener", None)
+        if remove is not None:
+            try:
+                remove(unit.button_cb)
+            except Exception:   # noqa: BLE001
+                logger.exception("on_button unsubscribe failed on %s", unit.unit_id)
+        unit.button_cb = None
+
+    def _on_button(self, unit: _Unit, pressed: bool) -> None:
+        """Gateway-thread callback: track the button and count each press.
+        The node re-sends its state periodically, so only a released ->
+        pressed change is a new press."""
+        pressed = bool(pressed)
+        if pressed and not unit.button_down:
+            unit.button_count += 1
+        unit.button_down = pressed
 
     @staticmethod
     def _parse_rgb(hex_colour: str) -> tuple[int, int, int]:

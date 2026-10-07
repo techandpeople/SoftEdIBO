@@ -33,6 +33,7 @@ class ESP32Controller:
         self._pressure_callbacks: list[Callable[[int, int], None]] = []
         self._magnet_callbacks: list[Callable[[dict[str, Any]], None]] = []
         self._organ_callbacks: list[Callable[[float, int], None]] = []
+        self._button_callbacks: list[Callable[[bool], None]] = []
         # Latest magnet sensor geometry, captured from a `node_magnet_sensor_ready` boot announce.
         # Shape: {"sensors": N, "magnets": M, "variant": str|None, "geometry": {...}}.
         self._magnet_geometry: dict[str, Any] | None = None
@@ -505,6 +506,20 @@ class ESP32Controller:
         """
         self._organ_callbacks.append(callback)
 
+    def on_button(self, callback: Callable[[bool], None]) -> None:
+        """Register a callback for push-button (`type:"button"`) messages.
+
+        Args:
+            callback: Called with ``pressed`` on every report - each debounced
+                press/release edge, plus the node's periodic re-send of the
+                current state (so the same value can arrive repeatedly).
+        """
+        self._button_callbacks.append(callback)
+
+    def remove_button_listener(self, callback: Callable[[bool], None]) -> None:
+        """Deregister a callback passed to :meth:`on_button` (no-op if absent)."""
+        self._button_callbacks[:] = [cb for cb in self._button_callbacks if cb != callback]
+
     def remove_magnet_listener(self, callback: Callable[[dict[str, Any]], None]) -> None:
         """Deregister a callback passed to :meth:`on_magnet` (no-op if absent)."""
         self._magnet_callbacks[:] = [cb for cb in self._magnet_callbacks if cb != callback]
@@ -586,6 +601,9 @@ class ESP32Controller:
         slot = int(data.get("slot", 0))
         self._call_callbacks(self._organ_callbacks, resistance, slot)
 
+    def _dispatch_button(self, data: dict[str, Any]) -> None:
+        self._call_callbacks(self._button_callbacks, bool(data.get("pressed")))
+
     def _handle_message(self, data: dict[str, Any]) -> None:
         """Process incoming messages, filtering for this node's MAC."""
         if data.get("source") == self.mac_address:
@@ -628,6 +646,9 @@ class ESP32Controller:
 
             elif data.get("type") == "organ":
                 self._dispatch_organ(data)
+
+            elif data.get("type") == "button":
+                self._dispatch_button(data)
 
     def __repr__(self) -> str:
         return f"ESP32Controller(mac={self.mac_address!r})"

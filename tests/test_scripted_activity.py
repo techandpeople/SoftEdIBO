@@ -6,15 +6,17 @@ the declarative-activity DB round-trip. Runs entirely without hardware or a Qt
 event loop: ticks are pumped manually and the clock is monkeypatched.
 """
 
+import json
 import os
 import tempfile
 from datetime import datetime
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
 
 from src.activities import scripted_activity as sa
-from src.activities.catalog import SpecError, validate_spec
+from src.activities.catalog import SpecError, lint_spec, validate_spec
 from src.activities.scripted_activity import ScriptedActivity
 from src.activities.seed_behaviors import SEED_CONDITIONS
 from src.core.session import Session
@@ -622,6 +624,132 @@ def test_wait_for_touch_blocks_until_touched(clock):
     activity._on_magnet(unit, {"act": [0]})   # touch chamber 0
     activity._on_tick()
     assert skin.pressures == [(0, 80)]
+
+
+# ---------------------------------------------------------------------------
+# Button conditions + generic `if`
+# ---------------------------------------------------------------------------
+
+class _FakeButtonCtrl(_FakeCtrl):
+    """Controller that also reports a push button (on_button)."""
+    def __init__(self):
+        super().__init__()
+        self.button_cbs = []
+
+    def on_button(self, cb):
+        self.button_cbs.append(cb)
+
+    def remove_button_listener(self, cb):
+        self.button_cbs.remove(cb)
+
+    def fire_button(self, pressed):
+        for cb in list(self.button_cbs):
+            cb(pressed)
+
+
+def _button_activity(spec):
+    ctrl = _FakeButtonCtrl()
+    activity = _start(ScriptedActivity("t", "d", spec),
+                      _FakeRobot([_FakeSkin(controller=ctrl)]))
+    return activity, ctrl
+
+
+def test_button_count_ignores_heartbeat_repeats_and_resets_per_phase(clock):
+    spec = {"initial": "p1", "states": {
+        "p1": {"do": [], "transitions": [
+            {"to": "p2", "when": {"button_count": {"min": 2}}}]},
+        "p2": {"do": [], "transitions": [
+            {"to": "p1", "when": {"button_count": {"min": 1}}}]}}}
+    activity, ctrl = _button_activity(spec)
+    unit = _unit(activity)
+
+    ctrl.fire_button(True)
+    ctrl.fire_button(True)          # the node re-sending its state
+    activity._on_tick()
+    assert unit.state == "p1"
+    ctrl.fire_button(False)
+    ctrl.fire_button(True)
+    activity._on_tick()
+    assert unit.state == "p2"
+    activity._on_tick()             # p1's presses do not carry over
+    assert unit.state == "p2"
+
+
+def test_button_pressed_follows_the_live_state(clock):
+    spec = {"initial": "p1", "states": {
+        "p1": {"do": [], "transitions": [
+            {"to": "p2", "when": {"button_pressed": {}}}]},
+        "p2": {"do": []}}}
+    activity, ctrl = _button_activity(spec)
+    unit = _unit(activity)
+
+    ctrl.fire_button(True)
+    ctrl.fire_button(False)
+    activity._on_tick()
+    assert unit.state == "p1"
+    ctrl.fire_button(True)
+    activity._on_tick()
+    assert unit.state == "p2"
+
+
+def test_if_step_picks_the_branch_each_time_it_runs(clock):
+    spec = {"initial": "p1", "states": {"p1": {"do": [
+        {"repeat": {"forever": True, "do": [
+            {"if": {"cond": {"button_pressed": {}},
+                    "do": [{"set_led": {"color": "#00ff00"}}],
+                    "else": [{"set_led": {"color": "#ff0000"}}]}},
+            {"wait": 100},
+        ]}}]}}}
+    activity, ctrl = _button_activity(spec)
+    assert ctrl.led == ("#ff0000", "solid")
+
+    ctrl.fire_button(True)
+    clock.advance(0.2)
+    activity._on_tick()             # the wait ends, the repeat yields once
+    activity._on_tick()
+    assert ctrl.led == ("#00ff00", "solid")
+
+
+def test_if_step_condition_is_validated():
+    spec = {"initial": "p1", "states": {"p1": {"do": [
+        {"if": {"cond": {"no_such_condition": {}}, "do": []}}]}}}
+    with pytest.raises(SpecError):
+        validate_spec(spec)
+
+
+def test_button_listener_removed_on_stop():
+    activity, ctrl = _button_activity(
+        {"initial": "p1", "states": {"p1": {"do": []}}})
+    assert len(ctrl.button_cbs) == 1
+    activity.stop()
+    assert ctrl.button_cbs == []
+
+
+def test_bundled_button_restart_activity_pulses_then_restarts_on_a_press(clock):
+    path = Path(__file__).resolve().parent.parent / "data" / "button_restart.json"
+    spec = json.loads(path.read_text())["spec"]
+    validate_spec(spec)
+    assert lint_spec(spec) == []
+    activity, ctrl = _button_activity(spec)
+    unit = _unit(activity)
+
+    ctrl.fire_button(True)          # button already held while playing
+    for _ in range(4):
+        activity._on_magnet(unit, {"act": [0]})
+        activity._on_magnet(unit, {"act": []})
+        activity._on_tick()
+    activity._on_tick()
+    assert unit.state == "finished"
+    assert ctrl.led == ("#2ecc71", "pulse")
+
+    ctrl.fire_button(True)          # heartbeat of the held button: no restart
+    activity._on_tick()
+    assert unit.state == "finished"
+    ctrl.fire_button(False)
+    ctrl.fire_button(True)          # a fresh press restarts
+    activity._on_tick()
+    assert unit.state == "play"
+    assert ctrl.led == ("#8e44ad", "solid")
 
 
 # ---------------------------------------------------------------------------

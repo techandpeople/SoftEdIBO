@@ -39,7 +39,7 @@ def _example_specs() -> dict[str, dict]:
         data = json.loads(Path(path).read_text())
         out[Path(path).name] = data.get("spec", data)
     for path in ("data/mvp_quadrant_touch.json", "data/cpr_rhythm.json",
-                 "data/sync_score.json"):
+                 "data/sync_score.json", "data/button_restart.json"):
         full = REPO / path
         if full.is_file():
             data = json.loads(full.read_text())
@@ -174,6 +174,9 @@ def test_round_trip_keeps_target_final_flag_units_and_nested_conditions():
                     ]}},
                     {"if_robot": {"robot": "tree", "do": [{"stop": {}}],
                                   "else": [{"log": {"message": "hi"}}]}},
+                    {"if": {"cond": {"not": {"button_pressed": {}}},
+                            "do": [{"log": {"message": "up"}}],
+                            "else": [{"set_led": {"color": "#ff0000"}}]}},
                 ],
                 "on_touch": [{"zone_fill": {"kind": "rhythmic", "step_pct": 10,
                                             "target_interval_ms": 600,
@@ -182,6 +185,7 @@ def test_round_trip_keeps_target_final_flag_units_and_nested_conditions():
                     {"to": "cured", "when": {"all": [
                         {"organs": {"scope": "all_good"}},
                         {"not": {"on_lifted": {"min": 2}}},
+                        {"button_count": {"min": 2}},
                         {"any": [{"elapsed_ms": 60000},
                                  {"gesture_count": {"kind": "compressions",
                                                     "min": 4}},

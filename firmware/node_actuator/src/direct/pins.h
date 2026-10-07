@@ -57,6 +57,12 @@ constexpr int STRIP_SLOTS   = NUM_PIXELS + LED_GAP_SLOTS;
 // pumps. TODO: verify IO36 is routed to a header/test pad on the PCB.
 constexpr int ORGAN_SENSE_PIN = 36;
 
+// Push button, active low (see button.h). Same IO36 (SENSOR_VP) line as the
+// organ circuit: a press pulls it to GND, which the organ module reads as a
+// short while the button is held. IO36 has no internal pull-up - the board
+// must provide one.
+constexpr int BUTTON_PIN = 36;
+
 // Optional MLX90393 magnet/touch sensors (see magnet.h). Shared I2C bus on
 // the two otherwise-free GPIOs; the board behaves identically when no sensors
 // are wired (auto-detected at boot). If absent, the module stays inert.

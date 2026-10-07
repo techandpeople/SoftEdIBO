@@ -1,0 +1,62 @@
+{
+  "format": "softedibo.activity",
+  "version": 1,
+  "name": "Button restart",
+  "description": "Touches fill the lights from purple to yellow, one quarter per touch. Once full the lights pulse green until the board's push button is pressed, which starts the activity over.",
+  "spec": {
+    "initial": "play",
+    "states": {
+      "play": {
+        "do": [
+          {
+            "set_led": {
+              "color": "#8e44ad",
+              "pattern": "solid",
+              "period_ms": 0,
+              "fade_ms": 250,
+              "angle": 0,
+              "ring": "all"
+            }
+          }
+        ],
+        "on_touch": [
+          {
+            "touch_progress": {
+              "segments": 4,
+              "per": 1,
+              "on_color": "#f1c40f",
+              "bg_color": "#8e44ad",
+              "ring": "all",
+              "to": "finished"
+            }
+          }
+        ],
+        "transitions": []
+      },
+      "finished": {
+        "do": [
+          {
+            "set_led": {
+              "color": "#2ecc71",
+              "pattern": "pulse",
+              "period_ms": 1200,
+              "fade_ms": 250,
+              "angle": 0,
+              "ring": "all"
+            }
+          }
+        ],
+        "transitions": [
+          {
+            "to": "play",
+            "when": {
+              "button_count": {
+                "min": 1
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

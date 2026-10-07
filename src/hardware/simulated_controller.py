@@ -59,6 +59,7 @@ class SimulatedController(QObject):
         self._pressure_callbacks: list[Callable[[int, int], None]] = []
         self._target_callbacks:   list[Callable[[int, int], None]] = []
         self._organ_callbacks:    list[Callable[[float, int], None]] = []
+        self._button_callbacks:   list[Callable[[bool], None]] = []
         # Simulated organ networks per slot: None = open circuit (cover off).
         self._organ_resistance: dict[int, float | None] = {}
 
@@ -199,6 +200,22 @@ class SimulatedController(QObject):
         value = float("inf") if resistance_ohm is None else float(resistance_ohm)
         for cb in self._organ_callbacks:
             cb(value, slot)
+
+    def on_button(self, callback: Callable[[bool], None]) -> None:
+        """Register a callback for simulated push-button reports.
+
+        Same contract as ``ESP32Controller.on_button``: called with ``pressed``.
+        """
+        self._button_callbacks.append(callback)
+
+    def remove_button_listener(self, callback: Callable[[bool], None]) -> None:
+        """Deregister a callback passed to :meth:`on_button` (no-op if absent)."""
+        self._button_callbacks[:] = [cb for cb in self._button_callbacks if cb != callback]
+
+    def sim_set_button(self, pressed: bool) -> None:
+        """Press / release the simulated push button from the GUI / tests."""
+        for cb in list(self._button_callbacks):
+            cb(bool(pressed))
 
     def set_led_angles(self, angles: dict[int, float] | None) -> None:
         """No-op shim mirroring :meth:`ESP32Controller.set_led_angles` (the robot

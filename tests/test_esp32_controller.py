@@ -141,3 +141,20 @@ def test_detach_stops_listening_and_holding():
     controller.detach()
     assert controller.active_holds() == []
     gateway.remove_message_callback.assert_called_once_with(controller._handle_message)
+
+
+def test_button_messages_reach_listeners_until_removed():
+    controller = ESP32Controller("AA:BB:CC:DD:EE:01", MagicMock())
+    seen: list[bool] = []
+    controller.on_button(seen.append)
+
+    controller._handle_message(
+        {"source": "AA:BB:CC:DD:EE:01", "type": "button", "pressed": True})
+    controller._handle_message(
+        {"source": "FF:FF:FF:FF:FF:FF", "type": "button", "pressed": False})
+    assert seen == [True]
+
+    controller.remove_button_listener(seen.append)
+    controller._handle_message(
+        {"source": "AA:BB:CC:DD:EE:01", "type": "button", "pressed": False})
+    assert seen == [True]

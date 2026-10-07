@@ -193,6 +193,20 @@ On the PC, `ESP32Controller.on_organ(cb)` delivers `(resistance_ohm, slot)`
 (`inf` when open); `src/hardware/organ_sensor.py` follows one slot and splits
 it into cover / resistance event streams for activities.
 
+### `button` - push button (direct)
+
+```json
+{"type":"button", "pressed": true}
+```
+
+An active-low push button on `BUTTON_PIN` (IO36, the same line as the organ
+circuit; the pin has no internal pull-up, so the board provides one). Sent on
+every debounced press/release (3 samples at 10 ms, edges at least 50 ms
+apart) and re-sent every 2 s as a heartbeat.
+
+On the PC, `ESP32Controller.on_button(cb)` delivers `pressed`; behaviours
+read it through the `button_pressed` / `button_count` conditions.
+
 ### Multiplexed-node only
 
 | `type` | Fields | When |

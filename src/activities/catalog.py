@@ -586,6 +586,15 @@ CONTROL: tuple[Verb, ...] = (
         VerbField("do", "steps", []),
         VerbField("else", "steps", []),
     ), template="if robot is {robot}\ndo {do}\nelse {else}", category="Control"),
+    Verb("if", "control",
+         "Run 'do' when the condition is true at the moment the sequence "
+         "reaches this block, else 'else'. It checks once and moves on - put "
+         "it inside a 'repeat' (with a 'wait') to keep checking, e.g. to "
+         "react every time the button is pressed.", (
+        VerbField("cond", "cond", None),
+        VerbField("do", "steps", []),
+        VerbField("else", "steps", []),
+    ), template="if {cond}\ndo {do}\nelse {else}", category="Control"),
 )
 
 CONDITIONS: tuple[Verb, ...] = (
@@ -680,6 +689,15 @@ CONDITIONS: tuple[Verb, ...] = (
          "C6 wireless link; robots without ground sensing never fire it.", (
         VerbField("min", "int", 1, min=1),
     ), template="Thymio lifted at least {min} times", category="Conditions"),
+    Verb("button_pressed", "condition",
+         "True while the skin board's push button is held down. Boards "
+         "without a button never fire it.", (),
+         template="button is pressed", category="Conditions"),
+    Verb("button_count", "condition",
+         "True once the skin board's push button was pressed at least 'min' "
+         "times in this phase. Boards without a button never fire it.", (
+        VerbField("min", "int", 1, min=1),
+    ), template="button pressed at least {min} times", category="Conditions"),
     Verb("any", "condition", "True if any sub-condition is true (OR).", (
         VerbField("conds", "conds", []),
     ), template="any of: {conds}", category="Conditions"),
@@ -911,6 +929,10 @@ def _validate_steps(steps: Any, where: str, kind: str | None = None) -> None:
         _check_verb_kind(_ALL_VERBS.get(name), name, kind, f"{where}[{i}]")
         params = step[name]
         if name in CONTROL_NAMES and isinstance(params, dict):
+            for f in _ALL_VERBS[name].fields:
+                if f.type == "cond":
+                    _validate_cond(params.get(f.name, {"always": True}),
+                                   f"{where}[{i}].{f.name}")
             _validate_steps(params.get("do", []), f"{where}[{i}].do", kind)
             _validate_steps(params.get("else", []),
                             f"{where}[{i}].else", kind)
