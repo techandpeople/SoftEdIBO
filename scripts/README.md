@@ -62,6 +62,7 @@ rarely move.
 | `run.py` | launch the GUI app (sets the Qt env - `xcb` platform, shared GL contexts, WebEngine flags - then starts the app) |
 | `build-firmware.sh` | build the bundled node/gateway firmware bins for OTA |
 | `ota_c6_wifi.py` | one-command WiFi-OTA of the gateway's C6 (Thymio RCP) |
+| `ota_nodes.py` | OTA-flash every online configured node through the gateway (`make flash-nodes`); `--led rgb|rgbw` forces the LED variant, `--dry-run` only lists the plan |
 | `emergency-flash.sh` | cable-flash a bricked node through a second ESP as a serial bridge |
 | `compile_ui.sh` | compile Qt Designer `.ui` files to `ui_*.py` |
 | `fetch_blockly.sh` | vendor Blockly for the Activity Editor |

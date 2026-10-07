@@ -20,6 +20,7 @@ from typing import Any
 
 from PySide6.QtCore import QThread, QTimer, Signal
 from PySide6.QtWidgets import (
+    QComboBox,
     QHeaderView,
     QMessageBox,
     QProgressBar,
@@ -30,6 +31,7 @@ from PySide6.QtCore import Qt
 
 from src.config.settings import Settings
 from src.core import node_sharing
+from src.core.led_variant import resolve_rgbw
 from src.gui.setup_wizard import firmware_for_node_type, firmware_for_c6
 from src.gui.base_dialog import BaseDialog
 from src.gui.ui_ota_update_dialog import Ui_OTAUpdateDialog
@@ -52,6 +54,14 @@ _C6_TYPE = "thymio_rcp"
 
 # Columns
 _COL_SEL, _COL_MAC, _COL_TYPE, _COL_LED, _COL_ONLINE, _COL_PROGRESS, _COL_STATUS = range(7)
+
+_LED_HELP = (
+    "LED pixel format of the firmware to flash onto this node. Auto follows "
+    "what the node's running firmware reports (or the fallback checkbox when "
+    "it reports nothing). Pick rgb or rgbw to override it: a node flashed with "
+    "the wrong variant keeps reporting that wrong variant and shows shifted, "
+    "rainbow-like colours until the other one is forced here."
+)
 
 
 class _OTAWorker(QThread):
@@ -274,7 +284,10 @@ class OTAUpdateDialog(BaseDialog, Ui_OTAUpdateDialog):
             mac_item.setToolTip(tooltip)
         self.table.setItem(row, _COL_MAC, mac_item)
         self.table.setItem(row, _COL_TYPE, QTableWidgetItem(ntype))
-        self.table.setItem(row, _COL_LED, QTableWidgetItem("?"))
+        if self._has_led_variants(ntype):
+            self.table.setCellWidget(row, _COL_LED, self._make_led_combo())
+        else:
+            self.table.setItem(row, _COL_LED, QTableWidgetItem("-"))
         self.table.setItem(row, _COL_ONLINE, QTableWidgetItem("?"))
 
         bar = QProgressBar()
@@ -293,18 +306,16 @@ class OTAUpdateDialog(BaseDialog, Ui_OTAUpdateDialog):
 
     def _refresh_row(self, mac: str, row: int, online) -> None:
         item = self.table.item(row, _COL_ONLINE)
-        led = self.table.item(row, _COL_LED)
         if mac == _C6_KEY:
             # Reached over the wired UART to the S3, not ESP-NOW - no MAC to scan.
             if item is not None:
                 item.setText("wired")
-            if led is not None:
-                led.setText("-")
             return
         if item is not None:
             item.setText("online" if mac in online else "offline")
-        if led is not None:
-            led.setText(self._led_text(mac, self._cell_text(row, _COL_TYPE)))
+        combo = self._led_combo(row)
+        if combo is not None:
+            combo.setItemText(0, f"auto ({self._reported_led_text(mac)})")
 
     def _cell_text(self, row: int, col: int) -> str:
         """Text of a table cell (empty if the cell is unset)."""
@@ -317,14 +328,35 @@ class OTAUpdateDialog(BaseDialog, Ui_OTAUpdateDialog):
         if item is not None:
             item.setText(msg)
 
-    def _led_text(self, mac: str, ntype: str) -> str:
-        """LED-ring variant to show for a node: 'rgb'/'rgbw' if reported, '?' if
-        not yet known (offline / pre-reporting firmware), '-' for node types
-        with no distinct RGBW build."""
-        if (firmware_for_node_type(ntype, rgbw=True)
-                == firmware_for_node_type(ntype, rgbw=False)):
-            return "-"
-        rgbw = self._gateway.node_rgbw(mac) if self._gateway.is_connected else None
+    @staticmethod
+    def _has_led_variants(ntype: str) -> bool:
+        """True for node types that ship distinct RGB and RGBW builds."""
+        return (firmware_for_node_type(ntype, rgbw=True)
+                != firmware_for_node_type(ntype, rgbw=False))
+
+    def _make_led_combo(self) -> QComboBox:
+        """LED-variant picker for one row: auto (as reported), or forced."""
+        combo = QComboBox()
+        combo.addItem("auto (?)", None)
+        combo.addItem("rgb", False)
+        combo.addItem("rgbw", True)
+        combo.setToolTip("Firmware LED variant: auto, or force rgb / rgbw.")
+        combo.setWhatsThis(_LED_HELP)
+        return combo
+
+    def _led_combo(self, row: int) -> QComboBox | None:
+        """The row's LED-variant picker (None for types with a single build)."""
+        combo = self.table.cellWidget(row, _COL_LED)
+        return combo if isinstance(combo, QComboBox) else None
+
+    def _reported_rgbw(self, mac: str) -> bool | None:
+        """LED variant the node's running firmware reported (None if unknown)."""
+        return self._gateway.node_rgbw(mac) if self._gateway.is_connected else None
+
+    def _reported_led_text(self, mac: str) -> str:
+        """'rgb'/'rgbw' as reported by the node, '?' if not yet known (offline
+        / pre-reporting firmware)."""
+        rgbw = self._reported_rgbw(mac)
         if rgbw is None:
             return "?"
         return "rgbw" if rgbw else "rgb"
@@ -373,9 +405,10 @@ class OTAUpdateDialog(BaseDialog, Ui_OTAUpdateDialog):
         # RGBW applies only to node types with an RGBW build (node_direct/
         # multiplexed); firmware_for_node_type falls back to the plain bin for
         # the others. Each node self-reports its variant in its ready/pong frame,
-        # so we flash the matching bin automatically. The checkbox is only a
-        # fallback for nodes that haven't reported it (offline, or firmware from
-        # before the field existed) - e.g. the first OTA that installs it.
+        # so by default we flash the matching bin. The row's LED picker forces
+        # the other one (a node on the wrong variant reports the wrong variant);
+        # the checkbox is only a fallback for nodes that haven't reported it
+        # (offline, or firmware from before the field existed).
         fallback_rgbw = self.rgbw_check.isChecked()
         jobs: list[tuple[str, Path]] = []
         for mac, row in self._row_by_mac.items():
@@ -393,8 +426,9 @@ class OTAUpdateDialog(BaseDialog, Ui_OTAUpdateDialog):
                 jobs.append((mac, fw))
                 continue
             ntype = self._cell_text(row, _COL_TYPE)
-            reported = self._gateway.node_rgbw(mac)
-            rgbw = fallback_rgbw if reported is None else reported
+            combo = self._led_combo(row)
+            forced = combo.currentData() if combo is not None else None
+            rgbw = resolve_rgbw(forced, self._reported_rgbw(mac), fallback_rgbw)
             fw = firmware_for_node_type(ntype, debug, rgbw)
             if fw is None or not fw.exists():
                 self._set_status(row, f"FAIL firmware not found: {fw}")
@@ -446,6 +480,10 @@ class OTAUpdateDialog(BaseDialog, Ui_OTAUpdateDialog):
         self.select_all_btn.setEnabled(not running)
         self.debug_check.setEnabled(not running)
         self.rgbw_check.setEnabled(not running)
+        for row in range(self.table.rowCount()):
+            combo = self._led_combo(row)
+            if combo is not None:
+                combo.setEnabled(not running)
         self.transport_combo.setEnabled(not running)
         self.ap_ssid_edit.setEnabled(not running)
         self.ap_pass_edit.setEnabled(not running)

@@ -162,3 +162,17 @@ def test_claim_board_pushes_this_robots_led_angles():
     assert ctrl.led_angles == {0: 90.0}           # Turtle is mounted now
     tree.claim_board()
     assert ctrl.led_angles == {0: 180.0}
+
+
+def test_node_types_by_mac_lists_each_board_once():
+    data = {"robots": {
+        "turtles": [{"id": "turtle", "nodes": [
+            {"mac": "AA:01", "node_type": "node_multiplexed"}]}],
+        "trees": [{"id": "tree", "nodes": [
+            {"mac": "AA:01", "node_type": "node_multiplexed"},
+            {"mac": "AA:02", "node_type": "node_magnet_sensor"},
+            {"node_type": "node_direct"}]}],
+        "note": "not a list",
+    }}
+    assert node_sharing.node_types_by_mac(data) == {
+        "AA:01": "node_multiplexed", "AA:02": "node_magnet_sensor"}

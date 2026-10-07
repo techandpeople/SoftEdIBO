@@ -30,7 +30,8 @@
    </item>
    <item>
     <widget class="QCheckBox" name="rgbw_check">
-     <property name="whatsThis"><string>Fallback RGBW LED-ring choice, used only for nodes whose LED column shows "?" - offline nodes, or nodes running firmware that predates LED self-reporting. Nodes that report their build (LED column shows rgb/rgbw) ignore this and are flashed with their matching bin automatically. Tick it for an RGBW NeoPixel ring (SK6812, e.g. Adafruit 2862, 4 colour channels) rather than a plain RGB ring (WS2812, e.g. Adafruit 1586); the two pixel formats differ, so the wrong build drives the ring with shifted colours.</string></property>
+     <property name="whatsThis"><string>Fallback RGBW choice, used only for nodes whose LED column reads "auto (?)" - offline nodes, or nodes running firmware that predates LED self-reporting. Nodes that report their build are flashed with the matching bin, unless the LED column forces rgb or rgbw for that node. Tick it for RGBW pixels (SK6812, e.g. Adafruit 2862, 4 colour channels) rather than plain RGB ones (WS2812, e.g. Adafruit 1586); the two pixel formats differ, so the wrong build drives the LEDs with shifted colours.</string></property>
+     <property name="toolTip"><string>RGBW build for nodes that do not report their LED variant.</string></property>
      <property name="text"><string>RGBW LED ring (fallback for nodes that don't report it yet)</string></property>
     </widget>
    </item>
@@ -87,7 +88,7 @@
    </item>
    <item>
     <widget class="QTableWidget" name="table">
-     <property name="whatsThis"><string>Configured nodes and whether each is reachable over ESP-NOW. Tick the ones to update; Progress and Status fill in during flashing. Only online nodes can be flashed.</string></property>
+     <property name="whatsThis"><string>Configured nodes and whether each is reachable over ESP-NOW. Tick the ones to update; Progress and Status fill in during flashing. The LED column picks the firmware LED variant per node: auto follows what the node reports, rgb / rgbw force it (use that to repair a node flashed with the wrong variant, which shows shifted, rainbow-like colours). Only online nodes can be flashed.</string></property>
      <column><property name="text"><string/></property></column>
      <column><property name="text"><string>MAC</string></property></column>
      <column><property name="text"><string>Type</string></property></column>

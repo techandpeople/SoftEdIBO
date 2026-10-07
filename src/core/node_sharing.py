@@ -45,6 +45,24 @@ def robot_ids_by_mac(settings_data: dict[str, Any]) -> dict[str, list[str]]:
     return out
 
 
+def node_types_by_mac(settings_data: dict[str, Any]) -> dict[str, str]:
+    """``{mac: node_type}`` for every configured board, in config order.
+
+    One entry per board: a MAC shared by two robots is listed once (its type is
+    the same wherever it is configured - it is the same PCB).
+    """
+    out: dict[str, str] = {}
+    for group in (settings_data.get("robots") or {}).values():
+        if not isinstance(group, list):
+            continue
+        for robot_cfg in group:
+            for node in robot_cfg.get("nodes", []):
+                mac = node.get("mac")
+                if mac:
+                    out.setdefault(mac, str(node.get("node_type", "")))
+    return out
+
+
 def shared_macs(settings_data: dict[str, Any]) -> dict[str, list[str]]:
     """``{mac: [robot ids]}`` for the MACs listed by more than one robot."""
     return {mac: rids for mac, rids in robot_ids_by_mac(settings_data).items()
