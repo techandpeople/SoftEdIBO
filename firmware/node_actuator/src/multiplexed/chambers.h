@@ -12,29 +12,25 @@
 
 // Per-chamber state + valve/pump coordination for node_multiplexed.
 //
-// Common manifold: the 3 pressure pumps feed ONE shared inflate line for all
-// chambers, the 3 vacuum pumps ONE shared deflate line; there are no check
-// valves. So while two or more valves of the same direction are open the chambers
-// equalise and every (mux-read) gauge reads the shared line, not its own chamber.
-// The fill targeting therefore runs in the board-agnostic coupled_fill::Engine
-// (open the group together -> fill to the lowest open target -> close -> settle ->
-// measure each isolated -> repeat), exactly like node_direct but with looser
-// timings (I2C PCA9685 valve writes + a per-read mux settle are far slower than
-// the direct board's GPIO + dedicated ADC).
+// One pump pair per skin (pumps::PUMP_GROUPS): the chambers of a group share
+// that group's inflate line and its deflate line; there are no check valves. So
+// while two or more valves of the same direction are open in one group those
+// chambers equalise and every (mux-read) gauge reads the shared line, not its
+// own chamber. Each group is therefore driven like its own node_direct: it owns
+// a pair of board-agnostic coupled_fill::Engine (open the group together -> fill
+// to the lowest open target -> close -> settle -> measure each isolated ->
+// repeat) and its own leak-compensating hold engine, only with looser timings
+// (I2C PCA9685 valve writes + a per-read mux settle are far slower than the
+// direct board's GPIO + dedicated ADC). The groups are fully independent: one
+// skin filling, settling or holding never waits for, or pumps, another.
 //
-// Pump scaling is the key multiplexed difference: with the manifold shared, only
-// the NUMBER of pumps running matters, so recalcPumps() spins ceil(open/3) pumps
-// of a direction - enough to keep the per-chamber fill speed roughly constant as
-// more valves open, and never more than the open valves can vent (so a spare pump
-// can't dead-head the manifold: the "running dry / forcing" failure).
+// recalcPumps() runs a group's pump only while one of that group's own valves
+// of that direction is open, so a pump never dead-heads its line (the "running
+// dry / forcing" failure).
 
 namespace chambers {
 
 constexpr uint8_t DEFAULT_DUTY = pump_duty::FULL;   // full pump speed (8-bit PWM)
-
-// One pump is enough flow for this many open valves; above it, spin another. With
-// 3 pressure + 3 vacuum pumps that caps at 3 active per direction (9 valves).
-constexpr int VALVES_PER_PUMP = 3;
 
 enum State : uint8_t {
     IDLE, INFLATING, DEFLATING
@@ -133,17 +129,35 @@ inline void stop(int n) {
 // Leak-compensating hold (hold_duty.h), both sides: a held chamber is topped
 // back up (pressure hold) or pulled back down (vacuum hold) in short, soft
 // pulses on its own gauge whenever it drifts off its target. Driven by
-// holdTick() (end of this header), which suspends it while anything else owns
-// the manifolds. Any explicit actuation command on a chamber supersedes
-// (drops) its hold. Requests go through holdRequest() (also at the end: it
-// needs the chamber's gauge floor).
+// holdTick() (end of this header), which suspends a group's holds while
+// anything else owns that group's lines. Any explicit actuation command on a
+// chamber supersedes (drops) its hold. Requests go through holdRequest() (also
+// at the end: it needs the chamber's gauge floor).
 // ---------------------------------------------------------------------------
 
-inline hold_duty::Engine<MAX_CHAMBERS> holdEng;
-inline uint16_t holdValveMask    = 0;   // inflate valves held open (pressure hold)
-inline uint8_t  holdPumpDuty     = 0;   // pressure pump duty for them (0 = none)
-inline uint16_t holdVacValveMask = 0;   // deflate valves held open (vacuum hold)
-inline uint8_t  holdVacDuty      = 0;   // vacuum pump duty for them (0 = none)
+// Everything that controls one pump group's pair of lines. Engines are indexed
+// by the board-wide chamber number; each only ever sees its own group's chambers.
+struct Line {
+    coupled_fill::Engine<MAX_CHAMBERS> inflateEng;
+    coupled_fill::Engine<MAX_CHAMBERS> deflateEng;
+    hold_duty::Engine<MAX_CHAMBERS>    holdEng;
+    uint16_t holdValveMask    = 0;   // inflate valves held open (pressure hold)
+    uint8_t  holdPumpDuty     = 0;   // pressure pump duty for them (0 = none)
+    uint16_t holdVacValveMask = 0;   // deflate valves held open (vacuum hold)
+    uint8_t  holdVacDuty      = 0;   // vacuum pump duty for them (0 = none)
+
+    bool seqActive() const { return inflateEng.active() || deflateEng.active(); }
+};
+
+inline Line lines[pumps::NUM_PUMP_GROUPS];
+
+// The line set chamber n hangs on, or nullptr for a chamber with no pump pair
+// (nothing can actuate it).
+inline Line* lineOf(int n) {
+    int g = pumps::groupOf(n);
+    return g < 0 ? nullptr : &lines[g];
+}
+
 // Chambers under a bench VENT (both valves open, no pump): excluded from the
 // pump recalc so nothing pumps into a chamber that is open to atmosphere.
 inline uint16_t ventMask      = 0;
@@ -155,52 +169,56 @@ inline void holdCloseValve(int i, uint8_t /*side*/) {
 }
 
 inline void holdDrop(int n) {
-    holdEng.drop(n, holdCloseValve);
+    if (Line* L = lineOf(n)) L->holdEng.drop(n, holdCloseValve);
 }
 
 inline void holdAbort() {
-    holdEng.abort();
-    holdValveMask    = 0;
-    holdPumpDuty     = 0;
-    holdVacValveMask = 0;
-    holdVacDuty      = 0;
+    for (Line& L : lines) {
+        L.holdEng.abort();
+        L.holdValveMask    = 0;
+        L.holdPumpDuty     = 0;
+        L.holdVacValveMask = 0;
+        L.holdVacDuty      = 0;
+    }
 }
 
-// Drive the shared pumps from the ACTUAL open valves (the pca_valves mirror),
-// never from chamber state - so a pump can only run while it has an open flow
-// path. Count-scaled for the common manifold: ceil(open_valves/VALVES_PER_PUMP)
-// pumps of each direction, capped at how many pumps that role has. Suspended
-// while a manual override drives the pumps directly (see main.cpp). The vacuum
-// pumps drop to pump_duty::DEFLATE_BELOW_FLOOR once EVERY open deflate valve is
-// past the gauge floor (the rest of that pull is time-only). A line whose only
-// open valves belong to the hold engine runs at its servoed hold duty.
-inline bool deflateLineAtFloor();   // defined after the engines (needs deflateEng)
-
+// Drive the pumps from the ACTUAL open valves (the pca_valves mirror), never
+// from chamber state - so a pump can only run while it has an open flow path.
+// Per pump group: its inflate pump runs while one of ITS inflate valves is open,
+// its deflate pump while one of ITS deflate valves is open. Suspended while a
+// manual override drives the pumps directly (see main.cpp). A deflate pump
+// drops to pump_duty::DEFLATE_BELOW_FLOOR once EVERY open deflate valve of its
+// group is past the gauge floor (the rest of that pull is time-only). A line
+// whose only open valves belong to the hold engine runs at its servoed hold duty.
 inline void recalcPumps() {
-    int openInf = 0, openDef = 0;
-    bool nonHoldInflate = false;
-    bool nonHoldDeflate = false;
+    uint16_t openInf = 0, openDef = 0;
     for (int i = 0; i < MAX_CHAMBERS; i++) {
         if (ventMask & (1u << i)) continue;   // vented: no flow path for a pump
-        if (pca_valves::isOpen(i, 0)) {
-            openInf++;
-            if (!(holdValveMask & (1u << i))) nonHoldInflate = true;
-        }
-        if (pca_valves::isOpen(i, 1)) {
-            openDef++;
-            if (!(holdVacValveMask & (1u << i))) nonHoldDeflate = true;
-        }
+        if (pca_valves::isOpen(i, 0)) openInf |= (uint16_t)(1u << i);
+        if (pca_valves::isOpen(i, 1)) openDef |= (uint16_t)(1u << i);
     }
-    int pCount = openInf > 0 ? (openInf + VALVES_PER_PUMP - 1) / VALVES_PER_PUMP : 0;
-    int vCount = openDef > 0 ? (openDef + VALVES_PER_PUMP - 1) / VALVES_PER_PUMP : 0;
-    // Full duty whenever any NON-hold valve of the side is open (an engine
-    // round / manual override); a hold-only line runs at the servoed hold duty.
-    uint8_t pDuty = nonHoldInflate ? DEFAULT_DUTY : holdPumpDuty;
-    pumps::setRoleActiveCount(pumps::ROLE_PRESSURE, pCount, pDuty ? pDuty : DEFAULT_DUTY);
-    uint8_t vDuty = !nonHoldDeflate      ? (holdVacDuty ? holdVacDuty : DEFAULT_DUTY)
-                  : deflateLineAtFloor() ? pump_duty::DEFLATE_BELOW_FLOOR
-                                         : DEFAULT_DUTY;
-    pumps::setRoleActiveCount(pumps::ROLE_VACUUM,   vCount, vDuty);
+    for (int g = 0; g < pumps::NUM_PUMP_GROUPS; g++) {
+        const Line& L = lines[g];
+        uint16_t inf = openInf & pumps::PUMP_GROUPS[g].chambers;
+        uint16_t def = openDef & pumps::PUMP_GROUPS[g].chambers;
+        // Full duty whenever any NON-hold valve of the line is open (an engine
+        // round / manual override); a hold-only line runs at the servoed hold duty.
+        uint8_t pDuty = 0, vDuty = 0;
+        if (inf) {
+            bool holdOnly = (inf & ~L.holdValveMask) == 0;
+            pDuty = (holdOnly && L.holdPumpDuty) ? L.holdPumpDuty : DEFAULT_DUTY;
+        }
+        if (def) {
+            // Every open deflate valve is a chamber the deflate engine flagged
+            // at its gauge floor; a manual/bench valve is never at-floor, so it
+            // keeps the vacuum pump at full duty.
+            bool holdOnly = (def & ~L.holdVacValveMask) == 0;
+            vDuty = holdOnly ? (L.holdVacDuty ? L.holdVacDuty : DEFAULT_DUTY)
+                  : L.deflateEng.lineAtFloor(def) ? pump_duty::DEFLATE_BELOW_FLOOR
+                                                  : DEFAULT_DUTY;
+        }
+        pumps::setGroupDuty(g, pDuty, vDuty);
+    }
 }
 
 // Median-of-three mux read for the control path: rejects a single-sample sensor
@@ -228,7 +246,7 @@ inline constexpr coupled_fill::Tuning TUNE_INFLATE {
     /* min_round_ms        */ 350,    // bigger manifold + I2C: longer pump-start spike to ride out
     /* settle_ms           */ 300,    // mux scan + larger manifold needs longer to settle isolated
     /* round_max_ms        */ 8000,
-    /* seq_max_ms          */ 45000,  // up to 9 chambers with different targets -> several rounds
+    /* seq_max_ms          */ 45000,  // chambers with different targets -> several rounds
     /* chamber_max_ms      */ 5000,
     /* cutoff_debounce     */ 2,      // each control tick spans more real time than direct
     /* tol_frac            */ 0.10f,
@@ -238,29 +256,18 @@ inline constexpr coupled_fill::Tuning TUNE_DEFLATE {
     120, 60, 350, 300, 8000, 45000, 5000, 2, 0.10f, config::HARD_CHAMBER_MAX_KPA,
 };
 
-inline coupled_fill::Engine<MAX_CHAMBERS> inflateEng;
-inline coupled_fill::Engine<MAX_CHAMBERS> deflateEng;
-
 inline void (*dbgHook)(uint8_t ev, uint16_t mask, uint8_t dir) = nullptr;
 
 inline void enginesInit() {
-    inflateEng.begin(0, TUNE_INFLATE);
-    deflateEng.begin(1, TUNE_DEFLATE);
+    for (Line& L : lines) {
+        L.inflateEng.begin(0, TUNE_INFLATE);
+        L.deflateEng.begin(1, TUNE_DEFLATE);
+    }
 }
 
 // Lowest ambient-zeroed reading chamber n's gauge can produce (sensor clamp at
 // P_MIN shifted by the chamber's tare zero) - see node_direct.
 inline float gaugeFloorKpa(int n) { return pressure::P_MIN - zeroKpa[n]; }
-
-// Every open (non-vented) deflate valve is a chamber the deflate engine flagged
-// at its gauge floor; a manual/bench deflate valve is never at-floor, so it
-// keeps the vacuum pumps at full duty.
-inline bool deflateLineAtFloor() {
-    uint16_t open = 0;
-    for (int i = 0; i < MAX_CHAMBERS; i++)
-        if (pca_valves::isOpen(i, 1) && !(ventMask & (1u << i))) open |= (uint16_t)(1u << i);
-    return deflateEng.lineAtFloor(open);
-}
 
 // Engine actuation primitive: open chamber i's valve for `dir` (closing the
 // opposite side). The engine recalcs pumps after a whole round opens.
@@ -283,45 +290,48 @@ inline void engOpen(int i, uint8_t dir) {
 
 inline void requestInflate(int n, float target, uint8_t duty, uint32_t cap_ms = 0,
                            bool blind = false) {
-    if (n < 0 || n >= MAX_CHAMBERS) return;
+    Line* L = lineOf(n);
+    if (!L) return;
     holdDrop(n);   // an explicit actuation supersedes a leak-compensating hold
     target = max(state[n].min_kpa, min(target, state[n].max_kpa));
     bool reversed = false;
-    deflateEng.drop(n, [&](int i) { stop(i); reversed = true; });
+    L->deflateEng.drop(n, [&](int i) { stop(i); reversed = true; });
     if (reversed) recalcPumps();
     state[n].duty       = duty;
     state[n].target_kpa = target;
-    inflateEng.request(n, target, state[n].max_kpa - state[n].min_kpa, cap_ms, blind);
+    L->inflateEng.request(n, target, state[n].max_kpa - state[n].min_kpa, cap_ms, blind);
 }
 
 inline void requestDeflate(int n, float target, uint8_t duty, uint32_t cap_ms = 0,
                            bool blind = false) {
-    if (n < 0 || n >= MAX_CHAMBERS) return;
+    Line* L = lineOf(n);
+    if (!L) return;
     holdDrop(n);   // an explicit actuation supersedes a leak-compensating hold
     target = max(state[n].min_kpa, min(target, state[n].max_kpa));
     bool reversed = false;
-    inflateEng.drop(n, [&](int i) { stop(i); reversed = true; });
+    L->inflateEng.drop(n, [&](int i) { stop(i); reversed = true; });
     if (reversed) recalcPumps();
     state[n].duty       = duty;
     state[n].target_kpa = target;
-    deflateEng.request(n, target, state[n].max_kpa - state[n].min_kpa, cap_ms, blind,
+    L->deflateEng.request(n, target, state[n].max_kpa - state[n].min_kpa, cap_ms, blind,
                        gaugeFloorKpa(n));
 }
 
 inline void holdChamber(int n) {
     if (n < 0 || n >= MAX_CHAMBERS) return;
     holdDrop(n);
-    inflateEng.drop(n, [](int i) { stop(i); });
-    deflateEng.drop(n, [](int i) { stop(i); });
+    if (Line* L = lineOf(n)) {
+        L->inflateEng.drop(n, [](int i) { stop(i); });
+        L->deflateEng.drop(n, [](int i) { stop(i); });
+    }
     stop(n);
     recalcPumps();
 }
 
-// Drive both engines. Called at the chamber-control cadence from loop(). Keeps the
-// engine chamber count in sync with the live config, and refreshes cachedKpa as a
-// side effect of the engine's reads.
+// Drive every group's engines. Called at the chamber-control cadence from
+// loop(). Keeps the engine chamber count in sync with the live config, and
+// refreshes cachedKpa as a side effect of the engines' reads.
 inline void controlTick(uint32_t now) {
-    inflateEng.count = deflateEng.count = (uint8_t)config::state.num_chambers;
     auto rd = [](int i) -> float { return recordKpa(i, readKpaMedian(i)); };
     auto op = [](int i, uint8_t d) { engOpen(i, d); };
     auto cl = [](int i) { stop(i); };
@@ -330,11 +340,12 @@ inline void controlTick(uint32_t now) {
     auto dbD = [](uint8_t ev, uint16_t mask) { if (dbgHook) dbgHook(ev, mask, 1); };
     auto opsI = coupled_fill::ops(rd, op, cl, rc, dbI);
     auto opsD = coupled_fill::ops(rd, op, cl, rc, dbD);
-    inflateEng.tick(now, opsI);
-    deflateEng.tick(now, opsD);
+    for (Line& L : lines) {
+        L.inflateEng.count = L.deflateEng.count = (uint8_t)config::state.num_chambers;
+        L.inflateEng.tick(now, opsI);
+        L.deflateEng.tick(now, opsD);
+    }
 }
-
-inline bool seqActive() { return inflateEng.active() || deflateEng.active(); }
 
 inline void closeAll() {
     for (int i = 0; i < MAX_CHAMBERS; i++) stop(i);
@@ -342,8 +353,10 @@ inline void closeAll() {
 
 // Drop any in-progress engine sequence (manual override / emergency takes over).
 inline void abortSequences() {
-    inflateEng.abort();
-    deflateEng.abort();
+    for (Line& L : lines) {
+        L.inflateEng.abort();
+        L.deflateEng.abort();
+    }
 }
 
 // Register / refresh a hold on chamber ``n``: ``side`` 0 = pressure hold
@@ -355,35 +368,42 @@ inline void abortSequences() {
 // (see hold_duty::Engine::refresh), never starts one.
 inline void holdRequest(int n, uint8_t side, float kpa, uint8_t duty, bool timed,
                         bool refreshOnly = false) {
+    Line* L = lineOf(n);
+    if (!L) return;
     if (refreshOnly) {
-        holdEng.refresh(n, side, kpa, duty, timed, gaugeFloorKpa(n), holdCloseValve);
+        L->holdEng.refresh(n, side, kpa, duty, timed, gaugeFloorKpa(n), holdCloseValve);
         return;
     }
-    holdEng.count = (uint8_t)config::state.num_chambers;
-    holdEng.request(n, side, kpa, duty, timed, gaugeFloorKpa(n), holdCloseValve);
+    L->holdEng.count = (uint8_t)config::state.num_chambers;
+    L->holdEng.request(n, side, kpa, duty, timed, gaugeFloorKpa(n), holdCloseValve);
 }
 
-// Drive the leak-compensating hold engine. Call every loop tick with the
-// manifold-busy flag (manual override, engine sequence, emergency stop). Its
-// pump duties are applied through recalcPumps, which only honours each one
-// while NO non-hold valve of that side is open.
-inline void holdTick(uint32_t now, bool busy) {
-    holdEng.count = (uint8_t)config::state.num_chambers;
-    hold_duty::Duties d = holdEng.tick(
-        now, busy,
-        [](int i, uint8_t side) { pca_valves::setChamberValve(i, side == 0, side == 1); },
-        holdCloseValve,
-        [](int i) -> float { return recordKpa(i, readKpaMedian(i)); });
-    uint16_t inflMask = holdEng.openInflateMask();
-    uint16_t deflMask = holdEng.openDeflateMask();
-    if (inflMask != holdValveMask || d.inflate != holdPumpDuty
-        || deflMask != holdVacValveMask || d.deflate != holdVacDuty) {
-        holdValveMask    = inflMask;
-        holdPumpDuty     = d.inflate;
-        holdVacValveMask = deflMask;
-        holdVacDuty      = d.deflate;
-        recalcPumps();
+// Drive the leak-compensating hold engines. Call every loop tick; `manual` is
+// the board-wide manual override. A group's holds are also suspended while one
+// of its own fill sequences owns its lines (another group's sequence does not
+// touch them). The pump duties are applied through recalcPumps, which only
+// honours each one while NO non-hold valve of that line is open.
+inline void holdTick(uint32_t now, bool manual) {
+    bool changed = false;
+    for (Line& L : lines) {
+        L.holdEng.count = (uint8_t)config::state.num_chambers;
+        hold_duty::Duties d = L.holdEng.tick(
+            now, manual || L.seqActive(),
+            [](int i, uint8_t side) { pca_valves::setChamberValve(i, side == 0, side == 1); },
+            holdCloseValve,
+            [](int i) -> float { return recordKpa(i, readKpaMedian(i)); });
+        uint16_t inflMask = L.holdEng.openInflateMask();
+        uint16_t deflMask = L.holdEng.openDeflateMask();
+        if (inflMask != L.holdValveMask || d.inflate != L.holdPumpDuty
+            || deflMask != L.holdVacValveMask || d.deflate != L.holdVacDuty) {
+            L.holdValveMask    = inflMask;
+            L.holdPumpDuty     = d.inflate;
+            L.holdVacValveMask = deflMask;
+            L.holdVacDuty      = d.deflate;
+            changed = true;
+        }
     }
+    if (changed) recalcPumps();
 }
 
 // Force-stop any chamber actuating past ACTUATION_TIMEOUT_MS (sensor failure

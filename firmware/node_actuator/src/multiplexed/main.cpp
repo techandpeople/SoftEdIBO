@@ -130,32 +130,27 @@ void sendEngEvent(uint8_t ev, uint16_t mask, uint8_t dir) {
     esp_now_send(gatewayMac, reinterpret_cast<const uint8_t*>(buf), len);
 }
 
-// Pump-vs-valve sanity: report a pump role running with NO open valve (dead-head,
-// the "running dry / forcing" failure) OR more pumps running than the open valves
-// should need (forcing the manifold). recalcPumps() should make both impossible -
-// this only fires on a regression.
+// Pump-vs-valve sanity: report a pump running with NO open valve of its own
+// group on its line (dead-head, the "running dry / forcing" failure).
+// recalcPumps() should make that impossible - this only fires on a regression.
 void checkDryPumps() {
     if (!gatewayKnown) return;
-    int openInf = 0, openDef = 0;
+    uint16_t openInf = 0, openDef = 0;
     for (int i = 0; i < MAX_CHAMBERS; i++) {
-        if (pca_valves::isOpen(i, 0)) openInf++;
-        if (pca_valves::isOpen(i, 1)) openDef++;
+        if (pca_valves::isOpen(i, 0)) openInf |= (uint16_t)(1u << i);
+        if (pca_valves::isOpen(i, 1)) openDef |= (uint16_t)(1u << i);
     }
-    int runP = 0, runV = 0;
-    for (int i = 0; i < NUM_PUMPS; i++) {
-        if (ledcRead(i) == 0) continue;
-        if (pumps::roles[i] == pumps::ROLE_PRESSURE) runP++;
-        else if (pumps::roles[i] == pumps::ROLE_VACUUM) runV++;
+    for (int g = 0; g < pumps::NUM_PUMP_GROUPS; g++) {
+        const pumps::PumpGroup& grp = pumps::PUMP_GROUPS[g];
+        bool dryInf = ledcRead(grp.inflate_pump) != 0 && !(openInf & grp.chambers);
+        bool dryDef = ledcRead(grp.deflate_pump) != 0 && !(openDef & grp.chambers);
+        if (!dryInf && !dryDef) continue;
+        char buf[96];
+        int len = snprintf(buf, sizeof(buf),
+            "{\"type\":\"dbg\",\"ev\":\"dry\",\"group\":%d,\"inf\":%d,\"def\":%d}",
+            g, dryInf, dryDef);
+        esp_now_send(gatewayMac, reinterpret_cast<const uint8_t*>(buf), len);
     }
-    const int VPP = chambers::VALVES_PER_PUMP;
-    int wantP = openInf > 0 ? (openInf + VPP - 1) / VPP : 0;
-    int wantV = openDef > 0 ? (openDef + VPP - 1) / VPP : 0;
-    if (runP <= wantP && runV <= wantV) return;
-    char buf[136];
-    int len = snprintf(buf, sizeof(buf),
-        "{\"type\":\"dbg\",\"ev\":\"dry\",\"runP\":%d,\"wantP\":%d,\"openInf\":%d,\"runV\":%d,\"wantV\":%d,\"openDef\":%d}",
-        runP, wantP, openInf, runV, wantV, openDef);
-    esp_now_send(gatewayMac, reinterpret_cast<const uint8_t*>(buf), len);
 }
 
 void installDebugHook() { chambers::dbgHook = &sendEngEvent; }
@@ -215,34 +210,6 @@ void detectSensors(int valid_channels[], int& valid_count) {
         pos += snprintf(channels + pos, sizeof(channels) - pos, "%s%d", i == 0 ? "" : ",", valid_channels[i]);
     }
     LOG("Sensors responding at mux channels: %s\n", channels);
-}
-
-// No reservoir tanks: the pumps push directly into the chambers, so their role
-// (pressure = inflate, vacuum = deflate) can't be discovered by watching a tank
-// sensor. Split the pumps evenly by default - first half PRESSURE, second half
-// VACUUM (e.g. 3 + 3 of NUM_PUMPS = 6) - which the gateway's `configure`
-// (pump_groups / pump_inflate_count / pump_deflate_count) overrides with the real
-// wiring. There are no tank sensors to assign.
-void assignDefaultPumpRoles() {
-    config::state.pressure_tank_mux_ch = -1;
-    config::state.vacuum_tank_mux_ch = -1;
-    for (int i = 0; i < NUM_PUMPS; i++) {
-        pumps::roles[i] = (i < NUM_PUMPS / 2) ? pumps::ROLE_PRESSURE : pumps::ROLE_VACUUM;
-    }
-    LOG("Default pump roles: PUMP1..%d pressure, rest vacuum (override via configure)\n",
-        NUM_PUMPS / 2);
-}
-
-void applyPumpGroups(uint8_t pressure_mask, uint8_t vacuum_mask) {
-    for (int i = 0; i < NUM_PUMPS; i++) {
-        bool in_pressure = (pressure_mask & (1u << i)) != 0;
-        bool in_vacuum = (vacuum_mask & (1u << i)) != 0;
-        if (in_pressure && !in_vacuum) {
-            pumps::roles[i] = pumps::ROLE_PRESSURE;
-        } else if (in_vacuum && !in_pressure) {
-            pumps::roles[i] = pumps::ROLE_VACUUM;
-        }
-    }
 }
 
 void parseAndQueue(const uint8_t* data, int len) {
@@ -330,33 +297,6 @@ void parseAndQueue(const uint8_t* data, int len) {
         c.cfg_v_max    = doc["tank_vacuum_max_kpa"]      | config::state.tank_vacuum_max_kpa;
         c.cfg_p_target = doc["tank_pressure_target_kpa"] | config::state.tank_pressure_target_kpa;
         c.cfg_v_target = doc["tank_vacuum_target_kpa"]   | config::state.tank_vacuum_target_kpa;
-
-        int inflate_count = constrain((int)(doc["pump_inflate_count"] | 0), 0, NUM_PUMPS);
-        int deflate_count = constrain((int)(doc["pump_deflate_count"] | 0), 0, NUM_PUMPS);
-
-        c.cfg_pressure_mask = 0;
-        c.cfg_vacuum_mask = 0;
-
-        JsonObject groups = doc["pump_groups"].as<JsonObject>();
-        if (!groups.isNull()) {
-            JsonArray pressure = groups["pressure"].as<JsonArray>();
-            JsonArray vacuum = groups["vacuum"].as<JsonArray>();
-            for (JsonVariant v : pressure) {
-                int p = v.as<int>();
-                if (p >= 1 && p <= NUM_PUMPS) c.cfg_pressure_mask |= (1u << (p - 1));
-            }
-            for (JsonVariant v : vacuum) {
-                int p = v.as<int>();
-                if (p >= 1 && p <= NUM_PUMPS) c.cfg_vacuum_mask |= (1u << (p - 1));
-            }
-        }
-
-        if (c.cfg_pressure_mask == 0 && c.cfg_vacuum_mask == 0) {
-            for (int i = 0; i < inflate_count; i++) c.cfg_pressure_mask |= (1u << i);
-            for (int i = inflate_count; i < inflate_count + deflate_count && i < NUM_PUMPS; i++) {
-                c.cfg_vacuum_mask |= (1u << i);
-            }
-        }
 
         // Organ circuits: list of mux channels; index in the list = slot in
         // the organ broadcasts. Staged here, applied from loop().
@@ -478,11 +418,28 @@ uint32_t manualTs                   = 0;
 bool     manualPumpOn[2]            = {false, false};   // [0]=pressure, [1]=vacuum
 bool     manualValveOpen[MAX_CHAMBERS][2] = {};         // [chamber][0=inflate,1=deflate]
 
+// Manual pumps follow the manual valves group by group: a group's pump of a
+// switched-on side runs only while one of that group's own manual valves of
+// that side is open, so it never dead-heads a line nobody opened.
+void driveManualPumps() {
+    for (int g = 0; g < pumps::NUM_PUMP_GROUPS; g++) {
+        bool open[2] = {false, false};
+        for (int i = 0; i < MAX_CHAMBERS; i++) {
+            uint16_t bit = (uint16_t)(1u << i);
+            if (!(pumps::PUMP_GROUPS[g].chambers & bit) || (chambers::ventMask & bit)) continue;
+            open[0] |= manualValveOpen[i][0];
+            open[1] |= manualValveOpen[i][1];
+        }
+        pumps::setGroupDuty(g,
+            (manualPumpOn[0] && open[0]) ? pumps::PUMP_DEFAULT_DUTY : 0,
+            (manualPumpOn[1] && open[1]) ? pumps::PUMP_DEFAULT_DUTY : 0);
+    }
+}
+
 void applyManualPump(int role01, bool on) {
     if (role01 < 0 || role01 > 1) return;
     manualPumpOn[role01] = on;
-    pumps::Role role = (role01 == 0) ? pumps::ROLE_PRESSURE : pumps::ROLE_VACUUM;
-    pumps::setRoleDuty(role, on ? pumps::PUMP_DEFAULT_DUTY : 0);
+    driveManualPumps();
 }
 
 void applyManualValve(int chamber, int side, bool open) {
@@ -494,6 +451,7 @@ void applyManualValve(int chamber, int side, bool open) {
     manualValveOpen[chamber][side] = open;
     pca_valves::setChamberValve(chamber,
         manualValveOpen[chamber][0], manualValveOpen[chamber][1]);
+    driveManualPumps();
 }
 
 // Bench vent of one chamber: BOTH valves open under the manual override (so
@@ -505,13 +463,11 @@ void applyManualVent(int chamber, bool open) {
     if (open) chambers::ventMask |= bit; else chambers::ventMask &= ~bit;
     manualValveOpen[chamber][0] = manualValveOpen[chamber][1] = open;
     pca_valves::setChamberValve(chamber, open, open);
-    chambers::recalcPumps();
+    driveManualPumps();
 }
 
 // Turn every manual actuator off and hand control back to the autonomous loops.
 void manualClearAll() {
-    pumps::setRoleDuty(pumps::ROLE_PRESSURE, 0);
-    pumps::setRoleDuty(pumps::ROLE_VACUUM, 0);
     manualPumpOn[0] = manualPumpOn[1] = false;
     for (int chmbr = 0; chmbr < MAX_CHAMBERS; chmbr++) {
         if (manualValveOpen[chmbr][0] || manualValveOpen[chmbr][1])
@@ -519,6 +475,7 @@ void manualClearAll() {
         manualValveOpen[chmbr][0] = manualValveOpen[chmbr][1] = false;
     }
     chambers::ventMask = 0;
+    driveManualPumps();
     manualActive = false;
 }
 
@@ -703,9 +660,6 @@ void processCommand(const cmd_queue::Cmd& c) {
             config::state.tank_pressure_min_kpa, config::state.tank_pressure_max_kpa);
         config::state.tank_vacuum_target_kpa   = constrain(c.cfg_v_target,
             config::state.tank_vacuum_min_kpa,   config::state.tank_vacuum_max_kpa);
-        if (c.cfg_pressure_mask || c.cfg_vacuum_mask) {
-            applyPumpGroups(c.cfg_pressure_mask, c.cfg_vacuum_mask);
-        }
         configured = true;
         return;
     }
@@ -846,7 +800,9 @@ void autodetect() {
     int valid_count = 0;
 
     detectSensors(valid_channels, valid_count);
-    assignDefaultPumpRoles();
+    // No reservoir tanks: the pumps push directly into the chambers.
+    config::state.pressure_tank_mux_ch = -1;
+    config::state.vacuum_tank_mux_ch = -1;
 
     config::state.ready = true;
 }
@@ -896,7 +852,7 @@ void setup() {
     // UNL17-24) so a bank swap from wrong address jumpers shows in the PC log.
     char ready_msg[192];
     snprintf(ready_msg, sizeof(ready_msg),
-             "{\"status\":\"node_multiplexed_ready\",\"fw\":\"valvemap-2\",\"rgbw\":" LED_RGBW_JSON
+             "{\"status\":\"node_multiplexed_ready\",\"fw\":\"pumpgroups-1\",\"rgbw\":" LED_RGBW_JSON
              ",\"kpa_min\":%.0f,\"pca\":[%d,%d]}",
              (double)pressure::FLOOR_KPA, pca_valves::pca1_addr, pca_valves::pca2_addr);
     se::broadcast(ready_msg);
@@ -978,7 +934,7 @@ void loop() {
     // ---- Coupled-fill engines on their own (tight) cadence: open the group
     //      together -> fill to the lowest open target -> close -> settle -> measure
     //      each isolated -> repeat. Reads the mux gauges itself (median-filtered)
-    //      and recalcs the count-scaled pumps when valves change. ----
+    //      and recalcs the per-group pumps when valves change. ----
     if (!manualActive && now - lastChamberMs >= CHAMBER_CHECK_MS) {
         lastChamberMs = now;
         chambers::controlTick(now);
@@ -986,9 +942,9 @@ void loop() {
     }
 
     // ---- Leak-compensating continuous holds (valve open + equilibrium duty).
-    //      Suspends itself while the manual override or an engine sequence owns
-    //      the manifold (emergencyStopped never reaches here - loop returned). ----
-    chambers::holdTick(now, manualActive || chambers::seqActive());
+    //      Each group's holds suspend while the manual override or one of that
+    //      group's own engine sequences owns its lines (emergencyStopped never reaches here - loop returned). ----
+    chambers::holdTick(now, manualActive);
 
     broadcastTelemetry(now);
 }

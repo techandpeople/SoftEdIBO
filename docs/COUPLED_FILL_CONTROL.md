@@ -9,12 +9,13 @@ board-agnostic supervisor lives in `firmware/common/coupled_fill.h`; each board'
 
 ## The hardware problem
 
-Every chamber of one direction taps a **single shared manifold** with **no check
+The chambers of one direction tap a **shared manifold** with **no check
 valves**:
 
 - `node_direct` - 3 chambers, 1 inflate pump + 1 vacuum pump.
-- `node_multiplexed` - up to 9 chambers, **3 inflate + 3 vacuum pumps on a common
-  manifold** (the pumps are interchangeable; only how many run matters).
+- `node_multiplexed` - up to 9 chambers in 3 skins; **each skin has its own
+  inflate pump + vacuum pump** and its own pair of lines, shared by that skin's
+  3 chambers only (`pumps::PUMP_GROUPS`).
 
 Because there are no check valves, while **two or more valves of the same
 direction are open the chambers equalise**, and each chamber's in-line gauge reads
@@ -81,12 +82,12 @@ one-element set.
 - **Direct** (`chambers::recalcPumps`): one pump per direction, driven on/off from
   the **actual open valves** (the `valveOpen` mirror), never from chamber state -
   so a pump can never run without an open flow path.
-- **Multiplexed** (`chambers::recalcPumps` + `pumps::setRoleActiveCount`): the
-  manifold is shared, so the number of running pumps scales with open valves -
-  `ceil(open_valves_of_dir / VALVES_PER_PUMP)`, capped at the pumps of that role
-  (3). This keeps the per-chamber fill speed roughly constant as more valves open
-  **and** stops a spare pump dead-heading the manifold (the "pump running dry /
-  forcing" failure): a pump only spins when open valves can take its air.
+- **Multiplexed** (`chambers::recalcPumps` + `pumps::setGroupDuty`): the pumps
+  are wired in pairs, one inflate + one deflate pump per 3-chamber skin
+  (`pumps::PUMP_GROUPS`). A pump runs only while a valve of its direction is
+  open on one of its own skin's chambers, so one skin actuating never spins
+  another skin's pumps and no pump dead-heads its line (the "pump running dry /
+  forcing" failure).
 
 ## Spike rejection
 
@@ -191,9 +192,8 @@ Wireless debugging over ESP-NOW is the only way to catch these on a battery node
 - `dbg ev:eng` - round/measure trace; `code` is `coupled_fill::Event`
   (0 open, 1 round-end, 2 measure, 3 done, 4 abort, 5 chamber-done - one chamber
   closed at its target while the rest keep filling), `mask` the affected chambers.
-- `dbg ev:dry` - a pump running with no open valve, or more pumps than the open
-  valves should need (`recalcPumps` makes both impossible - fires only on a
-  regression).
+- `dbg ev:dry` - a pump running with no open valve on its line (`recalcPumps`
+  makes that impossible - fires only on a regression).
 - `seq` - both engines' phase + pending masks + per-chamber kpa/max.
 
 **`fw` marker.** The boot `node_*_ready` message carries `"fw":"..."`. **Bump it

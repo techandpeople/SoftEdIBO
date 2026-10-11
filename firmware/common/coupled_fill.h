@@ -6,9 +6,10 @@
 // Coupled-fill supervisor - shared by node_direct and node_multiplexed.
 //
 // THE HARDWARE PROBLEM THIS SOLVES
-// Both actuator boards put every chamber of one direction on a SINGLE shared
-// pneumatic line: the inflate valves all tap a common pressure manifold (1 pump
-// on direct, 3 on multiplexed), the deflate valves a common vacuum manifold.
+// Both actuator boards put several chambers of one direction on a shared
+// pneumatic line: the inflate valves tap a common pressure manifold, the deflate
+// valves a common vacuum manifold (direct: one pump pair for the whole board;
+// multiplexed: one pump pair, hence one pair of lines, per 3-chamber skin).
 // There are NO check valves. So while two or more valves of the same direction
 // are open, all those chambers EQUALISE - and each chamber's in-line gauge reads
 // the shared line, not its own chamber. Per-chamber closed-loop cutoff therefore
@@ -50,8 +51,9 @@
 // supplies the actuation (open/close a valve, recalc pumps) and a median-filtered
 // gauge read through a small Ops bundle, plus a per-board Tuning (the multiplexed
 // board is slower - I2C PCA9685 writes + a 16-channel mux scan - so its timings
-// are looser). Pump COUNT scaling (multiplexed: ceil(open/3) pumps) is the board's
-// recalc job; the engine only opens/closes valves and asks the board to recalc.
+// are looser). Which pumps run (multiplexed: the pump pair of each skin with an
+// open valve) is the board's recalc job; the engine only opens/closes valves and
+// asks the board to recalc.
 // ---------------------------------------------------------------------------
 
 namespace coupled_fill {

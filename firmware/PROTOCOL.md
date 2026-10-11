@@ -5,7 +5,7 @@ Three firmware flavors share this protocol:
 - **`node_direct`** - 3 chambers, GPIO valves, onboard pumps (optionally folds
   in the magnet/touch module, auto-detected).
 - **`node_multiplexed`** - up to 12 chambers, multiplexed valves/sensors,
-  shared pump banks (no reservoir tanks in the current build - pumps push
+  one inflate + deflate pump pair per skin (no reservoir tanks in the current build - pumps push
   straight into the chambers).
 - **`node_magnet_sensor`** - 4x MLX90393 magnet/touch board (+1 optional 5th
   sensor; separate firmware, no chambers / pumps; streams sensor data only).
@@ -85,14 +85,14 @@ board's `test_stop`/`status_rate` stay honoured.
 | `resume` | - | Re-arm after `stop` |
 | `tare` | - | Zero the pressure sensors: capture each chamber's current reading (8-sample average) as its ambient zero and persist it in NVS. Non-actuating, honoured while stopped. The PC vents every chamber first (`vent`, Skin Config -> Zero Sensors). The direct board acks it (`{"type":"ack","cmd":"tare"}`); the multiplexed board does not, and bypasses the `configure` requirement for it |
 | `valve_manual` | `chamber`, `side` (0 = inflate, 1 = deflate), `open` (0/1) | Dev/bench override, bypasses the engine; 5 s dead-man auto-off + hard-limit cutoff |
-| `pump_manual` | `pump` (0 = inflate/pressure, 1 = deflate/vacuum), `on` (0/1) | Dev/bench override, same safety nets |
+| `pump_manual` | `pump` (0 = inflate/pressure, 1 = deflate/vacuum), `on` (0/1) | Dev/bench override, same safety nets. Multiplexed: switches that side on for the board, but each skin's pump only runs while one of that skin's own manual valves of that side is open |
 | `vent` | `chamber` (-1 = all), `open` (0/1) | Bench vent: BOTH valves of the chamber open with the pumps kept off it (excluded from the pump recalc), so it equalises to atmosphere - neutralises an inflated or vacuumed chamber and drops any `hold_duty` on it. Manual-override rules: 5 s dead-man (PC keeps it alive), a `valve_manual` open on either side or any actuation ends it |
 | `set_led` | `color` ("#RRGGBB"), `pattern` ("off"/"solid"/"blink"/"pulse"/"comet"/"fade"), `color2`?, `period_ms`, `count`, `fade_ms`?, `angle`?, `index`?, `ring`? | WS2812/SK6812 ring(s). `index` sets a single pixel; omit it for the whole ring. `period_ms`/`count` apply to blink/pulse/comet/fade (count <= 0 = forever). `"fade"` cross-fades `color` <-> `color2` (default black) on the node, one full cycle per `period_ms`. Every change cross-fades over `fade_ms` (default 250 ms; 0 snaps). `angle` (0-360 deg) rotates the comet start. `ring` (0..2) selects one of the multiplexed board's three rings; omit/-1 = all (ignored by the direct board) |
 | `set_led_halves` | `colors` (["#RRGGBB", ...], up to 8), `pattern`, `period_ms`, `count`, `fade_ms`?, `angle`?, `ring`? | Splits the ring into `len(colors)` equal contiguous arcs in ONE frame (e.g. half purple / half yellow), rendered from loop(). `pattern`/`period_ms` animate the whole split together; `"comet"` paints one comet per colour. `angle` rotates the split. Prefer this over a burst of per-pixel `set_led` frames - those call `strip.show()` once per pixel in the receive task and reset the node |
 | `debug` | - | Debug build only; reply: `{type:"debug",...}` |
 
 `duty` (1-255) is an optional pump PWM value: it is parsed and stored, but the
-shared-manifold pump recalc currently runs the pumps at full duty - only the
+per-skin pump recalc currently runs the pumps at full duty - only the
 bench `test_run` honors it (duty-curve calibration sweeps).
 
 ### Direct-node only
@@ -123,11 +123,6 @@ runtime.
 Fields (all optional - omitted ones keep their current firmware state):
 
 - `num_chambers`
-- `pump_inflate_count`
-- `pump_deflate_count`
-- `pump_groups` - `{pressure:[i,...], vacuum:[i,...]}`, indices 1..6 of
-  `PUMP1..PUMP6`; overrides the boot default (first half pressure, second half
-  vacuum). Wins over the count fields when both are present.
 - `organ_channels` - `[c, ...]` mux channels carrying organ+cover circuits; the
   index in this list becomes the `slot` in the node's `organ` broadcasts. Wire
   them to the highest channels (I13..I15) so the chamber autodetect (which

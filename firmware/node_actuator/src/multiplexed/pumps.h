@@ -4,8 +4,8 @@
 #include "dbg.h"
 
 // 6 pumps via 3x DRV3297. Each pump has a single PWM input. LEDC channels 0..5
-// are dedicated to pump PWM. Each pump has a "role" (pressure or vacuum) that
-// the count-scaled pump control drives; runtime configure can override it.
+// are dedicated to pump PWM. The pumps are wired in pairs (PUMP_GROUPS below):
+// one inflate + one deflate pump per skin, each pair feeding its own chambers.
 
 namespace pumps {
 
@@ -13,9 +13,51 @@ constexpr int PUMP_PWM_FREQ = 20000;
 constexpr int PUMP_PWM_RES  =     8;
 constexpr uint8_t PUMP_DEFAULT_DUTY = 255;
 
-enum Role : uint8_t { ROLE_UNKNOWN = 0, ROLE_PRESSURE = 1, ROLE_VACUUM = 2 };
+// Pneumatic wiring: every skin has its own pump pair - the inflate pump feeds a
+// private pressure line, the deflate pump a private vacuum line - shared only by
+// that skin's chambers. Pump indices follow PUMP_PINS (PUMP1 = 0); connector
+// names are the PCB references. `chambers` is a bit mask (bit i = chamber i,
+// see pca_valves::VALVE_MAP for each chamber's valve connectors). A chamber in
+// no group has no pump behind its valves.
+struct PumpGroup {
+    uint8_t  inflate_pump;
+    uint8_t  deflate_pump;
+    uint16_t chambers;
+};
 
-inline Role roles[NUM_PUMPS] = {ROLE_UNKNOWN};
+constexpr PumpGroup PUMP_GROUPS[] = {
+    {0, 1, 0b000111000000},  // J12 / J13 -> chambers 6, 7, 8
+    {3, 2, 0b000000111000},  // J24 / J23 -> chambers 3, 4, 5
+    {4, 5, 0b000000000111},  // J26 / J27 -> chambers 0, 1, 2
+};
+constexpr int NUM_PUMP_GROUPS = sizeof(PUMP_GROUPS) / sizeof(PUMP_GROUPS[0]);
+
+// Every pump drives at most one line and every chamber hangs on at most one pair.
+constexpr bool pumpGroupsAreDisjoint() {
+    uint8_t  pumpsSeen = 0;
+    uint16_t chambersSeen = 0;
+    for (int g = 0; g < NUM_PUMP_GROUPS; g++) {
+        const PumpGroup& grp = PUMP_GROUPS[g];
+        if (grp.inflate_pump >= NUM_PUMPS || grp.deflate_pump >= NUM_PUMPS) return false;
+        if (grp.inflate_pump == grp.deflate_pump) return false;
+        uint8_t pair = (uint8_t)((1u << grp.inflate_pump) | (1u << grp.deflate_pump));
+        if ((pumpsSeen & pair) || (chambersSeen & grp.chambers)) return false;
+        if (grp.chambers >> MAX_CHAMBERS) return false;
+        pumpsSeen |= pair;
+        chambersSeen |= grp.chambers;
+    }
+    return true;
+}
+static_assert(pumpGroupsAreDisjoint(), "PUMP_GROUPS reuses a pump or a chamber");
+
+// Group whose pump pair feeds chamber n, or -1 when it has none.
+inline int groupOf(int chamber) {
+    if (chamber < 0 || chamber >= MAX_CHAMBERS) return -1;
+    for (int g = 0; g < NUM_PUMP_GROUPS; g++)
+        if (PUMP_GROUPS[g].chambers & (1u << chamber)) return g;
+    return -1;
+}
+
 inline bool _anyOn = false;  // tracked by setters so stopAll can print on transition
 
 inline void hardware_init() {
@@ -42,52 +84,21 @@ inline void stopAll() {
     for (int i = 0; i < NUM_PUMPS; i++) ledcWrite(i, 0);
 }
 
-// Set duty for all pumps with a given role. duty=0 stops them.
-inline void setRoleDuty(Role role, uint8_t duty) {
-    static uint8_t lastDuty[3] = {0, 0, 0};  // indexed by Role enum (UNKNOWN/PRESSURE/VACUUM)
-    if (role < 3 && lastDuty[role] != duty) {
-        const char* name = role == ROLE_PRESSURE ? "pressure"
-                         : role == ROLE_VACUUM   ? "vacuum"
-                         : "?";
-        DBG_PRINT("PUMPS role=%s duty=%u\n", name, duty);
-        lastDuty[role] = duty;
+// Drive one group's pump pair (duty 0 = off). Each line is private to its
+// group, so a pump only spins while one of its own chambers' valves can take
+// its air - a pump with no open valve would dead-head its line (the "pump
+// running dry / forcing" failure).
+inline void setGroupDuty(int group, uint8_t inflate_duty, uint8_t deflate_duty) {
+    if (group < 0 || group >= NUM_PUMP_GROUPS) return;
+    static uint8_t last[NUM_PUMP_GROUPS][2] = {};
+    if (last[group][0] != inflate_duty || last[group][1] != deflate_duty) {
+        DBG_PRINT("PUMPS group=%d inflate=%u deflate=%u\n", group, inflate_duty, deflate_duty);
+        last[group][0] = inflate_duty;
+        last[group][1] = deflate_duty;
     }
-    if (duty > 0) _anyOn = true;
-    for (int i = 0; i < NUM_PUMPS; i++) {
-        if (roles[i] == role) ledcWrite(i, duty);
-    }
-}
-
-inline int countByRole(Role role) {
-    int n = 0;
-    for (int i = 0; i < NUM_PUMPS; i++) if (roles[i] == role) n++;
-    return n;
-}
-
-// Run only the FIRST `activeCount` pumps of a role at `duty`, the rest off.
-// Common-manifold scaling: with all role pumps feeding one shared line, only the
-// NUMBER running matters (not which), so we keep the same pumps spun up as the
-// open-valve count rises/falls. `activeCount` is clamped to [0, pumps-of-role].
-// Running fewer pumps than open valves can vent keeps the fill speed per chamber
-// roughly constant AND stops spare pumps dead-heading the manifold (the "pump
-// running dry / forcing" failure): a pump only spins when valves can take its air.
-inline void setRoleActiveCount(Role role, int activeCount, uint8_t duty) {
-    static uint8_t lastCount[3] = {0xFF, 0xFF, 0xFF};
-    int seen = 0;
-    for (int i = 0; i < NUM_PUMPS; i++) {
-        if (roles[i] != role) continue;
-        bool on = seen < activeCount;
-        ledcWrite(i, on ? duty : 0);
-        if (on) _anyOn = true;
-        seen++;
-    }
-    int clamped = (activeCount < 0) ? 0 : (activeCount > seen ? seen : activeCount);
-    if (role < 3 && lastCount[role] != (uint8_t)clamped) {
-        const char* name = role == ROLE_PRESSURE ? "pressure"
-                         : role == ROLE_VACUUM   ? "vacuum" : "?";
-        DBG_PRINT("PUMPS role=%s active=%d/%d duty=%u\n", name, clamped, seen, duty);
-        lastCount[role] = (uint8_t)clamped;
-    }
+    if (inflate_duty > 0 || deflate_duty > 0) _anyOn = true;
+    ledcWrite(PUMP_GROUPS[group].inflate_pump, inflate_duty);
+    ledcWrite(PUMP_GROUPS[group].deflate_pump, deflate_duty);
 }
 
 }  // namespace pumps

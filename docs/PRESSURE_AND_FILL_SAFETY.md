@@ -40,7 +40,8 @@ ambient). So:
 `recalcPumps()` drives the inflate (pressure) and deflate (vacuum) pumps from
 the **actual open valves** - a pump only runs while a valve of its direction is
 open (the direct board: one on/off pump per direction; the multiplexed board:
-`ceil(open_valves/3)` of that role's 3 pumps). Deflate is *suction*, not passive
+one inflate + one deflate pump per 3-chamber skin, each driven only by its own
+skin's valves). Deflate is *suction*, not passive
 venting, so an unbounded deflate can pull a sealed chamber into vacuum.
 
 ### Wire protocol

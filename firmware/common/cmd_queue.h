@@ -74,8 +74,6 @@ struct Cmd {
     float    cfg_v_max;     // configure: tank_vacuum_max_kpa
     float    cfg_p_target;  // configure: tank_pressure_target_kpa
     float    cfg_v_target;  // configure: tank_vacuum_target_kpa
-    uint8_t  cfg_pressure_mask; // configure: bit i -> pump (i+1) in pressure group
-    uint8_t  cfg_vacuum_mask;   // configure: bit i -> pump (i+1) in vacuum group
     uint16_t seq;               // confirm sequence for set_max/set_min (NO_SEQ = fire-and-forget)
 };
 
