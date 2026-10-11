@@ -52,6 +52,15 @@ class SensorPlacement:
         object.__setattr__(self, "position", float(self.position) % 1.0)
 
 
+def sensor_address(index: int, count: int) -> str:
+    """Sensor ``index`` as the binary address soldered on the back of the
+    sensor board (``00``, ``01``, ``10``, ``11`` for four sensors).
+
+    Padded to the bits needed to address ``count`` sensors."""
+    bits = max(1, (max(1, int(count)) - 1).bit_length())
+    return format(int(index), f"0{bits}b")
+
+
 def evenly_spaced_placements(count: int, offset: float | None = None
                              ) -> list[SensorPlacement]:
     """``count`` sensors equally spaced round the perimeter.

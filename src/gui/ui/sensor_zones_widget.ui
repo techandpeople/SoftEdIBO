@@ -10,7 +10,7 @@
   <layout class="QVBoxLayout" name="outer_layout">
    <item>
     <widget class="QLabel" name="hint_label">
-     <property name="text"><string>Seen from above with the robot's front at the top. Default: sensor 0 = Q1, 1 = Q2, 2 = Q3, 3 = Q4.</string></property>
+     <property name="text"><string>Seen from above with the robot's front at the top. Each sensor is named by the address soldered on its back. Default: 00 = Q1, 01 = Q2, 10 = Q3, 11 = Q4.</string></property>
      <property name="wordWrap"><bool>true</bool></property>
     </widget>
    </item>

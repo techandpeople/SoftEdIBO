@@ -19,7 +19,7 @@ from typing import Any, Mapping
 from PySide6.QtWidgets import QComboBox, QGroupBox, QLabel, QWidget
 
 from src.core.touch_zones import (QUADRANT_LABELS, QUADRANT_NAMES,
-                                  normalise_sensor_quadrants)
+                                  normalise_sensor_quadrants, sensor_address)
 from src.gui.ui_sensor_zones_widget import Ui_SensorZonesWidget
 
 
@@ -51,13 +51,18 @@ class SensorZonesWidget(QGroupBox, Ui_SensorZonesWidget):
             combo = QComboBox()
             for name in QUADRANT_NAMES:
                 combo.addItem(f"{name} ({QUADRANT_LABELS[name]})", userData=name)
+            # Rows are named by the address soldered on the back of each
+            # sensor, so the one in hand can be matched without counting.
+            address = sensor_address(idx, count)
+            combo.setToolTip(f"Corner of the sensor marked {address}.")
             combo.setWhatsThis(
-                f"The corner sensor {idx} is mounted in. A touch on this sensor "
-                "lights the LED-strip arc above that corner in activities that "
-                "use zone fills.")
+                f"The corner the sensor marked {address} on its back (sensor "
+                f"{idx}) is mounted in. A touch on this sensor lights the "
+                "LED-strip arc above that corner in activities that use zone "
+                "fills.")
             combo.setCurrentIndex(idx)
             self._combos.append(combo)
-            self.rows_form.addRow(QLabel(f"Sensor {idx}:"), combo)
+            self.rows_form.addRow(QLabel(f"Sensor {address}:"), combo)
         self.set_assignments(current)
 
     def set_assignments(self, sensor_quadrants: Mapping[Any, Any] | None) -> None:
