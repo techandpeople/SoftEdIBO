@@ -11,6 +11,7 @@ persisted to ``settings.yaml``), so it can be unit-tested without a GUI.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 # YAML list key under ``robots`` for each robot kind.
@@ -32,19 +33,20 @@ CONFIRM_DELTA = 2.0
 MAX_CHAMBERS = 3
 
 # How a chamber decides when to stop inflating:
+#   "pressure" - classic closed loop: inflate until the gauge sensor hits target.
+#                The default: it needs no calibration.
 #   "time"     - open the inflate valve for a calibrated time window (fill_profile);
 #                the firmware never closes the loop on the laggy pressure sensor.
-#   "pressure" - classic closed loop: inflate until the gauge sensor hits target.
 # Deflate is always pressure-based above atmosphere (and time-bounded below, since
 # the gauge sensor is blind to vacuum), so this only governs inflation.
 FILL_MODE_TIME = "time"
 FILL_MODE_PRESSURE = "pressure"
-DEFAULT_FILL_MODE = FILL_MODE_TIME
+DEFAULT_FILL_MODE = FILL_MODE_PRESSURE
 FILL_MODES = (FILL_MODE_TIME, FILL_MODE_PRESSURE)
 
 
 def normalize_fill_mode(value: object) -> str:
-    """Coerce a stored/UI fill-mode value to a known mode (default ``time``)."""
+    """Coerce a stored/UI fill-mode value to a known mode (default ``pressure``)."""
     return value if value in FILL_MODES else DEFAULT_FILL_MODE
 # Node types that actually own chambers (can inflate/deflate). Sensor-only
 # boards (node_magnet_sensor) are excluded from chamber selection.
@@ -189,12 +191,12 @@ def chambers_by_key(chambers: list[dict]) -> dict[tuple[str | None, int], dict]:
 
 
 # Skin-level keys the skin dialog rebuilds on every save. Anything else on a
-# saved skin (e.g. ``name``, the Tree's per-branch ``organ`` circuit) is written
-# elsewhere and must survive the save. ``sensor_grid`` is legacy and is dropped.
+# saved skin (e.g. ``name``, the ``organs`` list, the Tree's per-branch
+# ``organ`` circuit) is written elsewhere and must survive the save.
+# ``sensor_grid`` is legacy and is dropped.
 DIALOG_SKIN_KEYS = frozenset({
     "skin_id", "chambers", "skin_type", "skin_variant", "shape", "grid",
-    "chamber_grid", "sensor_grid", "touch", "organs", "led_angles",
-    "led_layout"})
+    "chamber_grid", "sensor_grid", "touch", "led_angles", "led_layout"})
 
 
 def carry_unmanaged_skin_keys(entry: dict, saved: dict) -> None:
@@ -213,6 +215,27 @@ def carry_calibration(chamber: dict, saved: dict | None) -> None:
             chamber[key] = saved[key]
 
 
+def chamber_summary(chambers: list[dict], *, with_mac: bool = True) -> str:
+    """Short text listing a skin's chambers for the robot tree.
+
+    ``with_mac=False`` drops the node MAC: use it where the node is already
+    obvious from context (the skin is listed under that node).
+    """
+    if not with_mac:
+        return "slots " + ", ".join(str(c.get("slot", "?")) for c in chambers)
+    return ", ".join(f"{c.get('mac', '')[-5:]}#{c.get('slot', '?')}" for c in chambers)
+
+
+def unconfigured_macs(chambers: list[dict], node_macs: Iterable[str]) -> list[str]:
+    """Node MACs the chambers use that are not among the robot's ``node_macs``.
+
+    Such a skin points at a board that was removed from the robot (or was
+    saved by an older version) and cannot be driven until it is re-assigned.
+    """
+    known = set(node_macs)
+    return sorted({m for c in chambers if (m := c.get("mac")) and m not in known})
+
+
 def find_missing_mac(chambers: list[dict]) -> bool:
     """True if any chamber row has no node MAC selected."""
     return any(not ch.get("mac") for ch in chambers)
@@ -227,6 +250,17 @@ def find_duplicate(chambers: list[dict]) -> dict | None:
             return ch
         seen.add(key)
     return None
+
+
+def next_free_slot(mac: str, used: Iterable[tuple[str | None, int | None]],
+                   max_slots: int) -> int:
+    """Lowest slot of node ``mac`` not in ``used`` ((mac, slot) pairs).
+
+    Falls back to slot 0 when the node is full, leaving the duplicate for the
+    save-time checks to report.
+    """
+    taken = {slot for m, slot in used if m == mac}
+    return next((s for s in range(max_slots) if s not in taken), 0)
 
 
 def sibling_conflicts(chambers: list[dict], siblings: list[dict]) -> list[dict]:
@@ -271,9 +305,8 @@ def build_skin_entry(skin_id: str, chambers: list[dict],
             c.pop("max_pressure", None)
         if abs(c.get("min_pressure", DEFAULT_MIN_KPA) - DEFAULT_MIN_KPA) < 1e-9:
             c.pop("min_pressure", None)
-        # Keep the YAML terse: only persist a non-default fill mode.
-        if normalize_fill_mode(c.get("fill_mode")) == DEFAULT_FILL_MODE:
-            c.pop("fill_mode", None)
+        # Always written out, so the saved choice survives a default change.
+        c["fill_mode"] = normalize_fill_mode(c.get("fill_mode"))
         out_chambers.append(c)
     entry: dict = {"skin_id": skin_id, "chambers": out_chambers}
     if skin_type:
@@ -281,18 +314,6 @@ def build_skin_entry(skin_id: str, chambers: list[dict],
     if skin_variant:
         entry["skin_variant"] = skin_variant
     return entry
-
-
-def apply_organs(entry: dict, organs: list[dict]) -> None:
-    """Write (or drop) the ``organs`` list on a skin entry.
-
-    Each organ is ``{"id", "shape", "rect": [x, y, w, h], "good_ohm",
-    "bad_ohm"}`` with ``rect`` normalised to the skin bounding box. An empty
-    list removes the key so the YAML stays terse for organ-less skins."""
-    if organs:
-        entry["organs"] = [dict(o) for o in organs]
-    else:
-        entry.pop("organs", None)
 
 
 def save_skin_entry(data: dict, robot_type: str, robot_index: int,

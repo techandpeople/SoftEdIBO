@@ -45,7 +45,6 @@ from src.gui.base_dialog import BaseDialog
 from src.gui.ui_skin_config_dialog import Ui_SkinConfigDialog
 from src.hardware.esp32_controller import ESP32Controller
 from src.hardware.gateway import Gateway
-from src.hardware.skin_geometry import max_organs_for, variant_has_organs
 from src.robots._robot_builder import multiplexed_configure
 
 # Domain rules (node lookup, validation, persistence) live in src.core.skin_config;
@@ -65,6 +64,8 @@ class _ChamberRow(QWidget):
     spinboxes + fill-mode combo + remove. On a node flagged as having no
     pressure sensors (``sensorless_macs``) the row also shows manual fill/empty
     time fields - the open-loop actuation windows."""
+
+    width_changed = Signal()   # the row's needed width changed (fields shown/hidden)
 
     def __init__(
         self,
@@ -89,8 +90,14 @@ class _ChamberRow(QWidget):
         hbox.setContentsMargins(0, 0, 0, 0)
         hbox.setSpacing(4)
 
+        # Sized to the MAC text, not stretched: the row has many columns and
+        # must fit the dialog without a horizontal scrollbar.
         self._mac_combo = QComboBox()
-        self._mac_combo.setMinimumWidth(160)
+        self._mac_combo.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToContents)
+        self._mac_combo.setToolTip("Node that drives this chamber.")
+        self._mac_combo.setWhatsThis(
+            "The actuator node (by MAC address) this chamber is plumbed to.")
         for m in node_macs:
             self._mac_combo.addItem(m)
         idx = self._mac_combo.findText(mac)
@@ -111,6 +118,8 @@ class _ChamberRow(QWidget):
         self._min_spin.setRange(_MIN_ALLOWED_KPA, _MAX_ALLOWED_KPA - 0.1)
         self._min_spin.setValue(min_pressure)
         self._min_spin.setSuffix(" kPa")
+        # No step arrows: they ate most of the field and clipped the value.
+        self._min_spin.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.NoButtons)
         self._min_spin.setFixedWidth(75)
         self._min_spin.setWhatsThis(
             "Lowest pressure for this chamber (0% maps here). Leave at 0 for a "
@@ -122,6 +131,7 @@ class _ChamberRow(QWidget):
         self._max_spin.setRange(0.1, _MAX_ALLOWED_KPA)
         self._max_spin.setValue(max_pressure)
         self._max_spin.setSuffix(" kPa")
+        self._max_spin.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.NoButtons)
         self._max_spin.setFixedWidth(75)
         self._max_spin.setWhatsThis(
             "Highest pressure this chamber inflates to (100% maps here). "
@@ -131,17 +141,20 @@ class _ChamberRow(QWidget):
             "take.")
 
         self._mode_combo = QComboBox()
-        self._mode_combo.addItem("Time", skincfg.FILL_MODE_TIME)
         self._mode_combo.addItem("Pressure", skincfg.FILL_MODE_PRESSURE)
+        self._mode_combo.addItem("Time", skincfg.FILL_MODE_TIME)
         mode_idx = self._mode_combo.findData(skincfg.normalize_fill_mode(fill_mode))
         if mode_idx >= 0:
             self._mode_combo.setCurrentIndex(mode_idx)
         self._mode_combo.setWhatsThis(
-            "How this chamber decides when to stop inflating. Time: open the "
-            "valve for a calibrated time window (needs Calibrate Fill; ignores "
-            "the laggy pressure sensor). Pressure: classic closed loop - inflate "
-            "until the gauge sensor reaches the target. Deflate is always "
+            "How this chamber decides when to stop inflating, in activities "
+            "and in the monitor alike. Pressure (default): classic closed loop "
+            "- inflate until the gauge sensor reaches the target. Time: open "
+            "the valve for a calibrated time window (needs Calibrate Fill; "
+            "ignores the laggy pressure sensor); a slowed inflate (duty or "
+            "'over ms') still uses the sensor. Deflate is always "
             "pressure-based (the sensor cannot read vacuum).")
+        self._mode_combo.setToolTip("Stop inflating by pressure or by time.")
 
         # Manual open-loop times for a node with NO pressure sensors populated:
         # full-fill (0->100%) and full-empty (100->0%) valve-open windows. Shown
@@ -178,7 +191,7 @@ class _ChamberRow(QWidget):
         self._remove_btn.setFixedWidth(24)
         self._remove_btn.setFixedHeight(24)
 
-        hbox.addWidget(self._mac_combo, stretch=1)
+        hbox.addWidget(self._mac_combo)
         hbox.addWidget(self._slot_spin)
         hbox.addWidget(QLabel("Min:"))
         hbox.addWidget(self._min_spin)
@@ -191,6 +204,7 @@ class _ChamberRow(QWidget):
         hbox.addWidget(self._empty_ms_label)
         hbox.addWidget(self._empty_ms_spin)
         hbox.addWidget(self._remove_btn)
+        hbox.addStretch()
         self._update_manual_times()
 
     @property
@@ -224,6 +238,7 @@ class _ChamberRow(QWidget):
     def _on_mac_changed(self, _mac: str) -> None:
         self._update_slot_max()
         self._update_manual_times()
+        self.width_changed.emit()
 
     def _update_manual_times(self) -> None:
         sensorless = self._mac_combo.currentText() in self._sensorless_macs
@@ -237,49 +252,6 @@ class _ChamberRow(QWidget):
         self._slot_spin.setMaximum(max_slot)
         if self._slot_spin.value() > max_slot:
             self._slot_spin.setValue(0)
-
-
-class _OrganRow(QWidget):
-    """One organ row: a number label + good/bad resistance spinboxes + remove."""
-
-    removed = Signal(object)   # emits self
-
-    def __init__(self, number: int, good_ohm: float, bad_ohm: float,
-                 parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        hbox = QHBoxLayout(self)
-        hbox.setContentsMargins(0, 0, 0, 0)
-        self._num_label = QLabel()
-        hbox.addWidget(self._num_label)
-        hbox.addWidget(QLabel("Good ohm:"))
-        self._good_spin = self._ohm_spin(
-            good_ohm, "Resistance when the GOOD variant of this organ is on.")
-        hbox.addWidget(self._good_spin)
-        hbox.addWidget(QLabel("Bad ohm:"))
-        self._bad_spin = self._ohm_spin(
-            bad_ohm, "Resistance when the BAD variant of this organ is on.")
-        hbox.addWidget(self._bad_spin)
-        self._remove_btn = QPushButton("x")
-        self._remove_btn.setFixedSize(24, 24)
-        self._remove_btn.clicked.connect(lambda: self.removed.emit(self))
-        hbox.addWidget(self._remove_btn)
-        self.set_number(number)
-
-    @staticmethod
-    def _ohm_spin(value: float, whats_this: str) -> QDoubleSpinBox:
-        spin = QDoubleSpinBox()
-        spin.setRange(0.0, 1_000_000.0)
-        spin.setDecimals(0)
-        spin.setSingleStep(100.0)
-        spin.setValue(value)
-        spin.setWhatsThis(whats_this)
-        return spin
-
-    def set_number(self, number: int) -> None:
-        self._num_label.setText(f"Organ {number}:")
-
-    def values(self) -> tuple[float, float]:
-        return self._good_spin.value(), self._bad_spin.value()
 
 
 class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
@@ -350,9 +322,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         # Silicone variant - orthogonal to the shape (same shape, different
         # silicone format / chamber sizes), but the set of formats a shape is
         # cast in is hardcoded per skin TYPE (geometry registry). The combo is
-        # rebuilt from the selected type; organs are gated on organ-bearing
-        # variants. Fed to the touch ML as a feature.
-        self.skin_variant_combo.currentIndexChanged.connect(self._on_variant_changed)
+        # rebuilt from the selected type. Fed to the touch ML as a feature.
         self._rebuild_variant_combo()
         if single_type:
             try:
@@ -372,8 +342,6 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         # ---- RIGHT COLUMN ----
         # Layout / grid editor - tallest piece, gets its own column.
         self.right_layout.addWidget(self._build_layout_group(), stretch=1)
-        self._organ_group = self._build_organ_group()
-        self.right_layout.addWidget(self._organ_group)
 
         # ---- Action buttons (defined in the .ui) ----
         self.test_btn.setEnabled(gateway.is_connected)
@@ -418,9 +386,6 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         self._populate_dims(skin_cfg.get("grid") or {}, touch_cfg.get("grid"))
         self._grid.set_chamber_grid(skin_cfg.get("chamber_grid"))
         self._grid.set_sensor_grid(touch_cfg.get("sensor_grid"))
-        self._load_organs(skin_cfg.get("organs"))
-        self._sync_organ_geometry()
-        self._on_variant_changed()
         # Per-ring LED mounting angles (ring index -> degrees). Edited from the Test
         # Actuators dialog's ring handle; persisted with the skin entry.
         self._led_angles = {int(k): float(v)
@@ -665,9 +630,21 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
                           fill_time_ms=fill_time_ms, empty_time_ms=empty_time_ms,
                           sensorless_macs=self._sensorless_macs())
         row.remove_btn.clicked.connect(lambda: self._remove_row(row))
+        row.width_changed.connect(self._fit_chambers_width)
         self._rows.append(row)
         self.rows_layout.addWidget(row)
+        self._fit_chambers_width()
         self.add_chamber_btn.setEnabled(len(self._rows) < _MAX_CHAMBERS)
+
+    def _fit_chambers_width(self) -> None:
+        """Widen the chamber list to its widest row, so no column is cut off
+        behind a horizontal scrollbar."""
+        if not self._rows:
+            return
+        widest = max(row.sizeHint().width() for row in self._rows)
+        extra = (self.chambers_scroll.verticalScrollBar().sizeHint().width()
+                 + 2 * self.chambers_scroll.frameWidth())
+        self.chambers_scroll.setMinimumWidth(widest + extra)
 
     def _remove_row(self, row: _ChamberRow) -> None:
         if row in self._rows:
@@ -677,7 +654,17 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         self.add_chamber_btn.setEnabled(len(self._rows) < _MAX_CHAMBERS)
 
     def _on_add_chamber(self) -> None:
-        self._add_row()
+        # Continue on the last row's node, at its first free slot (counting
+        # the other skins' chambers too), instead of a clashing Slot 0.
+        macs = self._node_macs()
+        mac = self._rows[-1].get_values()[0] if self._rows else ""
+        mac = mac or (macs[0] if macs else "")
+        used = [row.get_values()[:2] for row in self._rows]
+        used += [(ch.get("mac"), ch.get("slot"))
+                 for sk in self._sibling_skins() for ch in sk.get("chambers", [])]
+        slot = skincfg.next_free_slot(
+            mac, used, self._node_max_slots().get(mac, 3))
+        self._add_row(mac=mac, slot=slot)
         self._rebuild_palette()
 
     # ------------------------------------------------------------------
@@ -819,78 +806,6 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         self._shape_round_btn.toggled.connect(self._on_shape_changed)
         return group
 
-    def _build_organ_group(self) -> QGroupBox:
-        """Simple list of the pluggable organs on this skin (hospital study):
-        one row per organ with its good/bad resistance. The monitor shows each
-        organ as a numbered dot (green=good, red=bad, empty=absent) beside the
-        skin grid. Only organ-bearing silicone variants have organs."""
-        group = QGroupBox("Organs (optional)")
-        group.setWhatsThis(
-            "List the pluggable organs on this skin - one row per organ with the "
-            "resistance of its good and bad variants. In the monitor each organ "
-            "shows as a numbered dot (green = good, red = bad, empty = absent), "
-            "inferred from the skin's organ-circuit resistance. Choose good/bad "
-            "resistances well separated so different organ combinations don't "
-            "overlap. Available only on organ-bearing skin variants.")
-        v = QVBoxLayout(group)
-        v.addWidget(QLabel(
-            "<i>Each organ is a numbered dot in the monitor: "
-            "green = good, red = bad, empty outline = absent.</i>"))
-
-        self._organ_rows: list[_OrganRow] = []
-        self._organ_rows_layout = QVBoxLayout()
-        v.addLayout(self._organ_rows_layout)
-
-        self._add_organ_btn = QPushButton("+ Add organ")
-        self._add_organ_btn.setWhatsThis("Add another organ to this skin.")
-        self._add_organ_btn.clicked.connect(self._on_add_organ)
-        v.addWidget(self._add_organ_btn)
-        return group
-
-    def _on_add_organ(self) -> None:
-        cap = max_organs_for(self.skin_type_combo.currentData())
-        if len(self._organ_rows) >= cap:
-            QMessageBox.information(
-                self, "Organ limit",
-                f"This skin type allows at most {cap} organ(s).")
-            return
-        self._add_organ_row()
-
-    def _add_organ_row(self, good_ohm: float = 1500.0,
-                       bad_ohm: float = 4700.0) -> None:
-        row = _OrganRow(len(self._organ_rows) + 1, good_ohm, bad_ohm)
-        row.removed.connect(self._remove_organ_row)
-        self._organ_rows.append(row)
-        self._organ_rows_layout.addWidget(row)
-        self._refresh_organ_cap()
-
-    def _remove_organ_row(self, row: "_OrganRow") -> None:
-        if row not in self._organ_rows:
-            return
-        self._organ_rows.remove(row)
-        self._organ_rows_layout.removeWidget(row)
-        row.deleteLater()
-        for i, r in enumerate(self._organ_rows):
-            r.set_number(i + 1)
-        self._refresh_organ_cap()
-
-    def _load_organs(self, organs: list[dict] | None) -> None:
-        """Replace the organ rows from a saved skin entry."""
-        for row in list(self._organ_rows):
-            self._remove_organ_row(row)
-        for o in organs or []:
-            self._add_organ_row(float(o.get("good_ohm", 0) or 0),
-                                float(o.get("bad_ohm", 0) or 0))
-
-    def _organs_from_rows(self) -> list[dict]:
-        """Collect the organ rows as ``{id, good_ohm, bad_ohm}`` (id = order)."""
-        out: list[dict] = []
-        for i, row in enumerate(self._organ_rows):
-            good, bad = row.values()
-            out.append({"id": f"organ-{i + 1}",
-                        "good_ohm": good, "bad_ohm": bad})
-        return out
-
     def _rebuild_variant_combo(self) -> None:
         """Repopulate the silicone-variant picker for the current skin type.
 
@@ -907,18 +822,6 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         idx = self.skin_variant_combo.findData(prev)
         self.skin_variant_combo.setCurrentIndex(idx if idx >= 0 else 0)
         self.skin_variant_combo.blockSignals(False)
-        self._on_variant_changed()
-
-    def _on_variant_changed(self, _index: int = 0) -> None:
-        """Organs only exist on organ-bearing silicone variants - enable the
-        organ list only then. No-op until the organ group is built."""
-        if not hasattr(self, "_organ_group"):
-            return
-        is_organ = variant_has_organs(self.skin_variant_combo.currentData())
-        self._organ_group.setEnabled(is_organ)
-        self._organ_group.setToolTip(
-            "" if is_organ
-            else "Organs are only available on organ silicone variants.")
 
     def _on_dims_changed(self, _value: int) -> None:
         """Spinbox edited -> resize the layer currently being edited."""
@@ -949,7 +852,6 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
     def _on_shape_changed(self, _checked: bool) -> None:
         shape = "round" if self._shape_round_btn.isChecked() else "rect"
         self._grid.set_shape(shape)
-        self._sync_organ_geometry()
 
     def _on_skin_type_changed(self, _index: int = 0) -> None:
         """Drive the grid's outline + aspect ratio from the chosen skin type's
@@ -963,7 +865,6 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
             self._shape_rect_btn.setChecked(True)
             self._sensor_count_spin.setEnabled(True)   # legacy skin: editable
             self._sensor_count_spin.setToolTip("")
-            self._sync_organ_geometry()
             return
         self._grid.set_geometry(geo.shape, geo.size_mm)
         # Sensor count is a registry constant for this type - show it, read-only.
@@ -976,18 +877,6 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
             self._shape_round_btn.setChecked(True)
         else:
             self._shape_rect_btn.setChecked(True)
-        self._sync_organ_geometry()
-
-    def _sync_organ_geometry(self) -> None:
-        """Refresh the add-button against the skin type's organ cap (the cap
-        depends on the skin type, which may change after the rows are built)."""
-        if hasattr(self, "_add_organ_btn"):
-            self._refresh_organ_cap()
-
-    def _refresh_organ_cap(self) -> None:
-        """Enable 'Add organ' only while under the skin type's organ cap."""
-        cap = max_organs_for(self.skin_type_combo.currentData())
-        self._add_organ_btn.setEnabled(len(self._organ_rows) < cap)
 
     def _apply_layout_and_touch(self, skin_entry: dict) -> None:
         """Persist grid + touch fields onto ``skin_entry`` (only when used)."""
@@ -1398,9 +1287,6 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
             skin_id, chambers, skin_type, skin_variant)
         self._apply_layout_and_touch(skin_entry)
         skincfg.carry_unmanaged_skin_keys(skin_entry, self._load_skin_cfg())
-        # Organs are only meaningful on organ-bearing variants; drop otherwise.
-        organs = self._organs_from_rows() if variant_has_organs(skin_variant) else []
-        skincfg.apply_organs(skin_entry, organs)
         # Carry the per-ring LED mounting angles + strip layout through a full save.
         if self._led_angles:
             skin_entry["led_angles"] = {

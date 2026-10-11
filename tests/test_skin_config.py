@@ -135,12 +135,14 @@ def test_build_skin_entry_omits_empty_type_variant():
     assert "skin_type" not in entry and "skin_variant" not in entry
 
 
-def test_build_skin_entry_fill_mode_default_dropped_pressure_kept():
-    chambers = [{"mac": "AA", "slot": 0, "fill_mode": "time"},       # default
-                {"mac": "BB", "slot": 1, "fill_mode": "pressure"}]   # non-default
+def test_build_skin_entry_always_writes_the_fill_mode():
+    chambers = [{"mac": "AA", "slot": 0, "fill_mode": "time"},
+                {"mac": "BB", "slot": 1, "fill_mode": "pressure"},
+                {"mac": "BB", "slot": 2}]                            # default
     entry = skincfg.build_skin_entry("belly-1", chambers)
-    assert "fill_mode" not in entry["chambers"][0]
-    assert entry["chambers"][1]["fill_mode"] == "pressure"
+    assert [c["fill_mode"] for c in entry["chambers"]] \
+        == ["time", "pressure", "pressure"]
+    assert "fill_mode" not in chambers[2]
     # input list must not be mutated
     assert chambers[0]["fill_mode"] == "time"
 
@@ -168,17 +170,12 @@ def test_delete_skin():
     assert [s["skin_id"] for s in skins] == ["belly-2"]
 
 
-def test_apply_organs_writes_and_drops():
-    entry: dict = {"skin_id": "x"}
+def test_saved_organs_survive_a_dialog_save():
+    # The skin dialog no longer edits organs, so it must carry them through.
     organs = [{"id": "organ-1", "good_ohm": 1500, "bad_ohm": 4700}]
-    skincfg.apply_organs(entry, organs)
+    entry: dict = {"skin_id": "x"}
+    skincfg.carry_unmanaged_skin_keys(entry, {"skin_id": "x", "organs": organs})
     assert entry["organs"] == organs
-    # Mutating the source list must not affect the stored copy.
-    organs[0]["id"] = "changed"
-    assert entry["organs"][0]["id"] == "organ-1"
-    # Empty list removes the key.
-    skincfg.apply_organs(entry, [])
-    assert "organs" not in entry
 
 
 def test_max_organs_for():
@@ -246,3 +243,33 @@ def test_normalise_led_layout_ignores_bad_values():
 def test_led_layout_is_a_dialog_managed_key():
     assert "led_layout" in skincfg.DIALOG_SKIN_KEYS
     assert skincfg.NODE_LED_RINGS["node_direct"] == (68,)
+
+
+def test_chamber_summary_with_and_without_mac():
+    chambers = [{"mac": "F4:65:0B:B5:78:04", "slot": 0},
+                {"mac": "F4:65:0B:B5:78:04", "slot": 2}]
+    assert skincfg.chamber_summary(chambers) == "78:04#0, 78:04#2"
+    assert skincfg.chamber_summary(chambers, with_mac=False) == "slots 0, 2"
+
+
+def test_unconfigured_macs_lists_nodes_missing_from_the_robot():
+    chambers = [{"mac": "AA:01", "slot": 0}, {"mac": "AA:02", "slot": 0},
+                {"mac": "AA:02", "slot": 1}, {"mac": "", "slot": 2}]
+    assert skincfg.unconfigured_macs(chambers, ["AA:01"]) == ["AA:02"]
+    assert skincfg.unconfigured_macs(chambers, ["AA:01", "AA:02"]) == []
+
+
+def test_next_free_slot_skips_used_slots_on_that_node_only():
+    used = [("AA", 0), ("AA", 1), ("BB", 2), (None, None)]
+    assert skincfg.next_free_slot("AA", used, 3) == 2
+    assert skincfg.next_free_slot("BB", used, 3) == 0
+    assert skincfg.next_free_slot("AA", [("AA", 1)], 3) == 0
+    # A full node falls back to slot 0.
+    assert skincfg.next_free_slot("AA", used + [("AA", 2)], 3) == 0
+
+
+def test_sensor_address_is_the_binary_index():
+    from src.core.touch_zones import sensor_address
+    assert [sensor_address(i, 4) for i in range(4)] == ["00", "01", "10", "11"]
+    assert sensor_address(5, 8) == "101"
+    assert sensor_address(0, 1) == "0"

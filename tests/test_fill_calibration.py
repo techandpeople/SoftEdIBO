@@ -221,8 +221,10 @@ def _settings():
         "skins": [{
             "skin_id": "belly",
             "chambers": [
-                {"mac": "AA:01", "slot": 0, "max_pressure": 8.0},
+                {"mac": "AA:01", "slot": 0, "max_pressure": 8.0,
+                 "fill_mode": "time"},
                 {"mac": "AA:01", "slot": 1, "max_pressure": 8.0,
+                 "fill_mode": "time",
                  "fill_time_ms": 1800},               # legacy scalar still counts
             ],
         }],

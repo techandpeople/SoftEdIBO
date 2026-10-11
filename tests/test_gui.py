@@ -222,10 +222,28 @@ class TestRobotPanel:
         assert kinds == ["node", "node", "skin"]
         node_a, node_b, spanning = children(robot)
         assert [c.text(0) for c in children(node_a)] \
-            == ["[S]  on A  (78:04#0, 78:04#1)"]
+            == ["[S]  on A  (slots 0, 1)"]
         assert [c.text(0) for c in children(node_b)] \
-            == ["[S]  on B  (71:C4#0)"]
+            == ["[S]  on B  (slots 0)"]
         assert "spans" in spanning.text(0)
+
+    def test_skin_on_a_node_the_robot_lacks_is_flagged(self, qtbot):
+        mac_a, mac_b = "F4:65:0B:B5:78:04", "F4:65:0B:B5:71:C4"
+        settings = _mock_settings()
+        settings.data["robots"]["thymios"] = [{
+            "thymio_id": "thymio-1",
+            "nodes": [{"mac": mac_a, "node_type": "node_direct"}],
+            "skins": [{"name": "stray", "chambers": [{"mac": mac_b, "slot": 0}]}],
+        }]
+        panel = RobotPanel(Gateway("/dev/null"), settings)
+        qtbot.addWidget(panel)
+        panel.refresh([])
+        robot = panel.thymio_tree.topLevelItem(0)
+        assert robot is not None
+        stray = robot.child(1)
+        assert stray.text(0) == (
+            f"[S]  stray  (71:C4#0)  - node not on this robot: {mac_b}")
+        assert stray.toolTip(0)
 
     def test_gateway_connect_btn_present(self, qtbot):
         panel = RobotPanel(Gateway("/dev/null"), _mock_settings())

@@ -36,9 +36,9 @@ def _two_chamber_skin():
     ctrl = _RecordingCtrl(clock=lambda: 0.0)
     inputs = [
         {"controller": ctrl, "node_slot": 0, "max_pressure": 8.0,
-         "fill_profile": _SOLO, "fill_profiles": {"0,1": _COMBO_01}},
+         "fill_mode": "time", "fill_profile": _SOLO, "fill_profiles": {"0,1": _COMBO_01}},
         {"controller": ctrl, "node_slot": 1, "max_pressure": 8.0,
-         "fill_profile": _SOLO, "fill_profiles": {"0,1": _COMBO_01}},
+         "fill_mode": "time", "fill_profile": _SOLO, "fill_profiles": {"0,1": _COMBO_01}},
     ]
     return Skin("belly", inputs), ctrl
 

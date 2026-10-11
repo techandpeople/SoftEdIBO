@@ -1,6 +1,7 @@
 """Robot connection management panel."""
 
 import sys
+from collections.abc import Iterable
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QKeyEvent
@@ -21,6 +22,7 @@ from PySide6.QtWidgets import (
 
 from src.config.settings import Settings
 from src.core import node_sharing
+from src.core import skin_config as skincfg
 from src.gui.async_task import run_async
 from src.gui.thymio_config_form import ThymioConfigForm
 from src.gui.ui_robot_panel import Ui_RobotPanel
@@ -52,9 +54,11 @@ class RobotPanel(QWidget, Ui_RobotPanel):
     Tree structure per robot:
       - top-level item   = robot
         +-- [N] * MAC  (node_type, used/max slots)   - double-click to edit node
-            +-- [S] Skin name  (chamber summary)      - double-click to edit skin
+            +-- [S] Skin name  (slots)                - double-click to edit skin
         +-- [S] Skin name  (chamber summary)          - skin spanning several nodes
-                                                        (or none) stays under the robot
+                                                        (or none) stays under the robot;
+                                                        flagged when it uses a node the
+                                                        robot does not have
 
     Signals:
         robot_configured: Emitted after any config change.
@@ -524,20 +528,46 @@ class RobotPanel(QWidget, Ui_RobotPanel):
             for skin_index, skin_cfg in enumerate(skins_for_robot):
                 skin_name = skin_cfg.get("name") or skin_cfg.get("skin_id", "")
                 chambers  = skin_cfg.get("chambers", [])
-                ch_parts  = [f"{c['mac'][-5:]}#{c['slot']}" for c in chambers]
-                label     = f"[S]  {skin_name}  ({', '.join(ch_parts)})"
-                skin_item = QTreeWidgetItem([label])
+                node_item = self._skin_parent(chambers, node_items_by_mac)
+                skin_item = QTreeWidgetItem([""])
+                self._label_skin_item(skin_item, skin_name, chambers,
+                                      node_items_by_mac, nested=node_item is not None)
                 skin_item.setData(0, Qt.ItemDataRole.UserRole, {
                     "robot_type":  robot_type,
                     "robot_index": robot_index,
                     "item_type":   "skin",
                     "skin_index":  skin_index,
                 })
-                parent = self._skin_parent(chambers, node_items_by_mac) or robot_item
+                parent = node_item or robot_item
                 parent.addChild(skin_item)
                 parent.setExpanded(True)
 
             robot_item.setExpanded(True)
+
+    @staticmethod
+    def _label_skin_item(
+        skin_item: QTreeWidgetItem,
+        skin_name: str,
+        chambers: list[dict],
+        node_macs: Iterable[str],
+        nested: bool,
+    ) -> None:
+        """Set a skin row's text; flag chambers on a node the robot lacks."""
+        # Under its node the MAC is already on the parent row, so only the
+        # slots are listed.
+        summary = skincfg.chamber_summary(chambers, with_mac=not nested)
+        label = f"[S]  {skin_name}  ({summary})"
+        missing = skincfg.unconfigured_macs(chambers, node_macs)
+        if missing:
+            label += f"  - node not on this robot: {', '.join(missing)}"
+            skin_item.setForeground(0, QColor("#cc8800"))
+            skin_item.setToolTip(
+                0,
+                "This skin uses a node that is not configured on this robot, so "
+                "its chambers cannot be driven. Add the node with '+ Node', or "
+                "double-click the skin to move its chambers to another node, or "
+                "delete the skin.")
+        skin_item.setText(0, label)
 
     @staticmethod
     def _skin_parent(

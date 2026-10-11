@@ -411,9 +411,7 @@ class Skin:
             min_p = ch.min_pressure
             if abs(min_p) > 1e-3:   # only persist explicit non-zero defaults
                 d["min_pressure"] = min_p
-            mode = self._fill_modes.get(idx, DEFAULT_FILL_MODE)
-            if mode != DEFAULT_FILL_MODE:   # only persist a non-default fill mode
-                d["fill_mode"] = mode
+            d["fill_mode"] = self._fill_modes.get(idx, DEFAULT_FILL_MODE)
             profile = self._fill_profiles.get(idx)
             if profile is not None and not profile.is_empty:
                 d["fill_profile"] = profile.to_list()
@@ -687,6 +685,16 @@ class Skin:
                 return self._deflate_open_loop(local_idx, chamber, slot,
                                                prev_target - v, v)
             return True
+        prev_target = chamber.target_pressure
+        if (v > prev_target and duty is None and not period_ms
+                and self._uses_timed_fill(local_idx)):
+            # A ``time``-mode chamber climbs to an absolute target the same way
+            # it takes a relative step: a window off its fill curve. A slowed
+            # stroke (duty / period_ms) stays closed-loop - the curve was
+            # measured at full pump speed, so its window would cut it short.
+            ok = self._inflate(local_idx, chamber, slot, v - prev_target)
+            self._settle_auto_hold(local_idx)
+            return ok
         chamber.target_pressure = v
         if chamber.pressure < v:
             chamber.state = ChamberState.INFLATING
@@ -744,9 +752,7 @@ class Skin:
             return True
 
         profile = self._fill_profiles.get(local_idx)
-        pressure_mode = (self._fill_modes.get(local_idx) == FILL_MODE_PRESSURE
-                         and not self._sensorless)
-        if profile is not None and not pressure_mode:
+        if profile is not None and self._uses_timed_fill(local_idx):
             load = self._ctrl.fill_load
             active = set(co_active) if co_active is not None \
                 else load.active_slots() | {slot}
@@ -773,6 +779,16 @@ class Skin:
                 self.skin_id, local_idx)
             return False
         return self._ctrl.inflate(slot, value)
+
+    def _uses_timed_fill(self, local_idx: int) -> bool:
+        """True when this chamber inflates by a time window off its fill curve.
+
+        That takes a curve to time with, and either ``time`` fill mode or a
+        node with no pressure sensors (where time is all there is)."""
+        if self._fill_profiles.get(local_idx) is None:
+            return False
+        return (self._sensorless
+                or self._fill_modes.get(local_idx) != FILL_MODE_PRESSURE)
 
     def _deflate_open_loop(self, local_idx: int, chamber: AirChamber, slot: int,
                            delta_pct: int, new_target: int) -> bool:

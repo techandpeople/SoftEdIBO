@@ -57,7 +57,7 @@
           <item row="2" column="1">
            <widget class="QComboBox" name="skin_variant_combo">
             <property name="toolTip"><string>Silicone format of this skin (different chamber sizes per variant). Used as a touch-gesture ML feature.</string></property>
-            <property name="whatsThis"><string>Silicone format of this skin (the variants depend on the skin type). Organs can only be placed on organ-bearing variants, and the variant is used as a touch-gesture ML feature.</string></property>
+            <property name="whatsThis"><string>Silicone format of this skin (the variants depend on the skin type). The variant is used as a touch-gesture ML feature.</string></property>
            </widget>
           </item>
          </layout>
