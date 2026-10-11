@@ -61,8 +61,8 @@ NODE_TYPE_FIRMWARES: dict[str, dict[str, Path]] = {
         "release": Settings.BUNDLE / "firmware" / "node_actuator" / "firmware-direct-release.bin",
         "debug":   Settings.BUNDLE / "firmware" / "node_actuator" / "firmware-direct-debug.bin",
         # RGBW LED-ring variants (SK6812, e.g. Adafruit 2862). Same direct board;
-        # only the NeoPixel pixel type differs (-DLED_RGBW). The flash wizard and
-        # OTA dialog expose an "RGBW LED ring" toggle that selects these; node
+        # only the NeoPixel pixel type differs (-DLED_RGBW). The flash wizard's
+        # "RGBW LED ring" toggle and the OTA dialog's LED column select these; node
         # types without these keys fall back to the plain release/debug bins.
         "release_rgbw": Settings.BUNDLE / "firmware" / "node_actuator" / "firmware-direct-rgbw-release.bin",
         "debug_rgbw":   Settings.BUNDLE / "firmware" / "node_actuator" / "firmware-direct-rgbw-debug.bin",

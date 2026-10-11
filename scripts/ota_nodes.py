@@ -64,7 +64,7 @@ def plan_jobs(gateway: Gateway, node_types: dict[str, str], forced_rgbw: bool | 
         if mac not in online:
             notes.append(f"{mac} ({ntype}): offline - skipped")
             continue
-        rgbw = resolve_rgbw(forced_rgbw, gateway.node_rgbw(mac), False)
+        rgbw = resolve_rgbw(forced_rgbw, gateway.node_rgbw(mac))
         fw = firmware_for_node_type(ntype, debug, rgbw)
         if fw is None or not fw.exists():
             notes.append(f"{mac} ({ntype}): firmware not found ({fw}) - skipped")
