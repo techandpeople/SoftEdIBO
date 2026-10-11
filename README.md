@@ -19,7 +19,7 @@ The system supports multiple robot types (Turtle, Tree, Thymio) and activity mod
 | Seeed XIAO ESP32-S3 (gateway) | 1 | Connected to PC via USB; also runs a WiFi SoftAP (WiFi-OTA) + a UART link to a companion XIAO ESP32-C6 for dongle-free Thymio control |
 | Seeed XIAO ESP32-C6 (Thymio RCP) | 0-1 | Optional - impersonates the Thymio RF dongle over 802.15.4 (drive wheels/LEDs/sound, no dongle). See [docs/THYMIO_WIRELESS_CONTROL.md](docs/THYMIO_WIRELESS_CONTROL.md) |
 | ESP32-WROOM-32 (`node_direct`) | 1 per direct board | 3 chambers, direct ADC sensors, onboard pumps |
-| ESP32-WROOM-32 (`node_multiplexed`) | 1 per multiplexed board | Up to 12 chambers (runtime configurable) |
+| ESP32-WROOM-32 (`node_multiplexed`) | 1 per multiplexed board | Up to 9 chambers: 3 skins of 3, one pump pair each (runtime configurable) |
 | DRV3297 motor driver | 1 (`node_direct`) / up to 3 (`node_multiplexed`) | Drives pumps with PWM |
 | Air pump | 2 (`node_direct`) / up to 6 (`node_multiplexed`) | Inflate/deflate supply - pumps push directly into the chambers |
 | XGZP6847A pressure sensor | 1 per chamber | Analog output (0-3.3 V) |
@@ -33,7 +33,7 @@ For each node, choose the matching firmware target:
 | Firmware | Path | When to use |
 |----------|------|-------------|
 | `node_actuator` env `direct` / `direct_debug` | [firmware/node_actuator/](firmware/node_actuator/) | Direct board (fixed 3 chambers) |
-| `node_actuator` env `multiplexed` / `multiplexed_debug` | [firmware/node_actuator/](firmware/node_actuator/) | Multiplexed board (default 12 chambers, runtime configurable) |
+| `node_actuator` env `multiplexed` / `multiplexed_debug` | [firmware/node_actuator/](firmware/node_actuator/) | Multiplexed board (default 9 chambers, runtime configurable) |
 | `node_magnet_sensor` | [firmware/node_magnet_sensor/](firmware/node_magnet_sensor/) | 4x MLX90393 magnetic touch board (`node_magnet_sensor` protocol) |
 
 ---
@@ -42,7 +42,7 @@ For each node, choose the matching firmware target:
 
 ```
 PC --USB--> Gateway (XIAO ESP32-S3) --ESP-NOW--> node_direct      (3 chambers, direct GPIO valves + own pumps)
-                                    |        +-> node_multiplexed (up to 12 chambers)
+                                    |        +-> node_multiplexed (up to 9 chambers)
                                     +--UART--> C6 --802.15.4--> Thymio  (dongle-free wheels/LEDs/sound; optional)
 ```
 
