@@ -30,7 +30,7 @@ constexpr float HARD_CHAMBER_MIN_KPA    = pressure::VACUUM_HOLD_FLOOR_KPA;
 struct State {
     bool ready          = false;     // becomes true after autodetect succeeds
     bool error          = false;     // true if autodetect saw <2 PCA9685s
-    int  num_chambers   = 0;         // detected count (max 12)
+    int  num_chambers   = 0;         // detected count (max MAX_CHAMBERS)
 
     // Mux channel assignments
     int  chamber_mux_ch[MAX_CHAMBERS] = {};   // mux channel per chamber index

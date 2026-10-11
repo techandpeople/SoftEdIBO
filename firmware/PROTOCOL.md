@@ -4,7 +4,7 @@ Three firmware flavors share this protocol:
 
 - **`node_direct`** - 3 chambers, GPIO valves, onboard pumps (optionally folds
   in the magnet/touch module, auto-detected).
-- **`node_multiplexed`** - up to 12 chambers, multiplexed valves/sensors,
+- **`node_multiplexed`** - up to 9 chambers, multiplexed valves/sensors,
   one inflate + deflate pump pair per skin (no reservoir tanks in the current build - pumps push
   straight into the chambers).
 - **`node_magnet_sensor`** - 4x MLX90393 magnet/touch board (+1 optional 5th

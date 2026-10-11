@@ -194,8 +194,8 @@ void detectSensors(int valid_channels[], int& valid_count) {
         valid_channels[valid_count++] = ch;
     }
 
-    // Fixed mapping: chamber i reads mux channel Ii (PSENSOR i+1), the same
-    // index its valves use (UNL 2i+1 / 2i+2). The scan above is diagnostic only:
+    // Fixed mapping: chamber i reads mux channel Ii (PSENSOR i+1). The scan
+    // above is diagnostic only:
     // packing the responders into chambers 0..n-1 put a sensor under the wrong
     // chamber's valves and left a chamber blind whenever one read out of range
     // at boot (unsoldered, noisy, or not yet settled).
@@ -852,7 +852,7 @@ void setup() {
     // UNL17-24) so a bank swap from wrong address jumpers shows in the PC log.
     char ready_msg[192];
     snprintf(ready_msg, sizeof(ready_msg),
-             "{\"status\":\"node_multiplexed_ready\",\"fw\":\"pumpgroups-1\",\"rgbw\":" LED_RGBW_JSON
+             "{\"status\":\"node_multiplexed_ready\",\"fw\":\"pumpgroups-2\",\"rgbw\":" LED_RGBW_JSON
              ",\"kpa_min\":%.0f,\"pca\":[%d,%d]}",
              (double)pressure::FLOOR_KPA, pca_valves::pca1_addr, pca_valves::pca2_addr);
     se::broadcast(ready_msg);

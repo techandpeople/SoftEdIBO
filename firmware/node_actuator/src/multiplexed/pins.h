@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 // SoftEdIBO node_multiplexed - Pin definitions
 //
-// Up to 12 chambers, with optional shared positive/vacuum reservoir tanks.
+// Up to 9 chambers (3 skins of 3), each skin on its own pump pair.
 // Sensor reading
 // goes through a 74HC4067 16-channel analog mux. Valves are driven by 2x
 // PCA9685 I^2C PWM expanders feeding 3x ULN2803A Darlington arrays (24 outputs
@@ -41,8 +41,9 @@ constexpr int PUMP_PINS[6] = {32, 33, 25, 26, 27, 13};
 
 constexpr int NUM_PUMPS = 6;
 
-// Maximum chambers supported by the hardware (12 sensor channels x 2 valves).
-constexpr int MAX_CHAMBERS = 12;
+// Chambers the board drives: 3 skins of 3, one pump pair each (the PCB has
+// 12 sensor channels / 24 valve outputs; the rest are spare).
+constexpr int MAX_CHAMBERS = 9;
 
 // ---------------------------------------------------------------------------
 // RGBW/RGB LED rings (SK6812 / WS2812). Up to three independent 24-LED rings -

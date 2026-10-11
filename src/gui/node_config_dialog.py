@@ -5,7 +5,7 @@ A node has three attributes: MAC address, node_type, and max_slots.
 
 Node types and their default slot counts:
     node_direct       - 3   (fixed: 3 chambers, GPIO valves, onboard pumps)
-    node_multiplexed  - 12  (default; up to 16 chambers)
+    node_multiplexed  - 9   (3 skins of 3 chambers, one pump pair each)
 """
 
 from PySide6.QtWidgets import QMessageBox, QWidget
@@ -18,7 +18,7 @@ _YAML_KEY = {"turtle": "turtles", "tree": "trees", "thymio": "thymios"}
 
 NODE_TYPES: dict[str, int] = {
     "node_direct": 3,
-    "node_multiplexed": 12,
+    "node_multiplexed": 9,
     "node_magnet_sensor": 4,
 }
 
@@ -123,7 +123,7 @@ class NodeConfigDialog(BaseDialog, Ui_NodeConfigDialog):
             self.slots_spin.setValue(4)
             self.slots_spin.setEnabled(False)
         else:
-            self.slots_spin.setRange(1, 16)
+            self.slots_spin.setRange(1, NODE_TYPES["node_multiplexed"])
             self.slots_spin.setEnabled(True)
             self.slots_spin.setValue(NODE_TYPES.get(node_type, 12))
         # Sensor-only boards have no chambers, so the flag is meaningless there.
@@ -135,7 +135,7 @@ class NodeConfigDialog(BaseDialog, Ui_NodeConfigDialog):
         notes = {
             "node_direct": "3 chambers, direct ADC sensors, onboard pumps.",
             "node_multiplexed": (
-                "Up to 16 chambers (default 12). Multiplexed valves/sensors."
+                "Up to 9 chambers: 3 skins of 3, one pump pair per skin."
             ),
             "node_magnet_sensor": (
                 "4-sensor magnet sensor. Sends raw / magnitudes / baseline-adjusted / "

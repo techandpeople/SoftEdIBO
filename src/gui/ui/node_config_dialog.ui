@@ -30,7 +30,7 @@
      </item>
      <item row="1" column="1">
       <widget class="QComboBox" name="type_combo">
-       <property name="whatsThis"><string>Board type: node_direct (3 chambers, onboard pumps), node_multiplexed (up to 12 chambers) or node_magnet_sensor (4 touch sensors, no actuation). Sets the slot count and which firmware to flash.</string></property>
+       <property name="whatsThis"><string>Board type: node_direct (3 chambers, onboard pumps), node_multiplexed (up to 9 chambers) or node_magnet_sensor (4 touch sensors, no actuation). Sets the slot count and which firmware to flash.</string></property>
       </widget>
      </item>
      <item row="2" column="0">
@@ -40,7 +40,7 @@
      </item>
      <item row="2" column="1">
       <widget class="QSpinBox" name="slots_spin">
-       <property name="whatsThis"><string>How many chamber slots this node exposes. Fixed for node_direct (3) and node_magnet_sensor (4); up to 16 for node_multiplexed (default 12).</string></property>
+       <property name="whatsThis"><string>How many chamber slots this node exposes. Fixed for node_direct (3) and node_magnet_sensor (4); up to 9 for node_multiplexed (3 skins of 3 chambers).</string></property>
        <property name="minimum"><number>0</number></property>
        <property name="maximum"><number>64</number></property>
        <property name="suffix"><string> slots</string></property>

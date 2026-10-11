@@ -17,8 +17,7 @@ constexpr uint8_t PUMP_DEFAULT_DUTY = 255;
 // private pressure line, the deflate pump a private vacuum line - shared only by
 // that skin's chambers. Pump indices follow PUMP_PINS (PUMP1 = 0); connector
 // names are the PCB references. `chambers` is a bit mask (bit i = chamber i,
-// see pca_valves::VALVE_MAP for each chamber's valve connectors). A chamber in
-// no group has no pump behind its valves.
+// see pca_valves::VALVE_MAP for each chamber's valve connectors).
 struct PumpGroup {
     uint8_t  inflate_pump;
     uint8_t  deflate_pump;
@@ -26,9 +25,9 @@ struct PumpGroup {
 };
 
 constexpr PumpGroup PUMP_GROUPS[] = {
-    {0, 1, 0b000111000000},  // J12 / J13 -> chambers 6, 7, 8
-    {3, 2, 0b000000111000},  // J24 / J23 -> chambers 3, 4, 5
-    {4, 5, 0b000000000111},  // J26 / J27 -> chambers 0, 1, 2
+    {0, 1, 0b000000111},  // J12 / J13 -> chambers 0, 1, 2
+    {3, 2, 0b000111000},  // J24 / J23 -> chambers 3, 4, 5
+    {4, 5, 0b111000000},  // J26 / J27 -> chambers 6, 7, 8
 };
 constexpr int NUM_PUMP_GROUPS = sizeof(PUMP_GROUPS) / sizeof(PUMP_GROUPS[0]);
 

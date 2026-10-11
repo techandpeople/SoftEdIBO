@@ -13,8 +13,9 @@
 //   PCA #1 LED8-15 -> U8  -> UNL[24-i] = pca1.LED[i]  for i = 8..15   (REVERSED)
 //   PCA #2 LED0-7  -> U20 -> UNL[24-i] = pca2.LED[i]  for i = 0..7    (REVERSED)
 //
-// Chambers follow the physical connector layout, not UNL order: each chamber
-// owns one neighbouring connector pair (see VALVE_MAP below).
+// Chambers follow the pneumatic layout, not UNL order: chambers 0-2, 3-5 and
+// 6-8 are the three skins, each on its own pump pair (pumps::PUMP_GROUPS), and
+// each chamber owns one inflate/deflate connector pair (see VALVE_MAP below).
 
 namespace pca_valves {
 
@@ -39,19 +40,17 @@ struct ValveOutputs {
 };
 
 constexpr ValveOutputs VALVE_MAP[] = {
-    {0, 12, 14},  // chamber 0:  J17 / J21
-    {0,  9, 11},  // chamber 1:  J9  / J14
-    {0,  8, 10},  // chamber 2:  J18 / J22
-    {0,  2,  0},  // chamber 3:  J3  / J2
-    {0,  3,  1},  // chamber 4:  J15 / J19
-    {0,  6,  4},  // chamber 5:  J4  / J5
-    {0,  7,  5},  // chamber 6:  J16 / J20
-    {1,  5,  0},  // chamber 7:  J10 / J52
-    {1,  6,  7},  // chamber 8:  J30 / J28
-    {1,  1,  4},  // chamber 9:  J44 / J29
-    {1,  2,  3},  // chamber 10: J53 / J51
-    {0, 13, 15},  // chamber 11: J6  / J7
+    {1,  6,  7},  // chamber 0: J30 / J28
+    {1,  5,  0},  // chamber 1: J10 / J52
+    {0,  7,  5},  // chamber 2: J16 / J20
+    {0,  2,  0},  // chamber 3: J3  / J2
+    {0,  3,  1},  // chamber 4: J15 / J19
+    {0,  6,  4},  // chamber 5: J4  / J5
+    {0, 12, 14},  // chamber 6: J17 / J21
+    {0,  9, 11},  // chamber 7: J9  / J14
+    {0,  8, 10},  // chamber 8: J18 / J22
 };
+// Spare outputs (no chamber, kept closed): J44 / J29, J53 / J51, J6 / J7.
 static_assert(sizeof(VALVE_MAP) / sizeof(VALVE_MAP[0]) == MAX_CHAMBERS,
               "VALVE_MAP needs one entry per chamber");
 
