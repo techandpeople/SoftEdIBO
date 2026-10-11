@@ -13,14 +13,13 @@
      <layout class="QHBoxLayout" name="gateway_layout">
       <item>
        <widget class="QComboBox" name="port_combo">
-        <property name="whatsThis"><string>Serial port the gateway board is plugged into. Use the (re) button to rescan if it is missing.</string></property>
+        <property name="whatsThis"><string>Serial port the gateway board is plugged into. Use the Refresh button to rescan if it is missing.</string></property>
         <property name="minimumWidth"><number>140</number></property>
        </widget>
       </item>
       <item>
        <widget class="QPushButton" name="refresh_ports_btn">
-        <property name="text"><string>(re)</string></property>
-        <property name="maximumWidth"><number>28</number></property>
+        <property name="text"><string>Refresh</string></property>
         <property name="toolTip"><string>Refresh serial port list</string></property>
         <property name="whatsThis"><string>Rescan the serial ports and refresh the port list - use it after plugging in the gateway.</string></property>
        </widget>
