@@ -239,6 +239,16 @@ def effective_fill_ms(base_ms: float, value_pct: float,
     return scale_fill_ms(float(base_ms) * frac, active_chambers, pump_count)
 
 
+# Chamber slots fed by each inflate/deflate pump pair of a ``node_multiplexed``
+# board: one pair per 3-chamber skin (mirrors ``pumps::PUMP_GROUPS`` in the
+# firmware). Slots in different groups share no air line.
+MULTIPLEXED_PUMP_GROUPS: tuple[frozenset[int], ...] = (
+    frozenset({0, 1, 2}),
+    frozenset({3, 4, 5}),
+    frozenset({6, 7, 8}),
+)
+
+
 class FillLoadTracker:
     """Tracks concurrently-inflating chambers on one node, to scale fill times.
 
@@ -248,34 +258,50 @@ class FillLoadTracker:
     on the node's controller), so chambers across different skins on the same
     physical node correctly count against each other.
 
+    ``pump_groups`` splits the node into independent pump circuits (sets of
+    slots, ``pump_count`` pumps each): asking for the load *of a slot* then only
+    counts the chambers sharing its circuit. Empty = the whole node is one.
+
     ``clock`` returns seconds (monotonic); inject a fake one in tests.
     """
 
     def __init__(self, pump_count: int = 1,
-                 clock: Callable[[], float] = time.monotonic) -> None:
+                 clock: Callable[[], float] = time.monotonic,
+                 pump_groups: tuple[frozenset[int], ...] = ()) -> None:
         self.pump_count = max(1, int(pump_count))
+        self.pump_groups = tuple(pump_groups)
         self._clock = clock
         self._until: dict[int, float] = {}   # slot -> monotonic end time (s)
+
+    def _shares_circuit(self, slot: int | None, other: int) -> bool:
+        """Whether ``other`` draws on the same pumps as ``slot``."""
+        if slot is None or not self.pump_groups:
+            return True
+        for group in self.pump_groups:
+            if slot in group:
+                return other in group
+        return other == slot    # slot on no known circuit: alone
 
     def _prune(self, now: float) -> None:
         for slot in [s for s, end in self._until.items() if end <= now]:
             del self._until[slot]
 
-    def active_count(self) -> int:
-        """Number of chambers whose fill window is still open."""
-        now = self._clock()
-        self._prune(now)
-        return len(self._until)
+    def active_count(self, slot: int | None = None) -> int:
+        """Number of chambers whose fill window is still open.
 
-    def active_slots(self) -> set[int]:
+        With ``slot``, only those on that slot's pump circuit."""
+        return len(self.active_slots(slot))
+
+    def active_slots(self, slot: int | None = None) -> set[int]:
         """Slots whose fill window is still open - the live co-active set.
+        With ``slot``, only those on that slot's pump circuit.
 
         Used to look up a chamber's fill curve measured under exactly this
         concurrent set (see :mod:`src.hardware.fill_calibration` combinations);
         falls back to :func:`scale_fill_ms` when no such curve exists."""
         now = self._clock()
         self._prune(now)
-        return set(self._until)
+        return {s for s in self._until if self._shares_circuit(slot, s)}
 
     def note_inflate(self, slot: int, ms: float) -> None:
         """Record that ``slot`` is inflating for ``ms`` from now."""

@@ -755,7 +755,7 @@ class Skin:
         if profile is not None and self._uses_timed_fill(local_idx):
             load = self._ctrl.fill_load
             active = set(co_active) if co_active is not None \
-                else load.active_slots() | {slot}
+                else load.active_slots(slot) | {slot}
             measured = self._combo_profiles.get(local_idx, {}).get(frozenset(active))
             if measured is not None:
                 ms = max(1, int(round(measured.time_for_pct(new_target)
@@ -763,7 +763,7 @@ class Skin:
             else:
                 base_ms = (profile.time_for_pct(new_target)
                            - profile.time_for_pct(prev_target))
-                ms = scale_fill_ms(base_ms, load.active_count() + 1, load.pump_count)
+                ms = scale_fill_ms(base_ms, load.active_count(slot) + 1, load.pump_count)
             load.note_inflate(slot, ms)
             if self._sensorless:
                 ok = self._ctrl.inflate(slot, value, ms=ms, timed=True)

@@ -5,6 +5,7 @@ from __future__ import annotations
 from src.hardware.fill_scaling import (
     FULL_DUTY,
     DutyModel,
+    MULTIPLEXED_PUMP_GROUPS,
     FillLoadTracker,
     effective_fill_ms,
 )
@@ -162,3 +163,42 @@ def test_duty_for_power_clamps_out_of_range_levels():
     assert duty_for_power(9) == FULL_DUTY              # above 5 clamps down to 5
     # A floor above full is clamped so the pump never over-drives / inverts.
     assert duty_for_power(1, min_duty=999) == FULL_DUTY
+
+
+def test_tracker_pump_groups_isolate_circuits():
+    # One pump pair per skin: a chamber only competes with its own circuit.
+    now = [0.0]
+    t = FillLoadTracker(clock=lambda: now[0], pump_groups=MULTIPLEXED_PUMP_GROUPS)
+    t.note_inflate(0, 1000)
+    t.note_inflate(1, 1000)
+    t.note_inflate(4, 1000)
+    assert t.active_slots(2) == {0, 1}
+    assert t.active_count(2) == 2
+    assert t.active_count(5) == 1
+    assert t.active_count(7) == 0
+    assert t.active_count() == 3          # no slot -> the whole node
+    assert t.active_slots(11) == set()    # slot on no circuit shares with nobody
+
+
+def test_tracker_without_groups_is_one_circuit():
+    t = FillLoadTracker(clock=lambda: 0.0)
+    t.note_inflate(0, 1000)
+    t.note_inflate(7, 1000)
+    assert t.active_count(3) == 2
+
+
+def test_set_pump_counts_gives_multiplexed_per_skin_circuits():
+    from types import SimpleNamespace
+
+    from src.robots._robot_builder import set_pump_counts
+
+    direct = SimpleNamespace(fill_load=FillLoadTracker())
+    mux = SimpleNamespace(fill_load=FillLoadTracker())
+    set_pump_counts(
+        [{"mac": "A", "node_type": "node_direct"},
+         {"mac": "B", "node_type": "node_multiplexed"}],
+        {"A": direct, "B": mux})
+    assert direct.fill_load.pump_count == 2
+    assert direct.fill_load.pump_groups == ()
+    assert mux.fill_load.pump_count == 1
+    assert mux.fill_load.pump_groups == MULTIPLEXED_PUMP_GROUPS

@@ -11,6 +11,7 @@ from typing import Any
 
 from src.core.led_geometry import MAX_BRIGHTNESS, led_geometry_for
 from src.core.skin_config import DEFAULT_MAX_KPA, DEFAULT_MIN_KPA
+from src.hardware.fill_scaling import MULTIPLEXED_PUMP_GROUPS
 from src.hardware.skin import Skin
 
 logger = logging.getLogger(__name__)
@@ -20,19 +21,23 @@ def set_pump_counts(
     node_configs: list[dict[str, Any]],
     controllers: dict[str, Any],
 ) -> None:
-    """Tell each controller how many pressure pumps its node shares.
+    """Tell each controller how its node's pressure pumps are shared.
 
     Drives the shared-pump fill-time scaling (see
-    :mod:`src.hardware.fill_scaling`): concurrent inflations on a node split its
-    pumps' airflow. ``node_direct`` has two onboard pumps; every other node type
-    is treated as a single shared pump.
+    :mod:`src.hardware.fill_scaling`): concurrent inflations on one pump circuit
+    split its airflow. ``node_direct`` has two onboard pumps on a single
+    circuit; ``node_multiplexed`` has one pump per 3-chamber skin, each its own
+    circuit; every other node type is treated as a single shared pump.
     """
     for node_cfg in node_configs:
         ctrl = controllers.get(node_cfg.get("mac", ""))
         if ctrl is None or not hasattr(ctrl, "fill_load"):
             continue
-        count = 2 if node_cfg.get("node_type") == "node_direct" else 1
+        node_type = node_cfg.get("node_type")
+        count = 2 if node_type == "node_direct" else 1
         ctrl.fill_load.pump_count = max(1, count)
+        ctrl.fill_load.pump_groups = (
+            MULTIPLEXED_PUMP_GROUPS if node_type == "node_multiplexed" else ())
 
 
 def multiplexed_configure(node_cfg: dict[str, Any]) -> dict[str, Any] | None:
