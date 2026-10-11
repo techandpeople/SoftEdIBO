@@ -11,10 +11,21 @@
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>
-    <!-- The left column holds an Expanding scroll area, so the QHBoxLayout gives
+    <!-- Everything but the Close row scrolls, so the dialog still fits a
+         small screen (the controls' minimum height exceeds a laptop display).
+         The left column holds an Expanding scroll area, so the QHBoxLayout gives
          it the extra horizontal space and the right (sensor) column keeps its
          natural width - no explicit stretch factor needed. -->
+    <widget class="QScrollArea" name="content_scroll">
+     <property name="frameShape"><enum>QFrame::NoFrame</enum></property>
+     <property name="widgetResizable"><bool>true</bool></property>
+     <property name="whatsThis"><string>All the test controls. When they do not fit the screen this area scrolls; the Close button below stays in view.</string></property>
+     <widget class="QWidget" name="content_widget">
     <layout class="QHBoxLayout" name="content_row">
+     <property name="leftMargin"><number>0</number></property>
+     <property name="topMargin"><number>0</number></property>
+     <property name="rightMargin"><number>0</number></property>
+     <property name="bottomMargin"><number>0</number></property>
      <item>
       <!-- Left column: chambers + actuator controls (grows to fill width). -->
       <layout class="QVBoxLayout" name="left_col">
@@ -142,6 +153,8 @@
       </layout>
      </item>
     </layout>
+     </widget>
+    </widget>
    </item>
    <item>
     <layout class="QHBoxLayout" name="close_row">

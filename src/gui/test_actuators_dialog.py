@@ -589,22 +589,34 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         if self._sensor_grid is not None:
             self._sensor_grid.feed(mag, vec)
 
+    # Room left for the window frame (title bar + borders), which the screen's
+    # available geometry does not account for.
+    _FRAME_ALLOWANCE = (16, 48)
+
     def _grow_to_fit(self) -> None:
-        """Grow the dialog to its preferred size (never shrink, never past the
-        screen). Called on open (the LED tester is inserted after the .ui is laid
-        out) and again when the sensor panel is added, so runtime-inserted content
-        isn't squeezed below its minimum. Grows width as well as height because the
-        sensor tester is added as a new right-hand column."""
+        """Grow the dialog to its content's preferred size (never shrink, never
+        past the screen - beyond that the content area scrolls). Called on open
+        (the LED tester is inserted after the .ui is laid out) and again when the
+        sensor panel is added, so runtime-inserted content isn't squeezed below
+        its minimum. Grows width as well as height because the sensor tester is
+        added as a new right-hand column."""
         layout = self.layout()
         if layout is not None:
             layout.activate()   # refresh the size hint after the insert
-        hint = self.sizeHint()
-        target_w, target_h = hint.width(), hint.height()
+        # The scroll area's own hint is a fixed small size, so size from what it
+        # holds plus the dialog's chrome around it (margins, Close row).
+        scroll = self.content_scroll
+        chrome = self.sizeHint() - scroll.sizeHint()
+        content = self.content_widget.sizeHint()
+        bars = scroll.verticalScrollBar().sizeHint().width()
+        target_w = content.width() + chrome.width() + bars
+        target_h = content.height() + chrome.height()
         screen = self.screen()
         if screen is not None:
             avail = screen.availableGeometry()
-            target_w = min(target_w, avail.width())
-            target_h = min(target_h, avail.height())
+            frame_w, frame_h = self._FRAME_ALLOWANCE
+            target_w = min(target_w, avail.width() - frame_w)
+            target_h = min(target_h, avail.height() - frame_h)
         self.resize(max(self.width(), target_w), max(self.height(), target_h))
 
     def _rezero_sensors(self) -> None:
