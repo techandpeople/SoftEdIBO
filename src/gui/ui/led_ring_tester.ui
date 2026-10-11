@@ -73,7 +73,7 @@
         </item>
         <item>
          <widget class="QSpinBox" name="count_spin">
-          <property name="whatsThis"><string>Physical pixels on the wire - what the firmware drives (68 for the cut COB strip on the Thymio skin, 24 for a multiplexed-board ring). Must match the firmware build; a change here only takes effect in the preview after reopening the dialog.</string></property>
+          <property name="whatsThis"><string>Physical pixels on the wire - what the firmware drives (68 for the cut COB strip on the Thymio skin, 24 for a multiplexed-board ring). The preview redraws as you change it, but the node's pixel count is fixed in its firmware build, so this must match it; Save layout stores it with the skin for activities.</string></property>
           <property name="suffix"><string> px</string></property>
           <property name="minimum"><number>1</number></property>
           <property name="maximum"><number>300</number></property>
@@ -88,7 +88,7 @@
         <item>
          <widget class="QSpinBox" name="gap_spin">
           <property name="whatsThis">
-           <string>Empty pixel slots at the seam where the two ends of a cut strip meet (1 on the Thymio skin: the strip is one pixel pitch shorter than the perimeter). 0 for a closed ring. Arcs and comets are computed over pixels + gap so the light stays continuous across the seam.</string>
+           <string>Empty pixel slots at the seam where the two ends of a cut strip meet (1 on the Thymio skin: the strip is one pixel pitch shorter than the perimeter). 0 for a closed ring. Arcs and comets are computed over pixels + gap so the light stays continuous across the seam. The preview follows it; the node's own gap is fixed in its firmware build.</string>
           </property>
           <property name="minimum"><number>0</number></property>
           <property name="maximum"><number>20</number></property>
@@ -110,7 +110,7 @@
         </item>
         <item>
          <widget class="QCheckBox" name="ccw_check">
-          <property name="whatsThis"><string>Tick when pixel indices grow counter-clockwise seen from above (the data-in end of the strip runs the other way round the skin). Changes which corner each touch sensor's arc lands on.</string></property>
+          <property name="whatsThis"><string>Tick when pixel indices grow counter-clockwise seen from above (the data-in end of the strip runs the other way round the skin). The preview is mirrored to match. Changes which corner each touch sensor's arc lands on.</string></property>
           <property name="text"><string>counter-clockwise</string></property>
          </widget>
         </item>

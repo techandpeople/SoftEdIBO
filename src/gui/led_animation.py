@@ -70,27 +70,30 @@ def lerp_color(a: QColor, b: QColor, t: float) -> QColor:
     )
 
 
-def comet_pixels(seg_colors: list[QColor], count: int, head_frac: float
-                 ) -> list[QColor]:
+def comet_pixels(seg_colors: list[QColor], count: int, head_frac: float,
+                 slots: int | None = None) -> list[QColor]:
     """Render ``count`` LEDs as one comet per segment colour.
 
-    ``head_frac`` is the lead comet's head position as a fraction of the ring
-    (0..1, increasing = clockwise). Comet ``j`` sits ``j/k`` of the way further
-    round and trails a 1 -> 0 fade behind its head, coloured by ``seg_colors[j]``
-    - so one colour gives one comet, two give two comets 180 deg apart. Mirrors the
-    firmware ``renderComet_``.
+    ``head_frac`` is the lead comet's head position as a fraction of the loop
+    (0..1, increasing = with the pixel index). Comet ``j`` sits ``j/k`` of the
+    way further round and trails a 1 -> 0 fade behind its head, coloured by
+    ``seg_colors[j]`` - so one colour gives one comet, two give two comets 180
+    deg apart. ``slots`` is the loop length the heads travel (pixels plus the
+    dark seam gap of a cut strip; default = ``count``, a closed ring). Mirrors
+    the firmware ``renderComet_``.
     """
     k = max(1, len(seg_colors))
-    head = (head_frac % 1.0) * count
-    spacing = count / k
-    tail = min(spacing * 0.7, count / 3.0)
+    slots = max(count, slots or count)
+    head = (head_frac % 1.0) * slots
+    spacing = slots / k
+    tail = min(spacing * 0.7, slots / 3.0)
     tail = max(1.0, tail)
     out: list[QColor] = []
     for i in range(count):
         best, best_j = 0.0, 0
         for j in range(k):
             h = head + j * spacing
-            d = (h - i) % count           # how far pixel i sits behind head h
+            d = (h - i) % slots           # how far pixel i sits behind head h
             level = 1.0 - d / tail
             if level > best:
                 best, best_j = level, j

@@ -53,11 +53,24 @@ class TestLedRingTesterFrames:
     def _tester(self, qtbot, count=24):
         from src.gui.led_ring_tester import LedRingTester
         sent = []
-        t = LedRingTester(count,
-                          lambda idx, cols, pat, fade, angle:
-                              sent.append((idx, cols, pat, fade, angle)))
+        self.periods = []
+
+        def record(idx, cols, pat, fade, angle, period) -> None:
+            sent.append((idx, cols, pat, fade, angle))
+            self.periods.append(period)
+
+        t = LedRingTester(count, record)
         qtbot.addWidget(t)
         return t, sent
+
+    def test_comet_sends_the_preview_period(self, qtbot):
+        # The node defaults to 1000 ms; without the period the real comet ran
+        # at twice the preview's speed.
+        from src.gui.led_ring_tester import _COMET_PERIOD_MS
+        t, _sent = self._tester(qtbot)
+        t._set_pattern("comet")
+        assert self.periods[-1] == _COMET_PERIOD_MS
+        assert t._ring._period_ms == _COMET_PERIOD_MS
 
     def test_choosing_a_colour_applies_live(self, qtbot):
         # No "apply" step - picking a colour sends the whole-ring frame at once.
@@ -148,6 +161,15 @@ class TestSendLedRouting:
         cmd, kw = gw.sent[-1]
         assert cmd == "set_led" and kw["ring"] == 2
 
+    def test_period_is_forwarded(self, qtbot):
+        dlg, gw = self._dialog(qtbot)
+        dlg._send_led(None, None, ["#ff0000"], "comet", 250, 0.0, 2000)
+        assert gw.sent[-1][1]["period_ms"] == 2000
+        dlg._send_led(None, None, ["#f00", "#0f0"], "comet", 250, 0.0, 2000)
+        assert gw.sent[-1][1]["period_ms"] == 2000
+        dlg._send_led(None, None, None, "off", 250, 0.0, 2000)   # off: no period
+        assert "period_ms" not in gw.sent[-1][1]
+
     def test_angle_is_forwarded(self, qtbot):
         dlg, gw = self._dialog(qtbot)
         dlg._send_led(None, None, ["#ff0000", "#00ff00"], "solid", 250, 90.0)
@@ -184,6 +206,53 @@ class TestRingWidgetAngle:
         assert abs(w._angle_at(QPointF(cx, cy - 50))) < 1.0
         # straight right is 90 deg
         assert abs(w._angle_at(QPointF(cx + 50, cy)) - 90.0) < 1.0
+
+
+class TestRingWidgetStrip:
+    """The preview mirrors the strip row: pixel count, seam gap, direction."""
+
+    def test_count_and_gap_redraw_the_ring(self, qtbot):
+        from src.gui.led_ring_tester import LedRingWidget
+        from src.gui.led_animation import AnimationPattern
+        w = LedRingWidget(24)
+        qtbot.addWidget(w)
+        w.set_strip(68, 1, True)
+        pts, _led_r = w._geometry()
+        assert len(pts) == 68
+        # Halves are split over the 69 slots (firmware setSegments): 35 + 33.
+        red, green = QColor("#ff0000"), QColor("#00ff00")
+        w.set_look([red, green], AnimationPattern.SOLID, 0, 0, 0.0)
+        names = [c.name() for c in w._base]
+        assert names.count("#ff0000") == 35 and names.count("#00ff00") == 33
+
+    def test_counter_clockwise_mirrors_pixels_and_handle(self, qtbot):
+        from PySide6.QtCore import QPointF
+        from src.gui.led_ring_tester import LedRingWidget
+        w = LedRingWidget(24)
+        qtbot.addWidget(w)
+        w.resize(200, 200)
+        cx, cy, _r, _l = w._center_radius()
+        w.set_strip(24, 0, True)
+        assert w._geometry()[0][6].x() > cx      # pixel 6 on the right
+        w.set_strip(24, 0, False)
+        assert w._geometry()[0][6].x() < cx      # ... now on the left
+        # A drag on the left reads as 90 deg along the pixel index.
+        assert abs(w._angle_at(QPointF(cx - 50, cy)) - 90.0) < 1.0
+
+    def test_tester_strip_row_drives_the_preview(self, qtbot):
+        from src.gui.led_ring_tester import LedRingTester
+        t = LedRingTester(24, lambda *a: None, on_save_layout=lambda _l: None)
+        qtbot.addWidget(t)
+        t.count_spin.setValue(30)
+        t.gap_spin.setValue(2)
+        assert (t._ring.count, t._ring._slots) == (30, 32)
+
+    def test_comet_travels_over_the_seam_gap(self):
+        red = QColor("#ff0000")
+        # Head on the dark seam slot (index 68 of 69): pixel 67 is one behind.
+        px = comet_pixels([red], 68, head_frac=68 / 69, slots=69)
+        assert len(px) == 68
+        assert px[67].red() > px[66].red() > 0
 
 
 class TestControllerBaseAngle:

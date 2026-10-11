@@ -43,7 +43,8 @@ _PATTERNS = ["solid", "blink", "pulse", "comet"]
 _SEGMENTS = {"Whole": 1, "Halves": 2, "Quarters": 4}
 
 # Fixed animation periods for the test panel (it has no period control). Plenty
-# slow to read the motion while verifying wiring.
+# slow to read the motion while verifying wiring. Sent to the node with every
+# look, so the strip runs at the preview's speed (not the firmware default).
 _PULSE_PERIOD_MS = 1000
 _COMET_PERIOD_MS = 2000
 # Wait this long after the last brightness spin change before sending it.
@@ -68,7 +69,9 @@ class LedRingWidget(QWidget):
 
     Renders the firmware's looks faithfully: solid/blink/pulse scale brightness,
     comet sweeps one rotating head per segment colour, split arcs are rotated by
-    an angle, and every change cross-fades. The look's split/comet angle is set by
+    an angle, and every change cross-fades. The strip's physical layout (pixel
+    count, dark seam gap, index direction) is mirrored too, so arcs and comets
+    land where they do on the real strip. The look's split/comet angle is set by
     dragging the handle around the ring (an arc slider) - ``angleChanged`` fires
     live while dragging, ``angleReleased`` once when the drag ends.
     """
@@ -79,6 +82,8 @@ class LedRingWidget(QWidget):
     def __init__(self, count: int, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._count = max(1, count)
+        self._gap = 0               # dark slots at the seam of a cut strip
+        self._clockwise = True      # pixel indices grow clockwise from above
         self._seg_colors = [QColor(_OFF_COLOR)]
         self._angle_deg = 0.0
         self._base = self._compute_base()
@@ -123,6 +128,22 @@ class LedRingWidget(QWidget):
         self._fade_t0 = now
         self._kick()
 
+    def set_strip(self, count: int, gap: int, clockwise: bool) -> None:
+        """Mirror the strip's physical layout: pixels on the wire, dark slots
+        at the seam, and which way the pixel index runs round the skin."""
+        self._count = max(1, int(count))
+        self._gap = max(0, int(gap))
+        self._clockwise = bool(clockwise)
+        self._base = self._compute_base()
+        self._fade_from = list(self._base)   # pixel count changed: no fade
+        self._fade_ms = 0
+        self.update()
+
+    @property
+    def _slots(self) -> int:
+        """Positions round the loop: the pixels plus the seam gap."""
+        return self._count + self._gap
+
     def set_angle(self, angle_deg: float) -> None:
         """Set the split/comet angle without emitting (e.g. to the saved value)."""
         self._angle_deg = float(angle_deg) % 360.0
@@ -135,10 +156,10 @@ class LedRingWidget(QWidget):
         """Per-pixel target colours for the static patterns: the arc colours laid
         out as equal contiguous arcs, rotated by the angle (mirrors the firmware
         ``setSegments``)."""
-        n, k = self._count, len(self._seg_colors)
+        n, k = self._slots, len(self._seg_colors)
         off = round(self._angle_deg / 360.0 * n) % n
         base = []
-        for i in range(n):
+        for i in range(self._count):
             idx = (i - off) % n
             seg = min(idx * k // n, k - 1)
             base.append(QColor(self._seg_colors[seg]))
@@ -149,7 +170,8 @@ class LedRingWidget(QWidget):
         if self._pattern == AnimationPattern.COMET:
             head = ((now - self._anim_t0) * 1000.0 / self._period_ms
                     + self._angle_deg / 360.0)
-            return comet_pixels(self._seg_colors, self._count, head)
+            return comet_pixels(self._seg_colors, self._count, head,
+                                slots=self._slots)
         frac = ((now - self._anim_t0) * 1000.0 / self._period_ms)
         scale = pattern_scale(self._pattern, frac)
         return [_scaled(c, scale) for c in self._base]
@@ -190,14 +212,21 @@ class LedRingWidget(QWidget):
         cx, cy, ring_r, led_r = self._center_radius()
         pts = []
         for i in range(self._count):
-            a = 2.0 * math.pi * i / self._count - math.pi / 2.0
+            a = self._screen_angle(i / self._slots)
             pts.append(QPointF(cx + ring_r * math.cos(a), cy + ring_r * math.sin(a)))
         return pts, led_r
+
+    def _screen_angle(self, frac: float) -> float:
+        """Screen angle (radians) of a loop fraction measured along the pixel
+        index: 0 at the top, running clockwise or counter-clockwise with the
+        strip's direction."""
+        turn = frac if self._clockwise else -frac
+        return 2.0 * math.pi * turn - math.pi / 2.0
 
     def _handle_center(self) -> QPointF:
         """Where the angle handle sits (just outside the ring, at the angle)."""
         cx, cy, ring_r, led_r = self._center_radius()
-        a = 2.0 * math.pi * (self._angle_deg / 360.0) - math.pi / 2.0
+        a = self._screen_angle(self._angle_deg / 360.0)
         r = ring_r + led_r + 7.0
         return QPointF(cx + r * math.cos(a), cy + r * math.sin(a))
 
@@ -231,10 +260,11 @@ class LedRingWidget(QWidget):
     # -- angle drag -----------------------------------------------------------
 
     def _angle_at(self, pos: QPointF) -> float:
-        """Angle (deg, 0 at top, clockwise) of a point relative to the centre."""
+        """Angle (deg, 0 at top, along the pixel index) of a point relative to
+        the centre - the inverse of :meth:`_screen_angle`."""
         cx, cy, _ring_r, _led_r = self._center_radius()
-        deg = math.degrees(math.atan2(pos.y() - cy, pos.x() - cx))
-        return (deg + 90.0) % 360.0
+        deg = math.degrees(math.atan2(pos.y() - cy, pos.x() - cx)) + 90.0
+        return (deg if self._clockwise else -deg) % 360.0
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         self._dragging = True
@@ -265,16 +295,18 @@ class LedRingTester(QGroupBox, Ui_LedRingTester):
     Every colour/pattern/segment change applies live, so ``send_cb`` fires
     immediately (no separate "apply" step):
 
-    ``send_cb(index, colors, pattern, fade_ms, angle)``:
+    ``send_cb(index, colors, pattern, fade_ms, angle, period_ms)``:
       - index:   always None here (whole ring); kept for the host signature
       - colors:  list of "#RRGGBB" arc colours (len 1/2/4), or None to turn off
       - pattern: "solid" | "blink" | "pulse" | "comet"
       - fade_ms: cross-fade time for this change (from the panel's spin box)
       - angle:   0-360 deg rotation of the split/comet (from the ring's drag handle)
+      - period_ms: blink/pulse cycle or comet revolution time the preview runs at
     """
 
     def __init__(self, count: int,
-                 send_cb: Callable[[int | None, list[str] | None, str, int, float], None],
+                 send_cb: Callable[
+                     [int | None, list[str] | None, str, int, float, int], None],
                  initial_angle: float = 0.0,
                  on_save_angle: Callable[[float], None] | None = None,
                  initial_layout: dict | None = None,
@@ -364,6 +396,11 @@ class LedRingTester(QGroupBox, Ui_LedRingTester):
         # it can't live in the .ui).
         self._ring = LedRingWidget(count)
         self._ring.set_angle(self._angle)                        # start at the saved angle
+        # The preview follows the strip row live (count / gap / direction).
+        self.count_spin.valueChanged.connect(self._sync_ring_strip)
+        self.gap_spin.valueChanged.connect(self._sync_ring_strip)
+        self.ccw_check.toggled.connect(self._sync_ring_strip)
+        self._sync_ring_strip()
         self._ring.angleChanged.connect(self._on_angle_live)     # live preview
         self._ring.angleReleased.connect(self._on_angle_release)  # send on drop
         self.main_layout.addWidget(self._ring, 1)
@@ -379,6 +416,11 @@ class LedRingTester(QGroupBox, Ui_LedRingTester):
         fg = "#000000" if c.value() > 140 else "#ffffff"
         return (f"QPushButton {{ background-color: {hex_color}; color: {fg}; "
                 f"padding: 3px 8px; border: 1px solid #555; border-radius: 3px; }}")
+
+    def _sync_ring_strip(self, *_args) -> None:
+        """Redraw the preview for the strip row's count / gap / direction."""
+        self._ring.set_strip(self.count_spin.value(), self.gap_spin.value(),
+                             not self.ccw_check.isChecked())
 
     def _fade_ms(self) -> int:
         return int(self.fade_spin.value())
@@ -416,7 +458,7 @@ class LedRingTester(QGroupBox, Ui_LedRingTester):
         self._ring.set_look(arcs, self._pattern_enum(),
                             self._period_ms(), self._fade_ms(), self._angle)
         self._send(None, self._arc_colors(), self._pattern, self._fade_ms(),
-                   self._angle)
+                   self._angle, self._period_ms())
 
     # -- slots ----------------------------------------------------------------
 
@@ -446,7 +488,8 @@ class LedRingTester(QGroupBox, Ui_LedRingTester):
     def _on_off(self) -> None:
         self._ring.set_look([QColor(_OFF_COLOR)], AnimationPattern.SOLID,
                             _PULSE_PERIOD_MS, self._fade_ms(), self._angle)
-        self._send(None, None, "off", self._fade_ms(), self._angle)
+        self._send(None, None, "off", self._fade_ms(), self._angle,
+                   self._period_ms())
 
     def _on_angle_live(self, angle: float) -> None:
         # The ring repaints itself while dragging; just track the value so the
@@ -457,7 +500,7 @@ class LedRingTester(QGroupBox, Ui_LedRingTester):
         # Send once when the drag ends, so dragging doesn't flood the radio.
         self._angle = angle
         self._send(None, self._arc_colors(), self._pattern, self._fade_ms(),
-                   self._angle)
+                   self._angle, self._period_ms())
 
     def _on_save_angle_clicked(self) -> None:
         """Persist the current angle as this ring's mounting orientation."""

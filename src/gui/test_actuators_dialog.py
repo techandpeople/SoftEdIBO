@@ -221,8 +221,8 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
             # Single ring: no "ring" field (back-compat with node_direct frames).
             self._led_tester = LedRingTester(
                 rings[0],
-                lambda idx, cols, pat, fade, angle:
-                    self._send_led(None, idx, cols, pat, fade, angle),
+                lambda idx, cols, pat, fade, angle, period:
+                    self._send_led(None, idx, cols, pat, fade, angle, period),
                 initial_angle=self._led_angles.get(0, 0.0),
                 on_save_angle=self._angle_saver(0),
                 initial_layout=self._layout_for(0),
@@ -235,8 +235,8 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
             for k, size in enumerate(rings):
                 tester = LedRingTester(
                     size,
-                    lambda idx, cols, pat, fade, angle, r=k:
-                        self._send_led(r, idx, cols, pat, fade, angle),
+                    lambda idx, cols, pat, fade, angle, period, r=k:
+                        self._send_led(r, idx, cols, pat, fade, angle, period),
                     initial_angle=self._led_angles.get(k, 0.0),
                     on_save_angle=self._angle_saver(k),
                     initial_layout=self._layout_for(k),
@@ -777,15 +777,20 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
 
     def _send_led(self, ring: int | None, index: int | None,
                   colors: list[str] | None, pattern: str = "solid",
-                  fade_ms: int | None = None, angle: float | None = None) -> None:
+                  fade_ms: int | None = None, angle: float | None = None,
+                  period_ms: int | None = None) -> None:
         """Forward an LED change to the node. ``colors`` None => turn off;
         ``index`` set => a single pixel (colours[0]); one colour => whole ring
         (``set_led``); 2+ colours => an arc split (``set_led_halves``, one comet
         per colour when ``pattern`` is "comet"). ``ring`` selects one of a
         multi-ring node's rings (node_multiplexed); None addresses the node's
         single ring (and is omitted from the frame for node_direct back-compat).
-        ``fade_ms`` is the cross-fade time; ``angle`` (0-360 deg) rotates the split."""
+        ``fade_ms`` is the cross-fade time; ``angle`` (0-360 deg) rotates the split;
+        ``period_ms`` is the blink/pulse cycle or comet revolution time (omitted
+        = the firmware's 1000 ms default)."""
         payload: dict = {} if ring is None else {"ring": ring}
+        if period_ms is not None and colors is not None and index is None:
+            payload["period_ms"] = int(period_ms)
         if fade_ms is not None:
             payload["fade_ms"] = int(fade_ms)
         if angle is not None:
