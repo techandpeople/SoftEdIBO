@@ -158,10 +158,11 @@ robots:
 ```bash
 # Qt platform libs (Debian/Ubuntu). Without libxcb-cursor0 the app aborts with
 # "Could not load the Qt platform plugin xcb" - the app forces xcb (see run.py).
+# libxkbfile1 is needed by QtWebEngine (the activity editor crashes without it).
 sudo apt-get install -y libgl1 libegl1 libglib2.0-0 libdbus-1-3 \
   libxcb1 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
   libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 \
-  libxcb-xkb1 libxkbcommon-x11-0 libfontconfig1
+  libxcb-xkb1 libxkbcommon-x11-0 libfontconfig1 libxkbfile1
 
 git clone https://github.com/techandpeople/SoftEdIBO.git
 cd SoftEdIBO
