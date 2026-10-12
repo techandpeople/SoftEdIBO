@@ -164,3 +164,72 @@ def test_empty_trash_purges_all_and_returns_ids(db):
 
     assert sorted(purged) == ["del-1", "del-2"]
     assert db.list_trashed_sessions() == []
+
+
+# --- research tables: snapshots, annotations, event corrections -----------
+
+def _session_with_touch(db, session_id="S9"):
+    from src.data.models import SessionRecord
+    db.save_session(SessionRecord(session_id=session_id, activity_name="A",
+                                  start_time=datetime.now()))
+    db.log_event(InteractionEvent(session_id=session_id, participant_id="P001",
+                                  type="touch", action="press", target="s:0"))
+    db.flush_events()
+    return db.get_session_events(session_id)[0]
+
+
+def test_session_snapshot_roundtrip_and_replace(db):
+    db.save_session_snapshot("S1", "activity", {"spec": {"initial": "a"}})
+    db.save_session_snapshot("S1", "touch", {"threshold": 100})
+    db.save_session_snapshot("S1", "touch", {"threshold": 250})
+    assert db.get_session_snapshots("S1") == {
+        "activity": {"spec": {"initial": "a"}}, "touch": {"threshold": 250}}
+    assert db.get_session_snapshots("other") == {}
+
+
+def test_session_annotation_defaults_then_saved(db):
+    from src.data.models import SESSION_STATUS_TEST, SessionAnnotation
+    default = db.get_session_annotation("S1")
+    assert (default.status, default.group_label, default.visit_order) == (
+        "valid", "", None)
+    db.save_session_annotation(SessionAnnotation(
+        session_id="S1", status=SESSION_STATUS_TEST, group_label="G3",
+        visit_order=2, notes="pilot"))
+    saved = db.get_session_annotation("S1")
+    assert (saved.status, saved.group_label, saved.visit_order, saved.notes) == (
+        "test", "G3", 2, "pilot")
+    assert set(db.get_session_annotations()) == {"S1"}
+
+
+def test_event_correction_leaves_the_event_untouched(db):
+    from src.data.models import EventCorrection
+    event = _session_with_touch(db)
+    db.save_event_correction(EventCorrection(
+        event_id=event.event_id, session_id="S9", participant_id="P002",
+        note="wrong child"))
+    assert db.get_session_events("S9")[0].participant_id == "P001"
+    correction = db.get_event_corrections("S9")[event.event_id]
+    assert (correction.participant_id, correction.excluded) == ("P002", False)
+    db.delete_event_correction(event.event_id)
+    assert db.get_event_corrections("S9") == {}
+
+
+def test_trash_and_restore_keep_research_tables(db):
+    from src.data.models import EventCorrection, SessionAnnotation
+    event = _session_with_touch(db)
+    db.save_event_correction(EventCorrection(
+        event_id=event.event_id, session_id="S9", excluded=True, note="noise"))
+    db.save_session_snapshot("S9", "activity", {"name": "A"})
+    db.save_session_annotation(SessionAnnotation(session_id="S9", group_label="G1"))
+
+    assert db.trash_session("S9")
+    assert db.get_event_corrections("S9") == {}
+    assert db.get_session_snapshots("S9") == {}
+    assert db.get_session_annotations() == {}
+
+    assert db.restore_session("S9")
+    restored = db.get_session_events("S9")[0]
+    correction = db.get_event_corrections("S9")[restored.event_id]
+    assert correction.excluded and correction.note == "noise"
+    assert db.get_session_snapshots("S9") == {"activity": {"name": "A"}}
+    assert db.get_session_annotation("S9").group_label == "G1"

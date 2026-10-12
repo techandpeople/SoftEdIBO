@@ -28,8 +28,11 @@ from src.core.skin_config import DEFAULT_MAX_KPA, DEFAULT_MIN_KPA
 from src.data.models import (
     ActivityPreset,
     DeclarativeActivity,
+    EventCorrection,
     InteractionEvent,
     ParticipantRecord,
+    SESSION_STATUS_VALID,
+    SessionAnnotation,
     SessionAssignment,
     SessionRecord,
     SkinTemplate,
@@ -98,6 +101,41 @@ _trashed_sessions = Table(
     Column("end_time",      String),
     Column("trashed_at",    String, nullable=False),
     Column("bundle",        String, nullable=False),  # JSON snapshot for restore
+)
+
+# What a session ran with, captured when it started: one JSON ``payload`` per
+# ``kind`` (the activity definition, the robots and skins, the touch tuning,
+# the node firmware). Lets a session be interpreted later even after the
+# configuration or the activity was edited.
+_session_snapshots = Table(
+    "session_snapshots", _metadata,
+    Column("session_id", String, primary_key=True),
+    Column("kind",       String, primary_key=True),
+    Column("payload",    String, nullable=False, default="{}"),
+    Column("created_at", String, nullable=False),
+)
+
+# The researcher's review of a session (see models.SessionAnnotation).
+_session_annotations = Table(
+    "session_annotations", _metadata,
+    Column("session_id",  String, primary_key=True),
+    Column("status",      String, nullable=False, default=SESSION_STATUS_VALID),
+    Column("group_label", String, nullable=False, default=""),
+    Column("visit_order", Integer),
+    Column("notes",       String, nullable=False, default=""),
+    Column("updated_at",  String, nullable=False),
+)
+
+# Corrections laid over logged events (see models.EventCorrection). The
+# ``events`` rows are never rewritten.
+_event_corrections = Table(
+    "event_corrections", _metadata,
+    Column("event_id",       Integer, primary_key=True),
+    Column("session_id",     String, nullable=False),
+    Column("participant_id", String),
+    Column("excluded",       Integer, nullable=False, default=0),
+    Column("note",           String, nullable=False, default=""),
+    Column("updated_at",     String, nullable=False),
 )
 
 _counters = Table(
@@ -302,6 +340,9 @@ class Database:
             _session_assignments.delete()
             .where(_session_assignments.c.session_id == session_id)
         )
+        for table in (_session_snapshots, _session_annotations,
+                      _event_corrections):
+            conn.execute(table.delete().where(table.c.session_id == session_id))
         conn.execute(_sessions.delete().where(_sessions.c.session_id == session_id))
 
     def trash_session(self, session_id: str) -> bool:
@@ -336,6 +377,24 @@ class Database:
                 .where(_session_participants.c.session_id == session_id)
             ).fetchall()
 
+            corrections = {
+                c.event_id: {"participant_id": c.participant_id,
+                             "excluded": c.excluded, "note": c.note,
+                             "updated_at": c.updated_at}
+                for c in conn.execute(
+                    select(_event_corrections)
+                    .where(_event_corrections.c.session_id == session_id)
+                ).fetchall()
+            }
+            snapshots = conn.execute(
+                select(_session_snapshots)
+                .where(_session_snapshots.c.session_id == session_id)
+            ).fetchall()
+            annotation = conn.execute(
+                select(_session_annotations)
+                .where(_session_annotations.c.session_id == session_id)
+            ).first()
+
             bundle = {
                 "session": {
                     "session_id": srow.session_id,
@@ -352,9 +411,24 @@ class Database:
                         "target": e.target,
                         "timestamp": e.timestamp,
                         "metadata": e.metadata,
+                        # Event ids change on restore, so a correction travels
+                        # with its event instead of by id.
+                        "correction": corrections.get(e.event_id),
                     }
                     for e in events
                 ],
+                "snapshots": [
+                    {"kind": sn.kind, "payload": sn.payload,
+                     "created_at": sn.created_at}
+                    for sn in snapshots
+                ],
+                "annotation": None if annotation is None else {
+                    "status": annotation.status,
+                    "group_label": annotation.group_label,
+                    "visit_order": annotation.visit_order,
+                    "notes": annotation.notes,
+                    "updated_at": annotation.updated_at,
+                },
                 # unit_ids kept as the raw JSON string exactly as stored.
                 "assignments": [
                     {
@@ -430,7 +504,7 @@ class Database:
                     unit_ids=a["unit_ids"],
                 ))
             for e in bundle.get("events", []):
-                conn.execute(_events.insert().values(
+                result = conn.execute(_events.insert().values(
                     session_id=session_id,
                     participant_id=e["participant_id"],
                     type=e["type"],
@@ -439,6 +513,19 @@ class Database:
                     timestamp=e["timestamp"],
                     metadata=e["metadata"],
                 ))
+                correction = e.get("correction")
+                new_key = result.inserted_primary_key
+                if correction and new_key is not None:
+                    conn.execute(_event_corrections.insert().values(
+                        event_id=new_key[0],
+                        session_id=session_id, **correction))
+            for sn in bundle.get("snapshots", []):
+                conn.execute(_session_snapshots.insert().values(
+                    session_id=session_id, **sn))
+            annotation = bundle.get("annotation")
+            if annotation:
+                conn.execute(_session_annotations.insert().values(
+                    session_id=session_id, **annotation))
             conn.execute(
                 _trashed_sessions.delete()
                 .where(_trashed_sessions.c.session_id == session_id)
@@ -682,6 +769,115 @@ class Database:
             )
             for row in rows
         ]
+
+    # ------------------------------------------------------------------
+    # Session snapshots (what a session ran with)
+    # ------------------------------------------------------------------
+
+    def save_session_snapshot(self, session_id: str, kind: str,
+                              payload: dict) -> None:
+        """Store (or replace) one snapshot of ``kind`` for a session."""
+        import json
+        with self._db_engine.begin() as conn:
+            conn.execute(_session_snapshots.delete().where(
+                (_session_snapshots.c.session_id == session_id)
+                & (_session_snapshots.c.kind == kind)))
+            conn.execute(_session_snapshots.insert().values(
+                session_id=session_id, kind=kind,
+                payload=json.dumps(payload, default=str),
+                created_at=datetime.now().isoformat()))
+
+    def get_session_snapshots(self, session_id: str) -> dict[str, dict]:
+        """Return ``{kind: payload}`` for a session (empty when none stored)."""
+        import json
+        with self._db_engine.connect() as conn:
+            rows = conn.execute(
+                select(_session_snapshots)
+                .where(_session_snapshots.c.session_id == session_id)
+            ).fetchall()
+        snapshots: dict[str, dict] = {}
+        for row in rows:
+            try:
+                payload = json.loads(row.payload)
+            except (ValueError, TypeError):
+                continue
+            if isinstance(payload, dict):
+                snapshots[row.kind] = payload
+        return snapshots
+
+    # ------------------------------------------------------------------
+    # Researcher annotations and event corrections
+    # ------------------------------------------------------------------
+
+    def save_session_annotation(self, annotation: SessionAnnotation) -> None:
+        """Store (or replace) the researcher's annotation of a session."""
+        with self._db_engine.begin() as conn:
+            conn.execute(_session_annotations.delete().where(
+                _session_annotations.c.session_id == annotation.session_id))
+            conn.execute(_session_annotations.insert().values(
+                session_id=annotation.session_id,
+                status=annotation.status,
+                group_label=annotation.group_label,
+                visit_order=annotation.visit_order,
+                notes=annotation.notes,
+                updated_at=datetime.now().isoformat()))
+
+    def get_session_annotation(self, session_id: str) -> SessionAnnotation:
+        """Return a session's annotation (defaults when none was saved)."""
+        return self.get_session_annotations().get(
+            session_id, SessionAnnotation(session_id=session_id))
+
+    def get_session_annotations(self) -> dict[str, SessionAnnotation]:
+        """Return every saved annotation, keyed by session id."""
+        with self._db_engine.connect() as conn:
+            rows = conn.execute(select(_session_annotations)).fetchall()
+        return {
+            row.session_id: SessionAnnotation(
+                session_id=row.session_id,
+                status=row.status,
+                group_label=row.group_label or "",
+                visit_order=row.visit_order,
+                notes=row.notes or "",
+                updated_at=datetime.fromisoformat(row.updated_at))
+            for row in rows
+        }
+
+    def save_event_correction(self, correction: EventCorrection) -> None:
+        """Store (or replace) the correction laid over one event."""
+        with self._db_engine.begin() as conn:
+            conn.execute(_event_corrections.delete().where(
+                _event_corrections.c.event_id == correction.event_id))
+            conn.execute(_event_corrections.insert().values(
+                event_id=correction.event_id,
+                session_id=correction.session_id,
+                participant_id=correction.participant_id,
+                excluded=1 if correction.excluded else 0,
+                note=correction.note,
+                updated_at=datetime.now().isoformat()))
+
+    def delete_event_correction(self, event_id: int) -> None:
+        """Remove a correction, restoring the event as it was logged."""
+        with self._db_engine.begin() as conn:
+            conn.execute(_event_corrections.delete().where(
+                _event_corrections.c.event_id == event_id))
+
+    def get_event_corrections(self, session_id: str) -> dict[int, EventCorrection]:
+        """Return a session's corrections, keyed by event id."""
+        with self._db_engine.connect() as conn:
+            rows = conn.execute(
+                select(_event_corrections)
+                .where(_event_corrections.c.session_id == session_id)
+            ).fetchall()
+        return {
+            row.event_id: EventCorrection(
+                event_id=row.event_id,
+                session_id=row.session_id,
+                participant_id=row.participant_id,
+                excluded=bool(row.excluded),
+                note=row.note or "",
+                updated_at=datetime.fromisoformat(row.updated_at))
+            for row in rows
+        }
 
     # ------------------------------------------------------------------
     # Events

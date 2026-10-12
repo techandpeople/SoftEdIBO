@@ -78,7 +78,7 @@ class SessionExporter:
 
     def _write_session(self, writer, session_id: str,
                        session: "SessionRecord | None") -> int:
-        resolver = _Attribution(self._db.get_session_assignments(session_id))
+        resolver = EventAttribution(self._db.get_session_assignments(session_id))
         activity = session.activity_name if session else ""
         start = self._iso(session.start_time) if session else ""
         end = self._iso(session.end_time) if session and session.end_time else ""
@@ -96,10 +96,11 @@ class SessionExporter:
 
     @staticmethod
     def _iso(dt) -> str:
-        return dt.isoformat(timespec="seconds") if dt else ""
+        # Milliseconds: touch rhythm and reaction times live below a second.
+        return dt.isoformat(timespec="milliseconds") if dt else ""
 
 
-class _Attribution:
+class EventAttribution:
     """Maps an event to (robot_id, participant_id) using session assignments.
 
     Builds two lookups from the assignments:

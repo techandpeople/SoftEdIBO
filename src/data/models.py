@@ -57,6 +57,46 @@ class InteractionEvent:
     metadata: str = ""  # JSON string for extra data
 
 
+# Review status of a session, set by the researcher in the Data tab.
+SESSION_STATUS_VALID = "valid"
+SESSION_STATUS_TEST = "test"
+SESSION_STATUS_EXCLUDED = "excluded"
+SESSION_STATUSES = (SESSION_STATUS_VALID, SESSION_STATUS_TEST,
+                    SESSION_STATUS_EXCLUDED)
+
+
+@dataclass
+class SessionAnnotation:
+    """What the researcher adds to a session after the fact.
+
+    ``group_label`` names the group of children (the sessions of one visit
+    share it) and ``visit_order`` is the position of this session within the
+    visit. Kept apart from the session record so raw data is never rewritten.
+    """
+    session_id: str
+    status: str = SESSION_STATUS_VALID
+    group_label: str = ""
+    visit_order: int | None = None
+    notes: str = ""
+    updated_at: datetime = field(default_factory=datetime.now)
+
+
+@dataclass
+class EventCorrection:
+    """A researcher's correction laid over one logged event.
+
+    The event row itself is left untouched: analysis applies the correction
+    on top (another participant, or the event left out), so the original
+    record can always be recovered by deleting the correction.
+    """
+    event_id: int
+    session_id: str
+    participant_id: str | None = None    # None = keep the logged participant
+    excluded: bool = False
+    note: str = ""
+    updated_at: datetime = field(default_factory=datetime.now)
+
+
 @dataclass
 class ActivityPreset:
     """A named parameter preset for an Activity.
