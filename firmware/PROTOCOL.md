@@ -109,7 +109,7 @@ bench `test_run` honors it (duty-curve calibration sweeps).
 | `cmd` | Fields | Notes |
 |---|---|---|
 | `rebaseline` | - | Re-zero (recapture the baseline of) all magnetic sensors |
-| `configure` | `act_threshold_ut`, `adaptive_baseline`, `baseline_tau_ms`, `stream_vec`, `osr`, `filter` | Set the uT activation threshold; opt-in adaptive baseline (tracks slow drift, frozen per-sensor while active); `stream_vec` toggles the 3-axis `vec` rows in the stream (RAM-only - re-send after a node reboot). `osr` (0-3) / `filter` (0-7) set the MLX90393 oversampling / digital filter (Adafruit enum indices; applied from the main loop, then the baseline is re-captured - keep hands off the skin). All optional. Legacy `fullscale_mt`/`act_threshold` (fraction) still accepted |
+| `configure` | `act_threshold_ut`, `adaptive_baseline`, `baseline_tau_ms`, `stream_vec`, `stream_ms`, `stream_active_ms`, `osr`, `filter` | `stream_ms` / `stream_active_ms` set the stream period at rest / while touched (ms, floor 20, RAM-only). Set the uT activation threshold; opt-in adaptive baseline (tracks slow drift, frozen per-sensor while active); `stream_vec` toggles the 3-axis `vec` rows in the stream (RAM-only - re-send after a node reboot). `osr` (0-3) / `filter` (0-7) set the MLX90393 oversampling / digital filter (Adafruit enum indices; applied from the main loop, then the baseline is re-captured - keep hands off the skin). All optional. Legacy `fullscale_mt`/`act_threshold` (fraction) still accepted |
 
 ### Multiplexed-node only
 
@@ -210,7 +210,13 @@ it into cover / resistance event streams for activities.
 An active-low push button on `BUTTON_PIN` (IO36, the same line as the organ
 circuit; the pin has no internal pull-up, so the board provides one). Sent on
 every debounced press/release (3 samples at 10 ms, edges at least 50 ms
-apart) and re-sent every 2 s as a heartbeat.
+apart) and once at boot. While the button is HELD the node re-sends
+`pressed:true` every 2 s; while it is released the node is silent. An edge
+frame the radio reports as failed is re-sent (up to 3 times), and the PC
+treats 5 s without a `pressed:true` as a release, so a lost release frame
+cannot leave the button stuck. (Firmware before `button-2` repeated the state
+every 2 s in both states; the PC accepts both.) Several buttons wired in
+series read as this one input: pressed only while all of them are.
 
 On the PC, `ESP32Controller.on_button(cb)` delivers `pressed`; behaviours
 read it through the `button_pressed` / `button_count` conditions.
@@ -220,13 +226,13 @@ read it through the `button_pressed` / `button_count` conditions.
 | `type` | Fields | When |
 |---|---|---|
 | `error` | `reason` | On error (see list below) |
+| `raw` | `adc` - `[16]` raw 12-bit ADC counts, one per mux input | Every 100 ms while a `sensor_scan` is on (debug builds: also once per status) |
 
 `error.reason` values: `pca9685_address_conflict`, `not_configured`.
 
 (The old `tank_status` broadcast is gone - the current no-reservoir build has
 no tank sensors.)
 
-| `raw` | `adc` - `[16]` raw 12-bit ADC counts, one per mux input | Every 100 ms while a `sensor_scan` is on (debug builds: also once per status) |
 ### magnet sensor-node only
 
 #### `magnet` - live sample (every reading)
@@ -237,8 +243,14 @@ no tank sensors.)
 | `act` | `[idx, ...]` - indices of sensors whose `mag >= act_threshold_ut` |
 | `vec` | `[[dx,dy,dz], ...]` - per-sensor 3-axis deltas in uT: one decimal (0.1 uT) for components below 100 uT, whole uT above; only when 3-axis streaming is on (`MAG_VECTOR` build or `configure stream_vec`). The announce then carries `"vec":1` |
 
-Cadence: ~28 Hz (35 ms) on the standalone board; 100 ms (~10 Hz) on the direct
-actuator board, so the stream can't crowd out actuation commands. The magnet
+| `n` | Sample counter, +1 per stream message since boot. A gap is a frame lost on the way |
+| `t` | The node's `millis()` when the sample round started. The PC maps it onto its own clock (`src/hardware/node_clock.py`), so touch times do not carry the radio/USB latency jitter |
+
+Cadence: ~28 Hz (35 ms) on the standalone board. The direct actuator board
+streams every 100 ms (~10 Hz) at rest, so the stream can't crowd out actuation
+commands, and every 50 ms (~20 Hz) while a sensor is active and for 1 s after,
+so a short touch is still sampled several times. Both cadences are runtime
+tunable (`configure` `stream_ms` / `stream_active_ms`, floor 20 ms). The magnet
 module is shared: `firmware/common/se_magnet.h`, used by both the standalone
 `node_magnet_sensor` board and the direct actuator board (which folds it in,
 auto-detected).
@@ -251,9 +263,9 @@ the PC.
 Register `controller.on_magnet(cb)` to receive each message (the gateway adds
 `"source":"<MAC>"`).
 
-> **Sizing**: stay under ~230 bytes total (ESP-NOW packet limit 250). Drop
-> `device_id` and `ts_ms` - `source` is added by the gateway and the PC
-> stamps on receipt.
+> **Sizing**: stay under ~230 bytes total (ESP-NOW packet limit 250). No
+> `device_id` - `source` is added by the gateway. Frames from firmware older
+> than `magtime-1` carry no `n`/`t`; the PC then stamps them on receipt.
 
 #### Boot announce (self-describing)
 

@@ -24,9 +24,14 @@ namespace magnet {
 constexpr size_t  NUM_SENSORS = 4;                        // S0..S3 -> Q1..Q4
 constexpr uint8_t ADDR[NUM_SENSORS] = {0x18, 0x19, 0x1A, 0x1B};
 
-constexpr uint32_t STREAM_INTERVAL_MS = 100;   // ~10 Hz (was 35/28 Hz - the
-                                               // flood was crowding the radio
+constexpr uint32_t STREAM_INTERVAL_MS = 100;   // ~10 Hz at rest (was 35/28 Hz -
+                                               // the flood was crowding the radio
                                                // and dropping actuation commands)
+// While a sensor is touched the stream runs faster, so a short tap is not
+// reduced to two samples. Only for the duration of the touch, which keeps the
+// radio free the rest of the time. Tunable at runtime (configure
+// "stream_active_ms") if a board shows dropped commands during touches.
+constexpr uint32_t STREAM_ACTIVE_INTERVAL_MS = 50;   // ~20 Hz
 
 // Probe the bus; the module only enables itself if at least one MLX90393
 // responds. Announce is built here but broadcast later (see se_magnet.h).
@@ -38,7 +43,8 @@ inline void hardware_init() {
     for (size_t i = 0; i < NUM_SENSORS; ++i) {
         se::magnet::addSensor(ADDR[i], &Wire);
     }
-    se::magnet::finishInit(STREAM_INTERVAL_MS);
+    se::magnet::finishInit(STREAM_INTERVAL_MS, /*forcePresent=*/false,
+                           STREAM_ACTIVE_INTERVAL_MS);
 }
 
 inline void announce()                              { se::magnet::announce(); }

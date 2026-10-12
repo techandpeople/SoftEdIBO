@@ -109,7 +109,7 @@ void setup() {
     // below which pressure a deflate needs a time budget instead of the sensor.
     char ready_msg[160];
     snprintf(ready_msg, sizeof(ready_msg),
-             "{\"status\":\"node_direct_ready\",\"fw\":\"button-1\",\"rgbw\":" LED_RGBW_JSON ",\"kpa_min\":%.0f}",
+             "{\"status\":\"node_direct_ready\",\"fw\":\"button-2\",\"rgbw\":" LED_RGBW_JSON ",\"kpa_min\":%.0f}",
              (double)pressure::FLOOR_KPA);
     se::broadcast(ready_msg);
 
@@ -203,7 +203,7 @@ void loop() {
     // ---- Organ + cover sensing (broadcasts on change + heartbeat) ----
     organ::tick(now);
 
-    // ---- Push button (broadcasts on press/release + heartbeat) ----
+    // ---- Push button (press/release edges; heartbeat only while held) ----
     button::tick(now);
 
     // ---- Magnet/touch sensing (streams ~10 Hz; no-op if no sensors) ----

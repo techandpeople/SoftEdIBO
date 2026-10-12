@@ -19,7 +19,16 @@
 // pressed, changing the field. The SoftEdIBO PC (QuadrantDetector / touch
 // tracking) consumes the stream unchanged:
 //   boot:   {"status":"node_magnet_sensor_ready","sensors":N,"variant":"mlx90393"}
-//   stream: {"type":"magnet","mag":[uT..],"act":[idx..]}
+//   stream: {"type":"magnet","mag":[uT..],"act":[idx..],"n":N,"t":ms}
+//
+// "n" counts stream samples (so the PC sees a dropped frame as a gap) and "t"
+// is this node's millis() when the sample round started (so the PC can place
+// each sample in time without the radio/USB latency jitter).
+//
+// Stream cadence is two-speed: `streamIntervalMs` while nothing is touched and
+// `streamActiveIntervalMs` while a sensor is active (and for ACTIVE_LINGER_MS
+// after), so a touch is sampled finely without flooding the radio at rest.
+// Both are runtime-tunable: {"cmd":"configure","stream_ms":..,"stream_active_ms":..}.
 //
 // Callers wire it up with addSensor() per MLX90393 (any bus), then
 // finishInit(streamIntervalMs) - which only BUILDS the announce message; it is
@@ -48,6 +57,8 @@ namespace magnet {
 constexpr size_t   MAX_SENSORS       = 5;
 constexpr uint16_t BASELINE_SAMPLES  = 70;     // running-average reads to auto-zero
 constexpr uint32_t ANNOUNCE_INTERVAL_MS = 2000;  // re-announce until gateway known
+constexpr uint32_t ACTIVE_LINGER_MS  = 1000;   // keep the fast cadence this long after a touch
+constexpr uint32_t MIN_STREAM_MS     = 20;     // floor for the runtime-tunable cadences
 
 constexpr mlx90393_gain_t         GAIN   = MLX90393_GAIN_2X;
 constexpr mlx90393_oversampling_t OSR    = MLX90393_OSR_2;
@@ -70,6 +81,10 @@ inline bool     ready[MAX_SENSORS] = {};
 inline size_t   count         = 0;        // slots wired via addSensor()
 inline bool     present       = false;    // any sensor detected -> module active
 inline uint32_t streamIntervalMs = 35;    // set by finishInit()
+inline uint32_t streamActiveIntervalMs = 35;   // while touched; set by finishInit()
+inline uint32_t sampleCount    = 0;       // "n" of the next stream message
+inline uint32_t lastActiveMs   = 0;       // last round with an active sensor
+inline bool     everActive     = false;
 
 inline Vec3     baseline[MAX_SENSORS] = {};
 inline bool     baselineReady = false;
@@ -112,15 +127,17 @@ inline void buildAnnounce() {
     // before judging it) - bump it whenever this module's behaviour changes.
     snprintf(announceMsg, sizeof(announceMsg),
              "{\"status\":\"node_magnet_sensor_ready\",\"sensors\":%u%s,"
-             "\"variant\":\"mlx90393\",\"fw\":\"magvec-1\"}",
+             "\"variant\":\"mlx90393\",\"fw\":\"magtime-1\"}",
              (unsigned)count, streamVec ? ",\"vec\":1" : "");
 }
 
 // Finish wiring: stream cadence + the announce message (built now, broadcast
 // later - see the header comment). `forcePresent` keeps a board with dead
 // sensors announcing (standalone magnet board: visible in scans for debugging).
-inline void finishInit(uint32_t intervalMs, bool forcePresent = false) {
+inline void finishInit(uint32_t intervalMs, bool forcePresent = false,
+                       uint32_t activeIntervalMs = 0) {
     streamIntervalMs = intervalMs;
+    streamActiveIntervalMs = activeIntervalMs ? activeIntervalMs : intervalMs;
     present = present || forcePresent;
     buildAnnounce();
     if (!present) DBG_PRINTLN("magnet: no MLX90393 found - module disabled");
@@ -144,6 +161,11 @@ inline void applyConfigure(const JsonDocument& doc) {
     }
     if (!doc["adaptive_baseline"].isNull()) adaptiveBaseline = doc["adaptive_baseline"].as<bool>();
     if (!doc["baseline_tau_ms"].isNull())   baselineTauMs    = doc["baseline_tau_ms"].as<float>();
+    if (!doc["stream_ms"].isNull())
+        streamIntervalMs = max(MIN_STREAM_MS, doc["stream_ms"].as<uint32_t>());
+    if (!doc["stream_active_ms"].isNull())
+        streamActiveIntervalMs = max(MIN_STREAM_MS,
+                                     doc["stream_active_ms"].as<uint32_t>());
     if (!doc["stream_vec"].isNull()) {
         streamVec = doc["stream_vec"].as<bool>();
         buildAnnounce();                    // keep the advertised capability honest
@@ -216,8 +238,9 @@ inline void updateAdaptiveBaseline(const Vec3* samples, const bool* valid, float
 
 // Build the stream message into buf: mag/act always; vec rows when streamVec
 // (whole uT - keeps the frame well under the 250-byte ESP-NOW payload limit
-// even with 5 sensors).
-inline void buildMessage(const Vec3* samples, const bool* valid, char* buf, size_t cap) {
+// even with 5 sensors). Returns true when any sensor is active.
+inline bool buildMessage(const Vec3* samples, const bool* valid, char* buf, size_t cap,
+                         uint32_t sampledAtMs) {
     int pos = snprintf(buf, cap, "{\"type\":\"magnet\",\"mag\":[");
     bool active[MAX_SENSORS] = {};
     for (size_t i = 0; i < count; ++i) {
@@ -255,7 +278,19 @@ inline void buildMessage(const Vec3* samples, const bool* valid, char* buf, size
             pos += snprintf(buf + pos, cap - pos, "]");
         }
     }
-    snprintf(buf + pos, cap - pos, "]}");
+    snprintf(buf + pos, cap - pos, "],\"n\":%lu,\"t\":%lu}",
+             (unsigned long)sampleCount, (unsigned long)sampledAtMs);
+    ++sampleCount;
+    for (size_t i = 0; i < count; ++i) {
+        if (active[i]) return true;
+    }
+    return false;
+}
+
+// Cadence for the next round: fast while (or just after) a sensor is active.
+inline uint32_t currentIntervalMs(uint32_t now) {
+    const bool touched = everActive && now - lastActiveMs < ACTIVE_LINGER_MS;
+    return touched ? streamActiveIntervalMs : streamIntervalMs;
 }
 
 inline void tick(uint32_t now) {
@@ -284,7 +319,7 @@ inline void tick(uint32_t now) {
         resetBaseline();
     }
 
-    if (now - lastStreamMs < streamIntervalMs) return;
+    if (now - lastStreamMs < currentIntervalMs(now)) return;
     const float dtMs = (float)(now - lastStreamMs);   // real elapsed time, for the EWMA
     lastStreamMs = now;
 
@@ -306,7 +341,10 @@ inline void tick(uint32_t now) {
     updateAdaptiveBaseline(samples, valid, dtMs);
 
     char msg[256];
-    buildMessage(samples, valid, msg, sizeof(msg));
+    if (buildMessage(samples, valid, msg, sizeof(msg), now)) {
+        lastActiveMs = now;
+        everActive   = true;
+    }
     se::node::toGateway(msg);
     DBG_PRINTLN(msg);   // echo the magnet stream over Serial in debug builds
 }
