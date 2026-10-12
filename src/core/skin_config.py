@@ -149,6 +149,36 @@ def sibling_skins(data: dict, robot_type: str, robot_index: int,
     return [sc for i, sc in enumerate(all_skins) if i != skin_index]
 
 
+def all_skin_ids(data: dict, exclude: tuple[str, int, int] | None = None
+                 ) -> list[str]:
+    """Skin ids of every robot of every kind.
+
+    Skin ids must be unique across the whole configuration, not just within
+    one robot: a session attributes touches by skin id alone. ``exclude`` is
+    the ``(robot_type, robot_index, skin_index)`` of a skin to leave out (the
+    one being edited)."""
+    ids = [str(skin.get("skin_id", "")).strip()
+           for position, skin in _iter_skins(data) if position != exclude]
+    return [skin_id for skin_id in ids if skin_id]
+
+
+def _iter_skins(data: dict):
+    """Yield ``((robot_type, robot_index, skin_index), skin_cfg)`` for every
+    configured skin."""
+    robots = data.get("robots", {})
+    for robot_type, key in YAML_KEY.items():
+        for robot_index, robot in enumerate(robots.get(key, []) or []):
+            for skin_index, skin in enumerate(robot.get("skins", []) or []):
+                yield (robot_type, robot_index, skin_index), skin
+
+
+def skin_id_taken(skin_id: str, existing_skin_ids: Iterable[str]) -> bool:
+    """True if ``skin_id`` clashes with an existing one (case-insensitive)."""
+    wanted = skin_id.strip().lower()
+    return any(wanted == str(other).strip().lower()
+               for other in existing_skin_ids)
+
+
 def next_skin_id(name_source: str, existing_skin_ids: list[str]) -> str:
     """Return ``{prefix}-{N}`` where prefix derives from ``name_source`` and N
     is one past the highest existing ``{prefix}-{n}`` among ``existing_skin_ids``."""

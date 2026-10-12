@@ -75,6 +75,39 @@ def test_next_skin_id_blank_source_falls_back():
     assert skincfg.next_skin_id("", []) == "skin-1"
 
 
+def _two_kind_data():
+    return {"robots": {
+        "turtles": [{"id": "turtle-1", "skins": [{"skin_id": "turtle-1"}]}],
+        "thymios": [
+            {"thymio_id": "thymio-1", "skins": [{"skin_id": "thymio-1"}]},
+            {"thymio_id": "thymio-2", "skins": [{"skin_id": "Thymio-2"},
+                                                {"skin_id": ""}]},
+        ],
+    }}
+
+
+def test_all_skin_ids_spans_every_robot_and_skips_blank():
+    assert sorted(skincfg.all_skin_ids(_two_kind_data())) == [
+        "Thymio-2", "thymio-1", "turtle-1"]
+
+
+def test_all_skin_ids_excludes_the_edited_skin():
+    ids = skincfg.all_skin_ids(_two_kind_data(), exclude=("thymio", 0, 0))
+    assert "thymio-1" not in ids and "Thymio-2" in ids
+
+
+def test_new_skin_id_is_unique_across_robots():
+    ids = skincfg.all_skin_ids(_two_kind_data())
+    assert skincfg.next_skin_id("thymio", ids) == "thymio-3"
+    assert skincfg.next_skin_id("tree", ids) == "tree-1"
+
+
+def test_skin_id_taken_ignores_case_and_spaces():
+    ids = skincfg.all_skin_ids(_two_kind_data())
+    assert skincfg.skin_id_taken(" THYMIO-2 ", ids)
+    assert not skincfg.skin_id_taken("thymio-3", ids)
+
+
 # --- validation -----------------------------------------------------------
 
 def test_find_missing_mac():
@@ -98,6 +131,7 @@ def test_sibling_conflicts():
 
 def test_large_pressure_changes():
     prev = [{"mac": "AA", "slot": 0, "max_pressure": 8.0}]
+    near_default = skincfg.DEFAULT_MAX_KPA + 0.5      # new chamber: vs the default
     chambers = [{"mac": "AA", "slot": 0, "max_pressure": 11.0},
                 {"mac": "BB", "slot": 1, "max_pressure": near_default}]
     changes = skincfg.large_pressure_changes(chambers, prev)
@@ -136,7 +170,6 @@ def test_build_skin_entry_strips_default_min_pressure():
 
 
 def test_build_skin_entry_omits_empty_type_variant():
-    near_default = skincfg.DEFAULT_MAX_KPA + 0.5      # new chamber: vs the default
     entry = skincfg.build_skin_entry("x", [{"mac": "AA", "slot": 0}])
     assert "skin_type" not in entry and "skin_variant" not in entry
 

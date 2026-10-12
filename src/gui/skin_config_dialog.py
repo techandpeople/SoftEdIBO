@@ -19,6 +19,7 @@ from __future__ import annotations
 from typing import Callable
 
 from PySide6.QtCore import QTimer, Signal
+from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import (
     QAbstractButton,
     QButtonGroup,
@@ -295,6 +296,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         # Track if user manually edited the skin_id - if so, stop auto-filling
         # it on template changes so we don't clobber their typing.
         self._skin_id_user_edited = False
+        self._fitted_on_show = False
 
         is_new = skin_index < 0
         self.setWindowTitle("Add Skin" if is_new else "Configure Skin")
@@ -368,7 +370,8 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
     def _populate_from_cfg(self, skin_cfg: dict) -> None:
         """Drive every widget from a saved skin entry. Split into focused
         helpers so ``__init__`` stays simple."""
-        self.skin_id_edit.setText(skin_cfg.get("skin_id", ""))
+        self.skin_id_edit.setText(
+            skin_cfg.get("skin_id", "") or self._suggested_skin_id())
         # Select the saved skin_type by data; its registry geometry then drives
         # the shape (via _on_skin_type_changed). Fall back to the stored shape
         # only when the skin has no (registered) type.
@@ -528,10 +531,21 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
 
     def _next_skin_id_for(self, tpl: SkinTemplate) -> str:
         """Return ``{tpl.name}-{N}`` with N one past the highest existing match."""
-        siblings = self._sibling_skins() + ([] if self._skin_index < 0
-                                            else [self._load_skin_cfg()])
-        ids = [sk.get("skin_id", "") for sk in siblings]
-        return skincfg.next_skin_id(tpl.name or tpl.template_id, ids)
+        return skincfg.next_skin_id(
+            tpl.name or tpl.template_id, skincfg.all_skin_ids(self._settings.data))
+
+    def _other_skin_ids(self) -> list[str]:
+        """Ids of every configured skin except the one being edited."""
+        return skincfg.all_skin_ids(
+            self._settings.data,
+            exclude=(self._robot_type, self._robot_index, self._skin_index))
+
+    def _suggested_skin_id(self) -> str:
+        """Id offered for a brand-new skin: ``{robot_type}-{N}``, with N unique
+        across every robot (empty when editing an existing skin)."""
+        if self._skin_index >= 0:
+            return ""
+        return skincfg.next_skin_id(self._robot_type, self._other_skin_ids())
 
     def _on_save_template(self) -> None:
         if self._db is None:
@@ -637,14 +651,37 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         self.add_chamber_btn.setEnabled(len(self._rows) < _MAX_CHAMBERS)
 
     def _fit_chambers_width(self) -> None:
-        """Widen the chamber list to its widest row, so no column is cut off
-        behind a horizontal scrollbar."""
+        """Keep the left column at least as wide as its widest chamber row, so
+        no field is cut off (the column never scrolls sideways)."""
         if not self._rows:
             return
-        widest = max(row.sizeHint().width() for row in self._rows)
-        extra = (self.chambers_scroll.verticalScrollBar().sizeHint().width()
-                 + 2 * self.chambers_scroll.frameWidth())
-        self.chambers_scroll.setMinimumWidth(widest + extra)
+        layout = self.left_panel.layout()
+        if layout is not None:
+            layout.activate()
+        bar = self.left_scroll.verticalScrollBar().sizeHint().width()
+        self.left_scroll.setMinimumWidth(
+            self.left_panel.minimumSizeHint().width() + bar)
+
+    def _fit_to_content(self) -> None:
+        """Size the dialog so the whole left column shows without scrolling,
+        as far as the screen allows."""
+        self._fit_chambers_width()
+        layout = self.layout()
+        if layout is None:
+            return
+        layout.activate()
+        margins = layout.contentsMargins()
+        chrome_h = (margins.top() + margins.bottom() + layout.spacing()
+                    + self.btn_row.sizeHint().height())
+        self.grow_to(self.sizeHint().width(),
+                     self.left_panel.sizeHint().height() + chrome_h)
+
+    def showEvent(self, event: QShowEvent) -> None:   # noqa: N802 - Qt API
+        super().showEvent(event)
+        if not self._fitted_on_show:
+            # Size hints are only final once the dialog is polished.
+            self._fitted_on_show = True
+            self._fit_to_content()
 
     def _remove_row(self, row: _ChamberRow) -> None:
         if row in self._rows:
@@ -652,6 +689,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
             self.rows_layout.removeWidget(row)
             row.deleteLater()
         self.add_chamber_btn.setEnabled(len(self._rows) < _MAX_CHAMBERS)
+        self._fit_chambers_width()
 
     def _on_add_chamber(self) -> None:
         # Continue on the last row's node, at its first free slot (counting
@@ -1265,6 +1303,13 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         if not skin_id:
             QMessageBox.warning(self, _MISSING_FIELD_TITLE,
                                 "Skin ID cannot be empty.")
+            return False
+        if skincfg.skin_id_taken(skin_id, self._other_skin_ids()):
+            QMessageBox.warning(
+                self, "Duplicate Skin ID",
+                f"Another skin is already called '{skin_id}'. Skin IDs must be "
+                "unique across all robots, because sessions attribute touches "
+                "by skin ID.")
             return False
         if not self._rows:
             QMessageBox.warning(self, _MISSING_FIELD_TITLE,

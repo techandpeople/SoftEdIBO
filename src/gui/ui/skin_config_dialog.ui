@@ -19,62 +19,62 @@
     <layout class="QHBoxLayout" name="columns">
      <property name="spacing"><number>8</number></property>
      <item>
-      <widget class="QWidget" name="left_panel" native="true">
-       <layout class="QVBoxLayout" name="left_layout">
-        <property name="leftMargin"><number>0</number></property>
-        <property name="topMargin"><number>0</number></property>
-        <property name="rightMargin"><number>0</number></property>
-        <property name="bottomMargin"><number>0</number></property>
-        <item>
-         <layout class="QFormLayout" name="form">
-          <item row="0" column="0">
-           <widget class="QLabel" name="skin_id_label">
-            <property name="text"><string>Skin ID:</string></property>
-           </widget>
-          </item>
-          <item row="0" column="1">
-           <widget class="QLineEdit" name="skin_id_edit">
-            <property name="whatsThis"><string>Unique identifier for this skin, used in settings.yaml and to route touches/activities. Lowercase, no spaces (e.g. belly).</string></property>
-            <property name="placeholderText"><string>e.g. belly</string></property>
-           </widget>
-          </item>
-          <item row="1" column="0">
-           <widget class="QLabel" name="skin_type_label">
-            <property name="text"><string>Skin type:</string></property>
-           </widget>
-          </item>
-          <item row="1" column="1">
-           <widget class="QComboBox" name="skin_type_combo">
-            <property name="toolTip"><string>Skin type for this robot. Determines the shape and sensor layout (from src/hardware/skin_geometry.py) and selects the touch-gesture model.</string></property>
-            <property name="whatsThis"><string>Skin type of this skin. It sets the outline and sensor layout of the preview, which silicone variants are offered and which touch-gesture model is used. Hidden when the robot has only one skin type.</string></property>
-           </widget>
-          </item>
-          <item row="2" column="0">
-           <widget class="QLabel" name="skin_variant_label">
-            <property name="text"><string>Silicone:</string></property>
-           </widget>
-          </item>
-          <item row="2" column="1">
-           <widget class="QComboBox" name="skin_variant_combo">
-            <property name="toolTip"><string>Silicone format of this skin (different chamber sizes per variant). Used as a touch-gesture ML feature.</string></property>
-            <property name="whatsThis"><string>Silicone format of this skin (the variants depend on the skin type). The variant is used as a touch-gesture ML feature.</string></property>
-           </widget>
-          </item>
-         </layout>
-        </item>
-        <item>
-         <widget class="QLabel" name="chambers_label">
-          <property name="whatsThis"><string>The chambers that make up this skin. Each row binds a node slot to a max/min pressure and an optional fill time. The live layout preview is on the right.</string></property>
-          <property name="text"><string>Chambers:</string></property>
-         </widget>
-        </item>
-        <item>
-         <widget class="QScrollArea" name="chambers_scroll">
-          <property name="maximumSize">
-           <size><width>16777215</width><height>160</height></size>
-          </property>
-          <property name="widgetResizable"><bool>true</bool></property>
-          <widget class="QWidget" name="rows_container">
+      <widget class="QScrollArea" name="left_scroll">
+       <property name="whatsThis"><string>The skin's identity, chambers and touch sensors. This column only scrolls when the screen is too small to show all of it.</string></property>
+       <property name="frameShape"><enum>QFrame::NoFrame</enum></property>
+       <property name="horizontalScrollBarPolicy"><enum>Qt::ScrollBarAlwaysOff</enum></property>
+       <property name="widgetResizable"><bool>true</bool></property>
+       <widget class="QWidget" name="left_panel">
+        <layout class="QVBoxLayout" name="left_layout">
+         <property name="leftMargin"><number>0</number></property>
+         <property name="topMargin"><number>0</number></property>
+         <property name="rightMargin"><number>0</number></property>
+         <property name="bottomMargin"><number>0</number></property>
+         <item>
+          <layout class="QFormLayout" name="form">
+           <item row="0" column="0">
+            <widget class="QLabel" name="skin_id_label">
+             <property name="text"><string>Skin ID:</string></property>
+            </widget>
+           </item>
+           <item row="0" column="1">
+            <widget class="QLineEdit" name="skin_id_edit">
+             <property name="whatsThis"><string>Unique identifier for this skin, used in settings.yaml and to route touches/activities. Must be unique across all robots. A new skin is offered the robot type plus the next free number (e.g. thymio-1).</string></property>
+             <property name="placeholderText"><string>e.g. thymio-1</string></property>
+            </widget>
+           </item>
+           <item row="1" column="0">
+            <widget class="QLabel" name="skin_type_label">
+             <property name="text"><string>Skin type:</string></property>
+            </widget>
+           </item>
+           <item row="1" column="1">
+            <widget class="QComboBox" name="skin_type_combo">
+             <property name="toolTip"><string>Skin type for this robot. Determines the shape and sensor layout (from src/hardware/skin_geometry.py) and selects the touch-gesture model.</string></property>
+             <property name="whatsThis"><string>Skin type of this skin. It sets the outline and sensor layout of the preview, which silicone variants are offered and which touch-gesture model is used. Hidden when the robot has only one skin type.</string></property>
+            </widget>
+           </item>
+           <item row="2" column="0">
+            <widget class="QLabel" name="skin_variant_label">
+             <property name="text"><string>Silicone:</string></property>
+            </widget>
+           </item>
+           <item row="2" column="1">
+            <widget class="QComboBox" name="skin_variant_combo">
+             <property name="toolTip"><string>Silicone format of this skin (different chamber sizes per variant). Used as a touch-gesture ML feature.</string></property>
+             <property name="whatsThis"><string>Silicone format of this skin (the variants depend on the skin type). The variant is used as a touch-gesture ML feature.</string></property>
+            </widget>
+           </item>
+          </layout>
+         </item>
+         <item>
+          <widget class="QLabel" name="chambers_label">
+           <property name="whatsThis"><string>The chambers that make up this skin. Each row binds a node slot to a max/min pressure and an optional fill time. The live layout preview is on the right.</string></property>
+           <property name="text"><string>Chambers:</string></property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QWidget" name="rows_container" native="true">
            <layout class="QVBoxLayout" name="rows_layout">
             <property name="leftMargin"><number>0</number></property>
             <property name="topMargin"><number>0</number></property>
@@ -83,15 +83,15 @@
             <property name="spacing"><number>3</number></property>
            </layout>
           </widget>
-         </widget>
-        </item>
-        <item>
-         <widget class="QPushButton" name="add_chamber_btn">
-          <property name="whatsThis"><string>Add a new chamber row to this skin. Set its node slot and pressure limits, then place it in the layout on the right.</string></property>
-          <property name="text"><string>+ Add Chamber</string></property>
-         </widget>
-        </item>
-       </layout>
+         </item>
+         <item>
+          <widget class="QPushButton" name="add_chamber_btn">
+           <property name="whatsThis"><string>Add a new chamber row to this skin. Set its node slot and pressure limits, then place it in the layout on the right.</string></property>
+           <property name="text"><string>+ Add Chamber</string></property>
+          </widget>
+         </item>
+        </layout>
+       </widget>
       </widget>
      </item>
      <item>

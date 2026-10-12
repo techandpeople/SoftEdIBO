@@ -24,7 +24,7 @@ is unaffected: ``exec()`` runs its own modal loop regardless of the window type.
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDialog, QWidget
+from PySide6.QtWidgets import QAbstractScrollArea, QDialog, QWidget
 
 
 class BaseDialog(QDialog):
@@ -42,3 +42,35 @@ class BaseDialog(QDialog):
             | Qt.WindowType.WindowMaximizeButtonHint
             | Qt.WindowType.WindowCloseButtonHint
         )
+
+    # Room left for the window frame (title bar + borders), which the screen's
+    # available geometry does not account for.
+    _FRAME_ALLOWANCE = (16, 48)
+
+    def grow_to(self, width: int, height: int) -> None:
+        """Grow the dialog to ``width`` x ``height`` - never shrink it, and
+        never past the screen it is on."""
+        screen = self.screen()
+        if screen is not None:
+            avail = screen.availableGeometry()
+            frame_w, frame_h = self._FRAME_ALLOWANCE
+            width = min(width, avail.width() - frame_w)
+            height = min(height, avail.height() - frame_h)
+        self.resize(max(self.width(), width), max(self.height(), height))
+
+    def grow_to_fit(self, scroll: QAbstractScrollArea, content: QWidget) -> None:
+        """Grow the dialog until ``content`` (the widget inside ``scroll``)
+        shows at its preferred size, so the scroll area only scrolls when the
+        screen is genuinely too small.
+
+        For dialogs whose content is inserted after the .ui was laid out. The
+        scroll area's own hint is a fixed small size, so the target is what it
+        holds plus the dialog's chrome around it (margins, button row)."""
+        layout = self.layout()
+        if layout is not None:
+            layout.activate()   # refresh the size hint after an insert
+        chrome = self.sizeHint() - scroll.sizeHint()
+        wanted = content.sizeHint()
+        bars = scroll.verticalScrollBar().sizeHint().width()
+        self.grow_to(wanted.width() + chrome.width() + bars,
+                     wanted.height() + chrome.height())

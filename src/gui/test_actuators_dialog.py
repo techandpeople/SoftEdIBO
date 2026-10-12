@@ -593,10 +593,6 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         if self._sensor_grid is not None:
             self._sensor_grid.feed(mag, vec)
 
-    # Room left for the window frame (title bar + borders), which the screen's
-    # available geometry does not account for.
-    _FRAME_ALLOWANCE = (16, 48)
-
     def _grow_to_fit(self) -> None:
         """Grow the dialog to its content's preferred size (never shrink, never
         past the screen - beyond that the content area scrolls). Called on open
@@ -604,24 +600,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         sensor panel is added, so runtime-inserted content isn't squeezed below
         its minimum. Grows width as well as height because the sensor tester is
         added as a new right-hand column."""
-        layout = self.layout()
-        if layout is not None:
-            layout.activate()   # refresh the size hint after the insert
-        # The scroll area's own hint is a fixed small size, so size from what it
-        # holds plus the dialog's chrome around it (margins, Close row).
-        scroll = self.content_scroll
-        chrome = self.sizeHint() - scroll.sizeHint()
-        content = self.content_widget.sizeHint()
-        bars = scroll.verticalScrollBar().sizeHint().width()
-        target_w = content.width() + chrome.width() + bars
-        target_h = content.height() + chrome.height()
-        screen = self.screen()
-        if screen is not None:
-            avail = screen.availableGeometry()
-            frame_w, frame_h = self._FRAME_ALLOWANCE
-            target_w = min(target_w, avail.width() - frame_w)
-            target_h = min(target_h, avail.height() - frame_h)
-        self.resize(max(self.width(), target_w), max(self.height(), target_h))
+        self.grow_to_fit(self.content_scroll, self.content_widget)
 
     def _rezero_sensors(self) -> None:
         """Re-zero the node's magnet baseline (sensor tester Re-zero button)."""
@@ -948,7 +927,6 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
             self._broadcast_actuate("inflate", slots)
         else:
             for slot in slots:
-        self._release_manual_holds()   # an actuation supersedes the manual override
                 self._inflate_slot(slot)
 
     def _deflate_slots(self, slots: list[int]) -> None:
@@ -959,6 +937,28 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         per-slot frames."""
         if set(slots) == set(self._chamber_cfgs) and not self._sensorless:
             self._broadcast_actuate("deflate", slots)
+        else:
+            for slot in slots:
+                self._deflate_slot(slot)
+
+    def _broadcast_actuate(self, command: str, slots: list[int]) -> None:
+        """Re-push every chamber's configured limits, then send ONE
+        ``chamber=-1`` inflate/deflate (delta=100 -> toward each chamber's
+        configured max/min) that the node fans out to all chambers. A single
+        frame can't be partially dropped, fixing the "only one chamber actuates"
+        burst-loss."""
+        self._arm()
+        self._release_manual_holds()   # an actuation supersedes the manual override
+        for slot in slots:
+            self._push_limits(slot)
+        self._gateway.send(self._mac, command, chamber=-1, delta=100)
+        self._holds.actuation_started(slots)
+        # Optimistic: show every actuated chamber's valve OPEN immediately (green
+        # once the node confirms). side 0 = inflate, 1 = deflate.
+        side = 0 if command == "inflate" else 1
+        for slot in slots:
+            self._set_valve_button((slot, side), True, confirmed=False)
+
     def _release_manual_holds(self) -> None:
         """Let go of every manual valve, pump and vent the user holds on.
 
@@ -982,27 +982,6 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
             self._drop_vent_ui(slot, send_off=True)
         self._stop_vent()
         self._refresh_manual_keepalive()
-
-        else:
-            for slot in slots:
-                self._deflate_slot(slot)
-
-    def _broadcast_actuate(self, command: str, slots: list[int]) -> None:
-        """Re-push every chamber's configured limits, then send ONE
-        ``chamber=-1`` inflate/deflate (delta=100 -> toward each chamber's
-        configured max/min) that the node fans out to all chambers. A single
-        frame can't be partially dropped, fixing the "only one chamber actuates"
-        burst-loss."""
-        self._arm()
-        for slot in slots:
-            self._push_limits(slot)
-        self._gateway.send(self._mac, command, chamber=-1, delta=100)
-        self._holds.actuation_started(slots)
-        # Optimistic: show every actuated chamber's valve OPEN immediately (green
-        # once the node confirms). side 0 = inflate, 1 = deflate.
-        side = 0 if command == "inflate" else 1
-        for slot in slots:
-            self._set_valve_button((slot, side), True, confirmed=False)
 
     def _on_hold_toggled(self, slot: int, on: bool) -> None:
         """The user switched a chamber's Hold mode (see BenchHolds)."""
@@ -1146,10 +1125,6 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         entry = self._pump_states.get(pump)
         if entry is None:
             return
-        if is_on:
-            self._pump_held.add(pump)
-        else:
-            self._pump_held.discard(pump)
         _, btn = entry
         self._pump_states[pump] = (is_on, btn)
         pump_name = "Inflate" if pump == 0 else "Deflate"
@@ -1171,6 +1146,10 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         # Optimistic label only (no green): the green fill waits for the node to
         # report the pump actually running (_update_pumps).
         self._set_pump_button(pump, is_on, confirmed=False)
+        if is_on:
+            self._pump_held.add(pump)
+        else:
+            self._pump_held.discard(pump)
 
         # Send command to firmware (re-arm first if STOP ALL latched the node)
         if is_on:
@@ -1275,7 +1254,6 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
                 self._gateway.send(self._mac, "pump_manual", pump=pump, on=1)
                 sent = True
         for slot in self._vented:
-        self._pump_held.clear()
             self._gateway.send(self._mac, "vent", chamber=slot, open=1)
             sent = True
         if not sent:
@@ -1297,6 +1275,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         Releases every held valve override and stops the keepalive; the next
         status broadcast then drives the valve buttons from the real state."""
         self._valve_intent.clear()
+        self._pump_held.clear()
         self._drop_all_vents_ui()
         for key in self._valve_states:
             self._set_valve_button(key, False)
