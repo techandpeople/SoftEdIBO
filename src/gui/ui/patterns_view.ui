@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>PatternsView</class>
+ <widget class="QWidget" name="PatternsView">
+  <property name="geometry">
+   <rect><x>0</x><y>0</y><width>720</width><height>480</height></rect>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <widget class="QLabel" name="scope_label">
+     <property name="whatsThis"><string>Which sessions the tables below are computed from. Select several sessions in the list (Ctrl/Shift-click, or click a group) to compare conditions.</string></property>
+     <property name="text"><string>Select one or more sessions.</string></property>
+     <property name="wordWrap"><bool>true</bool></property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QTabWidget" name="tables_tabs">
+     <property name="whatsThis"><string>Patterns across the selected sessions, one table per question. Each row is pooled per condition (robot kind and how the children share the touch surfaces) and says how many sessions or children it rests on.</string></property>
+     <widget class="QWidget" name="turns_page">
+      <attribute name="title"><string>Turn-taking</string></attribute>
+      <layout class="QVBoxLayout" name="turns_layout">
+       <item>
+        <widget class="QTableWidget" name="turns_table">
+         <property name="whatsThis"><string>After one child finishes a bout of touching, who touches next: the same child again ("self") or another child ("other"), how often, and after how long a pause. A high "other" share means the children alternate.</string></property>
+         <property name="editTriggers"><set>QAbstractItemView::NoEditTriggers</set></property>
+         <property name="alternatingRowColors"><bool>true</bool></property>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="behaviours_page">
+      <attribute name="title"><string>Behaviours</string></attribute>
+      <layout class="QVBoxLayout" name="behaviours_layout">
+       <item>
+        <widget class="QTableWidget" name="behaviours_table">
+         <property name="whatsThis"><string>What a child does after what: touching, and the behaviours coded in the observer panel (watches, helps, points, ...). Each row is one step, with how likely it is given what the child was doing before.</string></property>
+         <property name="editTriggers"><set>QAbstractItemView::NoEditTriggers</set></property>
+         <property name="alternatingRowColors"><bool>true</bool></property>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="reactions_page">
+      <attribute name="title"><string>Reactions</string></attribute>
+      <layout class="QVBoxLayout" name="reactions_layout">
+       <item>
+        <widget class="QTableWidget" name="reactions_table">
+         <property name="whatsThis"><string>How quickly children touch after the robot does something on its own (an action of the phase program or a phase change): the median delay and its spread, per robot action.</string></property>
+         <property name="editTriggers"><set>QAbstractItemView::NoEditTriggers</set></property>
+         <property name="alternatingRowColors"><bool>true</bool></property>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="styles_page">
+      <attribute name="title"><string>Styles</string></attribute>
+      <layout class="QVBoxLayout" name="styles_layout">
+       <item>
+        <widget class="QLabel" name="styles_note">
+         <property name="whatsThis"><string>How the styles were found and how well separated they are. Styles are groups of similar touching bouts found automatically, without labels.</string></property>
+         <property name="text"><string>-</string></property>
+         <property name="wordWrap"><bool>true</bool></property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QTableWidget" name="styles_table">
+         <property name="whatsThis"><string>Recurring styles of touching found automatically: for each style, how many bouts, children and sessions show it and what characterises it (number of touches, tempo, regularity, force, how much it happens together with others). A style seen in a single child is that child's habit, not a general pattern.</string></property>
+         <property name="editTriggers"><set>QAbstractItemView::NoEditTriggers</set></property>
+         <property name="alternatingRowColors"><bool>true</bool></property>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

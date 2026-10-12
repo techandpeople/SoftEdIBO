@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>SessionTimelineView</class>
+ <widget class="QWidget" name="SessionTimelineView">
+  <property name="geometry">
+   <rect><x>0</x><y>0</y><width>700</width><height>420</height></rect>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <layout class="QHBoxLayout" name="tools_layout">
+     <item>
+      <widget class="QPushButton" name="fit_btn">
+       <property name="toolTip"><string>Show the whole session.</string></property>
+       <property name="whatsThis"><string>Zoom out so the whole session fits the width.</string></property>
+       <property name="text"><string>Whole Session</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="zoom_in_btn">
+       <property name="toolTip"><string>Zoom in (or scroll the wheel over the timeline).</string></property>
+       <property name="whatsThis"><string>Show a shorter stretch of time in more detail. You can also scroll the mouse wheel over the timeline to zoom around the cursor.</string></property>
+       <property name="text"><string>Zoom In</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="zoom_out_btn">
+       <property name="toolTip"><string>Zoom out.</string></property>
+       <property name="whatsThis"><string>Show a longer stretch of time.</string></property>
+       <property name="text"><string>Zoom Out</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QLabel" name="hint_label">
+       <property name="text"><string>Wheel: zoom. Drag: move. Hover: details.</string></property>
+       <property name="enabled"><bool>false</bool></property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="tools_spacer">
+       <property name="orientation"><enum>Qt::Horizontal</enum></property>
+       <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+      </spacer>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <widget class="QScrollArea" name="canvas_scroll">
+     <property name="frameShape"><enum>QFrame::StyledPanel</enum></property>
+     <property name="widgetResizable"><bool>true</bool></property>
+     <widget class="TimelineCanvas" name="canvas">
+      <property name="whatsThis"><string>The session on a time axis. Top lanes: the activity phase of each robot skin. Then one lane per child (or skin, or sensor) with each touch as a bar as long as the touch lasted. Then what the robot did (dark: its own initiative; light: answering a touch), its buttons and other inputs, and what the observer coded. Hover any mark to read it.</string></property>
+     </widget>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>TimelineCanvas</class>
+   <extends>QWidget</extends>
+   <header>src.gui.data.timeline_canvas</header>
+   <container>1</container>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>

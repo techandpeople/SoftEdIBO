@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>SessionSummaryView</class>
+ <widget class="QWidget" name="SessionSummaryView">
+  <property name="geometry">
+   <rect><x>0</x><y>0</y><width>640</width><height>520</height></rect>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <widget class="QGroupBox" name="facts_group">
+     <property name="title"><string>Session</string></property>
+     <property name="whatsThis"><string>What was recorded about the selected session: the activity, the robots, who took part and how the activity ended.</string></property>
+     <layout class="QFormLayout" name="facts_layout">
+      <item row="0" column="0"><widget class="QLabel" name="activity_label"><property name="text"><string>Activity:</string></property></widget></item>
+      <item row="0" column="1"><widget class="QLabel" name="activity_value"><property name="whatsThis"><string>The activity that ran in this session.</string></property><property name="text"><string>-</string></property><property name="textInteractionFlags"><set>Qt::TextSelectableByMouse</set></property></widget></item>
+      <item row="1" column="0"><widget class="QLabel" name="when_label"><property name="text"><string>When:</string></property></widget></item>
+      <item row="1" column="1"><widget class="QLabel" name="when_value"><property name="whatsThis"><string>Start time and length of the session.</string></property><property name="text"><string>-</string></property><property name="textInteractionFlags"><set>Qt::TextSelectableByMouse</set></property></widget></item>
+      <item row="2" column="0"><widget class="QLabel" name="robots_label"><property name="text"><string>Robots:</string></property></widget></item>
+      <item row="2" column="1"><widget class="QLabel" name="robots_value"><property name="whatsThis"><string>The kinds of robot used, and how the children and the touch surfaces relate: one skin shared by several children, own skin each on one robot, or own robot each.</string></property><property name="text"><string>-</string></property><property name="wordWrap"><bool>true</bool></property><property name="textInteractionFlags"><set>Qt::TextSelectableByMouse</set></property></widget></item>
+      <item row="3" column="0"><widget class="QLabel" name="participants_label"><property name="text"><string>Participants:</string></property></widget></item>
+      <item row="3" column="1"><widget class="QLabel" name="participants_value"><property name="whatsThis"><string>Who took part, and which robot and skins each child was assigned.</string></property><property name="text"><string>-</string></property><property name="wordWrap"><bool>true</bool></property><property name="textInteractionFlags"><set>Qt::TextSelectableByMouse</set></property></widget></item>
+      <item row="4" column="0"><widget class="QLabel" name="outcome_label"><property name="text"><string>Outcome:</string></property></widget></item>
+      <item row="4" column="1"><widget class="QLabel" name="outcome_value"><property name="whatsThis"><string>How far the activity got: touches recorded, phase changes, and whether every robot reached the final phase (and after how long).</string></property><property name="text"><string>-</string></property><property name="wordWrap"><bool>true</bool></property><property name="textInteractionFlags"><set>Qt::TextSelectableByMouse</set></property></widget></item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="review_group">
+     <property name="title"><string>Your review</string></property>
+     <property name="whatsThis"><string>What you add to the session afterwards. It is stored next to the recording and never changes the recorded data.</string></property>
+     <layout class="QFormLayout" name="review_layout">
+      <item row="0" column="0"><widget class="QLabel" name="status_label"><property name="text"><string>Status:</string></property><property name="buddy"><cstring>status_combo</cstring></property></widget></item>
+      <item row="0" column="1">
+       <widget class="QComboBox" name="status_combo">
+        <property name="toolTip"><string>Whether this session counts for the study.</string></property>
+        <property name="whatsThis"><string>Valid: a real study session. Test: a rehearsal or equipment check. Excluded: a real session you decided to leave out (say why in the notes). The export can skip test and excluded sessions.</string></property>
+       </widget>
+      </item>
+      <item row="1" column="0"><widget class="QLabel" name="group_label"><property name="text"><string>Group:</string></property><property name="buddy"><cstring>group_edit</cstring></property></widget></item>
+      <item row="1" column="1">
+       <widget class="QLineEdit" name="group_edit">
+        <property name="toolTip"><string>Label of the group of children (e.g. G3).</string></property>
+        <property name="whatsThis"><string>A label shared by every session of the same group of children on the same visit. It groups the sessions in the list and is the key for joining the export with the questionnaires.</string></property>
+        <property name="placeholderText"><string>e.g. G3</string></property>
+       </widget>
+      </item>
+      <item row="2" column="0"><widget class="QLabel" name="order_label"><property name="text"><string>Order in visit:</string></property><property name="buddy"><cstring>order_spin</cstring></property></widget></item>
+      <item row="2" column="1">
+       <widget class="QSpinBox" name="order_spin">
+        <property name="toolTip"><string>Position of this session among the group's sessions (1 = first).</string></property>
+        <property name="whatsThis"><string>Which activity this was for the group during the visit: 1 for the first, 2 for the second, and so on. Leave at "not set" if it does not apply. Used to check for order effects.</string></property>
+        <property name="specialValueText"><string>not set</string></property>
+        <property name="minimum"><number>0</number></property>
+        <property name="maximum"><number>99</number></property>
+       </widget>
+      </item>
+      <item row="3" column="0"><widget class="QLabel" name="notes_label"><property name="text"><string>Notes:</string></property><property name="buddy"><cstring>notes_edit</cstring></property></widget></item>
+      <item row="3" column="1">
+       <widget class="QPlainTextEdit" name="notes_edit">
+        <property name="toolTip"><string>Free notes about this session.</string></property>
+        <property name="whatsThis"><string>Anything worth remembering about this session: interruptions, a child who left, equipment problems, why it was excluded. Exported with the session.</string></property>
+        <property name="maximumSize"><size><width>16777215</width><height>110</height></size></property>
+       </widget>
+      </item>
+      <item row="4" column="1">
+       <layout class="QHBoxLayout" name="save_layout">
+        <item>
+         <widget class="QPushButton" name="save_btn">
+          <property name="toolTip"><string>Store the status, group, order and notes.</string></property>
+          <property name="whatsThis"><string>Save your review of this session. Nothing is stored until you press this.</string></property>
+          <property name="text"><string>Save Review</string></property>
+         </widget>
+        </item>
+        <item>
+         <spacer name="save_spacer">
+          <property name="orientation"><enum>Qt::Horizontal</enum></property>
+          <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+         </spacer>
+        </item>
+       </layout>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="conditions_group">
+     <property name="title"><string>Recorded conditions</string></property>
+     <property name="whatsThis"><string>What the session ran with, captured when it started: touch thresholds and tuning, and the firmware on each board. Sessions are only comparable when these match.</string></property>
+     <layout class="QVBoxLayout" name="conditions_layout">
+      <item>
+       <widget class="QPlainTextEdit" name="conditions_text">
+        <property name="whatsThis"><string>The touch settings and node firmware in force during this session. Empty for sessions recorded before these were captured.</string></property>
+        <property name="readOnly"><bool>true</bool></property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

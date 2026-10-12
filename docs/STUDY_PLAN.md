@@ -195,11 +195,13 @@ Skins without one share a single whole-robot patient.
 
 ### Phase C - analysis support (after pilot)
 
-- [ ] Notebook/script with first-pass metrics:
-      - per-child event rate + inter-event interval distributions (rhythm);
-      - state-transition timelines per robot (time-to-cure, number of
-        cover openings, organ trial-and-error count);
-      - cross-child lagged correlation / sequence similarity (imitation).
+- [x] First-pass metrics, in the app (Data tab + "Export for Analysis",
+      see [`DATA.md`](DATA.md)):
+      - per-child touch rate, tempo and rhythm regularity;
+      - milestones per robot (what triggered each phase change, time spent,
+        touches and input changes it took);
+      - between children: touches together, who leads, lagged
+        cross-correlation, turn-taking and behaviour transitions.
 - [ ] Decide on ML for behavior detection (see section 5) **after** the pilot data
       exists.
 
@@ -207,20 +209,18 @@ Skins without one share a single whole-robot patient.
 
 ## 4. Behavioral event logging (what gets recorded)
 
-All events go to the existing `interaction_events` table
-(`session_id, participant_id, type, action, target, timestamp, metadata`).
+The full reference is [`DATA.md`](DATA.md): every event type and its fields,
+the session snapshot, the researcher's review tables, the Data tab and the
+Excel export with the definitions of the derived measures.
 
-Already logged today:
+In short, the `events` table receives touches (press / release with duration
+and peak), recognised touch types, phase changes with the condition that
+fired, robot actions, discrete inputs (button, cover, organs), named values,
+group rounds, observer codes and markers. Everything is stamped by the one PC
+(touches by the sensor sample time when the firmware provides it), so the
+streams are mutually comparable without clock sync.
 
-- `session` / `start|pause|resume|stop` (SessionPanel).
-- `touch` / `press` (+ release) per `skin_id:chamber`, attributed to the
-  participant assigned to the skin (TouchAssignmentPanel flow).
-
-Added by the behaviour engine (`ScriptedActivity`), keyed by **unit id** in
-``target`` (``<robot>/<skin>`` - each skin runs the behaviour independently):
-
-| type | action | target | metadata |
-|---|---|---|---|
+---|---|---|---|
 | `activity` | `state` | unit_id | `{"from": "...", "to": "..."}` |
 
 (The removed `OrganSwapActivity` also logged `cover open/close` and

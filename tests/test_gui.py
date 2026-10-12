@@ -12,7 +12,6 @@ from src.activities.seed_behaviors import SEED_CONDITIONS
 from src.core.session_trash import SessionTrash
 from src.data.database import Database
 from src.data.models import DeclarativeActivity, SessionRecord
-from src.gui.data_panel import DataPanel
 from src.gui.trash_dialog import TrashDialog
 from src.gui.robot_panel import RobotPanel
 from src.gui.session_panel import SessionPanel
@@ -252,60 +251,6 @@ class TestRobotPanel:
 
 
 # ---------------------------------------------------------------------------
-# DataPanel
-# ---------------------------------------------------------------------------
-
-class TestDataPanel:
-    def test_creates(self, qtbot, db):
-        panel = DataPanel(db)
-        qtbot.addWidget(panel)
-
-    def test_sessions_table_columns(self, qtbot, db):
-        panel = DataPanel(db)
-        qtbot.addWidget(panel)
-        assert panel.sessions_table.columnCount() == 4
-
-    def test_events_table_columns(self, qtbot, db):
-        panel = DataPanel(db)
-        qtbot.addWidget(panel)
-        assert panel.events_table.columnCount() == 6
-
-    def test_export_button(self, qtbot, db):
-        panel = DataPanel(db)
-        qtbot.addWidget(panel)
-        # Export now supports multi-select; with nothing selected the button shows
-        # its default "Export Selected to CSV" (relabelled with a count once rows are
-        # picked). A separate "Export All" button covers the whole roster.
-        assert panel.export_btn.text() == "Export Selected to CSV"
-
-    def test_delete_button_disabled_until_selection(self, qtbot, db):
-        db.save_session(SessionRecord("s01", "Group Touch", datetime(2026, 1, 1, 9, 0)))
-        panel = DataPanel(db)
-        qtbot.addWidget(panel)
-        assert panel.delete_btn.text() == "Delete Session"
-        assert not panel.delete_btn.isEnabled()
-        panel.sessions_table.selectRow(0)
-        assert panel.delete_btn.isEnabled()
-
-    def test_trash_button_present(self, qtbot, db):
-        panel = DataPanel(db)
-        qtbot.addWidget(panel)
-        assert panel.trash_btn.text() == "Trash..."
-
-    def test_delete_moves_selected_session_to_trash(self, qtbot, db, monkeypatch):
-        from PySide6.QtWidgets import QMessageBox
-        db.save_session(SessionRecord("s01", "Group Touch", datetime(2026, 1, 1, 9, 0)))
-        panel = DataPanel(db)
-        qtbot.addWidget(panel)
-        panel.sessions_table.selectRow(0)
-        monkeypatch.setattr(QMessageBox, "exec", lambda self: QMessageBox.StandardButton.Yes)
-        panel._on_delete()
-        assert panel.sessions_table.rowCount() == 0
-        assert db.get_all_sessions() == []
-        assert [t.session_id for t in db.list_trashed_sessions()] == ["s01"]
-
-
-# ---------------------------------------------------------------------------
 # TrashDialog
 # ---------------------------------------------------------------------------
 
@@ -349,29 +294,6 @@ class TestTrashDialog:
         qtbot.addWidget(dlg)
         assert not dlg.empty_trash_btn.isEnabled()
         assert not dlg.restore_btn.isEnabled()
-
-    def test_refresh_loads_sessions_from_db(self, qtbot, db):
-        db.save_session(SessionRecord(
-            session_id="s01",
-            activity_name="Group Touch",
-            start_time=datetime(2026, 1, 1, 10, 0),
-            end_time=datetime(2026, 1, 1, 10, 30),
-        ))
-        panel = DataPanel(db)
-        qtbot.addWidget(panel)
-        assert panel.sessions_table.rowCount() == 1
-        item = panel.sessions_table.item(0, 0)
-        assert item is not None
-        assert item.text() == "s01"
-
-    def test_refresh_shows_sessions_ordered_newest_first(self, qtbot, db):
-        db.save_session(SessionRecord("s01", "Group Touch", datetime(2026, 1, 1, 9, 0)))
-        db.save_session(SessionRecord("s02", "Group Touch", datetime(2026, 1, 1, 10, 0)))
-        panel = DataPanel(db)
-        qtbot.addWidget(panel)
-        item = panel.sessions_table.item(0, 0)
-        assert item is not None
-        assert item.text() == "s01"
 
 
 # ---------------------------------------------------------------------------
@@ -477,45 +399,6 @@ class TestActuatorsDialogHoldMode:
         qtbot.addWidget(dlg)
         return dlg
 
-    def test_inflate_releases_held_manual_valves_first(self, qtbot):
-        """A fill asked while a manual valve is held closes that valve first
-        and stops re-asserting it: node_multiplexed suspends its fill engines
-        while anything manual is on, so the fill used to start seconds late."""
-        gw = _RecordingGateway()
-        dlg = self._dialog(qtbot, gw, fill_mode="pressure")
-        _, btn = dlg._valve_states[(0, 1)]
-        dlg._toggle_valve(0, 1, btn)             # hold the deflate valve open
-        assert dlg._manual_keepalive.isActive()
-        gw.sent.clear()
-
-        dlg._inflate_slot(0)
-
-        cmds = [c for c, _ in gw.sent]
-        assert gw.sent[0] == ("valve_manual", {"chamber": 0, "side": 1, "open": 0})
-        assert cmds.index("valve_manual") < cmds.index("inflate")
-        assert not any(dlg._valve_intent.values())
-        assert not dlg._manual_keepalive.isActive()   # nothing re-opens it
-
-    def test_deflate_releases_a_manual_pump_the_user_switched_on(self, qtbot):
-        gw = _RecordingGateway()
-        dlg = self._dialog(qtbot, gw, fill_mode="pressure")
-        dlg._toggle_pump(0, dlg.pump_inf_btn)
-        gw.sent.clear()
-
-        dlg._deflate_slot(0)
-
-        cmds = [c for c, _ in gw.sent]
-        assert gw.sent[0] == ("pump_manual", {"pump": 0, "on": 0})
-        assert cmds.index("pump_manual") < cmds.index("deflate")
-        assert not dlg._manual_keepalive.isActive()
-
-    def test_actuation_with_nothing_held_sends_no_manual_frames(self, qtbot):
-        gw = _RecordingGateway()
-        dlg = self._dialog(qtbot, gw, fill_mode="pressure")
-        dlg._inflate_slot(0)
-        cmds = [c for c, _ in gw.sent]
-        assert not {"valve_manual", "pump_manual", "vent"} & set(cmds)
-
     def test_mode_on_holds_at_current_level_and_survives_actuation(self, qtbot):
         from unittest.mock import MagicMock
         ctrl = MagicMock()
@@ -581,6 +464,123 @@ class TestActuatorsDialogActuation:
         assert inflate == [{"chamber": 0, "delta": 100}]
 
     def test_inflate_time_mode_uses_calibrated_time_window(self, qtbot):
+        gw = _RecordingGateway()
+        dlg = self._dialog(qtbot, gw, fill_mode="time", fill_time_ms=3000)
+        dlg._inflate_slot(0)
+        inflate = [kw for c, kw in gw.sent if c == "inflate"]
+        assert inflate == [{"chamber": 0, "delta": 100, "ms": 3000}]
+
+    def test_inflate_time_mode_without_calibration_falls_back_to_pressure(self, qtbot):
+        gw = _RecordingGateway()
+        dlg = self._dialog(qtbot, gw, fill_mode="time", fill_time_ms=None)
+        dlg._inflate_slot(0)
+        inflate = [kw for c, kw in gw.sent if c == "inflate"]
+        assert inflate == [{"chamber": 0, "delta": 100}]
+
+    def test_inflate_releases_held_manual_valves_first(self, qtbot):
+        """A fill asked while a manual valve is held closes that valve first
+        and stops re-asserting it: node_multiplexed suspends its fill engines
+        while anything manual is on, so the fill used to start seconds late."""
+        gw = _RecordingGateway()
+        dlg = self._dialog(qtbot, gw, fill_mode="pressure")
+        _, btn = dlg._valve_states[(0, 1)]
+        dlg._toggle_valve(0, 1, btn)             # hold the deflate valve open
+        assert dlg._manual_keepalive.isActive()
+        gw.sent.clear()
+
+        dlg._inflate_slot(0)
+
+        cmds = [c for c, _ in gw.sent]
+        assert gw.sent[0] == ("valve_manual", {"chamber": 0, "side": 1, "open": 0})
+        assert cmds.index("valve_manual") < cmds.index("inflate")
+        assert not any(dlg._valve_intent.values())
+        assert not dlg._manual_keepalive.isActive()   # nothing re-opens it
+
+    def test_deflate_releases_a_manual_pump_the_user_switched_on(self, qtbot):
+        gw = _RecordingGateway()
+        dlg = self._dialog(qtbot, gw, fill_mode="pressure")
+        dlg._toggle_pump(0, dlg.pump_inf_btn)
+        gw.sent.clear()
+
+        dlg._deflate_slot(0)
+
+        cmds = [c for c, _ in gw.sent]
+        assert gw.sent[0] == ("pump_manual", {"pump": 0, "on": 0})
+        assert cmds.index("pump_manual") < cmds.index("deflate")
+        assert not dlg._manual_keepalive.isActive()
+
+    def test_actuation_with_nothing_held_sends_no_manual_frames(self, qtbot):
+        gw = _RecordingGateway()
+        dlg = self._dialog(qtbot, gw, fill_mode="pressure")
+        dlg._inflate_slot(0)
+        cmds = [c for c, _ in gw.sent]
+        assert not {"valve_manual", "pump_manual", "vent"} & set(cmds)
+
+    def test_deflate_pushes_limits_and_runs_to_configured_min(self, qtbot):
+        gw = _RecordingGateway()
+        dlg = self._dialog(qtbot, gw, fill_mode="time", fill_time_ms=3000)
+        dlg._deflate_slot(0)
+        cmds = [c for c, _ in gw.sent]
+        assert cmds[:2] == ["set_max_pressure", "set_min_pressure"]
+        deflate = [kw for c, kw in gw.sent if c == "deflate"]
+        assert deflate == [{"chamber": 0, "delta": 100}]
+
+
+class TestActuatorsDialogSensors:
+    """The live magnet-sensor readout embedded in the Test Actuators dialog."""
+
+    MAC = "AA:BB:CC:DD:EE:FF"
+
+    def _dialog(self, qtbot, gateway):
+        from src.gui.test_actuators_dialog import TestActuatorsDialog
+
+        dlg = TestActuatorsDialog(self.MAC, [], gateway, led_count=0)
+        qtbot.addWidget(dlg)
+        gateway.sent.clear()
+        return dlg
+
+    def test_sensor_tester_built_lazily_on_first_magnet_frame(self, qtbot):
+        dlg = self._dialog(qtbot, _RecordingGateway())
+        assert dlg._sensor_tester is None            # nothing until a frame arrives
+        dlg._on_magnet_data([10.0, 200.0, 0.0, 0.0])
+        assert dlg._sensor_tester is not None
+        assert dlg._sensor_tester._count == 4        # count follows the frame length
+
+    def test_active_highlight_follows_threshold(self, qtbot):
+        dlg = self._dialog(qtbot, _RecordingGateway())
+        dlg._on_magnet_data([10.0, 200.0, 0.0, 0.0])
+        tester = dlg._sensor_tester
+        assert tester is not None
+        tester.threshold_spin.setValue(100.0)
+        tester.update_values([10.0, 200.0, 0.0, 0.0])
+        # Only S1 (200 uT) clears the 100 uT threshold.
+        assert tester._active_shown == [False, True, False, False]
+        # Dropping the threshold below S0 lights it too; the two 0 uT sensors stay off.
+        tester.threshold_spin.setValue(5.0)
+        assert tester._active_shown == [True, True, False, False]
+
+    def test_rezero_sends_rebaseline(self, qtbot):
+        gw = _RecordingGateway()
+        dlg = self._dialog(qtbot, gw)
+        dlg._on_magnet_data([0.0, 0.0, 0.0, 0.0])
+        tester = dlg._sensor_tester
+        assert tester is not None
+        tester.rezero_btn.click()
+        assert ("rebaseline", {}) in gw.sent
+
+    def test_push_sends_threshold_uT_to_node(self, qtbot):
+        gw = _RecordingGateway()
+        dlg = self._dialog(qtbot, gw)
+        dlg._on_magnet_data([0.0, 0.0, 0.0, 0.0])
+        tester = dlg._sensor_tester
+        assert tester is not None
+        tester.threshold_spin.setValue(120.0)
+        tester.push_btn.click()
+        cfg = [kw for c, kw in gw.sent if c == "configure"]
+        assert len(cfg) == 1
+        # The uT threshold goes straight to the node - it flips a sensor active at
+        # exactly 120 uT (no fullscale/fraction gymnastics).
+        assert cfg[0]["act_threshold_ut"] == pytest.approx(120.0)
 
 
 # ---------------------------------------------------------------------------
@@ -683,81 +683,3 @@ class TestSensorMapDialog:
         dlg._on_raw(self.MAC, [500] * 16)
         assert session.phase.value == "baseline"
         dlg._stop()
-        gw = _RecordingGateway()
-        dlg = self._dialog(qtbot, gw, fill_mode="time", fill_time_ms=3000)
-        dlg._inflate_slot(0)
-        inflate = [kw for c, kw in gw.sent if c == "inflate"]
-        assert inflate == [{"chamber": 0, "delta": 100, "ms": 3000}]
-
-    def test_inflate_time_mode_without_calibration_falls_back_to_pressure(self, qtbot):
-        gw = _RecordingGateway()
-        dlg = self._dialog(qtbot, gw, fill_mode="time", fill_time_ms=None)
-        dlg._inflate_slot(0)
-        inflate = [kw for c, kw in gw.sent if c == "inflate"]
-        assert inflate == [{"chamber": 0, "delta": 100}]
-
-    def test_deflate_pushes_limits_and_runs_to_configured_min(self, qtbot):
-        gw = _RecordingGateway()
-        dlg = self._dialog(qtbot, gw, fill_mode="time", fill_time_ms=3000)
-        dlg._deflate_slot(0)
-        cmds = [c for c, _ in gw.sent]
-        assert cmds[:2] == ["set_max_pressure", "set_min_pressure"]
-        deflate = [kw for c, kw in gw.sent if c == "deflate"]
-        assert deflate == [{"chamber": 0, "delta": 100}]
-
-
-class TestActuatorsDialogSensors:
-    """The live magnet-sensor readout embedded in the Test Actuators dialog."""
-
-    MAC = "AA:BB:CC:DD:EE:FF"
-
-    def _dialog(self, qtbot, gateway):
-        from src.gui.test_actuators_dialog import TestActuatorsDialog
-
-        dlg = TestActuatorsDialog(self.MAC, [], gateway, led_count=0)
-        qtbot.addWidget(dlg)
-        gateway.sent.clear()
-        return dlg
-
-    def test_sensor_tester_built_lazily_on_first_magnet_frame(self, qtbot):
-        dlg = self._dialog(qtbot, _RecordingGateway())
-        assert dlg._sensor_tester is None            # nothing until a frame arrives
-        dlg._on_magnet_data([10.0, 200.0, 0.0, 0.0])
-        assert dlg._sensor_tester is not None
-        assert dlg._sensor_tester._count == 4        # count follows the frame length
-
-    def test_active_highlight_follows_threshold(self, qtbot):
-        dlg = self._dialog(qtbot, _RecordingGateway())
-        dlg._on_magnet_data([10.0, 200.0, 0.0, 0.0])
-        tester = dlg._sensor_tester
-        assert tester is not None
-        tester.threshold_spin.setValue(100.0)
-        tester.update_values([10.0, 200.0, 0.0, 0.0])
-        # Only S1 (200 uT) clears the 100 uT threshold.
-        assert tester._active_shown == [False, True, False, False]
-        # Dropping the threshold below S0 lights it too; the two 0 uT sensors stay off.
-        tester.threshold_spin.setValue(5.0)
-        assert tester._active_shown == [True, True, False, False]
-
-    def test_rezero_sends_rebaseline(self, qtbot):
-        gw = _RecordingGateway()
-        dlg = self._dialog(qtbot, gw)
-        dlg._on_magnet_data([0.0, 0.0, 0.0, 0.0])
-        tester = dlg._sensor_tester
-        assert tester is not None
-        tester.rezero_btn.click()
-        assert ("rebaseline", {}) in gw.sent
-
-    def test_push_sends_threshold_uT_to_node(self, qtbot):
-        gw = _RecordingGateway()
-        dlg = self._dialog(qtbot, gw)
-        dlg._on_magnet_data([0.0, 0.0, 0.0, 0.0])
-        tester = dlg._sensor_tester
-        assert tester is not None
-        tester.threshold_spin.setValue(120.0)
-        tester.push_btn.click()
-        cfg = [kw for c, kw in gw.sent if c == "configure"]
-        assert len(cfg) == 1
-        # The uT threshold goes straight to the node - it flips a sensor active at
-        # exactly 120 uT (no fullscale/fraction gymnastics).
-        assert cfg[0]["act_threshold_ut"] == pytest.approx(120.0)

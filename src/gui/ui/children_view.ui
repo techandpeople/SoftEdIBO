@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>ChildrenView</class>
+ <widget class="QWidget" name="ChildrenView">
+  <property name="geometry">
+   <rect><x>0</x><y>0</y><width>700</width><height>480</height></rect>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <widget class="QGroupBox" name="profiles_group">
+     <property name="title"><string>Each child</string></property>
+     <property name="whatsThis"><string>One row per child (or skin, or sensor, depending on "Group touches by"): how much they touched, at what tempo, how regularly, how hard and how fast they reacted to the robot. Hover a column title for its exact meaning.</string></property>
+     <layout class="QVBoxLayout" name="profiles_layout">
+      <item>
+       <widget class="QTableWidget" name="profiles_table">
+        <property name="whatsThis"><string>Touch profile of each child in this session. Tempo is touches per minute while touching (pauses excluded); regularity is 0 for a perfectly even rhythm and grows as it gets uneven. Hover a column title for its meaning and unit.</string></property>
+        <property name="editTriggers"><set>QAbstractItemView::NoEditTriggers</set></property>
+        <property name="alternatingRowColors"><bool>true</bool></property>
+        <property name="selectionBehavior"><enum>QAbstractItemView::SelectRows</enum></property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="pairs_group">
+     <property name="title"><string>Between children</string></property>
+     <property name="whatsThis"><string>One row per pair of children: how often they touched together, who tended to go first and by how much, and how similar their touch patterns were over time.</string></property>
+     <layout class="QVBoxLayout" name="pairs_layout">
+      <item>
+       <widget class="QTableWidget" name="pairs_table">
+        <property name="whatsThis"><string>Alignment between each pair of children. "Together" counts touches made within a fraction of a second of each other; "A leads" is the share of those where the first child was first; the correlation lag says how far behind the second child's pattern follows. Hover a column title for its meaning and unit.</string></property>
+        <property name="editTriggers"><set>QAbstractItemView::NoEditTriggers</set></property>
+        <property name="alternatingRowColors"><bool>true</bool></property>
+        <property name="selectionBehavior"><enum>QAbstractItemView::SelectRows</enum></property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

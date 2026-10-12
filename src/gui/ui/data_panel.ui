@@ -3,68 +3,111 @@
  <class>DataPanel</class>
  <widget class="QWidget" name="DataPanel">
   <property name="geometry">
-   <rect><x>0</x><y>0</y><width>800</width><height>600</height></rect>
+   <rect><x>0</x><y>0</y><width>1100</width><height>680</height></rect>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>
-    <widget class="QGroupBox" name="sessions_group">
-     <property name="title"><string>Past Sessions</string></property>
-     <property name="whatsThis"><string>All recorded sessions. Select one or more (Ctrl/Shift-click) to export or delete them; the first selection's events show below.</string></property>
-     <layout class="QVBoxLayout" name="sessions_layout">
-      <item>
-       <widget class="QTableWidget" name="sessions_table">
-        <property name="whatsThis"><string>One row per recorded session: ID, activity, start and end. Select one or more rows (Ctrl/Shift-click) to export or delete them; the first selected session's events show below.</string></property>
-        <property name="selectionBehavior">
-         <enum>QAbstractItemView::SelectRows</enum>
-        </property>
-        <property name="selectionMode">
-         <enum>QAbstractItemView::ExtendedSelection</enum>
-        </property>
-        <property name="editTriggers">
-         <set>QAbstractItemView::NoEditTriggers</set>
-        </property>
-        <property name="alternatingRowColors"><bool>true</bool></property>
-        <property name="columnCount"><number>4</number></property>
-        <column><property name="text"><string>Session ID</string></property></column>
-        <column><property name="text"><string>Activity</string></property></column>
-        <column><property name="text"><string>Start</string></property></column>
-        <column><property name="text"><string>End</string></property></column>
-       </widget>
-      </item>
-     </layout>
-    </widget>
-   </item>
-   <item>
-    <widget class="QGroupBox" name="events_group">
-     <property name="title"><string>Events</string></property>
-     <property name="whatsThis"><string>Timeline of what happened in the selected session: who did what, on which robot and target, with any extra metadata.</string></property>
-     <layout class="QVBoxLayout" name="events_layout">
-      <item>
-       <widget class="QTableWidget" name="events_table">
-        <property name="whatsThis"><string>Events of the selected session, in time order: when it happened, which participant and robot, the action, its target and any extra metadata.</string></property>
-        <property name="selectionBehavior">
-         <enum>QAbstractItemView::SelectRows</enum>
-        </property>
-        <property name="editTriggers">
-         <set>QAbstractItemView::NoEditTriggers</set>
-        </property>
-        <property name="alternatingRowColors"><bool>true</bool></property>
-        <property name="columnCount"><number>6</number></property>
-        <column><property name="text"><string>Time</string></property></column>
-        <column><property name="text"><string>Participant</string></property></column>
-        <column><property name="text"><string>Robot</string></property></column>
-        <column><property name="text"><string>Action</string></property></column>
-        <column><property name="text"><string>Target</string></property></column>
-        <column><property name="text"><string>Metadata</string></property></column>
-       </widget>
-      </item>
-     </layout>
+    <widget class="QSplitter" name="splitter">
+     <property name="orientation"><enum>Qt::Horizontal</enum></property>
+     <property name="childrenCollapsible"><bool>false</bool></property>
+     <widget class="QGroupBox" name="sessions_group">
+      <property name="title"><string>Sessions</string></property>
+      <property name="whatsThis"><string>Every recorded session, grouped by the group of children it belongs to. Select one to review it on the right; select several (Ctrl/Shift-click) to export or delete them together.</string></property>
+      <layout class="QVBoxLayout" name="sessions_layout">
+       <item>
+        <layout class="QHBoxLayout" name="filter_layout">
+         <item>
+          <widget class="QLineEdit" name="filter_edit">
+           <property name="toolTip"><string>Show only sessions whose ID, activity, group, robot or participant contains this text.</string></property>
+           <property name="whatsThis"><string>Type part of a session ID, activity name, group label, robot kind or participant ID to narrow the list. Leave empty to show every session.</string></property>
+           <property name="placeholderText"><string>Filter sessions...</string></property>
+           <property name="clearButtonEnabled"><bool>true</bool></property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QComboBox" name="status_filter">
+           <property name="toolTip"><string>Show only sessions with this review status.</string></property>
+           <property name="whatsThis"><string>Narrow the list to sessions you marked as valid, test or excluded in the Summary view. "All statuses" shows everything.</string></property>
+          </widget>
+         </item>
+        </layout>
+       </item>
+       <item>
+        <widget class="QTreeWidget" name="sessions_tree">
+         <property name="whatsThis"><string>One row per session under its group of children: activity, start, duration, number of children, review status and whether the activity reached its final phase. Sessions with no group label are listed under "(no group)".</string></property>
+         <property name="selectionMode"><enum>QAbstractItemView::ExtendedSelection</enum></property>
+         <property name="alternatingRowColors"><bool>true</bool></property>
+         <property name="rootIsDecorated"><bool>true</bool></property>
+         <property name="uniformRowHeights"><bool>true</bool></property>
+         <column><property name="text"><string>Session</string></property></column>
+         <column><property name="text"><string>Activity</string></property></column>
+         <column><property name="text"><string>Start</string></property></column>
+         <column><property name="text"><string>Duration</string></property></column>
+         <column><property name="text"><string>Children</string></property></column>
+         <column><property name="text"><string>Status</string></property></column>
+         <column><property name="text"><string>Finished</string></property></column>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="review_panel" native="true">
+      <layout class="QVBoxLayout" name="review_layout">
+       <property name="leftMargin"><number>0</number></property>
+       <property name="topMargin"><number>0</number></property>
+       <property name="rightMargin"><number>0</number></property>
+       <property name="bottomMargin"><number>0</number></property>
+       <item>
+        <layout class="QHBoxLayout" name="source_layout">
+         <item>
+          <widget class="QLabel" name="source_label">
+           <property name="text"><string>Group touches by:</string></property>
+           <property name="buddy"><cstring>source_combo</cstring></property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QComboBox" name="source_combo">
+           <property name="toolTip"><string>Who a touch is attributed to in the timeline, the children tables and the export.</string></property>
+           <property name="whatsThis"><string>How touches are grouped. Participant: the child assigned to the touched skin (use when each child has their own skin). Skin: one group per skin. Sensor: one group per touch sensor, for a skin several children share, where the sensor position is the only way to tell them apart.</string></property>
+          </widget>
+         </item>
+         <item>
+          <spacer name="source_spacer">
+           <property name="orientation"><enum>Qt::Horizontal</enum></property>
+           <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+          </spacer>
+         </item>
+        </layout>
+       </item>
+       <item>
+        <widget class="QTabWidget" name="views_tabs">
+         <property name="whatsThis"><string>Views of the selected session: its summary and your review notes, a timeline of everything that happened, the measures per child and between children, and the raw events. The last view, Patterns, pools every selected session to compare conditions.</string></property>
+         <property name="currentIndex"><number>0</number></property>
+         <widget class="SessionSummaryView" name="summary_view">
+          <attribute name="title"><string>Summary</string></attribute>
+         </widget>
+         <widget class="SessionTimelineView" name="timeline_view">
+          <attribute name="title"><string>Timeline</string></attribute>
+         </widget>
+         <widget class="ChildrenView" name="children_view">
+          <attribute name="title"><string>Children</string></attribute>
+         </widget>
+         <widget class="SessionEventsView" name="events_view">
+          <attribute name="title"><string>Events</string></attribute>
+         </widget>
+         <widget class="PatternsView" name="patterns_view">
+          <attribute name="title"><string>Patterns</string></attribute>
+         </widget>
+        </widget>
+       </item>
+      </layout>
+     </widget>
     </widget>
    </item>
    <item>
     <layout class="QHBoxLayout" name="export_layout">
      <item>
       <widget class="QPushButton" name="delete_btn">
+       <property name="toolTip"><string>Move the selected sessions to the trash.</string></property>
        <property name="whatsThis"><string>Move the selected session to the trash. It leaves the list and can be restored (or deleted for good) from the Trash button.</string></property>
        <property name="styleSheet"><string>QPushButton { color: white; background-color: #c0392b; } QPushButton:hover { background-color: #e74c3c; } QPushButton:disabled { color: #cccccc; background-color: #b5817c; }</string></property>
        <property name="text"><string>Delete Session</string></property>
@@ -72,34 +115,60 @@
      </item>
      <item>
       <widget class="QPushButton" name="trash_btn">
+       <property name="toolTip"><string>Restore or permanently delete trashed sessions.</string></property>
        <property name="whatsThis"><string>Open the trash: sessions you deleted are kept there so nothing is lost by accident. From it you can restore a session or delete it permanently.</string></property>
        <property name="text"><string>Trash...</string></property>
       </widget>
      </item>
      <item>
-      <spacer>
+      <spacer name="export_spacer">
        <property name="orientation"><enum>Qt::Horizontal</enum></property>
+       <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
       </spacer>
      </item>
      <item>
       <widget class="QPushButton" name="export_btn">
-       <property name="minimumSize">
-        <size><width>210</width><height>0</height></size>
-       </property>
-       <property name="whatsThis"><string>Save the selected sessions' events to a CSV file.</string></property>
-       <property name="text"><string>Export Selected to CSV</string></property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QPushButton" name="export_all_btn">
-       <property name="whatsThis"><string>Save every recorded session to a single CSV file.</string></property>
-       <property name="text"><string>Export All Sessions to CSV</string></property>
+       <property name="toolTip"><string>Save the sessions as an Excel workbook ready for statistics.</string></property>
+       <property name="whatsThis"><string>Export sessions to one Excel workbook with a sheet per table: sessions, milestones, participants, touches, profiles per child, pairs of children, raw events and a dictionary explaining every column. The selected sessions are offered first; you can also export all of them.</string></property>
+       <property name="text"><string>Export for Analysis...</string></property>
       </widget>
      </item>
     </layout>
    </item>
   </layout>
  </widget>
+ <customwidgets>
+  <customwidget>
+   <class>SessionSummaryView</class>
+   <extends>QWidget</extends>
+   <header>src.gui.data.session_summary_view</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>SessionTimelineView</class>
+   <extends>QWidget</extends>
+   <header>src.gui.data.session_timeline_view</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>ChildrenView</class>
+   <extends>QWidget</extends>
+   <header>src.gui.data.children_view</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>PatternsView</class>
+   <extends>QWidget</extends>
+   <header>src.gui.data.patterns_view</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>SessionEventsView</class>
+   <extends>QWidget</extends>
+   <header>src.gui.data.session_events_view</header>
+   <container>1</container>
+  </customwidget>
+ </customwidgets>
  <resources/>
  <connections/>
 </ui>

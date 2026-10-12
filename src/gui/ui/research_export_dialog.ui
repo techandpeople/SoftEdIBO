@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>ResearchExportDialog</class>
+ <widget class="QDialog" name="ResearchExportDialog">
+  <property name="geometry">
+   <rect><x>0</x><y>0</y><width>460</width><height>300</height></rect>
+  </property>
+  <property name="windowTitle"><string>Export for Analysis</string></property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <widget class="QGroupBox" name="scope_group">
+     <property name="title"><string>Sessions to export</string></property>
+     <property name="whatsThis"><string>Which sessions go into the workbook.</string></property>
+     <layout class="QVBoxLayout" name="scope_layout">
+      <item>
+       <widget class="QRadioButton" name="selected_radio">
+        <property name="toolTip"><string>Export only the sessions selected in the list.</string></property>
+        <property name="whatsThis"><string>Export only the sessions you selected in the Data tab's list.</string></property>
+        <property name="text"><string>Selected sessions</string></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QRadioButton" name="all_radio">
+        <property name="toolTip"><string>Export every session in the database.</string></property>
+        <property name="whatsThis"><string>Export every recorded session, whatever is selected or filtered in the list.</string></property>
+        <property name="text"><string>All sessions</string></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QCheckBox" name="include_test_check">
+        <property name="toolTip"><string>Also export sessions marked as test.</string></property>
+        <property name="whatsThis"><string>Include sessions whose review status is "test" (rehearsals, equipment checks). Normally left off so they do not end up in the statistics.</string></property>
+        <property name="text"><string>Include sessions marked as test</string></property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QCheckBox" name="include_excluded_check">
+        <property name="toolTip"><string>Also export sessions marked as excluded.</string></property>
+        <property name="whatsThis"><string>Include sessions whose review status is "excluded". Normally left off; turn it on to audit what was left out.</string></property>
+        <property name="text"><string>Include sessions marked as excluded</string></property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <layout class="QFormLayout" name="options_layout">
+     <item row="0" column="0">
+      <widget class="QLabel" name="source_label">
+       <property name="text"><string>Group touches by:</string></property>
+       <property name="buddy"><cstring>source_combo</cstring></property>
+      </widget>
+     </item>
+     <item row="0" column="1">
+      <widget class="QComboBox" name="source_combo">
+       <property name="toolTip"><string>Who a touch is attributed to in the exported tables.</string></property>
+       <property name="whatsThis"><string>How touches are grouped in the Touches, Profiles and Pairs sheets. Participant: the child assigned to the touched skin. Skin: one group per skin. Sensor: one group per touch sensor, for a skin several children share.</string></property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <widget class="QLabel" name="summary_label">
+     <property name="whatsThis"><string>How many sessions the current choices export.</string></property>
+     <property name="text"><string>-</string></property>
+     <property name="wordWrap"><bool>true</bool></property>
+    </widget>
+   </item>
+   <item>
+    <spacer name="verticalSpacer">
+     <property name="orientation"><enum>Qt::Vertical</enum></property>
+     <property name="sizeHint" stdset="0"><size><width>20</width><height>10</height></size></property>
+    </spacer>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="buttons_layout">
+     <item>
+      <spacer name="buttons_spacer">
+       <property name="orientation"><enum>Qt::Horizontal</enum></property>
+       <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="QPushButton" name="cancel_btn">
+       <property name="whatsThis"><string>Close without exporting.</string></property>
+       <property name="toolTip"><string>Close without exporting.</string></property>
+       <property name="text"><string>Cancel</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="export_btn">
+       <property name="toolTip"><string>Choose where to save the Excel workbook.</string></property>
+       <property name="whatsThis"><string>Choose a file name and write the workbook: one sheet per table plus a Dictionary sheet that explains every column.</string></property>
+       <property name="text"><string>Export...</string></property>
+       <property name="default"><bool>true</bool></property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

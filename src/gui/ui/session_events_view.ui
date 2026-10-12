@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>SessionEventsView</class>
+ <widget class="QWidget" name="SessionEventsView">
+  <property name="geometry">
+   <rect><x>0</x><y>0</y><width>760</width><height>480</height></rect>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <layout class="QHBoxLayout" name="filter_layout">
+     <item>
+      <widget class="QLabel" name="type_label">
+       <property name="text"><string>Show:</string></property>
+       <property name="buddy"><cstring>type_filter</cstring></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QComboBox" name="type_filter">
+       <property name="toolTip"><string>Show only events of one kind.</string></property>
+       <property name="whatsThis"><string>Narrow the list to one kind of event: touches, phase changes, robot actions, inputs, observer codes and so on. "All events" shows everything.</string></property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="filter_spacer">
+       <property name="orientation"><enum>Qt::Horizontal</enum></property>
+       <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+      </spacer>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <widget class="QTableWidget" name="events_table">
+     <property name="whatsThis"><string>Every event recorded in this session, in time order: when (to the millisecond, and in seconds since the start), who, what and the recorded details. Events you corrected show the correction in the last column; excluded events are greyed out.</string></property>
+     <property name="editTriggers"><set>QAbstractItemView::NoEditTriggers</set></property>
+     <property name="alternatingRowColors"><bool>true</bool></property>
+     <property name="selectionBehavior"><enum>QAbstractItemView::SelectRows</enum></property>
+     <property name="selectionMode"><enum>QAbstractItemView::ExtendedSelection</enum></property>
+     <column><property name="text"><string>Time</string></property></column>
+     <column><property name="text"><string>Since start (s)</string></property></column>
+     <column><property name="text"><string>Participant</string></property></column>
+     <column><property name="text"><string>Kind</string></property></column>
+     <column><property name="text"><string>What</string></property></column>
+     <column><property name="text"><string>On</string></property></column>
+     <column><property name="text"><string>Details</string></property></column>
+     <column><property name="text"><string>Correction</string></property></column>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="correct_layout">
+     <item>
+      <widget class="QLabel" name="correct_label">
+       <property name="text"><string>Selected events:</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QComboBox" name="participant_combo">
+       <property name="toolTip"><string>The participant the selected events really belong to.</string></property>
+       <property name="whatsThis"><string>Pick the child who actually made the selected events, then press "Attribute To". Use it when a touch was logged under the wrong child.</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="reassign_btn">
+       <property name="toolTip"><string>Attribute the selected events to the chosen participant.</string></property>
+       <property name="whatsThis"><string>Record that the selected events belong to the chosen participant. The original record is kept; the correction is applied on top in every view and in the export.</string></property>
+       <property name="text"><string>Attribute To</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="exclude_btn">
+       <property name="toolTip"><string>Leave the selected events out of the analysis.</string></property>
+       <property name="whatsThis"><string>Leave the selected events out of every measure and of the export, for example an adult touching the robot by accident. The events stay in the record and can be brought back with "Undo Correction".</string></property>
+       <property name="text"><string>Exclude</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="clear_btn">
+       <property name="toolTip"><string>Remove the correction from the selected events.</string></property>
+       <property name="whatsThis"><string>Remove any correction from the selected events, so they count again exactly as they were recorded.</string></property>
+       <property name="text"><string>Undo Correction</string></property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="correct_spacer">
+       <property name="orientation"><enum>Qt::Horizontal</enum></property>
+       <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+      </spacer>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
