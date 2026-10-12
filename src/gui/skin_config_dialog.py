@@ -647,6 +647,10 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         row.width_changed.connect(self._fit_chambers_width)
         self._rows.append(row)
         self.rows_layout.addWidget(row)
+        # A widget added to an already-visible layout is only shown on the
+        # next event-loop pass; until then the layout ignores it and the
+        # width fit below would not count this row.
+        row.show()
         self._fit_chambers_width()
         self.add_chamber_btn.setEnabled(len(self._rows) < _MAX_CHAMBERS)
 

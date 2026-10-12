@@ -93,3 +93,16 @@ def test_dialog_shows_the_left_column_in_full_and_fits_the_screen(qtbot):
     # open at its designed size on a very small screen).
     assert dlg.width() <= max(avail.width(), 900)
     assert dlg.height() <= max(avail.height(), 620)
+
+
+def test_first_chamber_added_to_an_open_dialog_is_not_cut_off(qtbot):
+    dlg = _dialog(qtbot, _Settings(_data()))
+    dlg.show()
+    qtbot.waitExposed(dlg)
+    # Back to no rows, then add the first one while the dialog is on screen.
+    cast(Any, dlg.rows_layout.itemAt(0)).widget().remove_btn.click()
+    qtbot.wait(50)
+    dlg._on_add_chamber()
+    qtbot.wait(50)
+    viewport = dlg.left_scroll.viewport()
+    assert viewport.width() >= dlg.left_panel.minimumSizeHint().width()
