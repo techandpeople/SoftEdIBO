@@ -33,7 +33,7 @@ class RobotMonitorPanel(QWidget):
     """Scrollable panel - one RobotMonitorWidget per robot, auto-refreshed."""
 
     touch_event = Signal(str, int, str)  # (skin_id, chamber_id, action)
-    touch_detail_event = Signal(str, int, str, int, object)
+    touch_edge_event = Signal(str, object)   # (skin_id, TouchEdge)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -69,7 +69,7 @@ class RobotMonitorPanel(QWidget):
             rw = RobotMonitorWidget(robot)
             rw.set_activity(self._activity)
             rw.touch_event.connect(self.touch_event)
-            rw.touch_detail_event.connect(self.touch_detail_event)
+            rw.touch_edge_event.connect(self.touch_edge_event)
             self._robot_widgets.append(rw)
             self._layout.addWidget(rw)
 

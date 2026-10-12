@@ -9,6 +9,32 @@
       "play": {
         "do": [
           {
+            "when": {
+              "event": "touch",
+              "do": [
+                {
+                  "change_value": {
+                    "name": "touches",
+                    "by": 1,
+                    "lowest": 0,
+                    "highest": 4
+                  }
+                },
+                {
+                  "show_value": {
+                    "source": "value",
+                    "name": "touches",
+                    "full_at": 4,
+                    "arcs": 4,
+                    "on_color": "#f1c40f",
+                    "bg_color": "#8e44ad",
+                    "ring": "all"
+                  }
+                }
+              ]
+            }
+          },
+          {
             "set_led": {
               "color": "#8e44ad",
               "pattern": "solid",
@@ -19,19 +45,18 @@
             }
           }
         ],
-        "on_touch": [
+        "transitions": [
           {
-            "touch_progress": {
-              "segments": 4,
-              "per": 1,
-              "on_color": "#f1c40f",
-              "bg_color": "#8e44ad",
-              "ring": "all",
-              "to": "finished"
+            "to": "finished",
+            "when": {
+              "value_is": {
+                "name": "touches",
+                "op": "at_least",
+                "value": 4
+              }
             }
           }
-        ],
-        "transitions": []
+        ]
       },
       "finished": {
         "do": [

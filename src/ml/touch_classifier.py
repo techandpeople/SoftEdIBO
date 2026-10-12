@@ -1,13 +1,15 @@
-"""TouchGestureClassifier - per-skin-type touch-gesture inference.
+"""Live touch reading: rules on every axis, a trained model for movement.
 
-Loads a trained model for a given ``skin_type`` (``models/touch_<type>.joblib``)
-and predicts a gesture label from a :class:`TouchSegment`. scikit-learn / joblib
-are imported **lazily**, so importing this module - and running the app - never
-requires them. With no model (or no ML libs) the classifier is inert and returns
-``unknown``, so wiring it in is always safe.
+:class:`TouchMovementModel` loads the per-skin-type movement model
+(``models/touch_<type>.joblib``) and predicts static / slide / rub for a
+:class:`TouchSegment`. scikit-learn / joblib are imported **lazily**, so
+importing this module - and running the app - never requires them. With no
+model (or no ML libs) it predicts nothing and the rule decides the movement.
 
-A live adapter (:class:`LiveTouchClassifier`) subscribes to a skin's
-``on_magnet``, segments the stream, and emits a ``gesture`` event per touch.
+:class:`LiveTouchClassifier` subscribes to a skin's magnet stream, segments
+it, reads each finished touch on the taxonomy's axes (see
+:mod:`src.ml.touch_axes`) and emits the derived gesture. It works without any
+trained model; a model only sharpens the movement axis.
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ from typing import Any, Callable
 
 from src.config.settings import Settings
 from src.ml import gesture_taxonomy as tax
+from src.ml.touch_axes import TouchReading, activation_threshold, read_touch
 from src.ml.touch_features import full_feature_vector
 from src.ml.touch_segmenter import PulseMerger, TouchSegment, TouchSegmenter
 
@@ -29,11 +32,11 @@ def model_path(skin_type: str) -> Path:
     return Settings.ROOT / "models" / f"touch_{skin_type}.joblib"
 
 
-class TouchGestureClassifier:
-    """Predicts a gesture label for a segment, using a per-type model if present.
+class TouchMovementModel:
+    """Predicts a segment's movement with a per-skin-type model, if present.
 
     Args:
-        skin_type: Selects the model. Empty / unknown type -> always ``unknown``.
+        skin_type: Selects the model. Empty / unknown type -> never predicts.
         path: Optional explicit model path (defaults to :func:`model_path`).
     """
 
@@ -59,57 +62,62 @@ class TouchGestureClassifier:
             return
         try:
             import joblib  # lazy - only needed when a model actually exists
-            self._model = joblib.load(self._path)
-            logger.info("Loaded touch model for %s from %s",
-                        self.skin_type, self._path)
+            from src.ml.training import unpack_model
+            self._model = unpack_model(joblib.load(self._path))
         except Exception:   # noqa: BLE001 - missing lib / bad file -> stay inert
-            logger.warning("No usable touch model for %s (%s); classifier inert",
-                           self.skin_type, self._path)
             self._model = None
+        if self._model is None:
+            logger.warning(
+                "Touch model for %s (%s) does not fit this version - retrain "
+                "it in Tools -> Touch Gestures. Rules are used meanwhile.",
+                self.skin_type, self._path)
+        else:
+            logger.info("Loaded touch movement model for %s from %s",
+                        self.skin_type, self._path)
 
-    def predict(self, seg: TouchSegment) -> str:
-        """Return a gesture label, or ``unknown`` when no model is loaded."""
+    def predict(self, seg: TouchSegment) -> str | None:
+        """The segment's movement, or ``None`` when no model is loaded."""
         self._ensure_loaded()
         if self._model is None:
-            return tax.UNKNOWN
+            return None
         try:
             pred = self._model.predict(
                 [full_feature_vector(seg, self.skin_variant)])[0]
             return str(pred)
         except Exception:   # noqa: BLE001 - never break a session on inference
             logger.exception("Touch inference failed for %s", self.skin_type)
-            return tax.UNKNOWN
+            return None
 
 
 class LiveTouchClassifier:
-    """Subscribes to a skin's magnet stream and emits a gesture per touch.
+    """Subscribes to a skin's magnet stream and emits a reading per touch.
 
     Args:
         skin: A ``Skin`` (real or simulated); its ``skin_type`` selects the
-            model and its ``touch_controller`` provides ``on_magnet``.
-        on_gesture: Called ``(skin_id, label, segment)`` when a touch ends and a
-            model classified it. Not called while the classifier is inert.
+            movement model, its touch config the force scale.
+        on_gesture: Called ``(skin_id, gesture, segment, reading)`` when a
+            touch ends. ``reading`` is the :class:`TouchReading` (axes and
+            descriptors) the gesture was derived from.
     """
 
     def __init__(self, skin: Any,
-                 on_gesture: Callable[[str, str, TouchSegment], None]):
+                 on_gesture: Callable[[str, str, TouchSegment, TouchReading], None]):
         self._skin = skin
         self._on_gesture = on_gesture
-        self._clf = TouchGestureClassifier(
+        self._model = TouchMovementModel(
             getattr(skin, "skin_type", ""),
             skin_variant=getattr(skin, "skin_variant", ""))
+        self._threshold_ut = activation_threshold(getattr(skin, "touch", None))
         self._seg = TouchSegmenter()
         # Group a run of presses (a compressions bout) into one gesture before
-        # classifying - training merges them over the same BOUT_GAP_MS silence
+        # reading it - training merges them over the same BOUT_GAP_MS silence
         # window, so inference must too (train/serve parity).
         self._merger = PulseMerger(tax.BOUT_GAP_MS)
         self._t0: float | None = None
 
     def attach(self) -> bool:
         """Subscribe to the skin's compensated magnet stream. Returns False if
-        there is nothing to attach to or no model to run (stays inert)."""
-        if not self._clf.has_model:
-            return False
+        the skin has no touch stream to read."""
         from src.hardware.touch_source import subscribe_skin_magnet
         return subscribe_skin_magnet(self._skin, self._handle_magnet)
 
@@ -117,6 +125,11 @@ class LiveTouchClassifier:
         """Stop consuming the skin's magnet stream (undo :meth:`attach`)."""
         from src.hardware.touch_source import unsubscribe_skin_magnet
         unsubscribe_skin_magnet(self._skin, self._handle_magnet)
+
+    def read(self, gesture: TouchSegment) -> TouchReading:
+        """Read one finished (merged) touch on the taxonomy's axes."""
+        return read_touch(gesture, self._threshold_ut,
+                          movement=self._model.predict(gesture))
 
     def _handle_magnet(self, data: dict) -> None:
         import time
@@ -127,7 +140,7 @@ class LiveTouchClassifier:
         seg = self._seg.feed(data, t)
         gesture = self._merger.feed(seg, t, self._seg.is_active)
         if gesture is not None:
-            label = self._clf.predict(gesture)
-            if label != tax.UNKNOWN:
-                self._on_gesture(getattr(self._skin, "skin_id", ""), label,
-                                 gesture)
+            reading = self.read(gesture)
+            if reading.gesture != tax.UNKNOWN:
+                self._on_gesture(getattr(self._skin, "skin_id", ""),
+                                 reading.gesture, gesture, reading)

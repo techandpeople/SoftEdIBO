@@ -38,10 +38,19 @@ class TouchSegment:
     times_ms: list[float] = field(default_factory=list)
     vecs: list[list[list[float]] | None] = field(default_factory=list)
     n_pulses: int = 1
+    # When each merged pulse began (ms); empty for a plain single segment.
+    pulse_starts_ms: list[float] = field(default_factory=list)
 
     @property
     def duration_ms(self) -> float:
         return self.end_ms - self.start_ms
+
+    @property
+    def pulse_intervals_ms(self) -> list[float]:
+        """Time between the starts of consecutive pulses of a merged gesture
+        (empty for a single touch): the rhythm inside the bout."""
+        starts = self.pulse_starts_ms
+        return [b - a for a, b in zip(starts, starts[1:])]
 
     @property
     def sensor_count(self) -> int:
@@ -54,8 +63,9 @@ def merge_segments(segments) -> TouchSegment | None:
     Samples are concatenated in start-time order; ``n_pulses`` accumulates so the
     feature pipeline can tell a triple-tap from a single long touch. The inactive
     gaps between the merged touches are not materialised as samples (the
-    segmenter only records while active) - ``n_pulses`` carries that information
-    instead. Returns ``None`` if ``segments`` is empty."""
+    segmenter only records while active) - ``n_pulses`` and ``pulse_starts_ms``
+    (the rhythm of the bout) carry that information instead. Returns ``None``
+    if ``segments`` is empty."""
     segs = sorted((s for s in segments if s is not None),
                   key=lambda s: s.start_ms)
     if not segs:
@@ -66,6 +76,7 @@ def merge_segments(segments) -> TouchSegment | None:
         merged.acts.extend(s.acts)
         merged.times_ms.extend(s.times_ms)
         merged.vecs.extend(s.vecs)
+        merged.pulse_starts_ms.extend(s.pulse_starts_ms or [s.start_ms])
     merged.n_pulses = sum(s.n_pulses for s in segs)
     return merged
 

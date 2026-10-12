@@ -20,7 +20,7 @@ class RobotMonitorWidget(QGroupBox):
     """Widget for a single robot - one SkinWidget per Skin."""
 
     touch_event = Signal(str, int, str)  # (skin_id, chamber_id, action)
-    touch_detail_event = Signal(str, int, str, int, object)
+    touch_edge_event = Signal(str, object)   # (skin_id, TouchEdge)
 
     def __init__(self, robot: BaseRobot) -> None:
         super().__init__(robot.robot_id)
@@ -39,7 +39,7 @@ class RobotMonitorWidget(QGroupBox):
         for skin in skins.values():
             sw = SkinWidget(skin)
             sw.touch_event.connect(self.touch_event)
-            sw.touch_detail_event.connect(self.touch_detail_event)
+            sw.touch_edge_event.connect(self.touch_edge_event)
             self._skin_widgets.append(sw)
             layout.addWidget(sw)
 

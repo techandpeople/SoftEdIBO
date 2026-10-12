@@ -48,6 +48,26 @@ def _compressions_seg():
     return merge_segments(segs)
 
 
+def _path_seg(order, peak=5.0):
+    """A touch whose strongest sensor follows ``order`` (one sample each)."""
+    idle = _msg([0, 0, 0, 0], [])
+    samples = [(idle, 0.0)]
+    for step, sensor in enumerate(order):
+        mag = [0.0, 0.0, 0.0, 0.0]
+        mag[sensor] = peak
+        samples.append((_msg(mag, [sensor]), 50.0 + 100.0 * step))
+    samples.append((idle, 60.0 + 100.0 * len(order)))
+    return TouchSegmenter().segment_stream(samples)[0]
+
+
+def _stroke_seg():
+    return _path_seg([0, 1, 2, 3])
+
+
+def _rub_seg():
+    return _path_seg([0, 1, 0, 1, 0])
+
+
 def _labeled(counts):
     """``{label: (segment_factory, n)}`` -> list of (type, variant, label, seg)."""
     out = []
@@ -56,35 +76,45 @@ def _labeled(counts):
     return out
 
 
-def test_trains_and_reports_accuracy_and_confusion(tmp_path):
-    labeled = _labeled({tax.TAP: (_tap_seg, 6),
-                        tax.PRESS: (_press_seg, 6),
-                        tax.COMPRESSIONS: (_compressions_seg, 6)})
+def test_trains_the_movement_axis_and_reports_accuracy_and_confusion(tmp_path):
+    labeled = _labeled({tax.TAP: (_tap_seg, 4),
+                        tax.COMPRESSIONS: (_compressions_seg, 2),
+                        tax.STROKE: (_stroke_seg, 6),
+                        tax.RUB: (_rub_seg, 6)})
     report = train_from_segments(labeled, tmp_path)
 
     res = next(r for r in report.results if r.skin_type == "turtle_square")
     assert res.trained
     assert (tmp_path / "touch_turtle_square.joblib").exists()
-    assert res.model_acc is not None and 0.0 <= res.model_acc <= 1.0
-    # Square confusion matrix over the sorted label set.
-    assert res.labels == sorted({tax.TAP, tax.PRESS, tax.COMPRESSIONS})
+    assert res.model_acc is not None and res.model_acc >= 0.9
+    # Taps and compressions are both examples of "static": the model learns
+    # the movement, the rules name everything else.
+    assert res.labels == sorted([tax.MOVE_STATIC, tax.MOVE_SLIDE, tax.MOVE_RUB])
     assert res.confusion is not None
     assert len(res.confusion) == len(res.labels) == 3
     assert all(len(row) == 3 for row in res.confusion)
     # Every captured sample is accounted for in the matrix.
     assert sum(sum(row) for row in res.confusion) == 18
+    # The rules already read these clean synthetic paths correctly.
+    assert res.baseline_acc == 1.0
+
+
+def test_static_gestures_alone_leave_nothing_to_learn(tmp_path):
+    labeled = _labeled({tax.TAP: (_tap_seg, 6), tax.PRESS: (_press_seg, 6)})
+    res = train_from_segments(labeled, tmp_path).results[0]
+    assert not res.trained and res.n_classes == 1
 
 
 def test_too_few_per_class_trains_without_cv(tmp_path):
-    # 11 samples, 2 classes -> trains, but PRESS has <2 so no honest CV.
-    labeled = _labeled({tax.TAP: (_tap_seg, 10), tax.PRESS: (_press_seg, 1)})
+    # 11 samples, 2 movements -> trains, but slide has <2 so no honest CV.
+    labeled = _labeled({tax.TAP: (_tap_seg, 10), tax.STROKE: (_stroke_seg, 1)})
     res = train_from_segments(labeled, tmp_path).results[0]
     assert res.trained
     assert res.model_acc is None and res.confusion is None
 
 
 def test_too_few_samples_are_not_trained(tmp_path):
-    labeled = _labeled({tax.TAP: (_tap_seg, 3), tax.PRESS: (_press_seg, 3)})
+    labeled = _labeled({tax.TAP: (_tap_seg, 3), tax.STROKE: (_stroke_seg, 3)})
     res = train_from_segments(labeled, tmp_path).results[0]
     assert not res.trained
     assert not (tmp_path / "touch_turtle_square.joblib").exists()
@@ -93,3 +123,26 @@ def test_too_few_samples_are_not_trained(tmp_path):
 def test_empty_input_yields_empty_report(tmp_path):
     report = train_from_segments([], tmp_path)
     assert report.results == []
+
+
+def test_trained_model_is_loaded_and_sharpens_the_movement(tmp_path):
+    from src.ml.touch_classifier import TouchMovementModel
+    labeled = _labeled({tax.TAP: (_tap_seg, 6), tax.STROKE: (_stroke_seg, 6),
+                        tax.RUB: (_rub_seg, 6)})
+    train_from_segments(labeled, tmp_path)
+    model = TouchMovementModel(
+        "turtle_square", path=tmp_path / "touch_turtle_square.joblib",
+        skin_variant="wrinkles")
+    assert model.has_model
+    assert model.predict(_stroke_seg()) == tax.MOVE_SLIDE
+    assert model.predict(_tap_seg()) == tax.MOVE_STATIC
+
+
+def test_model_from_another_feature_set_is_refused(tmp_path):
+    import joblib
+    from sklearn.dummy import DummyClassifier
+    from src.ml.touch_classifier import TouchMovementModel
+    path = tmp_path / "touch_turtle_square.joblib"
+    joblib.dump(DummyClassifier().fit([[0.0]], ["tap"]), path)   # an old model
+    model = TouchMovementModel("turtle_square", path=path)
+    assert not model.has_model and model.predict(_tap_seg()) is None

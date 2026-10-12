@@ -39,6 +39,8 @@ def extract_features(seg: TouchSegment) -> dict[str, float]:
             "n_distinct_sensors": 0.0, "n_transitions": 0.0,
             "is_sequential": 0.0,
             "vec_present": 0.0, "vec_dir_consistency": 0.0, "vec_z_frac": 0.0,
+            "pulse_interval_ms": 0.0, "pulse_interval_cv": 0.0,
+            "path_len": 0.0, "path_revisits": 0.0,
         })
         return feats
 
@@ -63,7 +65,50 @@ def extract_features(seg: TouchSegment) -> dict[str, float]:
 
     feats.update(_sequence_features(seg))
     feats.update(_vec_features(seg))
+    feats.update(_rhythm_features(seg))
+    feats.update(_path_features(seg))
     return feats
+
+
+def _rhythm_features(seg: TouchSegment) -> dict[str, float]:
+    """Rhythm inside a merged bout: mean gap between pulse starts and how much
+    it varies (coefficient of variation; 0 = perfectly even). Zero for a
+    single touch."""
+    intervals = seg.pulse_intervals_ms
+    mean = _safe_mean(intervals)
+    if len(intervals) < 2 or mean <= 0:
+        return {"pulse_interval_ms": mean, "pulse_interval_cv": 0.0}
+    variance = _safe_mean([(v - mean) ** 2 for v in intervals])
+    return {"pulse_interval_ms": mean,
+            "pulse_interval_cv": variance ** 0.5 / mean}
+
+
+def dominant_path(seg: TouchSegment) -> list[int]:
+    """The strongest active sensor of each sample, with repeats collapsed:
+    the route the touch took across the sensors (``[2]`` = stayed on sensor
+    2, ``[0, 1]`` = moved from 0 to 1, ``[0, 1, 0]`` = went back)."""
+    path: list[int] = []
+    for mags, active in zip(seg.mags, seg.acts):
+        candidates = [s for s in active if s < len(mags)]
+        if not candidates:
+            continue
+        strongest = max(candidates, key=lambda s: mags[s])
+        if not path or path[-1] != strongest:
+            path.append(strongest)
+    return path
+
+
+def _path_features(seg: TouchSegment) -> dict[str, float]:
+    """How far the touch travelled across sensors and how often it came back
+    to one it had left (the back-and-forth of a rub)."""
+    path = dominant_path(seg)
+    seen: set[int] = set()
+    revisits = 0
+    for sensor in path:
+        if sensor in seen:
+            revisits += 1
+        seen.add(sensor)
+    return {"path_len": float(len(path)), "path_revisits": float(revisits)}
 
 
 def _sequence_features(seg: TouchSegment) -> dict[str, float]:
@@ -160,6 +205,8 @@ FEATURE_NAMES: tuple[str, ...] = (
     "active_frac_max", "active_frac_mean",
     "n_distinct_sensors", "n_transitions", "is_sequential",
     "vec_present", "vec_dir_consistency", "vec_z_frac",
+    "pulse_interval_ms", "pulse_interval_cv",
+    "path_len", "path_revisits",
 )
 
 

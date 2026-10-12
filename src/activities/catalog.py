@@ -59,6 +59,7 @@ from src.activities import activity_kind, skin_condition
 from src.activities.led_canvas import FILL_MODES, HOLD_MODES
 from src.activities.touch_rhythm import MODE_AUTO, SYNC_MODES
 from src.ml.gesture_taxonomy import GESTURE_CLASSES
+from src.ml.gesture_taxonomy import LABELS as GESTURE_LABELS
 
 # Field types the editor knows how to render / compile. Anything else is a
 # programming error caught by ``test_catalog_editor``.
@@ -142,8 +143,41 @@ class Verb:
 # Toolbox categories in display order, with their Blockly hue.
 CATEGORIES: tuple[tuple[str, int], ...] = (
     ("Phases", 290), ("Lights", 230), ("Chambers", 30), ("Thymio", 160),
-    ("Control", 120), ("Conditions", 20),
+    ("Control", 120), ("Events", 330), ("Values", 65), ("Conditions", 20),
 )
+
+# What a `when` block can react to. Events are things that happen at a
+# moment; the block's steps run each time one does.
+EVENT_TOUCH = "touch"
+EVENT_ROUND_GOOD = "round_good"
+EVENT_ROUND_OFF_CADENCE = "round_off_cadence"
+EVENT_ROUND_MISSED = "round_missed"
+EVENT_BUTTON_PRESSED = "button_pressed"
+EVENT_BUTTON_RELEASED = "button_released"
+EVENT_GESTURE = "gesture"
+EVENTS = (EVENT_TOUCH, EVENT_ROUND_GOOD, EVENT_ROUND_OFF_CADENCE,
+          EVENT_ROUND_MISSED, EVENT_BUTTON_PRESSED, EVENT_BUTTON_RELEASED,
+          EVENT_GESTURE)
+EVENT_LABELS = (
+    (EVENT_TOUCH, "the skin is touched"),
+    (EVENT_ROUND_GOOD, "a group round is together and on the beat"),
+    (EVENT_ROUND_OFF_CADENCE, "a group round is together but off the beat"),
+    (EVENT_ROUND_MISSED, "a group round is missed"),
+    (EVENT_BUTTON_PRESSED, "the button is pressed"),
+    (EVENT_BUTTON_RELEASED, "the button is released"),
+    (EVENT_GESTURE, "a touch type is recognised"),
+)
+
+# What a `show_value` display follows.
+SHOW_VALUE = "value"            # a named value (see change_value)
+SHOW_GROUP_SYNC = "group_sync"  # progress of the phase's group sync condition
+SHOW_SOURCES = (SHOW_VALUE, SHOW_GROUP_SYNC)
+
+VALUE_NAME_FIELD = VerbField(
+    "name", "text", "score",
+    description="Name of the value. Values are numbers you name yourself; "
+                "they start at 0 and keep their number across phases.")
+VALUE_OPS = ("at_least", "at_most")
 
 # ---------------------------------------------------------------------------
 # Chamber addressing - every chamber action accepts one of these.
@@ -341,7 +375,7 @@ ACTIONS: tuple[Verb, ...] = (
     ), template="touch fill - {segments} arcs, {per} touch(es) each\n"
                 "from {bg_color} to {on_color} on ring {ring}\n"
                 "when full go to phase {to}",
-       category="Lights"),
+       category="Lights", in_toolbox=False),
     Verb("zone_fill", "action",
          "Light part of the LED zone above the sensor that was just touched. "
          "Put it in a phase's 'on touch': each qualifying press lights "
@@ -381,7 +415,7 @@ ACTIONS: tuple[Verb, ...] = (
                 "from {bg_color} to {on_color} on ring {ring}, smooth {fade_ms}\n"
                 "while held: {hold} by press strength, full at {hold_full_ut} uT\n"
                 "when every zone is full go to phase {to}",
-       category="Lights"),
+       category="Lights", in_toolbox=False),
     Verb("sync_fill", "action",
          "Show the group's synchronized-round progress on the WHOLE strip: "
          "the lit share of all pixels equals completed rounds / rounds "
@@ -402,7 +436,7 @@ ACTIONS: tuple[Verb, ...] = (
                 "from {bg_color} to {on_color} on ring {ring}, smooth {fade_ms}, "
                 "decay {decay_ms}\n"
                 "while held: {hold} by press strength, full at {hold_full_ut} uT",
-       category="Lights"),
+       category="Lights", in_toolbox=False),
     Verb("score_fill", "action",
          "Score the group's synchronized rounds on the WHOLE strip. Put it in "
          "the phase's 'do'. Every round where all the children press together "
@@ -456,7 +490,142 @@ ACTIONS: tuple[Verb, ...] = (
                 "from {bg_color} to {on_color} on ring {ring}, smooth {fade_ms}\n"
                 "while held: {hold} by press strength, full at {hold_full_ut} uT\n"
                 "when the strip is full go to phase {to}",
+       category="Lights", in_toolbox=False),
+    Verb("show_value", "action",
+         "Show a number as light: the share of the strip (or ring) that is "
+         "lit follows it. Put it in the phase's 'do'; it keeps updating. "
+         "'value' follows a value you change with 'change value' (lit share "
+         "= value / full at). 'group sync' follows the progress of this "
+         "phase's group sync condition. With 'arcs' above 0 the light is "
+         "split into that many equal arcs instead of single pixels (rings "
+         "without a pixel strip always use arcs).", (
+        VerbField("source", "enum", SHOW_VALUE, choices=SHOW_SOURCES,
+                  labels=((SHOW_VALUE, "value"),
+                          (SHOW_GROUP_SYNC, "group sync progress")),
+                  description="What the light follows."),
+        VerbField("name", "text", "score", show_when=("source", (SHOW_VALUE,)),
+                  description="The value to show."),
+        VerbField("full_at", "float", 100, min=1,
+                  show_when=("source", (SHOW_VALUE,)),
+                  description="The value at which everything is lit."),
+        VerbField("arcs", "int", 0, min=0, max=8,
+                  description="0 = light pixel by pixel; N = N equal arcs."),
+        FILL_FIELD,
+        ON_COLOR_FIELD,
+        BG_COLOR_FIELD,
+        VerbField("decay_ms", "ms", 0, min=0,
+                  description="When the number drops, turn one pixel off "
+                              "every this long instead of all at once "
+                              "(0 = at once)."),
+        FADE_FIELD,
+        RING_FIELD,
+    ), template="show {source} {name} as light, full at {full_at}, {arcs} arcs, {fill}\n"
+                "from {bg_color} to {on_color} on ring {ring}, smooth {fade_ms}, "
+                "decay {decay_ms}",
        category="Lights"),
+    Verb("zone_light", "action",
+         "Light more of the LED zone above the sensor that was touched. Put "
+         "it in a 'when the skin is touched' block: each qualifying touch "
+         "lights 'step_pct' more of THAT zone (the strip is split into one "
+         "zone per touch sensor). 'kind' = any touch, or only a rhythmic one "
+         "(a touch that keeps the zone's cadence). Pair it with the 'every "
+         "zone is full' condition to move on.", (
+        VerbField("kind", "enum", "touch", choices=ZONE_FILL_KINDS,
+                  labels=(("touch", "touch"), ("rhythmic", "rhythmic touch")),
+                  description="touch = every press counts; rhythmic = only a "
+                              "press within tolerance of the target interval "
+                              "since the previous press in the same zone."),
+        VerbField("step_pct", "pct", 25, min=1,
+                  description="Share of the zone lit per qualifying press."),
+        FILL_FIELD,
+        ON_COLOR_FIELD,
+        BG_COLOR_FIELD,
+        VerbField("target_interval_ms", "ms", 550, min=1,
+                  show_when=("kind", ("rhythmic",)),
+                  description="Rhythmic kind: expected time between presses."),
+        VerbField("tolerance_ms", "ms", 150, min=0,
+                  show_when=("kind", ("rhythmic",)),
+                  description="Rhythmic kind: allowed drift around the target."),
+        VerbField("min_gap_ms", "ms", 250, min=0,
+                  show_when=("kind", ("rhythmic",)),
+                  description="Rhythmic kind: ignore faster repeats as chatter."),
+        FADE_FIELD,
+        RING_FIELD,
+    ), template="light {step_pct} % more of the touched zone on each {kind}, {fill}\n"
+                "rhythm: every {target_interval_ms} +/- {tolerance_ms}, "
+                "ignore repeats under {min_gap_ms}\n"
+                "from {bg_color} to {on_color} on ring {ring}, smooth {fade_ms}",
+       category="Lights"),
+    Verb("hold_feedback", "action",
+         "While a sensor is held, tint its LED zone by how hard it is "
+         "pressed: glow the lit pixels or dim the unlit ones. Put it in the "
+         "phase's 'do', next to the block that lights the strip.", (
+        VerbField("hold", "enum", "glow", choices=HOLD_MODES[1:],
+                  labels=(("glow", "glow the lit pixels"),
+                          ("dim", "dim the unlit pixels")),
+                  description="glow = the held zone's lit pixels brighten "
+                              "towards white; dim = its unlit pixels fade "
+                              "towards black."),
+        HOLD_FULL_FIELD,
+        ON_COLOR_FIELD,
+        BG_COLOR_FIELD,
+        FADE_FIELD,
+        RING_FIELD,
+    ), template="while held: {hold} by press strength, full at {hold_full_ut} uT\n"
+                "strip colours {bg_color} / {on_color} on ring {ring}, "
+                "smooth {fade_ms}",
+       category="Lights"),
+    Verb("group_rhythm", "action",
+         "Watch for group rounds in this phase: the children press together "
+         "on a beat. Put it in the phase's 'do'. It lights nothing and scores "
+         "nothing by itself - it raises events for 'when' blocks: a round "
+         "together and on the beat, together but off the beat, or missed (a "
+         "child absent, or one child pressing alone). 'mode' auto = whoever "
+         "presses forms the group once 'participants' have joined; fixed = "
+         "the listed sensor zones.", (
+        VerbField("mode", "enum", MODE_AUTO, choices=SYNC_MODES,
+                  labels=SYNC_MODE_LABELS,
+                  description="auto = whoever presses (first N start, others "
+                              "join); fixed = the listed sensors only."),
+        VerbField("participants", "int", 3, min=1, max=4,
+                  description="Number of children (auto: the minimum needed "
+                              "before rounds count)."),
+        VerbField("sensors", "ints", [0, 1, 2, 3], count=4, min=0,
+                  show_when=("mode", ("fixed",)),
+                  description="Fixed mode: the sensor zones that form the "
+                              "group (the first 'participants' count)."),
+        VerbField("target_interval_ms", "ms", 550, min=1,
+                  description="Expected time between group rounds."),
+        VerbField("cadence_tolerance_ms", "ms", 100, min=0,
+                  description="Allowed timing error of one round."),
+        VerbField("phase_tolerance_ms", "ms", 150, min=0,
+                  description="Maximum spread between children in one round."),
+        VerbField("min_gap_ms", "ms", 250, min=0,
+                  description="Per-sensor debounce; faster onsets are ignored."),
+    ), template="watch group rounds - {participants} children, {mode}\n"
+                "fixed zones {sensors}\n"
+                "a round every {target_interval_ms} +/- {cadence_tolerance_ms}, "
+                "together within {phase_tolerance_ms}\n"
+                "ignore repeats faster than {min_gap_ms}",
+       category="Events"),
+    Verb("change_value", "action",
+         "Add to (or take from) a named value. The result stays between "
+         "'lowest' and 'highest'. Use a negative amount to take away.", (
+        VALUE_NAME_FIELD,
+        VerbField("by", "float", 1,
+                  description="Amount to add (negative = take away)."),
+        VerbField("lowest", "float", 0,
+                  description="The value never goes below this."),
+        VerbField("highest", "float", 100,
+                  description="The value never goes above this."),
+    ), template="change {name} by {by} (stays between {lowest} and {highest})",
+       category="Values"),
+    Verb("set_value", "action",
+         "Set a named value to a number (e.g. back to 0 at the start of a "
+         "phase).", (
+        VALUE_NAME_FIELD,
+        VerbField("to", "float", 0, description="The new number."),
+    ), template="set {name} to {to}", category="Values"),
     Verb("inflate", "action", "Drive a chamber up to a pressure %.", (
         CHAMBER_FIELD,
         VerbField("pct", "pct", 60, description="Target pressure (0-100 %)."),
@@ -586,6 +755,15 @@ CONTROL: tuple[Verb, ...] = (
         VerbField("do", "steps", []),
         VerbField("else", "steps", []),
     ), template="if robot is {robot}\ndo {do}\nelse {else}", category="Control"),
+    Verb("when", "control",
+         "Run the nested steps every time something happens in this phase. "
+         "Put it in the phase's 'do'; it keeps listening until the phase "
+         "ends. Group-round events need a 'watch group rounds' block in the "
+         "same phase; the touch-type event fires for any recognised touch.", (
+        VerbField("event", "enum", EVENT_TOUCH, choices=EVENTS,
+                  labels=EVENT_LABELS, description="What to react to."),
+        VerbField("do", "steps", []),
+    ), template="when {event}\ndo {do}", category="Events"),
     Verb("if", "control",
          "Run 'do' when the condition is true at the moment the sequence "
          "reaches this block, else 'else'. It checks once and moves on - put "
@@ -608,15 +786,18 @@ CONDITIONS: tuple[Verb, ...] = (
     ), template="touched at least {min} times", category="Conditions"),
     Verb("gesture_count", "condition",
          "True once the child made a gesture at least 'min' times in this phase. "
-         "'kind' is either a raw touch (any press - no model needed) or an "
-         "ML-classified gesture (tap / press / compressions). Classified kinds "
-         "need a trained touch model for this skin type; without one they never "
-         "fire, so 'touch' is the safe default.", (
+         "'kind' is either a raw touch (any press) or a touch type the app "
+         "recognises: tap, press, resting hand, compressions, pats, stroke, "
+         "rub, hit. Types are recognised by rules, so no trained model is "
+         "needed; a trained movement model makes stroke and rub more reliable. "
+         "A squeeze additionally needs chamber pressure data and does not fire "
+         "yet.", (
         VerbField("kind", "enum", "touch", choices=("touch", *GESTURE_CLASSES),
-                  labels=(("touch", "a touch"), ("tap", "a tap"),
-                          ("press", "a press"), ("compressions", "compressions")),
-                  description="'touch' = any press; the rest are ML gestures "
-                              "needing a trained model for this skin type."),
+                  labels=(("touch", "a touch"),
+                          *((code, GESTURE_LABELS[code])
+                            for code in GESTURE_CLASSES)),
+                  description="'touch' = any press; the rest are touch types "
+                              "recognised from how the touch unfolded."),
         VerbField("min", "int", 3, min=1),
     ), template="after {kind} {min} times", category="Conditions"),
     Verb("touch_rhythm", "condition",
@@ -689,6 +870,17 @@ CONDITIONS: tuple[Verb, ...] = (
          "C6 wireless link; robots without ground sensing never fire it.", (
         VerbField("min", "int", 1, min=1),
     ), template="Thymio lifted at least {min} times", category="Conditions"),
+    Verb("value_is", "condition",
+         "True while a named value is at least / at most a number.", (
+        VALUE_NAME_FIELD,
+        VerbField("op", "enum", "at_least", choices=VALUE_OPS,
+                  labels=(("at_least", "at least"), ("at_most", "at most"))),
+        VerbField("value", "float", 100),
+    ), template="{name} is {op} {value}", category="Conditions"),
+    Verb("zones_full", "condition",
+         "True once every LED zone of the strip is fully lit (see 'light "
+         "more of the touched zone').", (),
+         template="every zone is full", category="Conditions"),
     Verb("button_pressed", "condition",
          "True while the skin board's push button is held down. Boards "
          "without a button never fire it.", (),

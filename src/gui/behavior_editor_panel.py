@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
 
 from src.activities.activity_io import (
     ActivityFileError, deserialize_activity, serialize_activity)
+from src.activities.spec_upgrade import upgrade_spec
 from src.activities.catalog import (
     SpecError, editor_catalog, lint_spec, validate_spec)
 from src.config.settings import Settings
@@ -218,7 +219,9 @@ class BehaviorEditorPanel(QWidget, Ui_BehaviorEditorPanel):
             self._web.page().runJavaScript("newWorkspace()")
         else:
             self.nameEdit.setText(rec.name)
-            payload = json.dumps(json.dumps(rec.spec))   # -> a JS string literal
+            # Older all-in-one blocks open as their composable parts; the
+            # stored behaviour only changes when the author saves.
+            payload = json.dumps(json.dumps(upgrade_spec(rec.spec)))   # -> a JS string literal
             self._web.page().runJavaScript(f"loadSpec({payload})")
 
     # ------------------------------------------------------------------
@@ -389,7 +392,7 @@ class BehaviorEditorPanel(QWidget, Ui_BehaviorEditorPanel):
         self.behaviorCombo.blockSignals(False)
         self.nameEdit.setText(name or Path(path).stem)
         self._pending_description = description or _DEFAULT_DESCRIPTION
-        payload = json.dumps(json.dumps(spec))         # -> a JS string literal
+        payload = json.dumps(json.dumps(upgrade_spec(spec)))   # -> a JS string literal
         self._web.page().runJavaScript(f"loadSpec({payload})")
         self._status(f"Imported '{name or Path(path).stem}' - "
                      "review and Save to keep it.")

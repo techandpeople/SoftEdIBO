@@ -1,24 +1,41 @@
-# Touch-gesture ML (exploratory)
+# Touch types (rules + a trained movement model)
 
-Pipeline to classify *how* a child touches a skin - three well-separated
-classes, **tap / press / compressions** (`src/ml/gesture_taxonomy.py`) - on top
-of the existing presence/location touch sensing:
+How a child touches a skin is described on four independent **axes**, and the
+gesture name is derived from their combination
+(`src/ml/gesture_taxonomy.py`, `src/ml/touch_axes.py`):
 
-- **tap** - one quick press (disambiguation / selection);
-- **press** - one sustained press held steady;
-- **compressions** - a *rhythmic bout* of repeated presses in a row (chest
-  compressions / a heartbeat rhythm). This is the study's active gesture: it is
-  offered as a `gesture_count` kind, so a behaviour authored in the visual editor
-  can advance a phase when the child performs it (`{"gesture_count": {"kind":
-  "compressions"}}`).
+| Axis | Values | How it is read |
+|---|---|---|
+| form | short, press, rest, repeated regular, repeated irregular | rules on duration and the gaps between pulses |
+| movement | static, slide, rub | a trained model when there is one, else a rule on the order sensors activated in |
+| force | light, medium, strong | peak signal against the skin's activation threshold |
+| extent | point, multi, whole | sensors active at once |
 
-The set is deliberately small: `tap`/`press` carry one press->release pulse and
-`compressions` is many pulses merged into one gesture, so all three separate on
-**pulse count + duration** - signals a sparse magnet array measures reliably. It
-is still **exploratory**: the hardware is sparse (at most 4 quadrant sensors per
-skin; some types carry only 1 or 2), so a rule baseline is kept as a comparison
-and ML only earns its place if it beats it on real labelled data. No video -
-only sensor streams.
+| Gesture | Combination | Status |
+|---|---|---|
+| tap | short, static | works by rules |
+| press | sustained, static | works by rules |
+| rest | held for seconds | works by rules |
+| compressions | repeated, regular | works by rules |
+| pats | repeated, irregular | works by rules |
+| stroke | slide | rule fallback; reliable once the movement model is trained |
+| rub | back and forth | rule fallback; reliable once the movement model is trained |
+| hit | very short, strong | needs the faster touch sampling (firmware `magtime-1`) |
+| squeeze | several zones + chamber pressure rise | defined, but not derived yet: the pressure rise is not fed in |
+
+Pinch, poke, tickle and scratch are out of reach with a handful of magnet
+sensors per skin and are deliberately not classes.
+
+Every recognised touch is logged (`gesture` event) with its axes and the
+continuous descriptors behind them, so the names can be redefined later
+without re-running a session. `gesture_count` accepts every gesture as a kind.
+
+Only the **movement** axis is learned. A guided capture still asks for
+gestures by name; each is used as an example of its movement (a stroke
+teaches "slide", a rub "rub", everything else "static"). Capturing only taps
+and presses therefore trains nothing - the rules already cover them. A model
+saved by an older version is refused at load time and the rules are used
+until it is retrained.
 
 ## Design in one paragraph
 

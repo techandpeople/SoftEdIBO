@@ -385,6 +385,13 @@ class GroupTouchSyncTracker:
         return list(range(max(1, int(participants))))
 
 
+# How a group round ended (see SyncScoreTracker.outcomes).
+ROUND_GOOD = "good"                  # everyone, on the beat
+ROUND_OFF_CADENCE = "off_cadence"    # everyone, but off the beat
+ROUND_MISSED = "missed"              # someone absent / a lone press
+_MAX_PENDING_OUTCOMES = 64
+
+
 @dataclass
 class SyncScoreTracker:
     """Score the group's synchronized rounds as they happen.
@@ -407,6 +414,9 @@ class SyncScoreTracker:
     score: float = 0.0
     good_rounds: int = 0
     bad_rounds: int = 0
+    # How each closed round ended, oldest first, until taken: ROUND_GOOD,
+    # ROUND_OFF_CADENCE or ROUND_MISSED (see :meth:`take_outcomes`).
+    outcomes: list[str] = field(default_factory=list)
     _params: dict | None = None
     _joined: list[int] = field(default_factory=list)
     _last_onset: dict[int, float] = field(default_factory=dict)
@@ -440,6 +450,7 @@ class SyncScoreTracker:
         self.score = 0.0
         self.good_rounds = 0
         self.bad_rounds = 0
+        self.outcomes.clear()
         self._joined.clear()
         self._last_onset.clear()
         self._open_start = None
@@ -507,6 +518,7 @@ class SyncScoreTracker:
         if not wanted <= pressed:
             self.bad_rounds += 1
             self.score = max(0.0, self.score - p["penalty"])
+            self._note(ROUND_MISSED)
             return
         round_ms = float(median(self._open_presses.values()))
         last = self._last_round_ms
@@ -514,3 +526,15 @@ class SyncScoreTracker:
         if last is None or abs((round_ms - last) - p["target"]) <= p["cadence_tol"]:
             self.good_rounds += 1
             self.score = min(1.0, self.score + p["gain"])
+            self._note(ROUND_GOOD)
+        else:
+            self._note(ROUND_OFF_CADENCE)
+
+    def _note(self, outcome: str) -> None:
+        self.outcomes.append(outcome)
+        del self.outcomes[:-_MAX_PENDING_OUTCOMES]   # nobody is taking them
+
+    def take_outcomes(self) -> list[str]:
+        """The outcomes of the rounds closed since the last call."""
+        taken, self.outcomes = self.outcomes, []
+        return taken

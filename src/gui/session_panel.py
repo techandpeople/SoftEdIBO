@@ -2,7 +2,6 @@
 
 import json
 import logging
-import time
 from datetime import datetime
 
 from PySide6.QtCore import QTimer, Signal
@@ -11,7 +10,7 @@ from PySide6.QtWidgets import QDialog, QMessageBox, QWidget
 from src.activities import get_activity
 from src.activities.base_activity import BaseActivity
 from src.config.settings import Settings
-from src.core.press_rate import PressRateMeter
+from src.core.touch_log import TouchLog
 from src.data import last_assignments as last_asgn
 from src.data.database import Database
 from src.data.models import InteractionEvent, ParticipantRecord, SessionAssignment, SessionRecord
@@ -20,6 +19,7 @@ from src.gui.session_setup_dialog import SessionSetupDialog
 from src.gui.monitor import RobotMonitorPanel
 from src.gui.touch_assignment_panel import TouchAssignmentPanel
 from src.gui.ui_session_panel import Ui_SessionPanel
+from src.hardware.touch_event_router import TouchEdge
 from src.robots.base_robot import BaseRobot
 
 logger = logging.getLogger(__name__)
@@ -61,12 +61,8 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         self._skin_participant: dict[str, str] = {}   # skin_id -> participant_id
         self._skin_robot: dict[str, str] = {}         # skin_id -> robot_id
         self._session_participants: list[ParticipantRecord] = []
-        # key -> (monotonic start for duration, wall-clock event timestamp).
-        # Monotonic time prevents a system-clock adjustment from corrupting a
-        # press/release duration; the datetime remains the exportable time.
-        self._touch_presses: dict[tuple[str, int], tuple[float, datetime, float | None, int | None]] = {}
-        # Per-skin press intervals for the logged touch frequency.
-        self._press_rates: dict[str, PressRateMeter] = {}
+        # Pairs presses with releases and builds the logged touch details.
+        self._touch_log = TouchLog()
         self._pending_touches: list[tuple[str, int, datetime, str]] = []
         # (skin_id, chamber_id, press timestamp) waiting for assignment
         self._assignment_panel: TouchAssignmentPanel | None = None
@@ -81,7 +77,7 @@ class SessionPanel(QWidget, Ui_SessionPanel):
 
         self._monitor = RobotMonitorPanel()
         self._monitor.touch_event.connect(self._on_touch_event)
-        self._monitor.touch_detail_event.connect(self._on_touch_detail_event)
+        self._monitor.touch_edge_event.connect(self._on_touch_edge)
         self.verticalLayout.removeItem(self.verticalSpacer)
         self.verticalLayout.addWidget(self._monitor)
 
@@ -283,6 +279,8 @@ class SessionPanel(QWidget, Ui_SessionPanel):
             }),
         ))
 
+        self._save_session_snapshots(session_id, activity, robots)
+
         robot_names = ", ".join(r.robot_id for r in robots) if robots else "none"
         participant_names = (
             ", ".join(p.participant_id for p in participants)
@@ -330,6 +328,23 @@ class SessionPanel(QWidget, Ui_SessionPanel):
             claim = getattr(robot, "claim_board", None)
             if callable(claim):
                 claim()
+
+    def _save_session_snapshots(self, session_id: str, activity: BaseActivity,
+                                robots: list[BaseRobot]) -> None:
+        """Record what this session runs with (activity definition, robots,
+        touch tuning, node firmware) so it can be interpreted later."""
+        from src.core import session_snapshot as snapshot
+        try:
+            payloads = snapshot.build_session_snapshots(
+                activity_name=activity.name,
+                activity_spec=getattr(activity, "spec", None),
+                settings_data=Settings().data,
+                robot_ids=[r.robot_id for r in robots],
+                firmware=snapshot.node_firmware(robots))
+            for kind, payload in payloads.items():
+                self._db.save_session_snapshot(session_id, kind, payload)
+        except Exception:   # noqa: BLE001 - a snapshot must never block a session
+            logger.exception("Failed to snapshot session %s", session_id)
 
     def _start_activity(self, activity: BaseActivity, session_id: str,
                         robots: list[BaseRobot]) -> None:
@@ -482,54 +497,35 @@ class SessionPanel(QWidget, Ui_SessionPanel):
             for skin_id in assignment.unit_ids:
                 self._skin_participant[skin_id] = assignment.participant_id
 
-    def _on_touch_detail_event(self, skin_id: str, chamber_id: int, action: str,
-                               sensor_id: int, intensity_ut: object) -> None:
-        """Receive physical touches with their compensated edge magnitude."""
-        intensity = (float(intensity_ut)
-                     if isinstance(intensity_ut, (int, float)) else None)
-        self._on_touch_event(skin_id, chamber_id, action,
-                             sensor_id=sensor_id, intensity_ut=intensity)
+    def _on_touch_edge(self, skin_id: str, edge: object) -> None:
+        """Receive a physical touch edge, stamped where it was detected."""
+        if isinstance(edge, TouchEdge):
+            self._on_touch_event(skin_id, edge.chamber_id, edge.action, edge=edge)
 
     def _on_touch_event(self, skin_id: str, chamber_id: int, action: str,
-                        *, sensor_id: int | None = None,
-                        intensity_ut: float | None = None) -> None:
-        """Log a touch interaction attributed to the participant assigned to the skin."""
+                        *, edge: TouchEdge | None = None) -> None:
+        """Log a touch interaction attributed to the participant assigned to
+        the skin. ``edge`` is absent for simulated chamber-button touches."""
         if self._current_record is None:
             return
 
-        now = datetime.now()
-        key = (skin_id, chamber_id)
-        metadata = ""
+        now = edge.timestamp if edge is not None else datetime.now()
+        sensor_id = edge.sensor_idx if edge is not None else None
+        intensity_ut = edge.intensity_ut if edge is not None else None
+        monotonic_ms = edge.monotonic_ms if edge is not None else None
+        details: dict = {}
         if action == "press":
-            pressed_at = time.monotonic()
-            interval_ms = self._press_rates.setdefault(
-                skin_id, PressRateMeter()).record(
-                    sensor_id if sensor_id is not None else chamber_id,
-                    pressed_at * 1000.0)
-            self._touch_presses[key] = (pressed_at, now, intensity_ut, sensor_id)
-            details = {}
-            if sensor_id is not None:
-                details["sensor_id"] = sensor_id
-            if intensity_ut is not None:
-                details["intensity_ut"] = round(intensity_ut, 1)
-            if interval_ms is not None:
-                details["touch_interval_ms"] = round(interval_ms)
-                details["frequency_hz"] = round(1000.0 / interval_ms, 3)
-            metadata = json.dumps(details) if details else ""
+            details = self._touch_log.press(
+                skin_id, chamber_id, sensor_id=sensor_id,
+                intensity_ut=intensity_ut, timestamp=now,
+                monotonic_ms=monotonic_ms)
         elif action == "release":
-            started = self._touch_presses.pop(key, None)
-            if started is not None:
-                details = {
-                    "duration_ms": round((time.monotonic() - started[0]) * 1000),
-                    "press_timestamp": started[1].isoformat(timespec="milliseconds"),
-                }
-                if started[3] is not None:
-                    details["sensor_id"] = started[3]
-                if started[2] is not None:
-                    details["press_intensity_ut"] = round(started[2], 1)
-                if intensity_ut is not None:
-                    details["release_intensity_ut"] = round(intensity_ut, 1)
-                metadata = json.dumps(details)
+            details = self._touch_log.release(
+                skin_id, chamber_id, sensor_id=sensor_id,
+                intensity_ut=intensity_ut,
+                peak_ut=edge.peak_ut if edge is not None else None,
+                monotonic_ms=monotonic_ms)
+        metadata = json.dumps(details) if details else ""
 
         if action == "press" and skin_id not in self._skin_participant:
             if self._assignment_panel is not None:
@@ -887,5 +883,4 @@ class SessionPanel(QWidget, Ui_SessionPanel):
         self._skin_robot = {}
         self._session_participants = []
         self._pending_touches = []
-        self._touch_presses = {}
-        self._press_rates = {}
+        self._touch_log.reset()

@@ -16,8 +16,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
+from src.ml import gesture_taxonomy as tax
 from src.ml import rule_baseline
-from src.ml.touch_features import full_feature_vector
+from src.ml.touch_features import FULL_FEATURE_NAMES, full_feature_vector
 from src.ml.touch_segmenter import TouchSegmenter, merge_segments
 
 
@@ -104,12 +105,39 @@ def collect_samples(pairs):
 
 
 def _sample(skin_type, skin_variant, label, seg, gi):
-    """One training tuple ``(skin_type, features, label, baseline, group)``.
+    """One training tuple ``(skin_type, features, target, baseline, group)``.
 
-    Features include the one-hot silicone variant so the per-shape model can
-    adapt across silicone formats."""
-    return (skin_type, full_feature_vector(seg, skin_variant), label,
-            rule_baseline.classify(seg), f"rec{gi}")
+    The target is the MOVEMENT the labelled gesture is an example of (static
+    / slide / rub): the one axis of the taxonomy that is learned. Every other
+    axis is rule-based, so a stroke and a rub teach the model, while a tap, a
+    press and a compressions bout are all examples of "static". Features
+    include the one-hot silicone variant so the per-shape model can adapt
+    across silicone formats."""
+    target = tax.MOVEMENT_OF.get(label, tax.MOVE_STATIC)
+    return (skin_type, full_feature_vector(seg, skin_variant), target,
+            rule_baseline.movement(seg), f"rec{gi}")
+
+
+# Saved model file: the fitted classifier plus what it expects, so a model
+# trained on a different feature set is recognised and refused at load time.
+MODEL_FORMAT = "softedibo.touch_movement"
+MODEL_VERSION = 1
+
+
+def pack_model(classifier) -> dict:
+    """Wrap a fitted movement classifier for saving."""
+    return {"format": MODEL_FORMAT, "version": MODEL_VERSION,
+            "features": list(FULL_FEATURE_NAMES), "model": classifier}
+
+
+def unpack_model(payload):
+    """The classifier inside a saved model, or ``None`` when the file is not
+    a movement model for the current feature set (e.g. an older gesture
+    model: retrain it)."""
+    if (isinstance(payload, dict) and payload.get("format") == MODEL_FORMAT
+            and payload.get("features") == list(FULL_FEATURE_NAMES)):
+        return payload.get("model")
+    return None
 
 
 @dataclass
@@ -232,7 +260,9 @@ def _fit_per_type(per_type: dict[str, dict], models_dir: Path, log,
         log(f"\n=== {skin_type or '(none)'}: {n} samples, {n_classes} classes ===")
         log(f"rule baseline accuracy: {res.baseline_acc:.3f}")
         if n < 10 or n_classes < 2:
-            log("Too few samples/classes to train - collect more. Skipping.")
+            log("Too few samples/movements to train - the movement model "
+                "needs strokes or rubs as well as static touches. Skipping "
+                "(rules stay in use).")
             results.append(res)
             continue
 
@@ -257,7 +287,7 @@ def _fit_per_type(per_type: dict[str, dict], models_dir: Path, log,
 
         clf.fit(X, y)
         out = models_dir / f"touch_{skin_type}.joblib"
-        ml["joblib"].dump(clf, out)
+        ml["joblib"].dump(pack_model(clf), out)
         res.trained = True
         res.model_path = str(out)
         log(f"saved -> {out}")

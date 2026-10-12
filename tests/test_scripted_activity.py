@@ -1250,7 +1250,8 @@ def test_stop_detaches_magnet_listener(clock):
     board = SimulatedMagnetSensor("AA:BB:CC:DD:EE:FF")
     skin.touch_controller = board
     _start(activity, robot)
-    assert len(board._magnet_callbacks) == 1
+    # The touch handler and the live touch classifier both listen.
+    assert len(board._magnet_callbacks) == 2
 
     activity.stop()
 
@@ -1807,3 +1808,182 @@ def test_progress_counts_touches():
 
     [item] = activity.progress("robot-1")
     assert item.lines == ("Touches: 1 / 3",)
+
+
+# ---------------------------------------------------------------------------
+# Session log: milestones, robot actions, discrete inputs, gestures
+# ---------------------------------------------------------------------------
+
+class _DetailLogger:
+    def __init__(self):
+        self.events: list[tuple[str, str, str, dict]] = []
+
+    def log(self, participant_id, type, action, target, metadata):
+        self.events.append(
+            (type, action, target, json.loads(metadata) if metadata else {}))
+
+    def of(self, type_):
+        return [e for e in self.events if e[0] == type_]
+
+
+def _logged(spec, clock, skin=None):
+    activity = ScriptedActivity("any name", "", spec)
+    log = _DetailLogger()
+    activity.event_logger = cast(Any, log)
+    _start(activity, _FakeRobot([skin or _FakeSkin(controller=_FakeCtrl())]))
+    return activity, log
+
+
+def test_state_change_logs_the_condition_that_fired_and_time_in_state(clock):
+    spec = {"initial": "s", "states": {
+        "s": {"do": [], "transitions": [
+            {"to": "done", "when": {"elapsed_ms": {"ms": 2000}}}]},
+        "done": {"do": [], "final": True, "transitions": []},
+    }}
+    activity, log = _logged(spec, clock)
+    clock.advance(2.5)
+    activity._on_tick()
+
+    [_first, change] = log.of("activity")
+    assert change[3] == {
+        "from": "s", "to": "done", "in_state_ms": 2500, "final": True,
+        "trigger": {"source": "condition",
+                    "condition": {"elapsed_ms": {"ms": 2000}}}}
+
+
+def test_manual_phase_change_is_logged_as_manual(clock):
+    spec = {"initial": "s", "states": {
+        "s": {"do": [], "transitions": [
+            {"to": "done", "when": {"elapsed_ms": {"ms": 60000}}}]},
+        "done": {"do": [], "transitions": []},
+    }}
+    activity, log = _logged(spec, clock)
+    activity.advance_phase()
+    assert log.of("activity")[-1][3]["trigger"] == {"source": "manual"}
+
+
+def test_robot_actions_are_logged_with_their_params(clock):
+    spec = {"initial": "s", "states": {"s": {"do": [
+        {"set_led": {"color": "#ff0000"}},
+        {"wait": {"ms": 100}},
+        {"log": {"message": "debug only"}},
+    ], "transitions": []}}}
+    _activity, log = _logged(spec, clock)
+    assert [(e[1], e[3]) for e in log.of("robot")] == [
+        ("set_led", {"cause": "phase", "params": {"color": "#ff0000"}})]
+
+
+def test_robot_action_answering_a_touch_is_marked_as_such(clock):
+    spec = {"initial": "s", "states": {"s": {
+        "do": [], "on_touch": [{"set_led": {"color": "#00ff00"}}],
+        "transitions": []}}}
+    activity, log = _logged(spec, clock)
+    activity._on_press(_unit(activity), {}, 0)
+    activity._on_tick()
+    assert [(e[1], e[3]["cause"]) for e in log.of("robot")] == [
+        ("set_led", "touch")]
+
+
+def test_discrete_input_changes_are_logged_once_per_change(clock):
+    spec = {"initial": "s", "states": {"s": {"do": [], "transitions": []}}}
+    activity, log = _logged(spec, clock)
+    unit = _unit(activity)
+    for pressed in (True, True, False, False, True):   # heartbeats repeat
+        activity._on_button(unit, pressed)
+    assert [(e[1], e[3]["value"]) for e in log.of("input")] == [
+        ("button", True), ("button", False), ("button", True)]
+    assert unit.button_count == 2
+
+
+def test_classified_gesture_is_logged_with_what_was_seen(clock):
+    from src.ml.touch_segmenter import TouchSegment
+    spec = {"initial": "s", "states": {"s": {"do": [], "transitions": []}}}
+    activity, log = _logged(spec, clock)
+    unit = _unit(activity)
+    segment = TouchSegment(start_ms=0.0, end_ms=180.0,
+                           mags=[[10.0, 250.0], [5.0, 410.0]], n_pulses=2)
+    activity._on_gesture(unit, "tap", segment)
+    assert log.of("gesture") == [("gesture", "tap", unit.unit_id, {
+        "duration_ms": 180, "n_pulses": 2, "peak_ut": 410.0})]
+    assert unit.gesture_counts == {"tap": 1}
+
+
+def test_held_button_is_released_when_its_reports_stop(clock):
+    spec = {"initial": "s", "states": {"s": {"do": [], "transitions": []}}}
+    activity, log = _logged(spec, clock)
+    unit = _unit(activity)
+
+    activity._on_button(unit, True)
+    clock.advance(4.0)
+    activity._on_button(unit, True)        # the board's "still held" repeat
+    clock.advance(4.0)
+    activity._on_tick()
+    assert unit.button_down                # heard 4 s ago: still held
+
+    clock.advance(2.0)                     # 6 s of silence: release was lost
+    activity._on_tick()
+    assert not unit.button_down
+    assert [e[3]["value"] for e in log.of("input")] == [True, False]
+
+
+# ---------------------------------------------------------------------------
+# Composable blocks: when / named values / hold_feedback
+# ---------------------------------------------------------------------------
+
+def test_when_button_runs_its_steps_and_values_persist_across_phases(clock):
+    spec = {"initial": "s", "states": {
+        "s": {"do": [
+            {"when": {"event": "button_pressed", "do": [
+                {"change_value": {"name": "clicks", "by": 1,
+                                  "lowest": 0, "highest": 2}}]}}],
+              "transitions": [{"to": "next", "when": {"value_is": {
+                  "name": "clicks", "op": "at_least", "value": 2}}}]},
+        "next": {"do": [], "transitions": []},
+    }}
+    activity, log = _logged(spec, clock)
+    unit = _unit(activity)
+    for pressed in (True, False, True, True, False, True):
+        activity._on_button(unit, pressed)
+        activity._on_tick()
+    activity._on_tick()
+    assert activity.unit_state(unit.unit_id) == "next"
+    assert unit.values == {"clicks": 2.0}          # capped, and kept in "next"
+    assert [e[3]["value"] for e in log.of("value")] == [1.0, 2.0]
+    # The action answering the button is logged as a response, not a stimulus.
+    assert {e[3]["cause"] for e in log.of("robot")} == {"button_pressed"}
+
+
+def test_when_handlers_stop_listening_once_the_phase_ends(clock):
+    spec = {"initial": "s", "states": {
+        "s": {"do": [{"when": {"event": "touch", "do": [
+            {"change_value": {"name": "n", "by": 1}}]}}],
+              "transitions": [{"to": "quiet", "when": {"touch_count": {"min": 1}}}]},
+        "quiet": {"do": [], "transitions": []},
+    }}
+    activity, _log = _logged(spec, clock)
+    unit = _unit(activity)
+    activity._on_press(unit, {}, 0)
+    activity._on_tick()                    # moves to "quiet"; its handler is gone
+    activity._on_tick()
+    activity._on_press(unit, {}, 0)
+    activity._on_tick()
+    assert unit.values.get("n", 0.0) <= 1.0
+    assert activity.unit_state(unit.unit_id) == "quiet"
+
+
+def test_hold_feedback_block_tints_the_held_zone(clock):
+    ctrl = _FakePixelCtrl()
+    spec = {"initial": "s", "states": {"s": {"do": [
+        {"show_value": {"source": "value", "name": "score", "full_at": 100,
+                        "arcs": 0, "fill": "contiguous",
+                        "on_color": "#00ff00", "bg_color": "#000000"}},
+        {"hold_feedback": {"hold": "dim", "hold_full_ut": 400,
+                           "on_color": "#00ff00", "bg_color": "#444444"}},
+    ], "transitions": []}}}
+    activity = ScriptedActivity("any", "", spec)
+    _start(activity, _FakeRobot([_hold_skin(ctrl)]))
+    unit = _unit(activity)
+    before = len(ctrl.pixels)
+    _frame(activity, unit, [1], [0, 400, 0, 0])
+    assert len(ctrl.pixels) == before + 1
+    assert len(ctrl.pixels[-1][0]) == 3            # bg, lit and the hold tint

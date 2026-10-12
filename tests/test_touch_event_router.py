@@ -137,3 +137,77 @@ def test_unsubscribe_and_prune_deleted_qt_source():
     router.unsubscribe(cb)
     router.handle_magnet({"act": []})
     assert events == [(0, "press")]
+
+
+def test_edges_carry_detection_time_and_press_peak():
+    router = TouchEventRouter.from_touch_config({"sensor_count": 2}, chamber_count=2)
+    edges = []
+    router.subscribe_edge(edges.append)
+
+    router.handle_magnet({"act": [1], "mag": [0.0, 120.0]})
+    router.handle_magnet({"act": [1], "mag": [0.0, 480.0]})   # strongest sample
+    router.handle_magnet({"act": [1], "mag": [0.0, 200.0]})
+    router.handle_magnet({"act": [], "mag": [0.0, 40.0]})
+
+    press, release = edges
+    assert (press.action, press.sensor_idx, press.intensity_ut) == ("press", 1, 120.0)
+    assert press.peak_ut is None
+    assert (release.action, release.intensity_ut, release.peak_ut) == (
+        "release", 40.0, 480.0)
+    assert release.monotonic_ms >= press.monotonic_ms
+    assert release.timestamp >= press.timestamp
+
+
+def test_peak_does_not_leak_into_the_next_press():
+    router = TouchEventRouter.from_touch_config({"sensor_count": 1}, chamber_count=1)
+    edges = []
+    router.subscribe_edge(edges.append)
+
+    router.handle_magnet({"act": [0], "mag": [900.0]})
+    router.handle_magnet({"act": [], "mag": [0.0]})
+    router.handle_magnet({"act": [0], "mag": [150.0]})
+    router.handle_magnet({"act": [], "mag": [0.0]})
+
+    assert [e.peak_ut for e in edges if e.action == "release"] == [900.0, 150.0]
+
+
+def _fake_clock(seconds):
+    """A monotonic() stand-in returning each value in turn, then the last."""
+    values = list(seconds)
+
+    def clock():
+        return values.pop(0) if len(values) > 1 else values[0]
+    return clock
+
+
+def test_node_stamped_frames_time_edges_by_the_node_clock(monkeypatch):
+    import src.hardware.touch_event_router as mod
+
+    monkeypatch.setattr(
+        mod.time, "monotonic", _fake_clock([10.000, 10.180, 10.215, 10.430]))
+    router = TouchEventRouter.from_touch_config({"sensor_count": 1}, chamber_count=1)
+    edges = []
+    router.subscribe_edge(edges.append)
+
+    router.handle_magnet({"act": [], "mag": [0.0], "n": 0, "t": 5000})
+    router.handle_magnet({"act": [0], "mag": [300.0], "n": 1, "t": 5100})
+    router.handle_magnet({"act": [0], "mag": [320.0], "n": 2, "t": 5200})
+    router.handle_magnet({"act": [], "mag": [0.0], "n": 4, "t": 5400})
+
+    press, release = edges
+    # 300 ms on the node clock, although the frames arrived 250 ms apart.
+    assert release.monotonic_ms - press.monotonic_ms == 300.0
+    assert router.frames_lost == 1
+
+
+def test_unstamped_frames_fall_back_to_arrival_time(monkeypatch):
+    import src.hardware.touch_event_router as mod
+
+    monkeypatch.setattr(mod.time, "monotonic", _fake_clock([1.0, 1.25]))
+    router = TouchEventRouter.from_touch_config({"sensor_count": 1}, chamber_count=1)
+    edges = []
+    router.subscribe_edge(edges.append)
+    router.handle_magnet({"act": [0]})
+    router.handle_magnet({"act": []})
+    assert edges[1].monotonic_ms - edges[0].monotonic_ms == 250.0
+    assert router.frames_lost == 0

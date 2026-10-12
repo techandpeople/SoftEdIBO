@@ -66,6 +66,21 @@ WaitToken = tuple
 _DEFAULT_ORGAN_TOLERANCE_OHM = 80.0
 
 
+# Robot actions written to the session log when they run: every catalog
+# action except the debugging ``log`` line. Control verbs are not actions.
+_UNSET = object()
+
+# Arcs a `show_value` display uses on a ring that has no pixel canvas.
+_DEFAULT_ARCS = 8
+
+# A held button is reported again every 2 s by the board; this long without a
+# report means the release frame was lost.
+_BUTTON_HELD_TIMEOUT_S = 5.0
+
+_LOGGED_ACTIONS = frozenset(
+    verb.name for verb in catalog.ACTIONS if verb.name != "log")
+
+
 @dataclass
 class _Unit:
     """One skin running the spec independently."""
@@ -91,6 +106,11 @@ class _Unit:
     button_down: bool = False
     button_count: int = 0
     button_cb: Any = None
+    # When the board last reported the button as held (monotonic seconds).
+    button_heard: float = 0.0
+    # Last logged value of each discrete input (button, cover, ...), so a
+    # repeated heartbeat is not logged again.
+    input_values: dict[str, Any] = field(default_factory=dict)
     touch_seq: int = 0
     touch_seq_by_chamber: dict[int, int] = field(default_factory=dict)
     active_touch: set[int] = field(default_factory=set)
@@ -129,6 +149,21 @@ class _Unit:
     score: SyncScoreTracker = field(default_factory=SyncScoreTracker)
     score_fill: dict[str, Any] | None = None
     score_lit: int = 0
+    # Named values (`change_value` / `set_value`): numbers the behaviour keeps
+    # across phases, e.g. a score.
+    values: dict[str, float] = field(default_factory=dict)
+    # `when` blocks armed in the current state: event name -> step lists.
+    handlers: dict[str, list[list]] = field(default_factory=dict)
+    # Group-round detector armed by `group_rhythm` in the current state.
+    rounds: SyncScoreTracker = field(default_factory=SyncScoreTracker)
+    rounds_on: bool = False
+    # Armed `show_value` display (None = off), the pixels it last lit and when
+    # its last decay step happened.
+    show: dict[str, Any] | None = None
+    show_lit: int = -1
+    show_decay_at: float = 0.0
+    # Armed `hold_feedback` block of the current state (None = off).
+    hold_cfg: dict[str, Any] | None = None
     # This skin type's power-level-1 PWM floor (see fill_scaling.duty_for_power);
     # resolved from settings at setup, defaults to the global stall floor.
     min_duty: int = MIN_PUMP_DUTY
@@ -194,6 +229,11 @@ class ScriptedActivity(BaseActivity):
         # `sync_fill` display uses in a state without its own condition.
         self._sync_params = self._find_sync_params()
 
+    @property
+    def spec(self) -> dict[str, Any]:
+        """The behaviour spec this activity runs (do not mutate)."""
+        return self._spec
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -254,7 +294,7 @@ class ScriptedActivity(BaseActivity):
 
     def start(self) -> None:
         for unit in self._units.values():
-            self._enter_state(unit, self._initial)
+            self._enter_state(unit, self._initial, {"source": "start"})
         self._tick_owner = QObject()
         self._tick = QTimer(self._tick_owner)
         self._tick.setInterval(_TICK_MS)
@@ -301,7 +341,7 @@ class ScriptedActivity(BaseActivity):
         """Jump a unit to a state (debug / scripted demo)."""
         unit = self._units.get(unit_id)
         if unit is not None and state in self._states:
-            self._enter_state(unit, state)
+            self._enter_state(unit, state, {"source": "manual"})
 
     def unit_state(self, unit_id: str) -> str:
         unit = self._units.get(unit_id)
@@ -344,7 +384,7 @@ class ScriptedActivity(BaseActivity):
         for unit in self._units.values():
             target = pick(unit.state)
             if target is not None:
-                self._enter_state(unit, target)
+                self._enter_state(unit, target, {"source": "manual"})
                 moved = target
         return moved
 
@@ -392,8 +432,14 @@ class ScriptedActivity(BaseActivity):
     # State machine
     # ------------------------------------------------------------------
 
-    def _enter_state(self, unit: _Unit, state: str) -> None:
+    def _enter_state(self, unit: _Unit, state: str,
+                     trigger: dict[str, Any] | None = None) -> None:
+        """Switch ``unit`` to ``state``. ``trigger`` says what caused the move
+        (the condition that fired, a step, the operator) and is logged with
+        it, so the session record shows how each phase was reached."""
         prev = unit.state
+        in_prev_ms = (round((time.monotonic() - unit.state_entered) * 1000)
+                      if prev else 0)
         unit.state = state
         unit.state_entered = time.monotonic()
         unit.touch_count = 0
@@ -418,6 +464,12 @@ class ScriptedActivity(BaseActivity):
         unit.score.reset()
         unit.score_fill = None
         unit.score_lit = 0
+        unit.handlers.clear()
+        unit.rounds.reset()
+        unit.rounds_on = False
+        unit.show = None
+        unit.show_lit = -1
+        unit.hold_cfg = None
         if unit.canvas is not None:
             unit.canvas.reset()
         body = self._states.get(state, {}).get("do", [])
@@ -425,8 +477,13 @@ class ScriptedActivity(BaseActivity):
         unit.wait = None
         if prev != state:
             logger.info("Scripted %s: %s -> %s", unit.unit_id, prev, state)
+            details: dict[str, Any] = {
+                "from": prev, "to": state, "in_state_ms": in_prev_ms,
+                "final": catalog.is_final_state(self._spec, state)}
+            if trigger:
+                details["trigger"] = trigger
             self.log_event("activity", "state", target=unit.unit_id,
-                           metadata=f'{{"from": "{prev}", "to": "{state}"}}')
+                           metadata=json.dumps(details, default=str))
         # Run the body's first slice immediately so on-enter visuals (LED) show
         # without waiting a tick.
         self._advance(unit)
@@ -437,25 +494,29 @@ class ScriptedActivity(BaseActivity):
             # Also closes a round's phase window when a participant never
             # presses, so the miss is logged without waiting for a later press.
             self._log_sync_rounds(unit)
+            self._expire_button(unit)
             # A per-press handler (touch_progress) may have requested a jump last
             # tick; apply it here, at a clean tick boundary, before anything else.
             if unit.pending_state is not None:
                 target, unit.pending_state = unit.pending_state, None
                 if target in self._states:
-                    self._enter_state(unit, target)
+                    self._enter_state(unit, target, {"source": "step"})
                 continue
             if self._check_transitions(unit):
                 continue                       # state changed; body restarted
             self._advance(unit)
+            self._poll_rounds(unit)
             self._advance_aux(unit)
             self._refresh_sync_fill(unit)
             self._refresh_score_fill(unit)
+            self._refresh_show(unit)
 
     def _check_transitions(self, unit: _Unit) -> bool:
         for tr in self._states.get(unit.state, {}).get("transitions", []) or []:
             when = tr.get("when", {"always": True})
             if self._eval_cond(unit, when):
-                self._enter_state(unit, tr["to"])
+                self._enter_state(unit, tr["to"],
+                                  {"source": "condition", "condition": when})
                 return True
         return False
 
@@ -492,6 +553,10 @@ class ScriptedActivity(BaseActivity):
             else:
                 need = val if val is not None else 1
             return unit.lifted_count >= int(need)
+        if name == "value_is":
+            return self._eval_value_is(unit, val)
+        if name == "zones_full":
+            return unit.canvas is not None and unit.canvas.all_full()
         if name == "button_pressed":
             return unit.button_down
         if name == "button_count":
@@ -511,6 +576,19 @@ class ScriptedActivity(BaseActivity):
         if name == "always":
             return bool(val)
         return False
+
+    @staticmethod
+    def _eval_value_is(unit: _Unit, val: Any) -> bool:
+        """`value_is` condition: a named value against a number."""
+        params = val if isinstance(val, dict) else {}
+        current = unit.values.get(str(params.get("name", "score")), 0.0)
+        try:
+            wanted = float(params.get("value", 100))
+        except (TypeError, ValueError):
+            return False
+        if params.get("op", "at_least") == "at_most":
+            return current <= wanted
+        return current >= wanted
 
     @staticmethod
     def _eval_gesture_count(unit: _Unit, val: Any) -> bool:
@@ -695,6 +773,12 @@ class ScriptedActivity(BaseActivity):
         if name == "touch_count":
             need = int(val.get("min", val) if isinstance(val, dict) else val)
             return [f"Touches: {unit.touch_count} / {need}"]
+        if name == "value_is" and isinstance(val, dict):
+            label = str(val.get("name", "score"))
+            have = unit.values.get(label, 0.0)
+            relation = "at most" if val.get("op") == "at_most" else "of"
+            return [f"{label.capitalize()}: {have:g} {relation} "
+                    f"{float(val.get('value', 100)):g}"]
         if name == "gesture_count":
             kind, need = self._gesture_goal(val)
             have = (unit.touch_count if kind == "touch"
@@ -824,7 +908,22 @@ class ScriptedActivity(BaseActivity):
         if not isinstance(params, dict):
             params = {"_value": params}
 
-        if verb == "wait":
+        if verb in _LOGGED_ACTIONS:
+            # What the robot did and when. "cause" tells a robot-initiated
+            # action (run by the phase program: a stimulus a child's reaction
+            # can be timed from) from the robot answering a touch.
+            cause = ctx.get("_event") or (
+                "touch" if "sensor" in ctx else "phase")
+            self.log_event("robot", verb, target=unit.unit_id,
+                           metadata=json.dumps(
+                               {"cause": cause, "params": params}, default=str))
+
+        if verb == "when":
+            # Arm a handler for the rest of this state; no time passes.
+            unit.handlers.setdefault(
+                str(params.get("event", catalog.EVENT_TOUCH)), []).append(
+                    params.get("do") or [])
+        elif verb == "wait":
             yield ("ms", int(params.get("ms", params.get("_value", 0))))
         elif verb == "wait_for_touch":
             yield ("touch", self._resolve_chamber(unit, params, ctx))
@@ -991,6 +1090,7 @@ class ScriptedActivity(BaseActivity):
         """Robot read-thread callback: record a knock (with intensity) for `on_impact`."""
         unit.impact_count += 1
         unit.impact_levels.append(int(level))
+        self._log_input(unit, "impact", int(level))
 
     def _subscribe_lifted(self, unit: _Unit) -> None:
         """Subscribe to the robot's lift stream (ground sensors), if it exposes one."""
@@ -1020,6 +1120,7 @@ class ScriptedActivity(BaseActivity):
         """Robot read-thread callback: count a lift-off event for `on_lifted`."""
         if lifted:
             unit.lifted_count += 1
+        self._log_input(unit, "lifted", bool(lifted))
 
     # ------------------------------------------------------------------
     # Button input (for `button_pressed` / `button_count` conditions)
@@ -1050,14 +1151,30 @@ class ScriptedActivity(BaseActivity):
                 logger.exception("on_button unsubscribe failed on %s", unit.unit_id)
         unit.button_cb = None
 
+    def _expire_button(self, unit: _Unit) -> None:
+        """Release a button whose "held" reports stopped arriving.
+
+        A board repeats "pressed" while the button is down and sends a single
+        "released"; if that one frame is lost the button would stay down for
+        ever. Silence for longer than the repeat period means it was let go."""
+        if (unit.button_down
+                and time.monotonic() - unit.button_heard > _BUTTON_HELD_TIMEOUT_S):
+            self._on_button(unit, False)
+
     def _on_button(self, unit: _Unit, pressed: bool) -> None:
         """Gateway-thread callback: track the button and count each press.
         The node re-sends its state periodically, so only a released ->
         pressed change is a new press."""
         pressed = bool(pressed)
+        if pressed:
+            unit.button_heard = time.monotonic()
         if pressed and not unit.button_down:
             unit.button_count += 1
+        if pressed != unit.button_down:
+            self._emit(unit, catalog.EVENT_BUTTON_PRESSED if pressed
+                       else catalog.EVENT_BUTTON_RELEASED)
         unit.button_down = pressed
+        self._log_input(unit, "button", pressed)
 
     @staticmethod
     def _parse_rgb(hex_colour: str) -> tuple[int, int, int]:
@@ -1098,6 +1215,19 @@ class ScriptedActivity(BaseActivity):
             self._sync_fill(unit, params)
         elif verb == "score_fill":
             self._score_fill(unit, params)
+        elif verb == "group_rhythm":
+            self._group_rhythm(unit, params)
+        elif verb == "change_value":
+            self._change_value(unit, params)
+        elif verb == "set_value":
+            self._set_value(unit, str(params.get("name", "score")),
+                            params.get("to", 0))
+        elif verb == "show_value":
+            self._show_value(unit, params)
+        elif verb == "zone_light":
+            self._zone_fill(unit, {**params, "to": ""}, ctx)
+        elif verb == "hold_feedback":
+            unit.hold_cfg = dict(params)
         elif verb in ("inflate", "set_pressure"):
             self._set_pressure(unit, self._resolve_chamber(unit, params, ctx),
                                int(params.get("pct", 60 if verb == "inflate" else 0)),
@@ -1342,6 +1472,148 @@ class ScriptedActivity(BaseActivity):
             penalty = 0.05
         return {**sync, "gain": gain, "penalty": penalty}
 
+    # ------------------------------------------------------------------
+    # Events, named values and the value display
+    # ------------------------------------------------------------------
+
+    def _emit(self, unit: _Unit, event: str, ctx: dict | None = None) -> None:
+        """Run the current state's `when` handlers for ``event``.
+
+        Each handler is spawned as a one-shot program advanced alongside the
+        state's body (so it may wait). Safe to call from the gateway thread:
+        it only appends to the unit's handler list."""
+        for steps in list(unit.handlers.get(event, ())):
+            gen = self._run_steps(unit, steps, {**(ctx or {}), "_event": event})
+            unit.aux.append((gen, None))
+
+    def _group_rhythm(self, unit: _Unit, params: dict) -> None:
+        """Arm the group-round detector for this state (it only raises
+        events; scoring and display are other blocks' job)."""
+        rules = self._sync_kwargs(params)
+        rules.pop("required_rounds", None)
+        unit.rounds.configure(**rules, gain=0.0, penalty=0.0)
+        unit.rounds.reset()
+        unit.rounds_on = True
+
+    def _poll_rounds(self, unit: _Unit) -> None:
+        """Per tick: close an expired round, then raise (and log) one event
+        per round that ended since the last tick."""
+        if not unit.rounds_on:
+            return
+        unit.rounds.tick(time.monotonic() * 1000.0)
+        for outcome in unit.rounds.take_outcomes():
+            self.log_event("sync", f"round_{outcome}", target=unit.unit_id,
+                           metadata=json.dumps(
+                               {"sensors": unit.rounds.sensors}))
+            self._emit(unit, f"round_{outcome}")
+
+    def _change_value(self, unit: _Unit, params: dict) -> None:
+        name = str(params.get("name", "score"))
+        try:
+            by = float(params.get("by", 1))
+            lowest = float(params.get("lowest", 0))
+            highest = float(params.get("highest", 100))
+        except (TypeError, ValueError):
+            return
+        current = unit.values.get(name, 0.0)
+        self._set_value(unit, name, max(lowest, min(highest, current + by)))
+
+    def _set_value(self, unit: _Unit, name: str, value: Any) -> None:
+        """Store a named value and log the change (once per new number)."""
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return
+        if unit.values.get(name) == number:
+            return
+        unit.values[name] = number
+        self.log_event("value", name, target=unit.unit_id,
+                       metadata=json.dumps({"value": number}))
+
+    def _show_value(self, unit: _Unit, params: dict) -> None:
+        """Arm the value display for this state and paint it once;
+        `_refresh_show` keeps it live."""
+        unit.show = dict(params)
+        if unit.canvas is not None:
+            unit.canvas.set_fill(str(params.get("fill", "") or ""))
+        unit.show_lit = -1                     # force the first paint
+        unit.show_decay_at = time.monotonic()
+        self._refresh_show(unit)
+
+    def _shown_fraction(self, unit: _Unit, params: dict) -> float:
+        """What share (0..1) the armed display should show right now."""
+        if params.get("source") == catalog.SHOW_GROUP_SYNC:
+            cond = self._state_sync_params(unit)
+            if cond is None:
+                return 0.0
+            status = self._sync_status(unit, cond)
+            if status.get("complete"):
+                return 1.0
+            required = max(1, int(status.get("rounds_required", 1) or 1))
+            return min(1.0, max(0, int(status.get("rounds", 0) or 0)) / required)
+        try:
+            full_at = float(params.get("full_at", 100) or 100)
+        except (TypeError, ValueError):
+            full_at = 100.0
+        value = unit.values.get(str(params.get("name", "score")), 0.0)
+        return max(0.0, min(1.0, value / full_at)) if full_at > 0 else 0.0
+
+    def _refresh_show(self, unit: _Unit) -> None:
+        """Per tick: repaint the armed `show_value` display when its number
+        changed. Lit share = the shown fraction, in pixels on a strip canvas
+        or in ``arcs`` equal arcs (always arcs on a ring without a canvas).
+        A drop decays one step per ``decay_ms`` (0 = at once)."""
+        params = unit.show
+        if params is None:
+            return
+        try:
+            arcs = max(0, min(8, int(params.get("arcs", 0) or 0)))
+        except (TypeError, ValueError):
+            arcs = 0
+        canvas = unit.canvas
+        if canvas is None and arcs == 0:
+            arcs = _DEFAULT_ARCS
+        steps = arcs if arcs else (canvas.total_size if canvas is not None else 0)
+        if steps <= 0:
+            return
+        fraction = self._shown_fraction(unit, params)
+        # Arcs light only once fully earned; pixels follow the nearest count.
+        target = (int(steps * fraction + 1e-9) if arcs
+                  else min(steps, round(steps * fraction)))
+        new = self._decayed(unit, params, target)
+        if new == unit.show_lit:
+            return
+        unit.show_lit = new
+        if arcs or canvas is None:
+            on_color = str(params.get("on_color", "#2ecc71"))
+            bg_color = str(params.get("bg_color", "#222222"))
+            self._set_led_halves(
+                unit, [on_color] * new + [bg_color] * (steps - new),
+                ring=self._parse_ring(params), fade_ms=self._fade_ms(params))
+        else:
+            canvas.set_total_lit(new)
+            self._send_canvas(unit, params)
+
+    @staticmethod
+    def _decayed(unit: _Unit, params: dict, target: int) -> int:
+        """The step count to show now: growth at once, a drop one step per
+        ``decay_ms`` (0 = at once)."""
+        current = max(0, unit.show_lit)
+        now = time.monotonic()
+        if target >= current or unit.show_lit < 0:
+            unit.show_decay_at = now
+            return target
+        try:
+            decay_ms = max(0, int(params.get("decay_ms", 0) or 0))
+        except (TypeError, ValueError):
+            decay_ms = 0
+        if decay_ms == 0:
+            return target
+        if (now - unit.show_decay_at) * 1000.0 >= decay_ms:
+            unit.show_decay_at = now
+            return current - 1
+        return current
+
     def _send_canvas(self, unit: _Unit, params: dict) -> None:
         """Render the unit's canvas as ONE `set_led_pixels` frame."""
         canvas = unit.canvas
@@ -1493,10 +1765,24 @@ class ScriptedActivity(BaseActivity):
     def _on_cover(self, unit: _Unit, closed: bool) -> None:
         if not closed:                      # open circuit -> every organ absent
             unit.organ_verdicts = dict.fromkeys(unit.organ_verdicts, "absent")
+        self._log_input(unit, "cover", bool(closed))
 
     def _on_resistance(self, unit: _Unit, resistance_ohm: float) -> None:
         if unit.resolver is not None:
             unit.organ_verdicts = unit.resolver.resolve(resistance_ohm)
+            self._log_input(unit, "organs", dict(unit.organ_verdicts))
+
+    def _log_input(self, unit: _Unit, name: str, value: Any) -> None:
+        """Log a change of one of the robot's discrete (non-touch) inputs.
+
+        Boards repeat their state as a heartbeat, so only a value that differs
+        from the last one logged for that input is written. Called from the
+        gateway / robot read thread; the event logger only enqueues."""
+        if unit.input_values.get(name, _UNSET) == value:
+            return
+        unit.input_values[name] = value
+        self.log_event("input", name, target=unit.unit_id,
+                       metadata=json.dumps({"value": value}, default=str))
 
     # ------------------------------------------------------------------
     # Touch input
@@ -1526,33 +1812,56 @@ class ScriptedActivity(BaseActivity):
         unit.organ_sensors.clear()
 
     def _subscribe_gestures(self, unit: _Unit) -> None:
-        """Attach a live ML gesture classifier so `gesture_count` can count
-        classified gestures (tap/stroke/...).
+        """Attach a live touch classifier so `gesture_count` can count
+        gestures by type (tap/stroke/...) and each one is logged.
 
-        Inert and cheap when the skin has no trained model for its type - the
-        classifier's ``attach()`` returns False and never subscribes - so
-        raw-touch `gesture_count` keeps working while classified kinds simply
-        never fire. Mirrors :meth:`_subscribe_touch`; the classifier taps the same
-        compensated magnet stream itself (both subscribers coexist)."""
+        Works without a trained model (the taxonomy's rules name the gesture;
+        a model only sharpens the movement axis). Mirrors
+        :meth:`_subscribe_touch`; the classifier taps the same compensated
+        magnet stream itself (both subscribers coexist)."""
         if unit.skin is None:
             return
         try:
             from src.ml.touch_classifier import LiveTouchClassifier
             clf = LiveTouchClassifier(
                 unit.skin,
-                lambda sid, label, seg, u=unit: self._on_gesture(u, label))
+                lambda sid, label, seg, reading, u=unit:
+                self._on_gesture(u, label, seg, reading))
             if clf.attach():
                 unit.gesture_clf = clf
         except Exception:   # noqa: BLE001 - ML deps optional; must not block a session
             logger.debug("gesture classifier unavailable on %s",
                          unit.unit_id, exc_info=True)
 
-    def _on_gesture(self, unit: _Unit, label: str) -> None:
-        """Gateway-thread callback: count one classified gesture (by label).
+    def _on_gesture(self, unit: _Unit, label: str, segment: Any = None,
+                    reading: Any = None) -> None:
+        """Gateway-thread callback: count one classified gesture (by label)
+        and log it with what the classifier saw.
 
         Plain int increment mirrors `touch_count`/`impact_count` - read on the
         GUI tick in `_eval_gesture_count`, so no lock is needed."""
         unit.gesture_counts[label] = unit.gesture_counts.get(label, 0) + 1
+        self._emit(unit, catalog.EVENT_GESTURE)
+        as_details = getattr(reading, "as_details", None)
+        details = (as_details() if callable(as_details)
+                   else self._gesture_details(segment))
+        self.log_event("gesture", label, target=unit.unit_id,
+                       metadata=json.dumps(details))
+
+    @staticmethod
+    def _gesture_details(segment: Any) -> dict[str, Any]:
+        """Duration, pulse count and peak magnitude of a classified segment."""
+        if segment is None:
+            return {}
+        details: dict[str, Any] = {
+            "duration_ms": round(float(getattr(segment, "duration_ms", 0.0))),
+            "n_pulses": int(getattr(segment, "n_pulses", 1) or 1),
+        }
+        peaks = [max(sample) for sample in getattr(segment, "mags", []) or []
+                 if sample]
+        if peaks:
+            details["peak_ut"] = round(float(max(peaks)), 1)
+        return details
 
     def _on_magnet(self, unit: _Unit, data: dict[str, Any]) -> None:
         active = data.get("act") or []
@@ -1605,7 +1914,7 @@ class ScriptedActivity(BaseActivity):
         """The fill block whose ``hold`` setting (and colours) drive the live
         hold feedback: the state's `zone_fill`, else its armed `score_fill`,
         else its armed `sync_fill`."""
-        return (self._state_zone_fill_params(unit)
+        return (unit.hold_cfg or self._state_zone_fill_params(unit)
                 or unit.score_fill or unit.sync_fill)
 
     def _refresh_hold(self, unit: _Unit, magnitudes: Any,
@@ -1657,6 +1966,7 @@ class ScriptedActivity(BaseActivity):
             sensor_idx, TouchRhythmTracker()).record(now_ms)
         unit.rhythm.record(now_ms)
         unit.score.record(sensor_idx, now_ms)
+        unit.rounds.record(sensor_idx, now_ms)
         unit.group_sync.record(sensor_idx, now_ms)
 
     @staticmethod
@@ -1692,12 +2002,12 @@ class ScriptedActivity(BaseActivity):
         # Spawn the state's on_touch handler, if any, to run concurrently. The
         # context names the chamber the sensor routes to AND the sensor itself,
         # so zone-aware verbs (zone_fill) know which strip zone to paint.
+        ctx = {"chamber": ch if ch is not None else None,
+               "sensor": int(sensor_idx)}
         handler = self._states.get(unit.state, {}).get("on_touch")
         if handler:
-            gen = self._run_steps(unit, handler,
-                                  {"chamber": ch if ch is not None else None,
-                                   "sensor": int(sensor_idx)})
-            unit.aux.append((gen, None))
+            unit.aux.append((self._run_steps(unit, handler, ctx), None))
+        self._emit(unit, catalog.EVENT_TOUCH, ctx)
 
     @staticmethod
     def _touch_mapping(skin) -> dict:

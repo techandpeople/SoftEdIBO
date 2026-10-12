@@ -30,7 +30,7 @@ from src.hardware.fill_profile import DeflateProfile, FillProfile
 from src.hardware.hold_duty import HOLD_VACUUM, hold_direction, seed_hold_duty
 from src.hardware.fill_scaling import (DutyModel, duty_for_period,
                                        scale_fill_ms)
-from src.hardware.touch_event_router import TouchEventRouter
+from src.hardware.touch_event_router import TouchEdge, TouchEventRouter
 from src.hardware.units import pct_to_kpa
 from src.hardware.touch_profiles import touch_profiles
 from src.core.press_rate import DEFAULT_STALE_MS, PressRateMeter
@@ -378,6 +378,11 @@ class Skin:
     @property
     def chamber_count(self) -> int:
         return len(self._chambers)
+
+    @property
+    def controller(self):
+        """The node controller driving this skin's chambers."""
+        return self._ctrl
 
     @property
     def geometry(self):
@@ -888,6 +893,12 @@ class Skin:
         the edge where the touch was detected (or ``None`` if unavailable).
         """
         self._touch_router.subscribe_detail(callback)
+
+    def on_touch_edge(self, callback: Callable[[TouchEdge], None]) -> None:
+        """Register ``callback(edge)`` for each sensor press/release, stamped
+        at detection and (on release) carrying the press's peak magnitude.
+        Fires on the gateway thread - marshal to the GUI thread first."""
+        self._touch_router.subscribe_edge(callback)
 
     def on_magnet(self, callback: Callable[[dict[str, Any]], None]) -> bool:
         """Register ``callback(data)`` for this skin's compensated magnet stream.

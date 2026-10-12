@@ -9,27 +9,87 @@
       "score": {
         "do": [
           {
-            "score_fill": {
+            "group_rhythm": {
               "mode": "auto",
               "participants": 3,
               "target_interval_ms": 550,
               "cadence_tolerance_ms": 100,
               "phase_tolerance_ms": 150,
-              "min_gap_ms": 250,
-              "gain_pct": 15,
-              "penalty_pct": 5,
+              "min_gap_ms": 250
+            }
+          },
+          {
+            "set_value": {
+              "name": "score",
+              "to": 0
+            }
+          },
+          {
+            "when": {
+              "event": "round_good",
+              "do": [
+                {
+                  "change_value": {
+                    "name": "score",
+                    "by": 15,
+                    "lowest": 0,
+                    "highest": 100
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "event": "round_missed",
+              "do": [
+                {
+                  "change_value": {
+                    "name": "score",
+                    "by": -5,
+                    "lowest": 0,
+                    "highest": 100
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "show_value": {
+              "source": "value",
+              "name": "score",
+              "full_at": 100,
+              "arcs": 0,
               "fill": "random",
               "on_color": "#f1c40f",
               "bg_color": "#8e44ad",
+              "fade_ms": 250,
+              "ring": "all"
+            }
+          },
+          {
+            "hold_feedback": {
               "hold": "dim",
               "hold_full_ut": 400,
+              "on_color": "#f1c40f",
+              "bg_color": "#8e44ad",
               "fade_ms": 250,
-              "ring": "all",
-              "to": "complete"
+              "ring": "all"
             }
           }
         ],
-        "transitions": []
+        "transitions": [
+          {
+            "to": "complete",
+            "when": {
+              "value_is": {
+                "name": "score",
+                "op": "at_least",
+                "value": 100
+              }
+            }
+          }
+        ]
       },
       "complete": {
         "do": [

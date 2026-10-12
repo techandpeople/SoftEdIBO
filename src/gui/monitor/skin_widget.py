@@ -27,9 +27,9 @@ class SkinWidget(QGroupBox):
 
     # Chamber-button (simulated) touches: (skin_id, chamber_id, action).
     touch_event   = Signal(str, int, str)
-    # Sensor touches: (skin_id, chamber_id, action, sensor_idx, intensity_ut).
-    touch_detail_event = Signal(str, int, str, int, object)
-    _touch_detail_log = Signal(int, str, int, object)   # thread-safe bridge
+    # Sensor touches: (skin_id, TouchEdge).
+    touch_edge_event = Signal(str, object)
+    _touch_edge_log = Signal(object)   # thread-safe bridge
 
     def __init__(self, skin: Skin) -> None:
         super().__init__(skin.skin_id)
@@ -40,14 +40,12 @@ class SkinWidget(QGroupBox):
         self._grid_view: SkinGridView | None = None
         self._organ_panel: OrganPanel | None = None
 
-        # Bubble skin sensor touches (with sensor + edge magnitude) up so the
-        # session panel logs them. The Skin's TouchEventRouter fires on the
+        # Bubble skin sensor touches (stamped where they were detected) up so
+        # the session panel logs them. The Skin's TouchEventRouter fires on the
         # gateway thread, so hop through a QueuedConnection bridge first.
-        self._touch_detail_log.connect(
-            self._emit_touch_detail_log, Qt.ConnectionType.QueuedConnection)
-        skin.on_touch_event_detail(
-            lambda chamber_id, action, sensor_idx, intensity_ut:
-            self._touch_detail_log.emit(chamber_id, action, sensor_idx, intensity_ut))
+        self._touch_edge_log.connect(
+            self._emit_touch_edge, Qt.ConnectionType.QueuedConnection)
+        skin.on_touch_edge(self._touch_edge_log.emit)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(2, 2, 2, 2)
@@ -110,11 +108,9 @@ class SkinWidget(QGroupBox):
             cols.addWidget(cw)
         outer.addLayout(cols)
 
-    def _emit_touch_detail_log(self, chamber_id: int, action: str,
-                               sensor_idx: int, intensity_ut: object) -> None:
-        """Bubble a physical touch, with its edge magnitude, to the session."""
-        self.touch_detail_event.emit(self._skin_id, chamber_id, action,
-                                     sensor_idx, intensity_ut)
+    def _emit_touch_edge(self, edge: object) -> None:
+        """Bubble a physical touch edge to the session."""
+        self.touch_edge_event.emit(self._skin_id, edge)
 
     def _relay_to_grid(self, _skin_id: str, chamber_id: int, action: str) -> None:
         """Mirror chamber touches onto the SkinGridView as a blue pulse on
