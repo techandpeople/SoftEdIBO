@@ -99,7 +99,7 @@ def test_sibling_conflicts():
 def test_large_pressure_changes():
     prev = [{"mac": "AA", "slot": 0, "max_pressure": 8.0}]
     chambers = [{"mac": "AA", "slot": 0, "max_pressure": 11.0},
-                {"mac": "BB", "slot": 1, "max_pressure": 8.5}]  # vs default 8.0
+                {"mac": "BB", "slot": 1, "max_pressure": near_default}]
     changes = skincfg.large_pressure_changes(chambers, prev)
     assert len(changes) == 1
     assert changes[0].mac == "AA" and changes[0].new_kpa == 11.0
@@ -108,7 +108,7 @@ def test_large_pressure_changes():
 # --- entry building + persistence ----------------------------------------
 
 def test_build_skin_entry_strips_default_pressure():
-    chambers = [{"mac": "AA", "slot": 0, "max_pressure": 8.0},
+    chambers = [{"mac": "AA", "slot": 0, "max_pressure": skincfg.DEFAULT_MAX_KPA},
                 {"mac": "BB", "slot": 1, "max_pressure": 10.0}]
     entry = skincfg.build_skin_entry("belly-1", chambers,
                                      skin_type="round_4", skin_variant="v2")
@@ -117,20 +117,26 @@ def test_build_skin_entry_strips_default_pressure():
     assert entry["skin_type"] == "round_4"
     assert entry["skin_variant"] == "v2"
     # input list must not be mutated
-    assert chambers[0]["max_pressure"] == 8.0
+    assert chambers[0]["max_pressure"] == skincfg.DEFAULT_MAX_KPA
+
+
+def test_default_limits():
+    assert skincfg.DEFAULT_MAX_KPA == 30.0
+    assert skincfg.DEFAULT_MIN_KPA == -5.0
 
 
 def test_build_skin_entry_strips_default_min_pressure():
-    chambers = [{"mac": "AA", "slot": 0, "min_pressure": 0.0},
+    chambers = [{"mac": "AA", "slot": 0, "min_pressure": skincfg.DEFAULT_MIN_KPA},
                 {"mac": "BB", "slot": 1, "min_pressure": -8.0}]   # vacuum-fed
     entry = skincfg.build_skin_entry("belly-1", chambers)
     assert "min_pressure" not in entry["chambers"][0]   # default dropped
     assert entry["chambers"][1]["min_pressure"] == -8.0  # non-default kept
     # input list must not be mutated
-    assert chambers[0]["min_pressure"] == 0.0
+    assert chambers[0]["min_pressure"] == skincfg.DEFAULT_MIN_KPA
 
 
 def test_build_skin_entry_omits_empty_type_variant():
+    near_default = skincfg.DEFAULT_MAX_KPA + 0.5      # new chamber: vs the default
     entry = skincfg.build_skin_entry("x", [{"mac": "AA", "slot": 0}])
     assert "skin_type" not in entry and "skin_variant" not in entry
 

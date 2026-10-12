@@ -19,6 +19,9 @@ import serial
 
 logger = logging.getLogger(__name__)
 
+# Longest command-parameter text kept in the "Sent to" debug line.
+_LOG_PARAMS_MAX = 160
+
 # Seconds to wait for the peer on the serial port to prove it is a gateway
 # before giving up and reporting the connection as failed.
 VERIFY_TIMEOUT_S = 2.0
@@ -287,7 +290,14 @@ class Gateway:
             with self._write_lock:
                 for _ in range(max(1, repeat)):
                     ser.write(payload)
-            logger.debug("Sent to %s: %s%s", target_mac, command,
+            # Parameters too (clipped: OTA chunks are long): the command name
+            # alone could not tell which chamber / valve a frame addressed when
+            # reading softedibo.log back after "it did not respond".
+            params = json.dumps(kwargs) if kwargs else ""
+            if len(params) > _LOG_PARAMS_MAX:
+                params = params[:_LOG_PARAMS_MAX] + "..."
+            logger.debug("Sent to %s: %s%s%s", target_mac, command,
+                         f" {params}" if params else "",
                          f" (x{repeat})" if repeat > 1 else "")
             self._emit_raw("tx", line)
             return True

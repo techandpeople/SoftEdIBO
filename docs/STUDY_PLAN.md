@@ -336,7 +336,8 @@ and burst**. Layered defences, innermost first:
    configured per-chamber max (next item).
 2. **Per-chamber configured max** - `set_max_pressure` (kPa) is pushed from the
    `Skin` constructor on connect, so each chamber keeps its safe ceiling **even
-   if the PC crashes mid-session**. Default 8 kPa, never above the hard cap.
+   if the PC crashes mid-session**. Default 30 kPa (the node boots on 8 kPa
+   until it is pushed), never above the hard cap.
 3. **Actuation watchdog (added this session)** - both firmwares force-stop any
    chamber stuck INFLATING/DEFLATING longer than `ACTUATION_TIMEOUT_MS` (10 s).
    This catches the dangerous failure the hard cap can't: a pressure sensor

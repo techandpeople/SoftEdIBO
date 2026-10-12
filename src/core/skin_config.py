@@ -18,7 +18,9 @@ from dataclasses import dataclass
 YAML_KEY: dict[str, str] = {
     "turtle": "turtles", "tree": "trees", "thymio": "thymios"}
 
-DEFAULT_MAX_KPA = 8.0
+# Per-chamber limits a chamber gets when its skin entry sets none. (The node
+# firmware boots on its own, tighter 8 / 0 kPa until these are pushed.)
+DEFAULT_MAX_KPA = 30.0
 # Upper/lower bound for the per-chamber Max/Min the config dialog accepts. These
 # are intentionally generous (effectively uncapped for these low-pressure air
 # chambers) - the pressure gauge is unreliable, so over-pressure is held off by
@@ -26,8 +28,8 @@ DEFAULT_MAX_KPA = 8.0
 # actuation watchdog), not by an artificial pressure ceiling. Kept in sync with
 # the firmware HARD_*_KPA constants.
 MAX_ALLOWED_KPA = 100.0
-# Lower cap: 0 by default; negative for chambers fed from a vacuum source.
-DEFAULT_MIN_KPA = 0.0
+# Lower cap: slightly below ambient by default (every board has a vacuum pump).
+DEFAULT_MIN_KPA = -5.0
 MIN_ALLOWED_KPA = -100.0
 CONFIRM_DELTA = 2.0
 MAX_CHAMBERS = 3

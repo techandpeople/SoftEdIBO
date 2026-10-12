@@ -119,6 +119,10 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.actionCalibrateTouch.triggered.connect(self._open_touch_calibration)
         self.menuTools.addAction(self.actionCalibrateTouch)
 
+        self.actionMapSensors = QAction("Map Pressure Sensors...", self)
+        self.actionMapSensors.triggered.connect(self._open_sensor_map)
+        self.menuTools.addAction(self.actionMapSensors)
+
         self.actionEmergencyFlash = QAction("Emergency Flash (dead USB)...", self)
         self.actionEmergencyFlash.triggered.connect(self._open_emergency_flash)
         self.menuTools.addAction(self.actionEmergencyFlash)
@@ -352,6 +356,20 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         from src.gui.fill_calibration_dialog import FillCalibrationDialog
         dlg = FillCalibrationDialog(self._settings, self._gateway, parent=self)
         dlg.saved.connect(self._on_robot_configured)   # rebuild robots with new fill times
+        dlg.exec()
+
+    def _open_sensor_map(self) -> None:
+        """Tools => Map Pressure Sensors... - find which sensor input belongs to
+        each chamber of a node_multiplexed and store the map on the node."""
+        if self._session_active:
+            QMessageBox.warning(
+                self, "Map Pressure Sensors",
+                "Stop the running session before mapping - it drives the "
+                "pumps directly.")
+            return
+        from src.gui.sensor_map_dialog import SensorMapDialog
+        dlg = SensorMapDialog(self._settings, self._gateway, parent=self)
+        dlg.saved.connect(self._on_robot_configured)   # rebuild robots with the map
         dlg.exec()
 
     def _open_touch_calibration(self) -> None:

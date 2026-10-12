@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>SensorMapDialog</class>
+ <widget class="QDialog" name="SensorMapDialog">
+  <property name="geometry">
+   <rect><x>0</x><y>0</y><width>620</width><height>520</height></rect>
+  </property>
+  <property name="windowTitle"><string>Map Pressure Sensors</string></property>
+  <property name="minimumSize">
+   <size><width>560</width><height>0</height></size>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <widget class="QLabel" name="intro_label">
+     <property name="wordWrap"><bool>true</bool></property>
+     <property name="text"><string>Finds which pressure sensor input belongs to each chamber of a multiplexed board. One chamber at a time is inflated while every sensor input is watched; as soon as one input has risen by the target pressure it is taken as that chamber's sensor, and the chamber is vented again before the next one. A chamber with no sensor never reaches the target, so it stops on the time limit instead. Connect the skins first and keep hands clear. Save stores the map on the node, so closed-loop inflate and deflate read the right sensor.</string></property>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="node_row">
+     <item>
+      <widget class="QLabel" name="node_label">
+       <property name="text"><string>Node:</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QComboBox" name="node_combo">
+       <property name="toolTip"><string>The multiplexed board to map.</string></property>
+       <property name="whatsThis"><string>The multiplexed board to map. A board shared by two robots is listed once; its map is saved for both.</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QLabel" name="stop_label">
+       <property name="text"><string>Stop at:</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QDoubleSpinBox" name="stop_spin">
+       <property name="decimals"><number>0</number></property>
+       <property name="minimum"><double>2.000000000000000</double></property>
+       <property name="maximum"><double>60.000000000000000</double></property>
+       <property name="singleStep"><double>5.000000000000000</double></property>
+       <property name="value"><double>15.000000000000000</double></property>
+       <property name="suffix"><string> kPa</string></property>
+       <property name="toolTip"><string>Each chamber inflates until one sensor input has risen this far above its rest level.</string></property>
+       <property name="whatsThis"><string>Each chamber inflates until one sensor input has risen this far above its rest level; that input is then unmistakably the chamber's sensor and the inflate stops at once. Keep it at or below what the skins safely take. Lower it to be gentler; a few kPa is already enough to tell the sensor apart.</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QLabel" name="pulse_label">
+       <property name="text"><string>Max time:</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QSpinBox" name="pulse_spin">
+       <property name="minimum"><number>200</number></property>
+       <property name="maximum"><number>8000</number></property>
+       <property name="singleStep"><number>500</number></property>
+       <property name="value"><number>3000</number></property>
+       <property name="suffix"><string> ms</string></property>
+       <property name="toolTip"><string>Safety limit: longest a chamber inflates when no sensor input reaches the target.</string></property>
+       <property name="whatsThis"><string>Safety limit for a chamber whose sensor never reaches the target - because it has no sensor, or nothing is connected. Such a chamber is pumped blind for this whole time, so keep it short for small chambers. Raise it only if a large chamber runs out of time before reaching the target.</string></property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="node_spacer">
+       <property name="orientation"><enum>Qt::Horizontal</enum></property>
+       <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+      </spacer>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <widget class="QTableWidget" name="result_table">
+     <property name="editTriggers"><set>QAbstractItemView::NoEditTriggers</set></property>
+     <property name="selectionMode"><enum>QAbstractItemView::NoSelection</enum></property>
+     <property name="toolTip"><string>Per chamber: the sensor input saved now, the one just measured, and how much it rose.</string></property>
+     <property name="whatsThis"><string>One row per chamber. Saved is the sensor input the node uses now (default = chamber N on input N, never measured). Measured is the input that rose during this run's pulse, Rise is by how much, in kPa above its rest level, and Note explains a chamber with no sensor or one that did not respond.</string></property>
+     <column><property name="text"><string>Chamber</string></property></column>
+     <column><property name="text"><string>Saved</string></property></column>
+     <column><property name="text"><string>Measured</string></property></column>
+     <column><property name="text"><string>Rise (kPa)</string></property></column>
+     <column><property name="text"><string>Note</string></property></column>
+    </widget>
+   </item>
+   <item>
+    <widget class="QProgressBar" name="progress">
+     <property name="value"><number>0</number></property>
+     <property name="toolTip"><string>Progress across the node's chambers.</string></property>
+     <property name="whatsThis"><string>Progress of the mapping run across the node's chambers.</string></property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QLabel" name="status_label">
+     <property name="wordWrap"><bool>true</bool></property>
+     <property name="text"><string>Ready.</string></property>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="button_row">
+     <item>
+      <widget class="QPushButton" name="start_btn">
+       <property name="text"><string>Start mapping</string></property>
+       <property name="toolTip"><string>Pulse each chamber in turn and find its sensor input.</string></property>
+       <property name="whatsThis"><string>Pulse each chamber in turn and find the sensor input that follows it. The pumps run: stop any session first and keep hands clear of the skins.</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="stop_btn">
+       <property name="text"><string>Stop</string></property>
+       <property name="enabled"><bool>false</bool></property>
+       <property name="toolTip"><string>Abort the run; the chamber in hand is closed and vented.</string></property>
+       <property name="whatsThis"><string>Abort the run. The chamber being pulsed is stopped and left venting for a few seconds so it does not stay inflated. Nothing is saved.</string></property>
+      </widget>
+     </item>
+     <item>
+      <spacer name="button_spacer">
+       <property name="orientation"><enum>Qt::Horizontal</enum></property>
+       <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+      </spacer>
+     </item>
+     <item>
+      <widget class="QPushButton" name="reset_btn">
+       <property name="text"><string>Reset to default</string></property>
+       <property name="toolTip"><string>Forget the saved map: chamber N reads input N again.</string></property>
+       <property name="whatsThis"><string>Forget this node's saved map and put it back on the board default, where chamber N reads sensor input N.</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="save_btn">
+       <property name="text"><string>Save</string></property>
+       <property name="enabled"><bool>false</bool></property>
+       <property name="toolTip"><string>Store the measured map and send it to the node.</string></property>
+       <property name="whatsThis"><string>Store the measured map in the node's configuration and send it to the node right away. Available once a run has finished. Zero the sensors afterwards (Skin Config, Zero Sensors): the stored zero offsets belonged to the old inputs.</string></property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="close_btn">
+       <property name="text"><string>Close</string></property>
+       <property name="toolTip"><string>Close this window.</string></property>
+       <property name="whatsThis"><string>Close this window. A run in progress is stopped first.</string></property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

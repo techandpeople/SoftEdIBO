@@ -24,6 +24,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.engine import Engine
 
+from src.core.skin_config import DEFAULT_MAX_KPA, DEFAULT_MIN_KPA
 from src.data.models import (
     ActivityPreset,
     DeclarativeActivity,
@@ -138,8 +139,8 @@ _skin_templates = Table(
     Column("name",                 String, nullable=False),
     Column("description",          String, default=""),
     Column("chamber_count",        Integer, nullable=False, default=1),
-    Column("default_max_pressure", Float, nullable=False, default=8.0),
-    Column("default_min_pressure", Float, nullable=False, default=0.0),
+    Column("default_max_pressure", Float, nullable=False, default=DEFAULT_MAX_KPA),
+    Column("default_min_pressure", Float, nullable=False, default=DEFAULT_MIN_KPA),
     Column("grid",                 String, nullable=False, default="{}"),
     Column("chamber_grid",         String, nullable=False, default="[]"),
     Column("sensor_count",         Integer, nullable=False, default=0),

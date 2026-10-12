@@ -477,6 +477,45 @@ class TestActuatorsDialogHoldMode:
         qtbot.addWidget(dlg)
         return dlg
 
+    def test_inflate_releases_held_manual_valves_first(self, qtbot):
+        """A fill asked while a manual valve is held closes that valve first
+        and stops re-asserting it: node_multiplexed suspends its fill engines
+        while anything manual is on, so the fill used to start seconds late."""
+        gw = _RecordingGateway()
+        dlg = self._dialog(qtbot, gw, fill_mode="pressure")
+        _, btn = dlg._valve_states[(0, 1)]
+        dlg._toggle_valve(0, 1, btn)             # hold the deflate valve open
+        assert dlg._manual_keepalive.isActive()
+        gw.sent.clear()
+
+        dlg._inflate_slot(0)
+
+        cmds = [c for c, _ in gw.sent]
+        assert gw.sent[0] == ("valve_manual", {"chamber": 0, "side": 1, "open": 0})
+        assert cmds.index("valve_manual") < cmds.index("inflate")
+        assert not any(dlg._valve_intent.values())
+        assert not dlg._manual_keepalive.isActive()   # nothing re-opens it
+
+    def test_deflate_releases_a_manual_pump_the_user_switched_on(self, qtbot):
+        gw = _RecordingGateway()
+        dlg = self._dialog(qtbot, gw, fill_mode="pressure")
+        dlg._toggle_pump(0, dlg.pump_inf_btn)
+        gw.sent.clear()
+
+        dlg._deflate_slot(0)
+
+        cmds = [c for c, _ in gw.sent]
+        assert gw.sent[0] == ("pump_manual", {"pump": 0, "on": 0})
+        assert cmds.index("pump_manual") < cmds.index("deflate")
+        assert not dlg._manual_keepalive.isActive()
+
+    def test_actuation_with_nothing_held_sends_no_manual_frames(self, qtbot):
+        gw = _RecordingGateway()
+        dlg = self._dialog(qtbot, gw, fill_mode="pressure")
+        dlg._inflate_slot(0)
+        cmds = [c for c, _ in gw.sent]
+        assert not {"valve_manual", "pump_manual", "vent"} & set(cmds)
+
     def test_mode_on_holds_at_current_level_and_survives_actuation(self, qtbot):
         from unittest.mock import MagicMock
         ctrl = MagicMock()
@@ -542,6 +581,108 @@ class TestActuatorsDialogActuation:
         assert inflate == [{"chamber": 0, "delta": 100}]
 
     def test_inflate_time_mode_uses_calibrated_time_window(self, qtbot):
+
+
+# ---------------------------------------------------------------------------
+# SensorMapDialog - Tools -> Map Pressure Sensors
+# ---------------------------------------------------------------------------
+
+class _ConnectedRecordingGateway(_RecordingGateway):
+    is_connected = True
+
+    def __init__(self):
+        super().__init__()
+        self.sent_to: list[str] = []
+
+    def send(self, mac, cmd, **kwargs):
+        self.sent_to.append(mac)
+        return super().send(mac, cmd, **kwargs)
+
+
+class _FakeSettings:
+    def __init__(self, data):
+        self.data = data
+        self.saves = 0
+
+    def save(self):
+        self.saves += 1
+
+
+class TestSensorMapDialog:
+    MAC = "AA:BB:CC:DD:EE:FF"
+
+    @staticmethod
+    def _cell(dlg, row: int, col: int) -> str:
+        item = dlg.result_table.item(row, col)
+        assert item is not None
+        return item.text()
+
+    def _dialog(self, qtbot, gateway=None):
+        from src.gui.sensor_map_dialog import SensorMapDialog
+
+        settings = _FakeSettings({"robots": {"turtles": [{
+            "id": "turtle-1",
+            "nodes": [{"mac": self.MAC, "node_type": "node_multiplexed",
+                       "max_slots": 3, "organ_channels": [13]}],
+        }]}})
+        gateway = gateway or _ConnectedRecordingGateway()
+        dlg = SensorMapDialog(cast(Any, settings), cast(Any, gateway))
+        qtbot.addWidget(dlg)
+        return dlg, settings, gateway
+
+    def test_lists_the_node_and_its_chambers_on_the_default_map(self, qtbot):
+        dlg, _, _ = self._dialog(qtbot)
+        assert dlg.node_combo.count() == 1
+        assert dlg.result_table.rowCount() == 3
+        assert self._cell(dlg, 2, 1) == "default (I2 (PSENSOR3))"
+        assert not dlg.save_btn.isEnabled()
+
+    def test_start_claims_the_board_then_asks_for_the_raw_stream(self, qtbot):
+        dlg, _, gw = self._dialog(qtbot)
+        dlg._start()
+        assert gw.sent[0] == ("configure", {
+            "num_chambers": 3, "organ_channels": [13], "sensor_channels": []})
+        assert gw.sent[1] == ("sensor_scan", {"on": 1})
+        assert set(gw.sent_to) == {self.MAC}
+        assert dlg.stop_btn.isEnabled() and not dlg.start_btn.isEnabled()
+        dlg._stop()
+
+    def test_save_stores_the_map_and_pushes_it_to_the_node(self, qtbot):
+        from src.hardware.sensor_mapping import Phase, SensorMatch
+
+        dlg, settings, gw = self._dialog(qtbot)
+        dlg._start()
+        session = dlg._session
+        assert session is not None
+        session._results = {0: SensorMatch(0, 3, 400, True),
+                            1: SensorMatch(1, 0, 380, True),
+                            2: SensorMatch(2, -1, 4, True)}
+        session._phase = Phase.DONE
+        dlg._on_tick()
+        assert dlg.save_btn.isEnabled()
+        assert self._cell(dlg, 0, 2) == "I3 (PSENSOR4)"
+        assert "no sensor input" in self._cell(dlg, 2, 4)
+        gw.sent.clear()
+        with qtbot.waitSignal(dlg.saved):
+            dlg._save()
+        node = settings.data["robots"]["turtles"][0]["nodes"][0]
+        assert node["sensor_channels"] == [3, 0, -1]
+        assert settings.saves == 1
+        assert gw.sent == [("configure", {
+            "num_chambers": 3, "organ_channels": [13],
+            "sensor_channels": [3, 0, -1]})]
+        assert self._cell(dlg, 0, 1) == "I3 (PSENSOR4)"   # now the saved map
+
+    def test_frames_from_another_node_are_ignored(self, qtbot):
+        dlg, _, _ = self._dialog(qtbot)
+        dlg._start()
+        session = dlg._session
+        assert session is not None
+        dlg._on_raw("11:22:33:44:55:66", [500] * 16)
+        assert session.phase.value == "wait_stream"
+        dlg._on_raw(self.MAC, [500] * 16)
+        assert session.phase.value == "baseline"
+        dlg._stop()
         gw = _RecordingGateway()
         dlg = self._dialog(qtbot, gw, fill_mode="time", fill_time_ms=3000)
         dlg._inflate_slot(0)

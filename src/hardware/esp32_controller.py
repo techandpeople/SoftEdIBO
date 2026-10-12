@@ -308,6 +308,7 @@ class ESP32Controller:
         num_chambers: int,
         *,
         organ_channels: list[int] | None = None,
+        sensor_channels: list[int] | None = None,
     ) -> bool:
         """Configure a multiplexed node at runtime.
 
@@ -316,10 +317,15 @@ class ESP32Controller:
             organ_channels: Mux channels carrying organ+cover circuits; the
                 index in this list becomes the ``slot`` in organ broadcasts.
                 ``[]`` clears them on the node; ``None`` leaves them unchanged.
+            sensor_channels: Mux channel of each chamber's pressure sensor
+                (index = chamber, -1 = none). ``[]`` restores the node's
+                default (chamber i on channel i); ``None`` leaves it unchanged.
         """
         payload: dict[str, Any] = {"num_chambers": int(num_chambers)}
         if organ_channels is not None:
             payload["organ_channels"] = [int(c) for c in organ_channels]
+        if sensor_channels is not None:
+            payload["sensor_channels"] = [int(c) for c in sensor_channels]
         return self.send_command("configure", **payload)
 
     def debug(self) -> bool:

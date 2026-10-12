@@ -84,7 +84,7 @@ board's `test_stop`/`status_rate` stay honoured.
 | `stop` | - | Emergency stop: latch every pump off + valve closed; actuation commands are dropped until `resume` (limits still apply - see above) |
 | `resume` | - | Re-arm after `stop` |
 | `tare` | - | Zero the pressure sensors: capture each chamber's current reading (8-sample average) as its ambient zero and persist it in NVS. Non-actuating, honoured while stopped. The PC vents every chamber first (`vent`, Skin Config -> Zero Sensors). The direct board acks it (`{"type":"ack","cmd":"tare"}`); the multiplexed board does not, and bypasses the `configure` requirement for it |
-| `valve_manual` | `chamber`, `side` (0 = inflate, 1 = deflate), `open` (0/1) | Dev/bench override, bypasses the engine; 5 s dead-man auto-off + hard-limit cutoff |
+| `valve_manual` | `chamber`, `side` (0 = inflate, 1 = deflate), `open` (0/1) | Dev/bench override, bypasses the engine; 5 s dead-man auto-off + hard-limit cutoff. Multiplexed: the override is board-wide (it suspends every fill engine) but lasts only while a manual valve/pump/vent is on - releasing the last one resumes control at once, an `inflate`/`deflate`/`set_pressure` takes over from it, and an `open`:0 with no override running is ignored |
 | `pump_manual` | `pump` (0 = inflate/pressure, 1 = deflate/vacuum), `on` (0/1) | Dev/bench override, same safety nets. Multiplexed: switches that side on for the board, but each skin's pump only runs while one of that skin's own manual valves of that side is open |
 | `vent` | `chamber` (-1 = all), `open` (0/1) | Bench vent: BOTH valves of the chamber open with the pumps kept off it (excluded from the pump recalc), so it equalises to atmosphere - neutralises an inflated or vacuumed chamber and drops any `hold_duty` on it. Manual-override rules: 5 s dead-man (PC keeps it alive), a `valve_manual` open on either side or any actuation ends it |
 | `set_led` | `color` ("#RRGGBB"), `pattern` ("off"/"solid"/"blink"/"pulse"/"comet"/"fade"), `color2`?, `period_ms`, `count`, `fade_ms`?, `angle`?, `index`?, `ring`? | WS2812/SK6812 ring(s). `index` sets a single pixel; omit it for the whole ring. `period_ms`/`count` apply to blink/pulse/comet/fade (count <= 0 = forever). `"fade"` cross-fades `color` <-> `color2` (default black) on the node, one full cycle per `period_ms`. Every change cross-fades over `fade_ms` (default 250 ms; 0 snaps). `angle` (0-360 deg) rotates the comet start. `ring` (0..2) selects one of the multiplexed board's three rings; omit/-1 = all (ignored by the direct board) |
@@ -128,12 +128,25 @@ Fields (all optional - omitted ones keep their current firmware state):
   them to the highest channels (I13..I15) so the chamber autodetect (which
   claims low channels first) doesn't collide. Up to 4. Applying this also
   scrubs those channels from any autodetected chamber/tank assignment.
+- `sensor_channels` - `[c, ...]` mux channel of each chamber's pressure sensor
+  (index = chamber, `-1` = no sensor). Which input is plumbed to which chamber
+  depends on the build, so the PC measures it (Tools -> Map Pressure Sensors)
+  and stores it on the node entry. Chambers the list does not cover, and all
+  of them for `[]`, go back to the boot default (chamber i on channel Ii).
+  RAM-only: the PC re-sends it with every `configure`.
 - `tank_pressure_min/max/target_kpa`, `tank_vacuum_min/max/target_kpa` -
   legacy reservoir-tank bounds. Still parsed and stored, but the current
   no-reservoir build has no tank sensors and nothing consumes them (the pumps
   push straight into the chambers); the PC no longer sends them.
 
 ---
+
+#### `sensor_scan`
+
+`{"cmd":"sensor_scan","on":0|1}` - stream the raw ADC counts of all 16 mux
+inputs as `{"type":"raw","adc":[...]}` every 100 ms, so the PC can see which
+input follows a chamber. Non-actuating and honoured while stopped or not yet
+configured. Lapses 3 s after the last request: re-send ~1 Hz as a keepalive.
 
 ## Node -> Gateway -> PC - replies and broadcasts
 
@@ -213,6 +226,7 @@ read it through the `button_pressed` / `button_count` conditions.
 (The old `tank_status` broadcast is gone - the current no-reservoir build has
 no tank sensors.)
 
+| `raw` | `adc` - `[16]` raw 12-bit ADC counts, one per mux input | Every 100 ms while a `sensor_scan` is on (debug builds: also once per status) |
 ### magnet sensor-node only
 
 #### `magnet` - live sample (every reading)

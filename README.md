@@ -147,7 +147,7 @@ robots:
 
 - Multiple skins can share the same node MAC; each skin groups up to 3 of that node's slots.
 - `max_pressure` is sent to the ESP32 node on startup as kPa. The gateway forwards it unchanged; the node enforces it independently - even if the app crashes, chambers will not exceed their configured limit.
-- If `max_pressure` is omitted, chambers default to 8.0 kPa.
+- If `max_pressure` / `min_pressure` are omitted, chambers default to 30 kPa / -5 kPa.
 
 ---
 

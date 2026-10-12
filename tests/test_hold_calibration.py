@@ -185,7 +185,7 @@ def test_hold_direction_picks_the_side():
 def test_hold_regulated_seeds_duty_from_curve():
     ctrl = _HoldCtrl()
     skin = Skin("shell", [{
-        "controller": ctrl, "node_slot": 0, "max_pressure": 10.0,
+        "controller": ctrl, "node_slot": 0, "max_pressure": 10.0, "min_pressure": 0.0,
         "hold_duty_curve": [[0.0, 160], [10.0, 220]],
     }])
     assert skin.hold_regulated(0, pct=50)      # 50% of 0..10 kPa -> 5 kPa
@@ -230,7 +230,7 @@ def _status(skin, slot, kpa, st):
 def test_auto_hold_engages_when_inflate_settles_and_releases_on_deflate():
     ctrl = _HoldCtrl()
     skin = Skin("shell", [{"controller": ctrl, "node_slot": 2,
-                           "max_pressure": 10.0}])
+                           "max_pressure": 10.0, "min_pressure": 0.0}])
     assert skin.set_pressure(0, 60)             # target 6 kPa
     assert ctrl.hold_calls == []                # nothing to hold yet
     _status(skin, 2, 3.0, 1)                    # inflating
@@ -251,7 +251,7 @@ def test_auto_hold_engages_when_inflate_settles_and_releases_on_deflate():
 def test_auto_hold_immediate_when_already_at_target():
     ctrl = _HoldCtrl()
     skin = Skin("shell", [{"controller": ctrl, "node_slot": 0,
-                           "max_pressure": 10.0}])
+                           "max_pressure": 10.0, "min_pressure": 0.0}])
     _status(skin, 0, 5.0, 0)                    # sitting at 5 kPa, no target
     assert ctrl.hold_calls == []
     assert skin.set_pressure(0, 50)             # already there -> hold now

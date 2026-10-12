@@ -554,7 +554,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
             template_id=self._db.next_skin_template_id(),
             name=name.strip(),
             chamber_count=len(self._rows),
-            default_max_pressure=float(max_p) if max_p else 8.0,
+            default_max_pressure=float(max_p) if max_p else _DEFAULT_MAX_KPA,
             default_min_pressure=float(min_p),
             grid={"cols": self._grid.cols(), "rows": self._grid.rows()},
             chamber_grid=self._grid.chamber_grid(),

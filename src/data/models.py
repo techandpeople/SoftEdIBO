@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from src.core.skin_config import DEFAULT_MAX_KPA, DEFAULT_MIN_KPA
+
 
 @dataclass
 class SessionRecord:
@@ -104,8 +106,8 @@ class SkinTemplate:
     name: str = ""                                       # human-readable
     description: str = ""
     chamber_count: int = 1
-    default_max_pressure: float = 8.0                    # kPa
-    default_min_pressure: float = 0.0                    # kPa
+    default_max_pressure: float = DEFAULT_MAX_KPA        # kPa
+    default_min_pressure: float = DEFAULT_MIN_KPA        # kPa
     grid: dict[str, int] = field(default_factory=lambda: {"cols": 8, "rows": 4})
     chamber_grid: list[list[int]] = field(default_factory=list)
     sensor_count: int = 0                                # 0 -> no touch sensor

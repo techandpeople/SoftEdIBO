@@ -50,6 +50,22 @@ bool emergencyStopped = false;
 int pendingOrganCh[organ::MAX_ORGANS] = {};
 volatile int pendingOrganCount = -1;   // -1 = nothing pending
 
+// Chamber -> mux channel map, staged the same way (`configure`
+// "sensor_channels", applied from loop()). Which PSENSOR is plumbed to which
+// chamber is a property of the build, so the PC measures it (Tools -> Map
+// Pressure Sensors) and re-pushes it on every claim; an empty list restores
+// the boot default (chamber i reads mux channel Ii).
+int pendingSensorCh[MAX_CHAMBERS] = {};
+volatile int pendingSensorCount = -1;   // -1 = nothing pending
+
+// Raw ADC stream of all 16 mux inputs ("sensor_scan"), for the PC's sensor
+// mapping. Lapses RAW_STREAM_HOLD_MS after the last request (PC keepalive).
+constexpr uint32_t RAW_STREAM_MS      = 100;
+constexpr uint32_t RAW_STREAM_HOLD_MS = 3000;
+volatile bool     rawStreamOn = false;
+volatile uint32_t rawStreamTs = 0;
+uint32_t lastRawMs = 0;
+
 void sendRaw(const char* payload) {
     if (!gatewayKnown) return;
     esp_now_send(gatewayMac, reinterpret_cast<const uint8_t*>(payload), strlen(payload));
@@ -104,6 +120,20 @@ void sendStatusAll() {
     esp_now_send(gatewayMac, reinterpret_cast<const uint8_t*>(buf), len);
 }
 
+// Raw ADC counts of all 16 mux inputs. Shows which inputs carry a sensor and
+// its ambient offset - the kPa status clamps at the gauge floor, so a sensor
+// whose ambient output sits below the nominal zero reads 0 there,
+// indistinguishable from an empty input. Sent once per status in debug builds
+// and at RAW_STREAM_MS while a "sensor_scan" is on.
+void sendRawAdc() {
+    char buf[128];
+    int len = snprintf(buf, sizeof(buf), "{\"type\":\"raw\",\"adc\":[");
+    for (int ch = 0; ch < mux::MUX_CHANNELS; ch++)
+        len += snprintf(buf + len, sizeof(buf) - len, "%s%d", ch ? "," : "", mux::readRaw(ch));
+    len += snprintf(buf + len, sizeof(buf) - len, "]}");
+    sendRaw(buf);
+}
+
 #ifdef DEBUG_BUILD
 // Which valves are open the instant an actuation command lands (the info the user
 // wants kept), streamed over ESP-NOW so it lands in the PC log without a cable.
@@ -154,19 +184,6 @@ void checkDryPumps() {
 }
 
 void installDebugHook() { chambers::dbgHook = &sendEngEvent; }
-
-// Raw ADC counts of all 16 mux inputs, once per status. Shows which inputs
-// carry a sensor and its ambient offset - the kPa status clamps at the gauge
-// floor, so a sensor whose ambient output sits below the nominal zero reads
-// 0 there, indistinguishable from an empty input.
-void sendRawAdc() {
-    char buf[128];
-    int len = snprintf(buf, sizeof(buf), "{\"type\":\"raw\",\"adc\":[");
-    for (int ch = 0; ch < mux::MUX_CHANNELS; ch++)
-        len += snprintf(buf + len, sizeof(buf) - len, "%s%d", ch ? "," : "", mux::readRaw(ch));
-    len += snprintf(buf + len, sizeof(buf) - len, "]}");
-    sendRaw(buf);
-}
 #endif
 
 bool isDisconnectedRail(int raw) {
@@ -311,10 +328,30 @@ void parseAndQueue(const uint8_t* data, int len) {
             }
             pendingOrganCount = count;
         }
+
+        // Sensor map: index = chamber, value = mux channel (-1 = no sensor).
+        // Staged here, applied from loop(); an empty list restores the default.
+        JsonArray sensor_channels = doc["sensor_channels"].as<JsonArray>();
+        if (!sensor_channels.isNull()) {
+            int count = 0;
+            for (JsonVariant v : sensor_channels) {
+                if (count >= MAX_CHAMBERS) break;
+                int ch = v.as<int>();
+                pendingSensorCh[count++] = (ch >= 0 && ch < mux::MUX_CHANNELS) ? ch : -1;
+            }
+            pendingSensorCount = count;
+        }
 #ifdef DEBUG_BUILD
     } else if (strcmp(cmd, "debug") == 0) {
         c.type = cmd_queue::CMD_DEBUG;
 #endif
+    } else if (strcmp(cmd, "sensor_scan") == 0) {
+        // {"cmd":"sensor_scan","on":0|1}: stream the raw ADC counts of all 16
+        // mux inputs ("raw" frames) so the PC can see which input follows a
+        // chamber. Non-actuating, handled inline; re-sent as a keepalive.
+        rawStreamTs = millis();
+        rawStreamOn = (doc["on"] | 0) != 0;
+        return;
     } else if (strcmp(cmd, "set_led") == 0) {
         // Handled inline (not queued): just stores each ring's target LED state,
         // which loop()'s leds::update() renders. "ring" (0..NUM_RINGS-1) selects
@@ -408,6 +445,12 @@ void parseAndQueue(const uint8_t* data, int len) {
 //      control resumes, so a lost "off" command can't leave a pump running.
 //   2. HARD limits: pumps/valves are cut if a tank or chamber hits its hard cap.
 // At most one valve per chamber is held open at a time (inflate XOR deflate).
+// The override lasts only while something manual is actually on: releasing the
+// last manual valve/pump hands control back at once (manualLeaveIfIdle), and an
+// explicit inflate/deflate/set_pressure takes over from it (processCommand).
+// Waiting for the dead-man instead left the engines suspended for up to
+// MANUAL_MAX_ON_MS after a manual "close", so the next inflate sat there and
+// fired late - the "pump / valve sometimes does not respond" bug.
 // Dev/teacher tool only - never exposed to children.
 // ---------------------------------------------------------------------------
 
@@ -479,6 +522,39 @@ void manualClearAll() {
     manualActive = false;
 }
 
+// True while the operator still holds something on: a manual valve (a vent
+// holds both of a chamber's) or a manual pump.
+bool manualHoldsAnything() {
+    if (manualPumpOn[0] || manualPumpOn[1]) return true;
+    for (int i = 0; i < MAX_CHAMBERS; i++)
+        if (manualValveOpen[i][0] || manualValveOpen[i][1]) return true;
+    return false;
+}
+
+// Take the manual override for a valve/pump/vent command and refresh its
+// dead-man. Entering it drops the engine sequences and closes everything first
+// so the manual action starts from a clean slate; recalcPumps() right after, or
+// a pump the engine had running keeps dead-heading against the now all-closed
+// valves. Returns false for an "off" with no override running: there is nothing
+// to release, and it must not abort a fill that is in progress.
+bool manualEnter(bool on) {
+    if (!manualActive) {
+        if (!on) return false;
+        chambers::abortSequences();
+        chambers::closeAll();
+        chambers::recalcPumps();
+    }
+    manualActive = true;
+    manualTs     = millis();
+    return true;
+}
+
+// Hand control back to the autonomous loops as soon as the last manual
+// actuator was released, instead of sitting out the dead-man.
+void manualLeaveIfIdle() {
+    if (manualActive && !manualHoldsAnything()) manualClearAll();
+}
+
 // Emergency stop - slam everything off immediately. loop() keeps it that way
 // (and skips all control) while emergencyStopped is set.
 void emergencyStopAll() {
@@ -529,6 +605,8 @@ void applyChamberCmd(int n, const cmd_queue::Cmd& c) {
         // would creep past max one round at a time).
         if (chambers::cachedKpa[n] < target)
             chambers::requestInflate(n, target, duty, c.fill_ms);
+        else if (ch.state == chambers::DEFLATING)
+            chambers::holdChamber(n);   // nowhere to go up: at least stop going down
         break;
     }
     case CMD_DEFLATE: {
@@ -544,6 +622,8 @@ void applyChamberCmd(int n, const cmd_queue::Cmd& c) {
         float target = max(chambers::cachedKpa[n] - delta, ch.min_kpa);
         if (chambers::cachedKpa[n] > target)
             chambers::requestDeflate(n, target, duty, c.fill_ms);
+        else if (ch.state == chambers::INFLATING)
+            chambers::holdChamber(n);   // nowhere to go down: at least stop going up
         break;
     }
     case CMD_SET_PRESSURE: {
@@ -570,30 +650,18 @@ void applyChamberCmd(int n, const cmd_queue::Cmd& c) {
         break;
     case CMD_VALVE_MANUAL: {
         // chamber = chamber, param = side (0=inflate, 1=deflate), cfg_chambers = open (0/1)
-        // Enter manual override: drop the engine sequences + close everything first
-        // so the manual action starts from a clean slate; auto-cleared by dead-man.
-        // recalcPumps() right after, or a pump the engine had running keeps
-        // dead-heading against the now all-closed valves.
-        if (!manualActive) {
-            chambers::abortSequences();
-            chambers::closeAll();
-            chambers::recalcPumps();
-        }
-        manualActive = true;
-        manualTs     = millis();
-        applyManualValve(n, c.param, c.cfg_chambers != 0);
+        bool open = c.cfg_chambers != 0;
+        if (!manualEnter(open)) break;
+        applyManualValve(n, c.param, open);
+        manualLeaveIfIdle();
         break;
     }
     case CMD_PUMP_MANUAL: {
         // param = pump role (0=pressure, 1=vacuum), cfg_chambers = on (0/1)
-        if (!manualActive) {
-            chambers::abortSequences();
-            chambers::closeAll();
-            chambers::recalcPumps();
-        }
-        manualActive = true;
-        manualTs     = millis();
-        applyManualPump(c.param, c.cfg_chambers != 0);
+        bool on = c.cfg_chambers != 0;
+        if (!manualEnter(on)) break;
+        applyManualPump(c.param, on);
+        manualLeaveIfIdle();
         break;
     }
     default:
@@ -713,21 +781,22 @@ void processCommand(const cmd_queue::Cmd& c) {
         // Bench vent (chamber -1 = all): enter the manual override from a clean
         // slate (like valve_manual), drop any hold, then open both valves with
         // the chamber excluded from the pump recalc.
-        if (!manualActive) {
-            chambers::abortSequences();
-            chambers::closeAll();
-            chambers::recalcPumps();
-        }
-        manualActive = true;
-        manualTs     = millis();
         bool open = c.cfg_chambers != 0;
+        if (!manualEnter(open)) return;
         int lo = n < 0 ? 0 : n, hi = n < 0 ? limit - 1 : n;
         for (int i = lo; i <= hi && i < limit; i++) {
             chambers::holdDrop(i);
             applyManualVent(i, open);
         }
+        manualLeaveIfIdle();
         return;
     }
+    // An explicit actuation supersedes the manual override (as it does a hold).
+    // The engines are suspended board-wide while the override runs, so the
+    // request would otherwise wait for the dead-man and fire late.
+    if (manualActive && (c.type == CMD_INFLATE || c.type == CMD_DEFLATE
+                         || c.type == CMD_SET_PRESSURE))
+        manualClearAll();
     if (n == -1 && isFanOut(c.type)) {
         for (int i = 0; i < limit; i++) applyChamberCmd(i, c);
         return;
@@ -761,6 +830,18 @@ void manualPressureSafety() {
         if (manualValveOpen[i][0]) inflateOpen = true;
     }
     if (cutInflate && !inflateOpen && manualPumpOn[0]) applyManualPump(0, false);
+    manualLeaveIfIdle();
+}
+
+// Apply a staged chamber -> mux channel map. Chambers the list does not cover
+// (and all of them for an empty list) go back to the boot default. Runs before
+// the organ channels are scrubbed, so an organ circuit still wins its input.
+void applyPendingSensorChannels() {
+    int count = pendingSensorCount;
+    if (count < 0) return;
+    pendingSensorCount = -1;
+    for (int i = 0; i < MAX_CHAMBERS; i++)
+        config::state.chamber_mux_ch[i] = (i < count) ? pendingSensorCh[i] : i;
 }
 
 // Apply a staged organ-channel configuration: hand the channels to the organ
@@ -852,7 +933,7 @@ void setup() {
     // UNL17-24) so a bank swap from wrong address jumpers shows in the PC log.
     char ready_msg[192];
     snprintf(ready_msg, sizeof(ready_msg),
-             "{\"status\":\"node_multiplexed_ready\",\"fw\":\"pumpgroups-2\",\"rgbw\":" LED_RGBW_JSON
+             "{\"status\":\"node_multiplexed_ready\",\"fw\":\"sensormap-1\",\"rgbw\":" LED_RGBW_JSON
              ",\"kpa_min\":%.0f,\"pca\":[%d,%d]}",
              (double)pressure::FLOOR_KPA, pca_valves::pca1_addr, pca_valves::pca2_addr);
     se::broadcast(ready_msg);
@@ -873,6 +954,16 @@ void refreshGauges(uint32_t now) {
 // Status (+ raw ADC in debug builds) at STATUS_REPORT_MS. Runs whether or not
 // the node is configured or halted - telemetry never depends on actuation.
 void broadcastTelemetry(uint32_t now) {
+    if (rawStreamOn) {
+        // SIGNED diff: rawStreamTs is set in the receive task, possibly a hair
+        // after loop() cached `now`.
+        if ((int32_t)(now - rawStreamTs) >= (int32_t)RAW_STREAM_HOLD_MS) {
+            rawStreamOn = false;
+        } else if (now - lastRawMs >= RAW_STREAM_MS) {
+            lastRawMs = now;
+            sendRawAdc();
+        }
+    }
     if (now - lastStatusMs < STATUS_REPORT_MS) return;
     lastStatusMs = now;
     sendStatusAll();
@@ -919,6 +1010,7 @@ void loop() {
     if (manualActive && (int32_t)(now - manualTs) >= (int32_t)MANUAL_MAX_ON_MS) manualClearAll();
 
     // ---- Organ + cover sensing (per configured slot) ----
+    applyPendingSensorChannels();
     applyPendingOrganChannels();
     organ::tick(now);
 

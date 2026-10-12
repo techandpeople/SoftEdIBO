@@ -252,6 +252,10 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
             0: (False, self.pump_inf_btn),
             1: (False, self.pump_def_btn),
         }
+        # Pumps the user switched on by hand. Kept apart from _pump_states
+        # (display, which also follows the node's own pump output) so an
+        # actuation only switches off what the user holds.
+        self._pump_held: set[int] = set()
         self.pump_inf_btn.clicked.connect(
             lambda _=False: self._toggle_pump(0, self.pump_inf_btn))
         self.pump_def_btn.clicked.connect(
@@ -884,7 +888,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         # sensorless node MUST have a time - it is sent with "timed":1 so the
         # firmware runs fully open-loop on it.
         self._arm()
-        self._drop_vent_ui(slot, send_off=False)   # an actuation supersedes a vent
+        self._release_manual_holds()   # an actuation supersedes the manual override
         self._push_limits(slot)
         ms = self._inflate_ms(slot)
         if self._sensorless:
@@ -909,7 +913,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         # A sensorless node needs the manual empty window + "timed":1, or the
         # firmware's below-target guard drops the command outright.
         self._arm()
-        self._drop_vent_ui(slot, send_off=False)   # an actuation supersedes a vent
+        self._release_manual_holds()   # an actuation supersedes the manual override
         self._push_limits(slot)
         if self._sensorless:
             ms = self._empty_ms(slot)
@@ -944,6 +948,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
             self._broadcast_actuate("inflate", slots)
         else:
             for slot in slots:
+        self._release_manual_holds()   # an actuation supersedes the manual override
                 self._inflate_slot(slot)
 
     def _deflate_slots(self, slots: list[int]) -> None:
@@ -954,6 +959,30 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         per-slot frames."""
         if set(slots) == set(self._chamber_cfgs) and not self._sensorless:
             self._broadcast_actuate("deflate", slots)
+    def _release_manual_holds(self) -> None:
+        """Let go of every manual valve, pump and vent the user holds on.
+
+        An inflate/deflate supersedes the manual override. node_multiplexed
+        suspends its fill engines board-wide while anything manual is on, so a
+        fill requested with a valve still held used to sit there and start
+        late; on node_direct a held valve shares the fill's line. Switching
+        them off here (not just on the node) also stops the keepalive from
+        re-opening them in the middle of the fill."""
+        for (chamber, side), held in self._valve_intent.items():
+            if held:
+                self._gateway.send(self._mac, "valve_manual", chamber=chamber,
+                                   side=side, open=0)
+                self._set_valve_button((chamber, side), False)
+        self._valve_intent.clear()
+        for pump in sorted(self._pump_held):
+            self._gateway.send(self._mac, "pump_manual", pump=pump, on=0)
+            self._set_pump_button(pump, False)
+        self._pump_held.clear()
+        for slot in list(self._vented):
+            self._drop_vent_ui(slot, send_off=True)
+        self._stop_vent()
+        self._refresh_manual_keepalive()
+
         else:
             for slot in slots:
                 self._deflate_slot(slot)
@@ -966,7 +995,6 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         burst-loss."""
         self._arm()
         for slot in slots:
-            self._drop_vent_ui(slot, send_off=False)
             self._push_limits(slot)
         self._gateway.send(self._mac, command, chamber=-1, delta=100)
         self._holds.actuation_started(slots)
@@ -1118,6 +1146,10 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         entry = self._pump_states.get(pump)
         if entry is None:
             return
+        if is_on:
+            self._pump_held.add(pump)
+        else:
+            self._pump_held.discard(pump)
         _, btn = entry
         self._pump_states[pump] = (is_on, btn)
         pump_name = "Inflate" if pump == 0 else "Deflate"
@@ -1243,6 +1275,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
                 self._gateway.send(self._mac, "pump_manual", pump=pump, on=1)
                 sent = True
         for slot in self._vented:
+        self._pump_held.clear()
             self._gateway.send(self._mac, "vent", chamber=slot, open=1)
             sent = True
         if not sent:

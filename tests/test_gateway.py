@@ -14,6 +14,33 @@ def test_send_fails_when_not_connected():
     assert result is False
 
 
+class _FakeSerial:
+    is_open = True
+
+    def write(self, _payload):
+        pass
+
+
+def test_send_logs_the_command_parameters(caplog):
+    """The log names the chamber/valve a frame addressed, not just the command:
+    that is what tells a dropped command from one sent to another chamber."""
+    import logging
+    from typing import Any, cast
+
+    gateway = Gateway("/dev/ttyUSB0")
+    gateway._serial = cast(Any, _FakeSerial())
+    with caplog.at_level(logging.DEBUG, logger="src.hardware.gateway"):
+        assert gateway.send("AA:BB:CC:DD:EE:01", "valve_manual",
+                            chamber=2, side=1, open=0)
+        assert gateway.send("AA:BB:CC:DD:EE:01", "stop")
+        assert gateway.send("AA:BB:CC:DD:EE:01", "ota_chunk", data="x" * 500)
+    sent = [r.getMessage() for r in caplog.records if "Sent to" in r.getMessage()]
+    assert sent[0] == ('Sent to AA:BB:CC:DD:EE:01: valve_manual '
+                       '{"chamber": 2, "side": 1, "open": 0}')
+    assert sent[1] == "Sent to AA:BB:CC:DD:EE:01: stop"
+    assert sent[2].endswith("...") and len(sent[2]) < 250   # long payload clipped
+
+
 class _Sink:
     def cb(self, data):  # bound method - on_message stores a weakref.WeakMethod
         pass

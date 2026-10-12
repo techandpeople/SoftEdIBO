@@ -171,7 +171,7 @@ def test_iter_touch_skins_exposes_kpa_limits():
     skins = iter_touch_skins(data)
     limits = skins[0]["limits"]
     assert limits[0] == (5.0, 30.0)
-    assert limits[1] == (0.0, 8.0)       # defaults (DEFAULT_MIN/MAX_KPA)
+    assert limits[1] == (-5.0, 30.0)     # defaults (DEFAULT_MIN/MAX_KPA)
 
 
 def test_sweep_diagnostics_no_samples():

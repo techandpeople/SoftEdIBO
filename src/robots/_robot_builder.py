@@ -58,6 +58,11 @@ def multiplexed_configure(node_cfg: dict[str, Any]) -> dict[str, Any] | None:
         # list, even empty: the Turtle and Tree share this board, and an omitted
         # key leaves the other robot's organ channels active on the node.
         "organ_channels": [int(c) for c in node_cfg.get("organ_channels", [])],
+        # Mux channel of each chamber's pressure sensor, as measured by Tools
+        # -> Map Pressure Sensors (index = chamber, -1 = none). Always a list
+        # for the same reason: an empty one puts the board back on its default
+        # (chamber i on channel i) instead of keeping a stale map.
+        "sensor_channels": [int(c) for c in node_cfg.get("sensor_channels", [])],
     }
 
 
@@ -72,7 +77,8 @@ def configure_multiplexed_nodes(
         if payload is None or ctrl is None:
             continue
         ctrl.configure(num_chambers=payload["num_chambers"],
-                       organ_channels=payload["organ_channels"])
+                       organ_channels=payload["organ_channels"],
+                       sensor_channels=payload["sensor_channels"])
 
 
 def push_led_angles(
