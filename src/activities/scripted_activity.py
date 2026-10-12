@@ -1816,7 +1816,7 @@ class ScriptedActivity(BaseActivity):
         gestures by type (tap/stroke/...) and each one is logged.
 
         Works without a trained model (the taxonomy's rules name the gesture;
-        a model only sharpens the movement axis). Mirrors
+        a trained model names it instead when the skin type has one). Mirrors
         :meth:`_subscribe_touch`; the classifier taps the same compensated
         magnet stream itself (both subscribers coexist)."""
         if unit.skin is None:

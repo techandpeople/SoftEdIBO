@@ -1,15 +1,16 @@
-"""Live touch reading: rules on every axis, a trained model for movement.
+"""Live touch reading: the taxonomy's rules, and a trained model when there is one.
 
-:class:`TouchMovementModel` loads the per-skin-type movement model
-(``models/touch_<type>.joblib``) and predicts static / slide / rub for a
+:class:`TouchGestureModel` loads the per-skin-type gesture model
+(``models/touch_<type>.joblib``) and names the gesture of a
 :class:`TouchSegment`. scikit-learn / joblib are imported **lazily**, so
 importing this module - and running the app - never requires them. With no
-model (or no ML libs) it predicts nothing and the rule decides the movement.
+model (or no ML libs) it names nothing and the rules do.
 
 :class:`LiveTouchClassifier` subscribes to a skin's magnet stream, segments
 it, reads each finished touch on the taxonomy's axes (see
-:mod:`src.ml.touch_axes`) and emits the derived gesture. It works without any
-trained model; a model only sharpens the movement axis.
+:mod:`src.ml.touch_axes`) and emits the gesture. It also measures how much
+the skin's chamber pressure rose during the touch, which is what tells a
+squeeze from a plain multi-zone press.
 """
 
 from __future__ import annotations
@@ -19,12 +20,17 @@ from pathlib import Path
 from typing import Any, Callable
 
 from src.config.settings import Settings
+from src.hardware.air_chamber import ChamberState
 from src.ml import gesture_taxonomy as tax
+from src.ml.pressure_rise import PressureRiseMeter
 from src.ml.touch_axes import TouchReading, activation_threshold, read_touch
 from src.ml.touch_features import full_feature_vector
 from src.ml.touch_segmenter import PulseMerger, TouchSegment, TouchSegmenter
 
 logger = logging.getLogger(__name__)
+
+# Chamber states in which the robot itself is changing the pressure.
+_DRIVEN_STATES = (ChamberState.INFLATING, ChamberState.DEFLATING)
 
 
 def model_path(skin_type: str) -> Path:
@@ -32,8 +38,8 @@ def model_path(skin_type: str) -> Path:
     return Settings.ROOT / "models" / f"touch_{skin_type}.joblib"
 
 
-class TouchMovementModel:
-    """Predicts a segment's movement with a per-skin-type model, if present.
+class TouchGestureModel:
+    """Names a segment's gesture with a per-skin-type model, if present.
 
     Args:
         skin_type: Selects the model. Empty / unknown type -> never predicts.
@@ -72,11 +78,11 @@ class TouchMovementModel:
                 "it in Tools -> Touch Gestures. Rules are used meanwhile.",
                 self.skin_type, self._path)
         else:
-            logger.info("Loaded touch movement model for %s from %s",
+            logger.info("Loaded touch gesture model for %s from %s",
                         self.skin_type, self._path)
 
     def predict(self, seg: TouchSegment) -> str | None:
-        """The segment's movement, or ``None`` when no model is loaded."""
+        """The segment's gesture, or ``None`` when no model is loaded."""
         self._ensure_loaded()
         if self._model is None:
             return None
@@ -94,7 +100,8 @@ class LiveTouchClassifier:
 
     Args:
         skin: A ``Skin`` (real or simulated); its ``skin_type`` selects the
-            movement model, its touch config the force scale.
+            gesture model, its touch config the force scale, and its chambers
+            give the pressure rise.
         on_gesture: Called ``(skin_id, gesture, segment, reading)`` when a
             touch ends. ``reading`` is the :class:`TouchReading` (axes and
             descriptors) the gesture was derived from.
@@ -104,7 +111,7 @@ class LiveTouchClassifier:
                  on_gesture: Callable[[str, str, TouchSegment, TouchReading], None]):
         self._skin = skin
         self._on_gesture = on_gesture
-        self._model = TouchMovementModel(
+        self._model = TouchGestureModel(
             getattr(skin, "skin_type", ""),
             skin_variant=getattr(skin, "skin_variant", ""))
         self._threshold_ut = activation_threshold(getattr(skin, "touch", None))
@@ -113,6 +120,7 @@ class LiveTouchClassifier:
         # reading it - training merges them over the same BOUT_GAP_MS silence
         # window, so inference must too (train/serve parity).
         self._merger = PulseMerger(tax.BOUT_GAP_MS)
+        self._pressure = PressureRiseMeter()
         self._t0: float | None = None
 
     def attach(self) -> bool:
@@ -126,10 +134,34 @@ class LiveTouchClassifier:
         from src.hardware.touch_source import unsubscribe_skin_magnet
         unsubscribe_skin_magnet(self._skin, self._handle_magnet)
 
-    def read(self, gesture: TouchSegment) -> TouchReading:
+    def read(self, gesture: TouchSegment,
+             pressure_rise_kpa: float | None = None) -> TouchReading:
         """Read one finished (merged) touch on the taxonomy's axes."""
         return read_touch(gesture, self._threshold_ut,
-                          movement=self._model.predict(gesture))
+                          gesture=self._model.predict(gesture),
+                          pressure_rise_kpa=pressure_rise_kpa)
+
+    def _resting_pressures(self) -> dict[int, float]:
+        """Pressure (kPa) of the chambers the robot is not driving right now.
+        A chamber being inflated or deflated changes by itself, so it says
+        nothing about the hand on the skin."""
+        readings: dict[int, float] = {}
+        chambers = getattr(self._skin, "chambers", None) or {}
+        for chamber_id, chamber in chambers.items():
+            state = getattr(chamber, "state", None)
+            kpa = getattr(chamber, "kpa", None)
+            if state in _DRIVEN_STATES or not isinstance(kpa, (int, float)):
+                continue
+            readings[int(chamber_id)] = float(kpa)
+        return readings
+
+    def _track_pressure(self) -> None:
+        """Follow the chamber pressure from the first press of a bout."""
+        if not self._pressure.is_open:
+            if self._seg.is_active:
+                self._pressure.begin(self._resting_pressures())
+            return
+        self._pressure.sample(self._resting_pressures())
 
     def _handle_magnet(self, data: dict) -> None:
         import time
@@ -138,9 +170,10 @@ class LiveTouchClassifier:
             self._t0 = now_ms
         t = now_ms - self._t0
         seg = self._seg.feed(data, t)
+        self._track_pressure()
         gesture = self._merger.feed(seg, t, self._seg.is_active)
         if gesture is not None:
-            reading = self.read(gesture)
+            reading = self.read(gesture, self._pressure.end())
             if reading.gesture != tax.UNKNOWN:
                 self._on_gesture(getattr(self._skin, "skin_id", ""),
                                  reading.gesture, gesture, reading)

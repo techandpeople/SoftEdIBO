@@ -1,4 +1,4 @@
-# Touch types (rules + a trained movement model)
+# Touch types (rules first, a trained model on top)
 
 How a child touches a skin is described on four independent **axes**, and the
 gesture name is derived from their combination
@@ -6,36 +6,52 @@ gesture name is derived from their combination
 
 | Axis | Values | How it is read |
 |---|---|---|
-| form | short, press, rest, repeated regular, repeated irregular | rules on duration and the gaps between pulses |
-| movement | static, slide, rub | a trained model when there is one, else a rule on the order sensors activated in |
+| form | short, press, rest, repeated regular, repeated irregular | duration and the gaps between pulses |
+| movement | static, slide, rub | the order sensors activated in (and the 3-axis data when streamed) |
 | force | light, medium, strong | peak signal against the skin's activation threshold |
 | extent | point, multi, whole | sensors active at once |
 
-| Gesture | Combination | Status |
-|---|---|---|
-| tap | short, static | works by rules |
-| press | sustained, static | works by rules |
-| rest | held for seconds | works by rules |
-| compressions | repeated, regular | works by rules |
-| pats | repeated, irregular | works by rules |
-| stroke | slide | rule fallback; reliable once the movement model is trained |
-| rub | back and forth | rule fallback; reliable once the movement model is trained |
-| hit | very short, strong | needs the faster touch sampling (firmware `magtime-1`) |
-| squeeze | several zones + chamber pressure rise | defined, but not derived yet: the pressure rise is not fed in |
+| Gesture | Combination |
+|---|---|
+| tap | short, static |
+| hit | very short, static, strong |
+| press | sustained, static |
+| rest | held for seconds |
+| compressions | repeated, regular |
+| pats | repeated, irregular |
+| stroke | slide |
+| rub | back and forth |
+| squeeze | several zones held while the chamber pressure rises |
 
 Pinch, poke, tickle and scratch are out of reach with a handful of magnet
 sensors per skin and are deliberately not classes.
+
+**Rules name every gesture**, so the app recognises touches before anything
+is trained. **A trained model then names the gesture instead**, wherever one
+exists for the skin type: capture labelled examples in Tools -> Touch
+Gestures ("Guided live capture") and train. The report shows the model's
+cross-validated accuracy next to the rules' on the same touches, so you can
+see whether it earns its place. A model saved by an older version is refused
+at load time and the rules are used until it is retrained.
+
+Two things the model does not decide:
+
+- **Squeeze.** It is told apart from a plain multi-zone press by the rise of
+  the skin's chamber pressure during the touch, which the model never sees.
+  That evidence outranks the model. Chambers the robot is inflating or
+  deflating at that moment are ignored (they change by themselves), and the
+  pressure only updates every 500 ms, so a squeeze must last about a second.
+- **The axes.** They always come from the rules (the movement is taken from
+  the model's gesture), and each logged touch keeps what the rules would have
+  called it (`rule_gesture`) and who named it (`named_by`).
 
 Every recognised touch is logged (`gesture` event) with its axes and the
 continuous descriptors behind them, so the names can be redefined later
 without re-running a session. `gesture_count` accepts every gesture as a kind.
 
-Only the **movement** axis is learned. A guided capture still asks for
-gestures by name; each is used as an example of its movement (a stroke
-teaches "slide", a rub "rub", everything else "static"). Capturing only taps
-and presses therefore trains nothing - the rules already cover them. A model
-saved by an older version is refused at load time and the rules are used
-until it is retrained.
+Training data caveat: a model learns the people who trained it. An hour of
+one adult's touches is enough to get it working, not to trust it on children;
+capture from several people before relying on the accuracy figure.
 
 ## Design in one paragraph
 

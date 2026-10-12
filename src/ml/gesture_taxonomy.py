@@ -13,7 +13,7 @@ derived from their combination (:func:`derive_gesture`):
 * **form**     - its shape in time: short, press, rest, repeated regular,
   repeated irregular (rules on duration and the gaps between pulses);
 * **movement** - static, slide (one direction) or rub (back and forth). The
-  only axis that needs a trained model to be reliable; rules give a fallback;
+  weakest axis for rules, with only a few sensors per skin;
 * **force**    - light, medium, strong (peak signal against the skin's
   activation threshold);
 * **extent**   - one point, several zones, the whole skin (sensors active at
@@ -36,6 +36,11 @@ Derived gestures:
 
 Out of reach with a handful of magnet sensors per skin, and deliberately not
 classes: pinch, poke, tickle, scratch.
+
+The rules alone name every gesture, so the app recognises touches before
+anything is trained. A model trained on labelled captures (Tools -> Touch
+Gestures) then names the gesture instead, wherever one exists for the skin
+type; the rules stay as its fallback and as the baseline it is scored against.
 
 Keeping the axes (and the continuous descriptors behind them) with every
 touch means the gesture names can be redefined later without re-running a
@@ -106,8 +111,8 @@ EXTENT_MULTI = "multi"
 EXTENT_WHOLE = "whole"
 EXTENTS = (EXTENT_POINT, EXTENT_MULTI, EXTENT_WHOLE)
 
-# The movement each gesture is an example of: what the movement model learns
-# from a labelled capture (every other axis is rule-based).
+# The movement each gesture implies: when a trained model names the gesture,
+# the movement axis is read from it.
 MOVEMENT_OF: dict[str, str] = {
     **dict.fromkeys(GESTURE_CLASSES, MOVE_STATIC),
     STROKE: MOVE_SLIDE, RUB: MOVE_RUB,

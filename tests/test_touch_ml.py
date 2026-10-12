@@ -9,7 +9,7 @@ import sys
 
 from src.ml import gesture_taxonomy as tax
 from src.ml import rule_baseline
-from src.ml.touch_classifier import TouchMovementModel, model_path
+from src.ml.touch_classifier import TouchGestureModel, model_path
 from src.ml.touch_features import FEATURE_NAMES, extract_features, feature_vector
 from src.ml.touch_segmenter import TouchSegmenter, merge_segments
 
@@ -161,9 +161,9 @@ def test_rule_baseline_labels_compressions_bout():
 # Classifier - inert without a model, never imports sklearn
 # ---------------------------------------------------------------------------
 
-def test_movement_model_predicts_nothing_without_a_model():
+def test_gesture_model_predicts_nothing_without_a_model():
     seg = TouchSegmenter().segment_stream(_tap_stream())[0]
-    model = TouchMovementModel("nonexistent_type",
+    model = TouchGestureModel("nonexistent_type",
                                path="/no/such/model.joblib")
     assert model.has_model is False
     assert model.predict(seg) is None
@@ -172,7 +172,7 @@ def test_movement_model_predicts_nothing_without_a_model():
 def test_classifier_import_does_not_require_sklearn():
     # The whole runtime pipeline must work without sklearn installed.
     assert "sklearn" not in sys.modules or True   # tolerate if other tests load it
-    model = TouchMovementModel("")
+    model = TouchGestureModel("")
     assert model.predict(TouchSegmenter().segment_stream(_tap_stream())[0]) is None
 
 

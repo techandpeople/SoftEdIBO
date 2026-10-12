@@ -1,8 +1,8 @@
 """Reads a touch segment on the taxonomy's four axes.
 
-Form, force and extent are plain rules on what the sensors measured, so every
-reading can be explained. Movement has a rule too, used when no trained
-movement model is available; a model's verdict replaces it.
+Every axis is a plain rule on what the sensors measured, so every reading can
+be explained, and together they name the gesture. When a trained model names
+the gesture instead, its verdict is used and the rule's is kept beside it.
 
 ``read_touch`` returns the axis values, the gesture they derive to
 (:func:`src.ml.gesture_taxonomy.derive_gesture`) and the continuous descriptors
@@ -32,11 +32,15 @@ class TouchReading:
     force: str
     extent: str
     descriptors: dict[str, float] = field(default_factory=dict)
+    # Who named the gesture ("model" or "rules") and what the rules said.
+    named_by: str = "rules"
+    rule_gesture: str = ""
 
     def as_details(self) -> dict[str, Any]:
         """Flat dict for the session log."""
         return {"form": self.form, "movement": self.movement,
                 "force": self.force, "extent": self.extent,
+                "named_by": self.named_by, "rule_gesture": self.rule_gesture,
                 **self.descriptors}
 
 
@@ -97,24 +101,30 @@ def movement_by_rules(feats: dict[str, float]) -> str:
 
 
 def read_touch(seg: TouchSegment, threshold_ut: float = DEFAULT_THRESHOLD_UT,
-               movement: str | None = None,
+               gesture: str | None = None,
                pressure_rise_kpa: float | None = None) -> TouchReading:
     """Describe ``seg`` on the four axes and name its gesture.
 
-    ``movement`` is a trained model's verdict, when there is one; otherwise
-    the rule decides. ``pressure_rise_kpa`` is the chamber pressure rise
-    during the touch, when known (needed to call a squeeze)."""
+    ``gesture`` is a trained model's verdict, when there is one; otherwise
+    the rules name it. ``pressure_rise_kpa`` is the chamber pressure rise
+    during the touch, when known: it is what makes a multi-zone hold a
+    squeeze, and that evidence outranks the model (which never sees it)."""
     feats = extract_features(seg)
     if feats["n_samples"] == 0:
         return TouchReading(tax.UNKNOWN, "", "", "", "")
     form = form_of(feats)
-    if movement not in tax.MOVEMENTS:
-        movement = movement_by_rules(feats)
+    movement = movement_by_rules(feats)
     force = force_of(feats, threshold_ut)
     extent = extent_of(feats)
-    gesture = tax.derive_gesture(
+    rule_gesture = tax.derive_gesture(
         form, movement, force, extent, n_pulses=int(feats["n_pulses"]),
         duration_ms=feats["duration_ms"], pressure_rise_kpa=pressure_rise_kpa)
+    named_by = "rules"
+    if gesture in tax.GESTURE_CLASSES and rule_gesture != tax.SQUEEZE:
+        named_by = "model"
+        movement = tax.MOVEMENT_OF[gesture]
+    else:
+        gesture = rule_gesture
     descriptors = {
         "duration_ms": round(feats["duration_ms"]),
         "n_pulses": int(feats["n_pulses"]),
@@ -130,4 +140,5 @@ def read_touch(seg: TouchSegment, threshold_ut: float = DEFAULT_THRESHOLD_UT,
         descriptors["dir_consistency"] = round(feats["vec_dir_consistency"], 3)
     if pressure_rise_kpa is not None:
         descriptors["pressure_rise_kpa"] = round(pressure_rise_kpa, 2)
-    return TouchReading(gesture, form, movement, force, extent, descriptors)
+    return TouchReading(gesture, form, movement, force, extent, descriptors,
+                        named_by=named_by, rule_gesture=rule_gesture)

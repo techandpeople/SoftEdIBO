@@ -1,8 +1,8 @@
 """Rule-based touch reading - the baseline every trained model is compared to.
 
 Reads a segment with the taxonomy's rules alone (see :mod:`src.ml.touch_axes`).
-Used by the training script as a comparison point ("does the learned movement
-model actually beat simple rules?") and live when no model was trained.
+Used by the training script as a comparison point ("does the learned model
+actually beat simple rules?") and live when no model was trained.
 """
 
 from __future__ import annotations

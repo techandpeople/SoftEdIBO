@@ -788,10 +788,10 @@ CONDITIONS: tuple[Verb, ...] = (
          "True once the child made a gesture at least 'min' times in this phase. "
          "'kind' is either a raw touch (any press) or a touch type the app "
          "recognises: tap, press, resting hand, compressions, pats, stroke, "
-         "rub, hit. Types are recognised by rules, so no trained model is "
-         "needed; a trained movement model makes stroke and rub more reliable. "
-         "A squeeze additionally needs chamber pressure data and does not fire "
-         "yet.", (
+         "rub, squeeze, hit. Types are recognised by rules, so no trained "
+         "model is needed; a model trained for the skin type (Tools -> Touch "
+         "Gestures) names them instead and is usually more reliable. A "
+         "squeeze needs the skin's chambers to report their pressure.", (
         VerbField("kind", "enum", "touch", choices=("touch", *GESTURE_CLASSES),
                   labels=(("touch", "a touch"),
                           *((code, GESTURE_LABELS[code])

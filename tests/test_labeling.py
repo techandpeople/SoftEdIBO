@@ -99,9 +99,8 @@ def test_grouped_rows_merge_into_one_training_sample(tmp_path):
     samples = list(collect_samples([(str(rec), labeling.label_map(rows))]))
     # Two labelled segments collapse into a single merged sample.
     assert len(samples) == 1
-    skin_type, _fv, target, _baseline, _group = samples[0]
-    # The training target is the movement the label is an example of.
-    assert target == "static" and skin_type == "thymio"
+    skin_type, _fv, label, _baseline, _group = samples[0]
+    assert label == "double_tap" and skin_type == "thymio"
 
 
 def test_ungrouped_rows_stay_separate_samples(tmp_path):

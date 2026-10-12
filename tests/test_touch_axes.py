@@ -104,9 +104,18 @@ def test_straight_down_push_across_sensors_is_not_a_slide():
     assert "z_frac" in sheared.descriptors
 
 
-def test_a_model_verdict_replaces_the_movement_rule():
-    reading = _read(_segment(_touch(0.0, 900.0)), movement=tax.MOVE_SLIDE)
-    assert reading.gesture == tax.STROKE
+def test_a_model_verdict_names_the_gesture_and_keeps_the_rules_beside_it():
+    reading = _read(_segment(_touch(0.0, 900.0)), gesture=tax.STROKE)
+    assert (reading.gesture, reading.movement) == (tax.STROKE, tax.MOVE_SLIDE)
+    assert (reading.named_by, reading.rule_gesture) == ("model", tax.PRESS)
+    by_rules = _read(_segment(_touch(0.0, 900.0)))
+    assert (by_rules.named_by, by_rules.rule_gesture) == ("rules", tax.PRESS)
+
+
+def test_pressure_evidence_of_a_squeeze_outranks_the_model():
+    held = _segment(_touch(0.0, 900.0, sensors=(0, 1, 2)))
+    reading = _read(held, gesture=tax.PRESS, pressure_rise_kpa=1.5)
+    assert (reading.gesture, reading.named_by) == (tax.SQUEEZE, "rules")
 
 
 def test_force_is_scaled_by_the_skin_threshold():
@@ -150,6 +159,75 @@ def test_activation_threshold_comes_from_the_touch_config(config, expected):
     assert activation_threshold(config) == expected
 
 
+def test_pressure_rise_meter_reports_the_largest_rise_and_ignores_unknowns():
+    from src.ml.pressure_rise import PressureRiseMeter
+    meter = PressureRiseMeter()
+    assert meter.end() is None                       # nothing measured
+    meter.begin({0: 5.0, 1: float("nan")})
+    meter.sample({0: 5.4, 1: 3.0})                   # chamber 1 first seen here
+    meter.sample({0: 6.2, 1: 3.1})
+    meter.sample({0: 5.1, 1: 3.0})
+    assert meter.end() == pytest.approx(1.2)
+    assert not meter.is_open
+
+
+class _Chamber:
+    def __init__(self, kpa, state=None):
+        from src.hardware.air_chamber import ChamberState
+        self.kpa = kpa
+        self.state = state or ChamberState.INFLATED
+
+
+def _live(skin, seen, monkeypatch):
+    import time
+    clock = {"now": 0.0}
+    monkeypatch.setattr(time, "monotonic", lambda: clock["now"])
+    live = LiveTouchClassifier(
+        skin, lambda sid, label, seg, reading: seen.append((label, reading)))
+    assert live.attach()
+    feed = skin.touch_source.cb
+    assert feed is not None
+
+    def at(ms, msg):
+        clock["now"] = ms / 1000.0
+        feed(msg)
+    return at
+
+
+def test_live_squeeze_is_recognised_from_the_chamber_pressure_rise(monkeypatch):
+    seen = []
+    skin = _Skin()
+    skin.chambers = {0: _Chamber(5.0), 1: _Chamber(5.0)}
+    at = _live(skin, seen, monkeypatch)
+    at(0, IDLE)
+    for ms in range(50, 1000, 50):
+        if ms == 400:
+            skin.chambers[0].kpa = 6.5              # the hand compresses it
+        at(ms, _hot((0, 1, 2)))
+    skin.chambers[0].kpa = 5.0
+    at(1000, IDLE)
+    at(2300, IDLE)
+    [(label, reading)] = seen
+    assert label == tax.SQUEEZE
+    assert reading.descriptors["pressure_rise_kpa"] == 1.5
+
+
+def test_pressure_rise_of_a_chamber_the_robot_inflates_is_not_a_squeeze(monkeypatch):
+    from src.hardware.air_chamber import ChamberState
+    seen = []
+    skin = _Skin()
+    skin.chambers = {0: _Chamber(5.0, ChamberState.INFLATING)}
+    at = _live(skin, seen, monkeypatch)
+    at(0, IDLE)
+    for ms in range(50, 1000, 50):
+        skin.chambers[0].kpa += 0.2                 # the pump, not the hand
+        at(ms, _hot((0, 1, 2)))
+    at(1000, IDLE)
+    at(2300, IDLE)
+    [(label, _reading)] = seen
+    assert label == tax.PRESS
+
+
 class _Source:
     def __init__(self):
         self.cb = None
@@ -164,6 +242,7 @@ class _Skin:
     skin_type = ""
     skin_variant = ""
     touch = {"act_threshold_ut": 300.0}
+    chambers: dict = {}
 
     def __init__(self):
         self.touch_source = _Source()

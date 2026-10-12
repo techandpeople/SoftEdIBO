@@ -26,7 +26,7 @@ JSON. `target` is `<skin>:<chamber>` for touches and `<robot>/<skin>` (the
 | `session` | `start`, `pause`, `resume`, `stop`, `next_phase`, `previous_phase`, `emergency_stop` | `start`: robots, robot kinds, simulation flag |
 | `touch` | `press` | `sensor_id`, `intensity_ut`, `touch_interval_ms`, `frequency_hz` |
 | `touch` | `release` | `duration_ms`, `press_timestamp`, `sensor_id`, `press_intensity_ut`, `release_intensity_ut`, `peak_intensity_ut` |
-| `gesture` | the touch type (`tap`, `press`, `rest`, `compressions`, `pats`, `stroke`, `rub`, `hit`) | the four axes (`form`, `movement`, `force`, `extent`) and the descriptors behind them |
+| `gesture` | the touch type (`tap`, `press`, `rest`, `compressions`, `pats`, `stroke`, `rub`, `squeeze`, `hit`) | the four axes (`form`, `movement`, `force`, `extent`), who named it (`named_by`: `model` or `rules`), what the rules called it (`rule_gesture`) and the descriptors behind them |
 | `activity` | `state` | `from`, `to`, `in_state_ms`, `final`, `trigger` (`source`: start / condition / step / manual, plus the `condition` that fired) |
 | `robot` | the action the robot ran (`set_led`, `inflate`, ...) | `cause` (`phase` = the robot's own initiative, anything else = answering that event) and `params` |
 | `input` | name of a discrete input (`button`, `cover`, `organs`, `impact`, `lifted`) | `value`; logged on change only |
