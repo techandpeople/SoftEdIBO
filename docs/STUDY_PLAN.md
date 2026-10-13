@@ -202,6 +202,19 @@ Skins without one share a single whole-robot patient.
         touches and input changes it took);
       - between children: touches together, who leads, lagged
         cross-correlation, turn-taking and behaviour transitions.
+- [ ] **Lab Streaming Layer (LSL) output** - asked for by the researcher: the
+      study will record several sources on different clocks (video of the
+      children, wearable sensors, the robots' touch sensors), and LSL gives
+      them one time base and one recording (XDF) with streams that can be
+      switched on and off. On the app side: an optional publisher, off by
+      default, next to the stream recorder - one numeric stream per touch
+      node plus one marker stream carrying the session events (phases,
+      touches, robot actions, observer codes). The database stays the source
+      of truth. Optional `pylsl` dependency with a lazy import; a "Publish to
+      LSL" checkbox in the session setup dialog. Open before starting: which
+      program records the video (it has to publish frame times or a start
+      marker to LSL - the video itself does not travel through LSL) and how
+      each wearable gets its data into an LSL stream.
 - [ ] Decide on ML for behavior detection (see section 5) **after** the pilot data
       exists.
 
