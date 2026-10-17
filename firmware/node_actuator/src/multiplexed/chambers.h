@@ -7,8 +7,7 @@
 #include "pumps.h"
 #include "mux.h"
 #include "coupled_fill.h"   // shared coupled-line fill supervisor (both boards)
-#include "hold_duty.h"      // shared leak-compensating continuous hold (both boards)
-#include "pump_duty.h"      // shared PWM floor + below-floor deflate duty (both boards)
+#include "pump_duty.h"      // shared PWM ceiling (both boards)
 
 // Per-chamber state + valve/pump coordination for node_multiplexed.
 //
@@ -19,10 +18,14 @@
 // own chamber. Each group is therefore driven like its own node_direct: it owns
 // a pair of board-agnostic coupled_fill::Engine (open the group together -> fill
 // to the lowest open target -> close -> settle -> measure each isolated ->
-// repeat) and its own leak-compensating hold engine, only with looser timings
-// (I2C PCA9685 valve writes + a per-read mux settle are far slower than the
-// direct board's GPIO + dedicated ADC). The groups are fully independent: one
-// skin filling, settling or holding never waits for, or pumps, another.
+// repeat), only with looser timings (I2C PCA9685 valve writes + a per-read mux
+// settle are far slower than the direct board's GPIO + dedicated ADC). The
+// groups are fully independent: one skin filling or settling never waits for,
+// or pumps, another.
+//
+// The chambers on this board are assumed leak-free: a chamber holds its
+// pressure with both valves closed, so there is no leak-compensating hold
+// (hold_duty requests are ignored) and a deflate always pulls at full duty.
 //
 // recalcPumps() runs a group's pump only while one of that group's own valves
 // of that direction is open, so a pump never dead-heads its line (the "running
@@ -125,26 +128,11 @@ inline void stop(int n) {
     state[n].min_kpa = saved_min;
 }
 
-// ---------------------------------------------------------------------------
-// Leak-compensating hold (hold_duty.h), both sides: a held chamber is topped
-// back up (pressure hold) or pulled back down (vacuum hold) in short, soft
-// pulses on its own gauge whenever it drifts off its target. Driven by
-// holdTick() (end of this header), which suspends a group's holds while
-// anything else owns that group's lines. Any explicit actuation command on a
-// chamber supersedes (drops) its hold. Requests go through holdRequest() (also
-// at the end: it needs the chamber's gauge floor).
-// ---------------------------------------------------------------------------
-
 // Everything that controls one pump group's pair of lines. Engines are indexed
 // by the board-wide chamber number; each only ever sees its own group's chambers.
 struct Line {
     coupled_fill::Engine<MAX_CHAMBERS> inflateEng;
     coupled_fill::Engine<MAX_CHAMBERS> deflateEng;
-    hold_duty::Engine<MAX_CHAMBERS>    holdEng;
-    uint16_t holdValveMask    = 0;   // inflate valves held open (pressure hold)
-    uint8_t  holdPumpDuty     = 0;   // pressure pump duty for them (0 = none)
-    uint16_t holdVacValveMask = 0;   // deflate valves held open (vacuum hold)
-    uint8_t  holdVacDuty      = 0;   // vacuum pump duty for them (0 = none)
 
     bool seqActive() const { return inflateEng.active() || deflateEng.active(); }
 };
@@ -162,34 +150,12 @@ inline Line* lineOf(int n) {
 // pump recalc so nothing pumps into a chamber that is open to atmosphere.
 inline uint16_t ventMask      = 0;
 
-// A held chamber only ever has the held side open, so closing "its side"
-// is closing both.
-inline void holdCloseValve(int i, uint8_t /*side*/) {
-    pca_valves::setChamberValve(i, false, false);
-}
-
-inline void holdDrop(int n) {
-    if (Line* L = lineOf(n)) L->holdEng.drop(n, holdCloseValve);
-}
-
-inline void holdAbort() {
-    for (Line& L : lines) {
-        L.holdEng.abort();
-        L.holdValveMask    = 0;
-        L.holdPumpDuty     = 0;
-        L.holdVacValveMask = 0;
-        L.holdVacDuty      = 0;
-    }
-}
-
 // Drive the pumps from the ACTUAL open valves (the pca_valves mirror), never
 // from chamber state - so a pump can only run while it has an open flow path.
 // Per pump group: its inflate pump runs while one of ITS inflate valves is open,
 // its deflate pump while one of ITS deflate valves is open. Suspended while a
-// manual override drives the pumps directly (see main.cpp). A deflate pump
-// drops to pump_duty::DEFLATE_BELOW_FLOOR once EVERY open deflate valve of its
-// group is past the gauge floor (the rest of that pull is time-only). A line
-// whose only open valves belong to the hold engine runs at its servoed hold duty.
+// manual override drives the pumps directly (see main.cpp). Both pumps run at
+// full duty: no reduced below-floor deflate, no hold duty (leak-free chambers).
 inline void recalcPumps() {
     uint16_t openInf = 0, openDef = 0;
     for (int i = 0; i < MAX_CHAMBERS; i++) {
@@ -198,26 +164,9 @@ inline void recalcPumps() {
         if (pca_valves::isOpen(i, 1)) openDef |= (uint16_t)(1u << i);
     }
     for (int g = 0; g < pumps::NUM_PUMP_GROUPS; g++) {
-        const Line& L = lines[g];
         uint16_t inf = openInf & pumps::PUMP_GROUPS[g].chambers;
         uint16_t def = openDef & pumps::PUMP_GROUPS[g].chambers;
-        // Full duty whenever any NON-hold valve of the line is open (an engine
-        // round / manual override); a hold-only line runs at the servoed hold duty.
-        uint8_t pDuty = 0, vDuty = 0;
-        if (inf) {
-            bool holdOnly = (inf & ~L.holdValveMask) == 0;
-            pDuty = (holdOnly && L.holdPumpDuty) ? L.holdPumpDuty : DEFAULT_DUTY;
-        }
-        if (def) {
-            // Every open deflate valve is a chamber the deflate engine flagged
-            // at its gauge floor; a manual/bench valve is never at-floor, so it
-            // keeps the vacuum pump at full duty.
-            bool holdOnly = (def & ~L.holdVacValveMask) == 0;
-            vDuty = holdOnly ? (L.holdVacDuty ? L.holdVacDuty : DEFAULT_DUTY)
-                  : L.deflateEng.lineAtFloor(def) ? pump_duty::DEFLATE_BELOW_FLOOR
-                                                  : DEFAULT_DUTY;
-        }
-        pumps::setGroupDuty(g, pDuty, vDuty);
+        pumps::setGroupDuty(g, inf ? DEFAULT_DUTY : 0, def ? DEFAULT_DUTY : 0);
     }
 }
 
@@ -292,7 +241,6 @@ inline void requestInflate(int n, float target, uint8_t duty, uint32_t cap_ms = 
                            bool blind = false) {
     Line* L = lineOf(n);
     if (!L) return;
-    holdDrop(n);   // an explicit actuation supersedes a leak-compensating hold
     target = max(state[n].min_kpa, min(target, state[n].max_kpa));
     bool reversed = false;
     L->deflateEng.drop(n, [&](int i) { stop(i); reversed = true; });
@@ -306,7 +254,6 @@ inline void requestDeflate(int n, float target, uint8_t duty, uint32_t cap_ms = 
                            bool blind = false) {
     Line* L = lineOf(n);
     if (!L) return;
-    holdDrop(n);   // an explicit actuation supersedes a leak-compensating hold
     target = max(state[n].min_kpa, min(target, state[n].max_kpa));
     bool reversed = false;
     L->inflateEng.drop(n, [&](int i) { stop(i); reversed = true; });
@@ -319,7 +266,6 @@ inline void requestDeflate(int n, float target, uint8_t duty, uint32_t cap_ms = 
 
 inline void holdChamber(int n) {
     if (n < 0 || n >= MAX_CHAMBERS) return;
-    holdDrop(n);
     if (Line* L = lineOf(n)) {
         L->inflateEng.drop(n, [](int i) { stop(i); });
         L->deflateEng.drop(n, [](int i) { stop(i); });
@@ -357,53 +303,6 @@ inline void abortSequences() {
         L.inflateEng.abort();
         L.deflateEng.abort();
     }
-}
-
-// Register / refresh a hold on chamber ``n``: ``side`` 0 = pressure hold
-// (inflate valve + pressure pumps), 1 = vacuum hold (deflate valve + vacuum
-// pumps). ``kpa`` NAN or ``timed`` = duty-only (sensorless). The chamber's own
-// gauge floor tells the engine whether a vacuum target is visible (servoed)
-// or below the floor (timed re-pulls).
-// ``refreshOnly`` = a PC keepalive: only re-asserts a hold already running
-// (see hold_duty::Engine::refresh), never starts one.
-inline void holdRequest(int n, uint8_t side, float kpa, uint8_t duty, bool timed,
-                        bool refreshOnly = false) {
-    Line* L = lineOf(n);
-    if (!L) return;
-    if (refreshOnly) {
-        L->holdEng.refresh(n, side, kpa, duty, timed, gaugeFloorKpa(n), holdCloseValve);
-        return;
-    }
-    L->holdEng.count = (uint8_t)config::state.num_chambers;
-    L->holdEng.request(n, side, kpa, duty, timed, gaugeFloorKpa(n), holdCloseValve);
-}
-
-// Drive the leak-compensating hold engines. Call every loop tick; `manual` is
-// the board-wide manual override. A group's holds are also suspended while one
-// of its own fill sequences owns its lines (another group's sequence does not
-// touch them). The pump duties are applied through recalcPumps, which only
-// honours each one while NO non-hold valve of that line is open.
-inline void holdTick(uint32_t now, bool manual) {
-    bool changed = false;
-    for (Line& L : lines) {
-        L.holdEng.count = (uint8_t)config::state.num_chambers;
-        hold_duty::Duties d = L.holdEng.tick(
-            now, manual || L.seqActive(),
-            [](int i, uint8_t side) { pca_valves::setChamberValve(i, side == 0, side == 1); },
-            holdCloseValve,
-            [](int i) -> float { return recordKpa(i, readKpaMedian(i)); });
-        uint16_t inflMask = L.holdEng.openInflateMask();
-        uint16_t deflMask = L.holdEng.openDeflateMask();
-        if (inflMask != L.holdValveMask || d.inflate != L.holdPumpDuty
-            || deflMask != L.holdVacValveMask || d.deflate != L.holdVacDuty) {
-            L.holdValveMask    = inflMask;
-            L.holdPumpDuty     = d.inflate;
-            L.holdVacValveMask = deflMask;
-            L.holdVacDuty      = d.deflate;
-            changed = true;
-        }
-    }
-    if (changed) recalcPumps();
 }
 
 // Force-stop any chamber actuating past ACTUATION_TIMEOUT_MS (sensor failure

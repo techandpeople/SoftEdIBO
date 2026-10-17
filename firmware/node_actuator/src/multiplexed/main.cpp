@@ -271,16 +271,9 @@ void parseAndQueue(const uint8_t* data, int len) {
         c.param_kpa = doc["value"] | config::DEFAULT_CHAMBER_MIN_KPA;
         c.seq = doc["seq"] | cmd_queue::NO_SEQ;
     } else if (strcmp(cmd, "hold_duty") == 0) {
-        // Leak-compensating hold: {"cmd":"hold_duty","chamber":n,"duty":D,
-        // "kpa":K?,"timed":1?} starts/refreshes (PC re-sends ~2 s as keepalive);
-        // "off":1 drops it (chamber -1 = all). No "kpa" / "timed":1 = duty-only.
-        c.type = cmd_queue::CMD_HOLD_DUTY;
-        c.chamber = cmd_queue::chamberArg(doc["chamber"] | -1);
-        c.duty = doc["duty"] | 0;
-        c.param = cmd_queue::holdDutyMode(doc["off"] | 0, doc["ka"] | 0);   // start / off / keepalive refresh
-        c.timed = doc["timed"] | 0;
-        c.dir = (doc["dir"] | 0) ? 1 : 0;    // 0 = pressure hold, 1 = vacuum hold
-        c.param_kpa = doc["kpa"].is<float>() ? doc["kpa"].as<float>() : NAN;
+        // Leak-compensating hold: the chambers on this board are assumed
+        // leak-free (a closed chamber keeps its pressure), so it is ignored.
+        return;
     } else if (strcmp(cmd, "hold") == 0) {
         c.type = cmd_queue::CMD_HOLD;
         c.chamber = cmd_queue::chamberArg(doc["chamber"] | -1);
@@ -558,7 +551,6 @@ void manualLeaveIfIdle() {
 // Emergency stop - slam everything off immediately. loop() keeps it that way
 // (and skips all control) while emergencyStopped is set.
 void emergencyStopAll() {
-    chambers::holdAbort();        // drop any leak-compensating holds
     chambers::abortSequences();   // drop any in-progress coupled-fill sequence
     pumps::stopAll();
     pca_valves::closeAllValves();
@@ -737,25 +729,6 @@ void processCommand(const cmd_queue::Cmd& c) {
     // and ack (the PC's confirmer would otherwise retry into silence).
     if (emergencyStopped && c.type != CMD_SET_MAX && c.type != CMD_SET_MIN) return;
 
-    // Leak-compensating hold: register/refresh/drop; chambers::holdTick()
-    // (from loop) actually opens valves and runs the pumps when the manifold
-    // is free. param = "off" flag; chamber -1 applies to every chamber.
-    if (c.type == cmd_queue::CMD_HOLD_DUTY) {
-        const int n_ch = config::state.num_chambers;
-        bool off = c.param == cmd_queue::HOLD_MODE_OFF;
-        bool ka  = c.param == cmd_queue::HOLD_MODE_REFRESH;
-        if (c.chamber == -1) {
-            if (off) chambers::holdAbort();
-            else for (int i = 0; i < n_ch; i++)
-                chambers::holdRequest(i, c.dir, c.param_kpa, c.duty, c.timed != 0, ka);
-        } else if (c.chamber >= 0 && c.chamber < n_ch) {
-            if (off) chambers::holdDrop(c.chamber);
-            else chambers::holdRequest(c.chamber, c.dir, c.param_kpa, c.duty,
-                                       c.timed != 0, ka);
-        }
-        return;
-    }
-
     if (!configured) {
         sendError("not_configured");
         return;
@@ -779,19 +752,16 @@ void processCommand(const cmd_queue::Cmd& c) {
     int limit = min(config::state.num_chambers, (int)MAX_CHAMBERS);
     if (c.type == cmd_queue::CMD_VENT) {
         // Bench vent (chamber -1 = all): enter the manual override from a clean
-        // slate (like valve_manual), drop any hold, then open both valves with
+        // slate (like valve_manual), then open both valves with
         // the chamber excluded from the pump recalc.
         bool open = c.cfg_chambers != 0;
         if (!manualEnter(open)) return;
         int lo = n < 0 ? 0 : n, hi = n < 0 ? limit - 1 : n;
-        for (int i = lo; i <= hi && i < limit; i++) {
-            chambers::holdDrop(i);
-            applyManualVent(i, open);
-        }
+        for (int i = lo; i <= hi && i < limit; i++) applyManualVent(i, open);
         manualLeaveIfIdle();
         return;
     }
-    // An explicit actuation supersedes the manual override (as it does a hold).
+    // An explicit actuation supersedes the manual override.
     // The engines are suspended board-wide while the override runs, so the
     // request would otherwise wait for the dead-man and fire late.
     if (manualActive && (c.type == CMD_INFLATE || c.type == CMD_DEFLATE
@@ -933,7 +903,7 @@ void setup() {
     // UNL17-24) so a bank swap from wrong address jumpers shows in the PC log.
     char ready_msg[192];
     snprintf(ready_msg, sizeof(ready_msg),
-             "{\"status\":\"node_multiplexed_ready\",\"fw\":\"sensormap-1\",\"rgbw\":" LED_RGBW_JSON
+             "{\"status\":\"node_multiplexed_ready\",\"fw\":\"noleak-1\",\"rgbw\":" LED_RGBW_JSON
              ",\"kpa_min\":%.0f,\"pca\":[%d,%d]}",
              (double)pressure::FLOOR_KPA, pca_valves::pca1_addr, pca_valves::pca2_addr);
     se::broadcast(ready_msg);
@@ -1018,7 +988,7 @@ void loop() {
     if (!manualActive) chambers::actuationWatchdog(now);
 
     // ---- Refresh gauges for telemetry + command-time guards (mirrors
-    //      node_direct). The engines and holds do their own fresh reads; this keeps
+    //      node_direct). The engines do their own fresh reads; this keeps
     //      idle chambers live in status and in the "below/above target?" checks.
     //      In manual override it also enforces the hard limits. ----
     refreshGauges(now);
@@ -1032,11 +1002,6 @@ void loop() {
         chambers::controlTick(now);
         chambers::recalcPumps();
     }
-
-    // ---- Leak-compensating continuous holds (valve open + equilibrium duty).
-    //      Each group's holds suspend while the manual override or one of that
-    //      group's own engine sequences owns its lines (emergencyStopped never reaches here - loop returned). ----
-    chambers::holdTick(now, manualActive);
 
     broadcastTelemetry(now);
 }
