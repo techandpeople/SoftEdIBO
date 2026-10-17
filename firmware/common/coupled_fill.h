@@ -36,7 +36,11 @@
 //              the pull goes on, but the board drops the vacuum pump to the
 //              reduced pump_duty::DEFLATE_BELOW_FLOOR while every open deflate
 //              valve is at the floor (the unsupervised part of the pull is
-//              gentler). A BLIND chamber (board with no pressure
+//              gentler). A pull to the bottom may also carry a TAIL
+//              (tailMs, the PC's "vac_ms"): the gauge cannot read vacuum, so
+//              once the reading bottoms out the chamber keeps pulling blind
+//              for exactly tailMs more and then closes.
+//              A BLIND chamber (board with no pressure
 //              sensor populated - the PC sends "timed":1) is time-only both
 //              ways: its floating ADC reading is noise, so the gauge never
 //              opens, closes, or verifies it - only capMs does.
@@ -137,6 +141,8 @@ struct Engine {
     uint16_t blindMask      = 0;   // chambers running open-loop: gauge ignored, capMs closes
     float    floorKpa[MAXN] = {};  // per-chamber gauge floor (lowest visible reading)
     uint16_t floorMask      = 0;   // open deflate chambers whose gauge bottomed out (latched until close)
+    uint32_t tailMs[MAXN]   = {};  // blind pull still to arm at the floor (0 = none / armed)
+    uint16_t tailMask       = 0;   // chambers on a tail pull: time-only done (capMs), never the gauge
 
     void begin(uint8_t direction, const Tuning& t) { dir = direction; tune = t; }
 
@@ -171,13 +177,20 @@ struct Engine {
     // (P_MIN minus its ambient zero); a deflate whose target lies below it is
     // flagged at-floor once the reading gets there (see floorMask). Leave the
     // default for inflate: nothing bottoms out on the way up.
+    // ``tail_ms`` (deflate, target below the floor): once at-floor, the
+    // chamber's budget becomes "time open so far + tail_ms" - a fixed blind
+    // vacuum pull past what the gauge can see.
     void request(int i, float target_kpa, float range_kpa, uint32_t cap_ms = 0,
-                 bool blind = false, float floor_kpa = -INFINITY) {
+                 bool blind = false, float floor_kpa = -INFINITY,
+                 uint32_t tail_ms = 0) {
         if (i < 0 || i >= count) return;
         target[i]   = target_kpa;
         range[i]    = range_kpa;
         capMs[i]    = cap_ms;
         floorKpa[i] = floor_kpa;
+        tailMs[i]   = tail_ms;
+        if (tail_ms) tailMask |=  (uint16_t)(1u << i);
+        else         tailMask &= ~(uint16_t)(1u << i);
         if (blind) blindMask |=  (uint16_t)(1u << i);
         else       blindMask &= ~(uint16_t)(1u << i);
         floorMask &= ~(uint16_t)(1u << i);
@@ -203,6 +216,7 @@ struct Engine {
         uint16_t bit = (uint16_t)(1u << i);
         pendingMask &= ~bit;
         floorMask   &= ~bit;
+        tailMask    &= ~bit;
         if (openMask & bit) { closeFn(i); openMask &= ~bit; }
         if (pendingMask == 0 && openMask == 0) phase = IDLE;
     }
@@ -224,6 +238,7 @@ struct Engine {
         pendingMask = 0;
         openMask = 0;
         floorMask = 0;
+        tailMask = 0;
     }
 
     // ---- internal: open every still-pending chamber together for a round ----
@@ -337,11 +352,18 @@ struct Engine {
                 // and the target lies below it, so from here the pull is
                 // time-only (capMs). Latch AT-FLOOR and let the board drop the
                 // vacuum pump to the reduced duty once every open valve is
-                // there (recalc consults lineAtFloor).
+                // there (recalc consults lineAtFloor). A tail request closes
+                // exactly tailMs after this point.
                 uint16_t bit = (uint16_t)(1u << i);
                 if (dir == 1 && !(floorMask & bit) && target[i] < floorKpa[i]
                     && k <= floorKpa[i] + FLOOR_BAND_KPA) {
                     floorMask |= bit;
+                    // Armed once: a later round re-latching the floor must
+                    // not restart the tail.
+                    if (tailMs[i]) {
+                        capMs[i]  = accumMs[i] + (now - openedMs[i]) + tailMs[i];
+                        tailMs[i] = 0;
+                    }
                     o.recalc();
                     o.dbg(EV_AT_FLOOR, floorMask);
                 }
@@ -373,8 +395,11 @@ struct Engine {
                 // budget IS the closing authority, and re-opening it would loop.
                 // A blind chamber (no sensor populated) is time-ONLY: its noise
                 // reading may neither confirm nor deny the target.
+                // A tail pull is time-only too: its target lies below the
+                // floor, and the widened measure tolerance would otherwise
+                // pass it at the floor before the blind tail has run.
                 bool done = accumMs[i] >= capOf(i);
-                if (!done && !((blindMask >> i) & 1)) {
+                if (!done && !(((blindMask | tailMask) >> i) & 1)) {
                     float tol = tune.tol_frac * range[i];
                     done = reached(o.readKpa(i), i, tol);
                 }

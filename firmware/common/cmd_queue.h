@@ -65,6 +65,8 @@ struct Cmd {
     uint8_t  timed;         // inflate/deflate: 1 = open-loop ("timed":1) - the board has
                             // no pressure sensor populated, run purely on fill_ms and
                             // ignore the (floating, noise) gauge readings entirely
+    uint32_t vac_ms;        // deflate/set_pressure: blind vacuum time once a pull to the
+                            // bottom (min) reaches the gauge floor (ms; 0 = stop at min)
     float    param_kpa;     // chamber min or max in kPa (depends on type)
     uint8_t  dir;           // hold_duty: 0 = pressure hold, 1 = vacuum hold
     int16_t  cfg_chambers;  // configure: num_chambers, or manual: open/on (bool)

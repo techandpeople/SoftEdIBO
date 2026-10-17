@@ -320,18 +320,22 @@ inline void requestInflate(int n, float target, uint8_t duty, uint32_t cap_ms = 
     inflateEng.request(n, target, state[n].max_kpa - state[n].min_kpa, cap_ms, blind);
 }
 
+// ``tail_ms`` > 0 = a pull to the bottom: the target goes below the gauge
+// floor (the min clamp is skipped - the gauge cannot see vacuum) and, once the
+// reading bottoms out, the chamber pulls blind for tail_ms more.
 inline void requestDeflate(int n, float target, uint8_t duty, uint32_t cap_ms = 0,
-                           bool blind = false) {
+                           bool blind = false, uint32_t tail_ms = 0) {
     if (n < 0 || n >= NUM_CHAMBERS) return;
     holdDrop(n);   // an explicit actuation supersedes a leak-compensating hold
-    target = max(state[n].min_kpa, min(target, state[n].max_kpa));
+    target = tail_ms ? gaugeFloorKpa(n) - 1.0f
+                     : max(state[n].min_kpa, min(target, state[n].max_kpa));
     bool reversed = false;
     inflateEng.drop(n, [&](int i) { stop(i); reversed = true; });
     if (reversed) recalcPumps();
     state[n].duty       = duty;
     state[n].target_kpa = target;
     deflateEng.request(n, target, state[n].max_kpa - state[n].min_kpa, cap_ms, blind,
-                       gaugeFloorKpa(n));
+                       gaugeFloorKpa(n), tail_ms);
 }
 
 // Stop & hold a chamber wherever it is (drops it from both engines and from

@@ -283,14 +283,21 @@ inline void applyChamberCmd(int n, const cmd_queue::Cmd& c) {
         }
         float delta  = (ch.max_kpa - ch.min_kpa) * constrain(c.param, 0, 100) / 100.0f;
         float target = max(chambers::cachedKpa[n] - delta, ch.min_kpa);
-        if (chambers::cachedKpa[n] > target)
+        // A pull to the bottom with "vac_ms": down to the gauge floor, then a
+        // blind vacuum for vac_ms (also from a chamber already at ambient).
+        if (c.vac_ms && target <= ch.min_kpa)
+            chambers::requestDeflate(n, target, duty, c.fill_ms, false, c.vac_ms);
+        else if (chambers::cachedKpa[n] > target)
             chambers::requestDeflate(n, target, duty, c.fill_ms);
         break;
     }
     case CMD_SET_PRESSURE: {
         float target = units::pctToKpa(constrain(c.param, 0, 100),
                                        ch.min_kpa, ch.max_kpa);
-        if      (chambers::cachedKpa[n] < target)
+        if (c.vac_ms && c.param <= 0)
+            chambers::requestDeflate(n, target, c.duty ? c.duty : chambers::DEFAULT_DEFLATE_DUTY,
+                                     0, false, c.vac_ms);
+        else if (chambers::cachedKpa[n] < target)
             chambers::requestInflate(n, target, c.duty ? c.duty : chambers::DEFAULT_INFLATE_DUTY);
         else if (chambers::cachedKpa[n] > target)
             chambers::requestDeflate(n, target, c.duty ? c.duty : chambers::DEFAULT_DEFLATE_DUTY);
@@ -461,8 +468,8 @@ inline void parseAndQueue(const uint8_t* data, int len) {
 
     if      (strcmp(cmd, "ping") == 0)             { c.type = CMD_PING;         c.chamber = -1; }
     else if (strcmp(cmd, "inflate") == 0)           { c.type = CMD_INFLATE;      c.chamber = chamberArg(doc["chamber"] | -1); c.param = doc["delta"] | 10; c.fill_ms = doc["ms"] | 0; c.duty = doc["duty"] | 0; c.timed = doc["timed"] | 0; }
-    else if (strcmp(cmd, "deflate") == 0)           { c.type = CMD_DEFLATE;      c.chamber = chamberArg(doc["chamber"] | -1); c.param = doc["delta"] | 10; c.fill_ms = doc["ms"] | 0; c.duty = doc["duty"] | 0; c.timed = doc["timed"] | 0; }
-    else if (strcmp(cmd, "set_pressure") == 0)      { c.type = CMD_SET_PRESSURE; c.chamber = chamberArg(doc["chamber"] | -1); c.param = doc["value"] | 0; c.duty = doc["duty"] | 0; }
+    else if (strcmp(cmd, "deflate") == 0)           { c.type = CMD_DEFLATE;      c.chamber = chamberArg(doc["chamber"] | -1); c.param = doc["delta"] | 10; c.fill_ms = doc["ms"] | 0; c.duty = doc["duty"] | 0; c.timed = doc["timed"] | 0; c.vac_ms = doc["vac_ms"] | 0; }
+    else if (strcmp(cmd, "set_pressure") == 0)      { c.type = CMD_SET_PRESSURE; c.chamber = chamberArg(doc["chamber"] | -1); c.param = doc["value"] | 0; c.duty = doc["duty"] | 0; c.vac_ms = doc["vac_ms"] | 0; }
     else if (strcmp(cmd, "set_max_pressure") == 0)  { c.type = CMD_SET_MAX;      c.chamber = chamberArg(doc["chamber"] | -1); c.param_kpa = doc["value"] | chambers::DEFAULT_MAX_KPA; c.seq = doc["seq"] | NO_SEQ; }
     else if (strcmp(cmd, "set_min_pressure") == 0)  { c.type = CMD_SET_MIN;      c.chamber = chamberArg(doc["chamber"] | -1); c.param_kpa = doc["value"] | chambers::DEFAULT_MIN_KPA; c.seq = doc["seq"] | NO_SEQ; }
     else if (strcmp(cmd, "hold") == 0)              { c.type = CMD_HOLD;         c.chamber = chamberArg(doc["chamber"] | -1); }

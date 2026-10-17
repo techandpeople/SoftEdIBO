@@ -255,11 +255,13 @@ void parseAndQueue(const uint8_t* data, int len) {
         c.fill_ms = doc["ms"] | 0;
         c.duty = doc["duty"] | 0;
         c.timed = doc["timed"] | 0;
+        c.vac_ms = doc["vac_ms"] | 0;
     } else if (strcmp(cmd, "set_pressure") == 0) {
         c.type = cmd_queue::CMD_SET_PRESSURE;
         c.chamber = cmd_queue::chamberArg(doc["chamber"] | -1);
         c.param = doc["value"] | 0;
         c.duty = doc["duty"] | 0;
+        c.vac_ms = doc["vac_ms"] | 0;
     } else if (strcmp(cmd, "set_max_pressure") == 0) {
         c.type = cmd_queue::CMD_SET_MAX;
         c.chamber = cmd_queue::chamberArg(doc["chamber"] | -1);
@@ -612,7 +614,11 @@ void applyChamberCmd(int n, const cmd_queue::Cmd& c) {
         }
         float delta  = (ch.max_kpa - ch.min_kpa) * constrain(c.param, 0, 100) / 100.0f;
         float target = max(chambers::cachedKpa[n] - delta, ch.min_kpa);
-        if (chambers::cachedKpa[n] > target)
+        // A pull to the bottom with "vac_ms": down to the gauge floor, then a
+        // blind vacuum for vac_ms (also from a chamber already at ambient).
+        if (c.vac_ms && target <= ch.min_kpa)
+            chambers::requestDeflate(n, target, duty, c.fill_ms, false, c.vac_ms);
+        else if (chambers::cachedKpa[n] > target)
             chambers::requestDeflate(n, target, duty, c.fill_ms);
         else if (ch.state == chambers::INFLATING)
             chambers::holdChamber(n);   // nowhere to go down: at least stop going up
@@ -620,7 +626,9 @@ void applyChamberCmd(int n, const cmd_queue::Cmd& c) {
     }
     case CMD_SET_PRESSURE: {
         float target = units::pctToKpa(constrain(c.param, 0, 100), ch.min_kpa, ch.max_kpa);
-        if      (chambers::cachedKpa[n] < target) chambers::requestInflate(n, target, duty);
+        if (c.vac_ms && c.param <= 0)
+            chambers::requestDeflate(n, target, duty, 0, false, c.vac_ms);
+        else if (chambers::cachedKpa[n] < target) chambers::requestInflate(n, target, duty);
         else if (chambers::cachedKpa[n] > target) chambers::requestDeflate(n, target, duty);
         else chambers::holdChamber(n);
         break;
@@ -903,7 +911,7 @@ void setup() {
     // UNL17-24) so a bank swap from wrong address jumpers shows in the PC log.
     char ready_msg[192];
     snprintf(ready_msg, sizeof(ready_msg),
-             "{\"status\":\"node_multiplexed_ready\",\"fw\":\"noleak-1\",\"rgbw\":" LED_RGBW_JSON
+             "{\"status\":\"node_multiplexed_ready\",\"fw\":\"vactail-1\",\"rgbw\":" LED_RGBW_JSON
              ",\"kpa_min\":%.0f,\"pca\":[%d,%d]}",
              (double)pressure::FLOOR_KPA, pca_valves::pca1_addr, pca_valves::pca2_addr);
     se::broadcast(ready_msg);
