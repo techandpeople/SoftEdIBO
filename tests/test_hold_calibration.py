@@ -196,16 +196,14 @@ def test_hold_regulated_seeds_duty_from_curve():
     assert call["vacuum"] is False
 
 
-def test_hold_regulated_vacuum_side_and_nothing_at_ambient():
+def test_hold_regulated_nothing_at_ambient():
+    # 0 % is ambient (the lower cap is fixed there; a configured negative
+    # min_pressure is ignored), so there is nothing to hold at the bottom.
     ctrl = _HoldCtrl()
     skin = Skin("wrinkles", [{"controller": ctrl, "node_slot": 1,
-                              "min_pressure": -20.0, "max_pressure": 0.0}])
-    assert skin.hold_regulated(0, pct=25)      # -15 kPa: vacuum hold
-    call = ctrl.hold_calls[-1]
-    assert call["kpa"] == -15.0
-    assert call["vacuum"] is True
-    assert not skin.hold_regulated(0, pct=100)  # 0 kPa = ambient: nothing
-    assert len(ctrl.hold_calls) == 1
+                              "min_pressure": -20.0, "max_pressure": 10.0}])
+    assert not skin.hold_regulated(0, pct=0)
+    assert ctrl.hold_calls == []
 
 
 def test_hold_regulated_falls_back_without_curve_and_releases():
@@ -257,27 +255,6 @@ def test_auto_hold_immediate_when_already_at_target():
     assert skin.set_pressure(0, 50)             # already there -> hold now
     assert len(ctrl.hold_calls) == 1
     assert ctrl.hold_calls[0]["kpa"] == 5.0
-
-
-def test_auto_hold_engages_vacuum_side_for_a_vacuum_pose():
-    ctrl = _HoldCtrl()
-    vac = Skin("wrinkles", [{"controller": ctrl, "node_slot": 0,
-                             "min_pressure": -20.0, "max_pressure": 0.0}])
-    assert vac.set_pressure(0, 50)              # -10 kPa
-    _status(vac, 0, -5.0, 2)                    # deflating
-    _status(vac, 0, -10.0, 0)                   # idle at the pose
-    assert len(ctrl.hold_calls) == 1
-    assert ctrl.hold_calls[0]["kpa"] == -10.0
-    assert ctrl.hold_calls[0]["vacuum"] is True
-
-    # Deepest pose (0 % of a vacuum-fed range) settles to IDLE: still held.
-    assert vac.deflate(0, 100)
-    assert ctrl.stop_calls == [0]
-    _status(vac, 0, -15.0, 2)
-    _status(vac, 0, -20.0, 0)
-    assert len(ctrl.hold_calls) == 2
-    assert ctrl.hold_calls[1]["kpa"] == -20.0
-    assert ctrl.hold_calls[1]["vacuum"] is True
 
 
 def test_auto_hold_skips_ambient_and_sensorless():

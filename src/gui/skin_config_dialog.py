@@ -53,7 +53,8 @@ from src.robots._robot_builder import multiplexed_configure
 _DEFAULT_MAX_KPA   = skincfg.DEFAULT_MAX_KPA
 _MAX_ALLOWED_KPA   = skincfg.MAX_ALLOWED_KPA
 _DEFAULT_MIN_KPA   = skincfg.DEFAULT_MIN_KPA
-_MIN_ALLOWED_KPA   = skincfg.MIN_ALLOWED_KPA
+_DEFAULT_VACUUM_MS = skincfg.DEFAULT_VACUUM_MS
+_MAX_VACUUM_MS     = skincfg.MAX_VACUUM_MS
 _MAX_CHAMBERS      = skincfg.MAX_CHAMBERS
 _DEFAULT_FILL_MODE = skincfg.DEFAULT_FILL_MODE
 _NONE_LABEL        = "(none)"
@@ -61,8 +62,8 @@ _MISSING_FIELD_TITLE = "Missing Field"
 
 
 class _ChamberRow(QWidget):
-    """A single chamber row: MAC dropdown + slot spinbox + min/max pressure
-    spinboxes + fill-mode combo + remove. On a node flagged as having no
+    """A single chamber row: MAC dropdown + slot spinbox + blind vacuum time
+    + max pressure spinbox + fill-mode combo + remove. On a node flagged as having no
     pressure sensors (``sensorless_macs``) the row also shows manual fill/empty
     time fields - the open-loop actuation windows."""
 
@@ -75,7 +76,7 @@ class _ChamberRow(QWidget):
         mac: str = "",
         slot: int = 0,
         max_pressure: float = _DEFAULT_MAX_KPA,
-        min_pressure: float = _DEFAULT_MIN_KPA,
+        vacuum_ms: int = _DEFAULT_VACUUM_MS,
         fill_mode: str = _DEFAULT_FILL_MODE,
         fill_time_ms: int | None = None,
         empty_time_ms: int | None = None,
@@ -112,19 +113,23 @@ class _ChamberRow(QWidget):
         self._slot_spin.setValue(slot)
         self._update_slot_max()
 
-        self._min_spin = QDoubleSpinBox()
-        self._min_spin.setDecimals(1)
-        self._min_spin.setSingleStep(0.1)
-        # Negative allowed for vacuum-fed chambers (0% maps to this lower cap).
-        self._min_spin.setRange(_MIN_ALLOWED_KPA, _MAX_ALLOWED_KPA - 0.1)
-        self._min_spin.setValue(min_pressure)
-        self._min_spin.setSuffix(" kPa")
+        # The gauge sensors cannot read below ambient, so 0% is ambient and a
+        # deflate to 0% ends with this BLIND vacuum pull (no pressure target).
+        self._vac_spin = QSpinBox()
+        self._vac_spin.setRange(0, _MAX_VACUUM_MS)
+        self._vac_spin.setSingleStep(100)
+        self._vac_spin.setValue(int(vacuum_ms))
+        self._vac_spin.setSuffix(" ms")
         # No step arrows: they ate most of the field and clipped the value.
-        self._min_spin.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.NoButtons)
-        self._min_spin.setFixedWidth(75)
-        self._min_spin.setWhatsThis(
-            "Lowest pressure for this chamber (0% maps here). Leave at 0 for a "
-            "normal chamber; set negative for one fed from a vacuum source.")
+        self._vac_spin.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
+        self._vac_spin.setFixedWidth(75)
+        self._vac_spin.setToolTip("Blind vacuum time after a deflate to 0%.")
+        self._vac_spin.setWhatsThis(
+            "Blind vacuum time for this chamber. The pressure sensors cannot "
+            "read below ambient, so a deflate to 0% first empties the chamber "
+            "down to ambient on the sensor and then keeps the vacuum pump "
+            "pulling for this many milliseconds, without pressure feedback. "
+            "0 = stop at ambient (no vacuum).")
 
         self._max_spin = QDoubleSpinBox()
         self._max_spin.setDecimals(1)
@@ -194,8 +199,8 @@ class _ChamberRow(QWidget):
 
         hbox.addWidget(self._mac_combo)
         hbox.addWidget(self._slot_spin)
-        hbox.addWidget(QLabel("Min:"))
-        hbox.addWidget(self._min_spin)
+        hbox.addWidget(QLabel("Vac:"))
+        hbox.addWidget(self._vac_spin)
         hbox.addWidget(QLabel("Max:"))
         hbox.addWidget(self._max_spin)
         hbox.addWidget(QLabel("Fill:"))
@@ -212,12 +217,13 @@ class _ChamberRow(QWidget):
     def remove_btn(self) -> QPushButton:
         return self._remove_btn
 
-    def get_values(self) -> tuple[str, int, float, float, str]:
+    def get_values(self) -> tuple[str, int, float, int, str]:
+        """(mac, slot, max_pressure kPa, vacuum_ms, fill_mode)."""
         return (
             self._mac_combo.currentText(),
             self._slot_spin.value(),
             round(self._max_spin.value(), 1),
-            round(self._min_spin.value(), 1),
+            self._vac_spin.value(),
             self._mode_combo.currentData(),
         )
 
@@ -404,7 +410,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
                 mac=ch.get("mac", ""),
                 slot=int(ch.get("slot", 0)),
                 max_pressure=float(ch.get("max_pressure", _DEFAULT_MAX_KPA)),
-                min_pressure=float(ch.get("min_pressure", _DEFAULT_MIN_KPA)),
+                vacuum_ms=skincfg.chamber_vacuum_ms(ch),
                 fill_mode=skincfg.normalize_fill_mode(ch.get("fill_mode")),
                 fill_time_ms=ch.get("fill_time_ms"),
                 empty_time_ms=ch.get("empty_time_ms"),
@@ -506,8 +512,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         for row in self._rows[:]:
             self._remove_row(row)
         for _ in range(max(1, tpl.chamber_count)):
-            self._add_row(max_pressure=tpl.default_max_pressure,
-                          min_pressure=tpl.default_min_pressure)
+            self._add_row(max_pressure=tpl.default_max_pressure)
 
         # Grid + chamber_grid.
         cols = int(tpl.grid.get("cols", self._cols_spin.value()))
@@ -559,17 +564,16 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
             return
         # Snapshot the current dialog state into a template.
         max_p = 0.0
-        min_p = 0.0
         if self._rows:
             # Collect the template defaults from the first row (typical use is
             # uniform pressure caps across a skin's chambers).
-            _, _, max_p, min_p, _ = self._rows[0].get_values()
+            _, _, max_p, _, _ = self._rows[0].get_values()
         template = SkinTemplate(
             template_id=self._db.next_skin_template_id(),
             name=name.strip(),
             chamber_count=len(self._rows),
             default_max_pressure=float(max_p) if max_p else _DEFAULT_MAX_KPA,
-            default_min_pressure=float(min_p),
+            default_min_pressure=_DEFAULT_MIN_KPA,
             grid={"cols": self._grid.cols(), "rows": self._grid.rows()},
             chamber_grid=self._grid.chamber_grid(),
             sensor_count=int(self._sensor_count_spin.value()),
@@ -629,7 +633,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         mac: str = "",
         slot: int = 0,
         max_pressure: float = _DEFAULT_MAX_KPA,
-        min_pressure: float = _DEFAULT_MIN_KPA,
+        vacuum_ms: int = _DEFAULT_VACUUM_MS,
         fill_mode: str = _DEFAULT_FILL_MODE,
         fill_time_ms: int | None = None,
         empty_time_ms: int | None = None,
@@ -639,7 +643,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         macs      = self._node_macs()
         max_slots = self._node_max_slots()
         row = _ChamberRow(macs, max_slots, mac=mac, slot=slot,
-                          max_pressure=max_pressure, min_pressure=min_pressure,
+                          max_pressure=max_pressure, vacuum_ms=vacuum_ms,
                           fill_mode=fill_mode,
                           fill_time_ms=fill_time_ms, empty_time_ms=empty_time_ms,
                           sensorless_macs=self._sensorless_macs())
@@ -1043,11 +1047,11 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         prev = skincfg.chambers_by_key(self._load_skin_cfg().get("chambers", []))
         chambers: list[dict] = []
         for row in self._rows:
-            m, s, max_p, min_p, mode = row.get_values()
+            m, s, max_p, vac_ms, mode = row.get_values()
             if m != mac:
                 continue
             cfg = {"slot": int(s), "max_pressure": float(max_p),
-                   "min_pressure": float(min_p), "fill_mode": mode}
+                   "vacuum_ms": int(vac_ms), "fill_mode": mode}
             skincfg.carry_calibration(cfg, prev.get((m, int(s))))
             # Manual open-loop times (sensorless node) straight from the row,
             # so the bench can drive the chamber before the skin is saved.
@@ -1130,7 +1134,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
                  if c["skin_id"] == skin_id}
         chambers: list[dict] = []
         for row in self._rows:
-            mac, slot, max_p, min_p, mode = row.get_values()
+            mac, slot, max_p, vac_ms, mode = row.get_values()
             if not mac:
                 continue
             if node_types.get(mac) not in skincfg.ACTUATOR_NODE_TYPES:
@@ -1146,7 +1150,8 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
                 "node_type": node_types.get(mac),
                 "fill_mode": mode,
                 "max_pressure": float(max_p),
-                "min_pressure": float(min_p),
+                "min_pressure": _DEFAULT_MIN_KPA,
+                "vacuum_ms": int(vac_ms),
             })
             ch.setdefault("fill_time_ms", None)
             chambers.append(ch)
@@ -1166,7 +1171,7 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
                       for n in self._robot_nodes()}
         out: dict[str, list[int]] = {}
         for row in self._rows:
-            mac, slot, _max_p, _min_p, _mode = row.get_values()
+            mac, slot, _max_p, _vac_ms, _mode = row.get_values()
             if mac and node_types.get(mac) in skincfg.ACTUATOR_NODE_TYPES:
                 out.setdefault(mac, []).append(int(slot))
         return out
@@ -1232,9 +1237,9 @@ class SkinConfigDialog(BaseDialog, Ui_SkinConfigDialog):
         prev = skincfg.chambers_by_key(self._load_skin_cfg().get("chambers", []))
         chambers: list[dict] = []
         for row in self._rows:
-            m, s, p, mn, fm = row.get_values()
+            m, s, p, vac, fm = row.get_values()
             ch: dict = {"mac": m, "slot": s, "max_pressure": p,
-                        "min_pressure": mn, "fill_mode": fm}
+                        "vacuum_ms": vac, "fill_mode": fm}
             saved = prev.get((m, int(s)))
             skincfg.carry_calibration(ch, saved)
             # A populated node hides the manual empty time; keep the saved one

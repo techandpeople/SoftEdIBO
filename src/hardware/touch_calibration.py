@@ -162,7 +162,7 @@ def iter_touch_skins(settings_data: dict) -> list[dict]:
                 "slots": [int(c.get("slot", 0)) for c in chambers],
                 "limits": {
                     int(c.get("slot", 0)): (
-                        float(c.get("min_pressure", DEFAULT_MIN_KPA)),
+                        DEFAULT_MIN_KPA,
                         float(c.get("max_pressure", DEFAULT_MAX_KPA)))
                     for c in chambers},
                 "coupling": touch.get("coupling"),

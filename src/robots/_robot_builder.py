@@ -10,7 +10,7 @@ import logging
 from typing import Any
 
 from src.core.led_geometry import MAX_BRIGHTNESS, led_geometry_for
-from src.core.skin_config import DEFAULT_MAX_KPA, DEFAULT_MIN_KPA
+from src.core.skin_config import DEFAULT_MAX_KPA, chamber_vacuum_ms
 from src.hardware.fill_scaling import MULTIPLEXED_PUMP_GROUPS
 from src.hardware.skin import Skin
 
@@ -195,7 +195,7 @@ def _build_one_skin(skin_cfg: dict[str, Any],
         {"controller":   ctrl,
          "node_slot":    int(ch["slot"]),
          "max_pressure": float(ch.get("max_pressure", DEFAULT_MAX_KPA)),
-         "min_pressure": float(ch.get("min_pressure", DEFAULT_MIN_KPA)),
+         "vacuum_ms":    chamber_vacuum_ms(ch),
          "fill_time_ms": ch.get("fill_time_ms"),
          "fill_profile": ch.get("fill_profile"),
          "fill_profiles": ch.get("fill_profiles"),

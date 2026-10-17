@@ -112,11 +112,11 @@ class SimulatedController(QObject):
 
     def deflate(self, chamber: int, delta: int = 10,
                 ms: int | None = None, duty: int | None = None,
-                timed: bool = False) -> bool:
+                timed: bool = False, vac_ms: int | None = None) -> bool:
         """Deflate by delta % (relative to current target).
 
-        ``ms``, ``duty`` and ``timed`` are accepted for interface parity and
-        ignored."""
+        ``ms``, ``duty``, ``timed`` and ``vac_ms`` are accepted for interface
+        parity and ignored."""
         if self._stopped:
             return False
         self._current.setdefault(chamber, 0)
@@ -130,10 +130,10 @@ class SimulatedController(QObject):
         return True
 
     def set_pressure(self, chamber: int, value: int,
-                     duty: int | None = None) -> bool:
+                     duty: int | None = None, vac_ms: int | None = None) -> bool:
         """Set absolute target pressure (clamped to chamber limits).
 
-        ``duty`` is accepted for interface parity and ignored."""
+        ``duty`` and ``vac_ms`` are accepted for interface parity and ignored."""
         if self._stopped:
             return False
         value = max(0, min(100, value))

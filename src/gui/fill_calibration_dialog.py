@@ -952,7 +952,7 @@ class FillCalibrationDialog(BaseDialog, Ui_FillCalibrationDialog):
                     continue
                 cfg = self._rows.get((mac, i), {}).get("cfg")
                 pct = float(kpa_to_pct(float(k),
-                                       cfg.get("min_pressure", DEFAULT_MIN_KPA),
+                                       DEFAULT_MIN_KPA,
                                        cfg.get("max_pressure", DEFAULT_MAX_KPA))) if cfg else 0.0
                 self._pressure.emit(mac, i, pct, float(k))
             return

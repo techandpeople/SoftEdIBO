@@ -95,7 +95,7 @@ class ESP32Controller:
 
     def deflate(self, chamber: int, delta: int = 10,
                 ms: int | None = None, duty: int | None = None,
-                timed: bool = False) -> bool:
+                timed: bool = False, vac_ms: int | None = None) -> bool:
         """Deflate a chamber by delta % of its [min, max] range (0-100).
 
         When ``ms`` is given it becomes the chamber's open-time budget on the
@@ -110,10 +110,16 @@ class ESP32Controller:
         no pressure sensor populated (see :meth:`inflate`). Without it a
         sensorless node's firmware drops the deflate outright - its floating
         gauge reads ~min pressure, so the below-target guard never passes.
+
+        ``vac_ms`` makes a deflate that reaches the bottom (min) pull on BLIND
+        for that long once the gauge bottoms out at ambient (it cannot read
+        vacuum) - also from a chamber already at ambient.
         """
         payload: dict[str, Any] = {"chamber": chamber, "delta": delta}
         if ms is not None:
             payload["ms"] = int(ms)
+        if vac_ms:
+            payload["vac_ms"] = int(vac_ms)
         if duty is not None:
             payload["duty"] = max(1, min(255, int(duty)))
         if timed:
@@ -230,13 +236,17 @@ class ESP32Controller:
         halt_and_rearm(self.send_command)
 
     def set_pressure(self, chamber: int, value: int,
-                     duty: int | None = None) -> bool:
+                     duty: int | None = None, vac_ms: int | None = None) -> bool:
         """Set target pressure for a chamber as 0-100 % of its [min, max] range.
 
         ``duty`` (1-255) is forwarded as the requested pump PWM duty, but
         neither board's pump control applies it on this path yet (FIXME.md).
+        ``vac_ms`` with ``value`` 0: blind vacuum pull after ambient (see
+        :meth:`deflate`).
         """
         payload: dict[str, Any] = {"chamber": chamber, "value": value}
+        if vac_ms:
+            payload["vac_ms"] = int(vac_ms)
         if duty is not None:
             payload["duty"] = max(1, min(255, int(duty)))
         return self.send_command("set_pressure", **payload)

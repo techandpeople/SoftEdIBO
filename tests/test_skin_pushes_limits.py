@@ -38,7 +38,7 @@ class _RecordingNode:
         self.sent.append(("inflate", (slot, delta, ms)))
         return True
 
-    def deflate(self, slot: int, delta: int) -> bool:
+    def deflate(self, slot: int, delta: int, vac_ms: int | None = None) -> bool:
         self.sent.append(("deflate", (slot, delta)))
         return True
 
@@ -49,7 +49,7 @@ class _RecordingNode:
 
 def _skin(node: _RecordingNode) -> Skin:
     inp = {"controller": node, "node_slot": 0,
-           "max_pressure": 20.0, "min_pressure": -2.0, "fill_mode": "pressure"}
+           "max_pressure": 20.0, "fill_mode": "pressure"}
     skin = Skin("organ", [inp])
     node.sent.clear()   # drop the construction-time push
     return skin
@@ -67,7 +67,7 @@ def test_inflate_repushes_limits_first():
     # configured cap, not whatever stale max it currently holds.
     assert _cmds(node) == ["set_max_pressure", "set_min_pressure", "inflate"]
     assert node.sent[0][1] == (0, 20.0)
-    assert node.sent[1][1] == (0, -2.0)
+    assert node.sent[1][1] == (0, 0.0)   # min is fixed at ambient
 
 
 def test_deflate_repushes_limits_first():

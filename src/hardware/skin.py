@@ -10,7 +10,7 @@ Config expected by the constructor (``chamber_inputs``):
         {"controller":   <ESP32Controller|SimulatedController>,
          "node_slot":    <int>,            # physical slot on the node
          "max_pressure": <float>,          # kPa upper cap for this chamber
-         "min_pressure": <float>},         # kPa lower cap (default 0; negative for vacuum-fed chambers)
+         "vacuum_ms":    <int>},           # blind vacuum pull ending a deflate to 0%
         ...
     ]
 
@@ -22,11 +22,11 @@ import time
 from typing import Any, Callable
 
 from src.core.skin_config import (
-    DEFAULT_FILL_MODE, DEFAULT_MAX_KPA, DEFAULT_MIN_KPA, FILL_MODE_PRESSURE,
-    normalize_fill_mode)
+    DEFAULT_FILL_MODE, DEFAULT_MAX_KPA, DEFAULT_MIN_KPA, DEFAULT_VACUUM_MS,
+    FILL_MODE_PRESSURE, chamber_vacuum_ms, normalize_fill_mode)
 from src.hardware.air_chamber import AirChamber, ChamberState
 from src.hardware.fill_calibration import combo_key, parse_combo_key
-from src.hardware.fill_profile import DeflateProfile, FillProfile
+from src.hardware.fill_profile import FillProfile
 from src.hardware.hold_duty import HOLD_VACUUM, hold_direction, seed_hold_duty
 from src.hardware.fill_scaling import (DutyModel, duty_for_period,
                                        scale_fill_ms)
@@ -159,10 +159,10 @@ class Skin:
         # runtime picks the "over (ms)" slow-fill duty from the measured curve
         # instead of the rough linear duty_for_period fallback.
         self._duty_models: dict[int, DutyModel | None] = {}
-        # local_idx -> measured falling deflate curve, or None. Times a deflate the
-        # gauge cannot supervise: a target below the node's sensor floor gets an
-        # open-time budget from this curve instead of the (blind) closed loop.
-        self._deflate_profiles: dict[int, DeflateProfile | None] = {}
+        # local_idx -> blind vacuum time (ms). The gauge cannot read below
+        # ambient (0 % = 0 kPa), so a deflate to 0 % pulls down to ambient on
+        # the sensor and then keeps the vacuum pump on for this long (vac_ms).
+        self._vacuum_ms: dict[int, int] = {}
         # local_idx -> fill mode ("time" | "pressure"). In "pressure" mode the
         # chamber inflates closed-loop on the gauge sensor even when a calibrated
         # curve exists, so the curve is ignored for runtime timing.
@@ -295,8 +295,7 @@ class Skin:
                 or FillProfile.linear(fill_time))
             self._combo_profiles[local_idx] = self._parse_combos(inp.get("fill_profiles"))
             self._duty_models[local_idx] = DutyModel.from_list(inp.get("duty_curve"))
-            self._deflate_profiles[local_idx] = \
-                DeflateProfile.from_list(inp.get("deflate_profile"))
+            self._vacuum_ms[local_idx] = chamber_vacuum_ms(inp)
             self._fill_modes[local_idx] = normalize_fill_mode(inp.get("fill_mode"))
             empty_time = inp.get("empty_time_ms")
             self._empty_times[local_idx] = int(empty_time) if empty_time else None
@@ -307,7 +306,7 @@ class Skin:
                 chamber_id=local_idx,
                 esp32_mac=self.mac,
                 max_pressure=float(inp.get("max_pressure", DEFAULT_MAX_KPA)),
-                min_pressure=float(inp.get("min_pressure", DEFAULT_MIN_KPA)),
+                min_pressure=DEFAULT_MIN_KPA,   # ambient: the gauge sees no lower
             )
             self._chambers[local_idx] = ch
 
@@ -413,9 +412,9 @@ class Skin:
                 "mac": self.mac, "slot": slot,
                 "max_pressure": ch.max_pressure,
             }
-            min_p = ch.min_pressure
-            if abs(min_p) > 1e-3:   # only persist explicit non-zero defaults
-                d["min_pressure"] = min_p
+            vac = self._vacuum_ms.get(idx, DEFAULT_VACUUM_MS)
+            if vac != DEFAULT_VACUUM_MS:
+                d["vacuum_ms"] = vac
             d["fill_mode"] = self._fill_modes.get(idx, DEFAULT_FILL_MODE)
             profile = self._fill_profiles.get(idx)
             if profile is not None and not profile.is_empty:
@@ -665,13 +664,13 @@ class Skin:
                 # never block the valve from opening.
                 return self._deflate_open_loop(local_idx, chamber, slot,
                                                value, new_target)
-            if chamber.pressure > new_target:
+            vac_ms = self._vac_ms_for(local_idx, new_target)
+            if chamber.pressure > new_target or vac_ms:
                 chamber.state = ChamberState.DEFLATING
             else:
                 chamber.state = ChamberState.IDLE
-            ms = self._deflate_ms(local_idx, chamber.pressure, new_target)
-            if ms is not None:
-                return self._ctrl.deflate(slot, value, ms=ms)
+            if vac_ms:
+                return self._ctrl.deflate(slot, value, vac_ms=vac_ms)
             return self._ctrl.deflate(slot, value)
 
         # set_pressure
@@ -701,9 +700,10 @@ class Skin:
             self._settle_auto_hold(local_idx)
             return ok
         chamber.target_pressure = v
+        vac_ms = self._vac_ms_for(local_idx, v)
         if chamber.pressure < v:
             chamber.state = ChamberState.INFLATING
-        elif chamber.pressure > v:
+        elif chamber.pressure > v or vac_ms:
             chamber.state = ChamberState.DEFLATING
         elif v > 0:
             chamber.state = ChamberState.INFLATED
@@ -715,10 +715,12 @@ class Skin:
         # period_ms still stretches the stroke when the chamber is calibrated.
         if duty is None:
             duty = self._duty_for_period(local_idx, chamber.pressure, v, period_ms)
+        extra: dict[str, int] = {}
         if duty is not None:
-            ok = self._ctrl.set_pressure(slot, v, duty=duty)
-        else:
-            ok = self._ctrl.set_pressure(slot, v)
+            extra["duty"] = duty
+        if vac_ms:
+            extra["vac_ms"] = vac_ms
+        ok = self._ctrl.set_pressure(slot, v, **extra)
         self._settle_auto_hold(local_idx)   # no-op unless already at target
         return ok
 
@@ -824,28 +826,15 @@ class Skin:
             chamber.pressure = new_target   # advance the estimate
         return ok
 
-    # Targets this close to (or below) the measured deflate floor get a time
-    # budget: readings hover at the floor, so the closed loop can't be trusted
-    # to end the pull there.
-    _DEFLATE_FLOOR_MARGIN_PCT = 1.0
+    def _vac_ms_for(self, local_idx: int, target_pct: float) -> int:
+        """Blind vacuum time (ms) for a deflate to ``target_pct`` (0 = none).
 
-    def _deflate_ms(self, local_idx: int, cur_pct: float,
-                    target_pct: float) -> int | None:
-        """Open-time budget (ms) for a deflate the gauge cannot supervise.
-
-        The calibrated deflate curve's **measured floor** (where the falling
-        reading plateaued) embodies the sensor's real low end - today ~ambient,
-        below zero once the -40 kPa sensors are in - so a target under it (with
-        a small margin) is timed off the curve (:meth:`DeflateProfile.extrapolate_ms`,
-        hard-capped) and sent as the firmware's per-chamber cap. Returns ``None``
-        (pure closed loop) when the target is comfortably above the floor or the
-        chamber has no measured deflate curve."""
-        profile = self._deflate_profiles.get(local_idx)
-        if profile is None or profile.is_empty:
-            return None
-        if target_pct >= profile.floor_pct + self._DEFLATE_FLOOR_MARGIN_PCT:
-            return None
-        return max(1, int(round(profile.extrapolate_ms(cur_pct, target_pct))))
+        Only a pull to the bottom (0 %) gets one: the gauge cannot read below
+        ambient, so the node empties the chamber to ambient on the sensor and
+        then keeps the vacuum pump on for this long."""
+        if target_pct > 0:
+            return 0
+        return self._vacuum_ms.get(local_idx, DEFAULT_VACUUM_MS)
 
     def _duty_for_period(self, local_idx: int, cur_pct: float, target_pct: float,
                          period_ms: int) -> int | None:

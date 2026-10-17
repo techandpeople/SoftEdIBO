@@ -166,12 +166,12 @@ def test_coupling_config_from_samples_writes_multi_level_states():
 def test_iter_touch_skins_exposes_kpa_limits():
     data = _settings()
     chambers = data["robots"]["turtles"][0]["skins"][0]["chambers"]
-    chambers[0]["min_pressure"] = 5.0
-    chambers[0]["max_pressure"] = 30.0
+    chambers[0]["min_pressure"] = 5.0    # ignored: min is fixed at ambient
+    chambers[0]["max_pressure"] = 25.0
     skins = iter_touch_skins(data)
     limits = skins[0]["limits"]
-    assert limits[0] == (5.0, 30.0)
-    assert limits[1] == (-5.0, 30.0)     # defaults (DEFAULT_MIN/MAX_KPA)
+    assert limits[0] == (0.0, 25.0)
+    assert limits[1] == (0.0, 30.0)      # defaults (DEFAULT_MIN/MAX_KPA)
 
 
 def test_sweep_diagnostics_no_samples():

@@ -28,9 +28,13 @@ DEFAULT_MAX_KPA = 30.0
 # actuation watchdog), not by an artificial pressure ceiling. Kept in sync with
 # the firmware HARD_*_KPA constants.
 MAX_ALLOWED_KPA = 100.0
-# Lower cap: slightly below ambient by default (every board has a vacuum pump).
-DEFAULT_MIN_KPA = -5.0
-MIN_ALLOWED_KPA = -100.0
+# Lower cap: ambient. The gauge sensors cannot read below it, so it is fixed
+# (no longer configurable); the vacuum below it is a BLIND timed pull instead.
+DEFAULT_MIN_KPA = 0.0
+# Blind vacuum pull (ms) that ends a deflate to 0%: once the chamber reaches
+# ambient on the sensor the vacuum pump keeps pulling this long ("vac_ms").
+DEFAULT_VACUUM_MS = 1000
+MAX_VACUUM_MS = 5000
 CONFIRM_DELTA = 2.0
 MAX_CHAMBERS = 3
 
@@ -238,6 +242,15 @@ def carry_unmanaged_skin_keys(entry: dict, saved: dict) -> None:
             entry.setdefault(key, value)
 
 
+def chamber_vacuum_ms(chamber: dict) -> int:
+    """The chamber's blind vacuum time (ms), clamped to [0, MAX_VACUUM_MS]."""
+    try:
+        ms = int(chamber.get("vacuum_ms", DEFAULT_VACUUM_MS))
+    except (TypeError, ValueError):
+        ms = DEFAULT_VACUUM_MS
+    return max(0, min(MAX_VACUUM_MS, ms))
+
+
 def carry_calibration(chamber: dict, saved: dict | None) -> None:
     """Copy the saved chamber's calibration (CALIBRATION_KEYS) onto ``chamber``."""
     if not saved:
@@ -326,8 +339,9 @@ def build_skin_entry(skin_id: str, chambers: list[dict],
                      skin_type: str = "", skin_variant: str = "") -> dict:
     """Build the base skin entry (chambers + metadata).
 
-    ``max_pressure``/``min_pressure`` are dropped from a chamber when they equal
-    the defaults, so the YAML stays terse. Layout/touch fields are added by the
+    ``max_pressure``/``vacuum_ms`` are dropped from a chamber when they equal
+    the defaults, so the YAML stays terse. ``min_pressure`` is always dropped:
+    the lower cap is fixed at ambient (DEFAULT_MIN_KPA). Layout/touch fields are added by the
     caller afterwards.
     """
     out_chambers: list[dict] = []
@@ -335,8 +349,9 @@ def build_skin_entry(skin_id: str, chambers: list[dict],
         c = dict(ch)
         if abs(c.get("max_pressure", DEFAULT_MAX_KPA) - DEFAULT_MAX_KPA) < 1e-9:
             c.pop("max_pressure", None)
-        if abs(c.get("min_pressure", DEFAULT_MIN_KPA) - DEFAULT_MIN_KPA) < 1e-9:
-            c.pop("min_pressure", None)
+        c.pop("min_pressure", None)
+        if chamber_vacuum_ms(c) == DEFAULT_VACUUM_MS:
+            c.pop("vacuum_ms", None)
         # Always written out, so the saved choice survives a default change.
         c["fill_mode"] = normalize_fill_mode(c.get("fill_mode"))
         out_chambers.append(c)

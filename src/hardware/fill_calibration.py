@@ -490,8 +490,7 @@ def iter_actuator_chambers(settings_data: dict) -> list[dict]:
                     # live % from the (authoritative) kPa of batched status frames.
                     "max_pressure": float(ch.get("max_pressure",
                                                  skin_config.DEFAULT_MAX_KPA)),
-                    "min_pressure": float(ch.get("min_pressure",
-                                                 skin_config.DEFAULT_MIN_KPA)),
+                    "min_pressure": skin_config.DEFAULT_MIN_KPA,
                     "hold_duty_curve": ch.get("hold_duty_curve"),
                     "leak_curve": ch.get("leak_curve"),
                     "calibrated": bool(profile) or bool(fill_ms),

@@ -14,7 +14,8 @@ from PySide6.QtWidgets import (
 )
 
 from src.core.skin_config import (DEFAULT_MAX_KPA, DEFAULT_MIN_KPA,
-                                  FILL_MODE_PRESSURE, normalize_fill_mode)
+                                  FILL_MODE_PRESSURE, chamber_vacuum_ms,
+                                  normalize_fill_mode)
 from src.core.touch_compensation import compensator_from_config
 from src.gui.led_ring_tester import LedRingTester
 from src.gui.sensor_tester import SensorTester
@@ -654,7 +655,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         node's ``set_max_pressure`` takes effect."""
         cfg = self._chamber_cfgs.get(chamber, {})
         return kpa_to_pct(kpa,
-                          float(cfg.get("min_pressure", DEFAULT_MIN_KPA)),
+                          DEFAULT_MIN_KPA,
                           float(cfg.get("max_pressure", DEFAULT_MAX_KPA)))
 
     def _update_valves(self, chamber: int, inflate_open: int, deflate_open: int) -> None:
@@ -817,7 +818,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         self._gateway.send(self._mac, "set_max_pressure", chamber=slot,
                            value=float(cfg["max_pressure"]))
         self._gateway.send(self._mac, "set_min_pressure", chamber=slot,
-                           value=float(cfg["min_pressure"]))
+                           value=DEFAULT_MIN_KPA)
 
     def _push_all_limits(self) -> None:
         """Push every configured chamber's limits once on open, mirroring
@@ -887,8 +888,8 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         self._set_valve_button((slot, 0), True, confirmed=False)
 
     def _deflate_slot(self, slot: int) -> None:
-        # delta=100 deflates toward the chamber's configured min pressure (the
-        # firmware's deflate time cap is always armed as the vacuum backstop).
+        # delta=100 deflates to ambient on the gauge, then pulls the chamber's
+        # blind vacuum time (vac_ms) - the gauge cannot read vacuum.
         # A sensorless node needs the manual empty window + "timed":1, or the
         # firmware's below-target guard drops the command outright.
         self._arm()
@@ -902,7 +903,8 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
             self._gateway.send(self._mac, "deflate", chamber=slot, delta=100,
                                ms=ms, timed=1)
         else:
-            self._gateway.send(self._mac, "deflate", chamber=slot, delta=100)
+            self._gateway.send(self._mac, "deflate", chamber=slot, delta=100,
+                               vac_ms=self._vacuum_ms(slot))
         self._holds.actuation_started([slot])
         # Optimistic: deflating opens this chamber's deflate valve (green on
         # node confirmation, closed when the node reports it done).
@@ -932,16 +934,23 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
     def _deflate_slots(self, slots: list[int]) -> None:
         """Deflate several chambers - one broadcast frame for the whole node
         (see :meth:`_inflate_slots`), else per-slot. Deflate has no calibrated
-        time window, so the whole-node case can always go single-frame - except
-        on a sensorless node, whose per-chamber manual empty windows force
-        per-slot frames."""
-        if set(slots) == set(self._chamber_cfgs) and not self._sensorless:
-            self._broadcast_actuate("deflate", slots)
+        time window, so the whole-node case goes single-frame when every
+        chamber shares one blind vacuum time - except on a sensorless node,
+        whose per-chamber manual empty windows force per-slot frames."""
+        vac = {self._vacuum_ms(s) for s in slots}
+        if (set(slots) == set(self._chamber_cfgs) and not self._sensorless
+                and len(vac) == 1):
+            self._broadcast_actuate("deflate", slots, vac_ms=vac.pop())
         else:
             for slot in slots:
                 self._deflate_slot(slot)
 
-    def _broadcast_actuate(self, command: str, slots: list[int]) -> None:
+    def _vacuum_ms(self, slot: int) -> int:
+        """Blind vacuum time (ms) ending a full deflate of ``slot``."""
+        return chamber_vacuum_ms(self._chamber_cfgs.get(slot, {}))
+
+    def _broadcast_actuate(self, command: str, slots: list[int],
+                           **extra: int) -> None:
         """Re-push every chamber's configured limits, then send ONE
         ``chamber=-1`` inflate/deflate (delta=100 -> toward each chamber's
         configured max/min) that the node fans out to all chambers. A single
@@ -951,7 +960,7 @@ class TestActuatorsDialog(BaseDialog, Ui_TestActuatorsDialog):
         self._release_manual_holds()   # an actuation supersedes the manual override
         for slot in slots:
             self._push_limits(slot)
-        self._gateway.send(self._mac, command, chamber=-1, delta=100)
+        self._gateway.send(self._mac, command, chamber=-1, delta=100, **extra)
         self._holds.actuation_started(slots)
         # Optimistic: show every actuated chamber's valve OPEN immediately (green
         # once the node confirms). side 0 = inflate, 1 = deflate.

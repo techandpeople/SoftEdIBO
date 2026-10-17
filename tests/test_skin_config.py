@@ -156,17 +156,27 @@ def test_build_skin_entry_strips_default_pressure():
 
 def test_default_limits():
     assert skincfg.DEFAULT_MAX_KPA == 30.0
-    assert skincfg.DEFAULT_MIN_KPA == -5.0
+    assert skincfg.DEFAULT_MIN_KPA == 0.0
+    assert skincfg.DEFAULT_VACUUM_MS == 1000
 
 
-def test_build_skin_entry_strips_default_min_pressure():
-    chambers = [{"mac": "AA", "slot": 0, "min_pressure": skincfg.DEFAULT_MIN_KPA},
-                {"mac": "BB", "slot": 1, "min_pressure": -8.0}]   # vacuum-fed
+def test_build_skin_entry_drops_min_pressure_and_default_vacuum():
+    chambers = [{"mac": "AA", "slot": 0, "min_pressure": -8.0,
+                 "vacuum_ms": skincfg.DEFAULT_VACUUM_MS},
+                {"mac": "BB", "slot": 1, "vacuum_ms": 2000}]
     entry = skincfg.build_skin_entry("belly-1", chambers)
-    assert "min_pressure" not in entry["chambers"][0]   # default dropped
-    assert entry["chambers"][1]["min_pressure"] == -8.0  # non-default kept
+    assert "min_pressure" not in entry["chambers"][0]   # no longer configurable
+    assert "vacuum_ms" not in entry["chambers"][0]      # default dropped
+    assert entry["chambers"][1]["vacuum_ms"] == 2000    # non-default kept
     # input list must not be mutated
-    assert chambers[0]["min_pressure"] == skincfg.DEFAULT_MIN_KPA
+    assert chambers[0]["min_pressure"] == -8.0
+
+
+def test_chamber_vacuum_ms_defaults_and_clamps():
+    assert skincfg.chamber_vacuum_ms({}) == skincfg.DEFAULT_VACUUM_MS
+    assert skincfg.chamber_vacuum_ms({"vacuum_ms": -5}) == 0
+    assert skincfg.chamber_vacuum_ms({"vacuum_ms": 10**6}) == skincfg.MAX_VACUUM_MS
+    assert skincfg.chamber_vacuum_ms({"vacuum_ms": "x"}) == skincfg.DEFAULT_VACUUM_MS
 
 
 def test_build_skin_entry_omits_empty_type_variant():

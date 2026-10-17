@@ -9,6 +9,7 @@ from PySide6.QtCore import Qt
 
 from src.activities.scripted_activity import ScriptedActivity
 from src.activities.seed_behaviors import SEED_CONDITIONS
+from src.core.skin_config import DEFAULT_VACUUM_MS
 from src.core.session_trash import SessionTrash
 from src.data.database import Database
 from src.data.models import DeclarativeActivity, SessionRecord
@@ -453,7 +454,7 @@ class TestActuatorsDialogActuation:
         # configured caps, not its boot defaults.
         assert cmds[:2] == ["set_max_pressure", "set_min_pressure"]
         assert gw.sent[0][1] == {"chamber": 0, "value": 6.0}
-        assert gw.sent[1][1] == {"chamber": 0, "value": -2.0}
+        assert gw.sent[1][1] == {"chamber": 0, "value": 0.0}   # fixed: ambient
         assert "inflate" in cmds
 
     def test_inflate_pressure_mode_closes_the_loop_no_time_window(self, qtbot):
@@ -516,14 +517,15 @@ class TestActuatorsDialogActuation:
         cmds = [c for c, _ in gw.sent]
         assert not {"valve_manual", "pump_manual", "vent"} & set(cmds)
 
-    def test_deflate_pushes_limits_and_runs_to_configured_min(self, qtbot):
+    def test_deflate_pushes_limits_and_pulls_blind_vacuum(self, qtbot):
         gw = _RecordingGateway()
         dlg = self._dialog(qtbot, gw, fill_mode="time", fill_time_ms=3000)
         dlg._deflate_slot(0)
         cmds = [c for c, _ in gw.sent]
         assert cmds[:2] == ["set_max_pressure", "set_min_pressure"]
         deflate = [kw for c, kw in gw.sent if c == "deflate"]
-        assert deflate == [{"chamber": 0, "delta": 100}]
+        assert deflate == [{"chamber": 0, "delta": 100,
+                            "vac_ms": DEFAULT_VACUUM_MS}]
 
 
 class TestActuatorsDialogSensors:
