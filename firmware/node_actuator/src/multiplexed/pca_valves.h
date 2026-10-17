@@ -43,12 +43,12 @@ constexpr ValveOutputs VALVE_MAP[] = {
     {1,  6,  7},  // chamber 0: J30 / J28
     {1,  5,  0},  // chamber 1: J10 / J52
     {0,  7,  5},  // chamber 2: J16 / J20
-    {0,  2,  0},  // chamber 3: J3  / J2
+    {0,  6,  4},  // chamber 3: J4  / J5
     {0,  3,  1},  // chamber 4: J15 / J19
-    {0,  6,  4},  // chamber 5: J4  / J5
-    {0, 12, 14},  // chamber 6: J17 / J21
+    {0,  2,  0},  // chamber 5: J3  / J2
+    {0,  8, 10},  // chamber 6: J18 / J22
     {0,  9, 11},  // chamber 7: J9  / J14
-    {0,  8, 10},  // chamber 8: J18 / J22
+    {0, 12, 14},  // chamber 8: J17 / J21
 };
 // Spare outputs (no chamber, kept closed): J44 / J29, J53 / J51, J6 / J7.
 static_assert(sizeof(VALVE_MAP) / sizeof(VALVE_MAP[0]) == MAX_CHAMBERS,
